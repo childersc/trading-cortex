@@ -187,9 +187,11 @@
     }
   } catch (e) {}
 
-  // Immediately hydrate sidebarState and lastChartSettings from localStorage mirror if present in this frame
+  // Immediately hydrate sidebarState and lastChartSettings from localStorage mirror (checking both current window and window.top for blob: chart iframes!)
   try {
-    const rawSavedSidebar = window.localStorage.getItem('__trading_cortex_sidebar_state__');
+    const rawSavedSidebar =
+      window.localStorage.getItem('__trading_cortex_sidebar_state__') ||
+      (window.top && window.top !== window ? window.top.localStorage.getItem('__trading_cortex_sidebar_state__') : null);
     if (rawSavedSidebar) {
       const parsedSidebar = JSON.parse(rawSavedSidebar);
       if (parsedSidebar && typeof parsedSidebar === 'object') {
@@ -206,7 +208,9 @@
         }
       }
     }
-    const rawSavedChart = window.localStorage.getItem('__trading_cortex_chart_settings__');
+    const rawSavedChart =
+      window.localStorage.getItem('__trading_cortex_chart_settings__') ||
+      (window.top && window.top !== window ? window.top.localStorage.getItem('__trading_cortex_chart_settings__') : null);
     if (rawSavedChart) {
       const parsedChart = JSON.parse(rawSavedChart);
       if (parsedChart && typeof parsedChart === 'object') {
@@ -243,10 +247,10 @@
             typeof value === 'string' &&
             value.length < 16000
           ) {
-            // If TradingView writes a tool/magnet/settings key while user is interacting, record it into toolbarStorage
+            // Capture ANY TradingView key (tradingview.*, TVLocalStorage.*, combobox.*, linetool.*, etc.)
             if (
               currentSettings.rememberSidebarTools !== false &&
-              (/linetool|drawing|toolbar|magnet|combobox|group|active|tool/i.test(key) || /LineTool/i.test(value))
+              (/tradingview|tvlocalstorage|linetool|drawing|toolbar|magnet|combobox|group|active|tool|favorite/i.test(key) || /LineTool/i.test(value))
             ) {
               const prev = currentSettings.sidebarState || {};
               const prevToolbar = prev.toolbarStorage || {};
@@ -259,11 +263,13 @@
                   ...prev,
                   toolbarStorage: nextToolbarStorage
                 };
-                origSetItem.call(
-                  window.localStorage,
-                  '__trading_cortex_sidebar_state__',
-                  JSON.stringify(currentSettings.sidebarState)
-                );
+                const serialized = JSON.stringify(currentSettings.sidebarState);
+                origSetItem.call(window.localStorage, '__trading_cortex_sidebar_state__', serialized);
+                try {
+                  if (window.top && window.top !== window && window.top.localStorage) {
+                    origSetItem.call(window.top.localStorage, '__trading_cortex_sidebar_state__', serialized);
+                  }
+                } catch (e) {}
                 if (storageHookPostTimer) clearTimeout(storageHookPostTimer);
                 storageHookPostTimer = setTimeout(() => {
                   storageHookPostTimer = null;
@@ -2761,32 +2767,138 @@
     }
   }
 
-  // Temporarily hide popup menus in `ownerDoc` during programmatic slot restoration so the flyout never flashes on screen
-  function setTemporaryFlyoutStealthStyle(ownerDoc, enabled) {
-    if (!ownerDoc || !ownerDoc.head) return;
-    const styleId = 'vest-cortex-stealth-flyout-style';
-    let styleEl = ownerDoc.getElementById(styleId);
-    if (enabled) {
-      if (!styleEl) {
-        styleEl = ownerDoc.createElement('style');
-        styleEl.id = styleId;
-        styleEl.textContent = `
-          [data-name="menu-inner"], [role="menu"], [class*="menuWrap-"], [class*="drawer-"] {
-            opacity: 0 !important;
-            pointer-events: none !important;
-            transition: none !important;
+  // Walk a DOM element's React Fiber (`__reactFiber$...` / `__reactProps$...`) or internal controller
+  // to update the group slot's selected tool in-memory WITHOUT ever clicking/opening the DOM dropdown menu!
+  function tryUpdateGroupSlotViaReactFiber(slotEl, targetToolId) {
+    if (!slotEl || !targetToolId) return false;
+    let updated = false;
+
+    const visitedNodes = new Set();
+    let currDom = slotEl;
+    let domDepth = 0;
+
+    while (currDom && domDepth < 5) {
+      const ownKeys = Object.keys(currDom);
+      const fiberKey = ownKeys.find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+      const propsKey = ownKeys.find(k => k.startsWith('__reactProps$'));
+
+      if (propsKey && currDom[propsKey]) {
+        const p = currDom[propsKey];
+        for (const fnName of ['onSelect', 'onToolSelect', 'onChange', 'setActiveTool', 'selectTool']) {
+          if (typeof p[fnName] === 'function') {
+            try {
+              p[fnName](targetToolId);
+              updated = true;
+            } catch (e) {}
           }
-        `;
-        ownerDoc.head.appendChild(styleEl);
+        }
       }
-    } else if (styleEl) {
-      styleEl.remove();
+
+      if (fiberKey && currDom[fiberKey]) {
+        let fiber = currDom[fiberKey];
+        let fiberDepth = 0;
+        while (fiber && fiberDepth < 18 && !visitedNodes.has(fiber)) {
+          visitedNodes.add(fiber);
+
+          // 1. Check class component stateNode (TradingView ComboTool / ToolGroupWidget)
+          const inst = fiber.stateNode;
+          if (inst && typeof inst === 'object' && !(inst instanceof Element)) {
+            // Check methods on the component instance
+            for (const mName of ['_onSelectTool', '_selectTool', 'selectTool', 'setActiveTool', '_setCurrentTool', 'setCurrentTool']) {
+              if (typeof inst[mName] === 'function') {
+                try {
+                  inst[mName](targetToolId);
+                  updated = true;
+                } catch (e) {}
+              }
+            }
+            // Check if component state holds current tool name
+            if (inst.state && typeof inst.state === 'object' && typeof inst.setState === 'function') {
+              const statePatch = {};
+              for (const [sk, sv] of Object.entries(inst.state)) {
+                if (typeof sv === 'string' && /^LineTool/i.test(sv)) {
+                  statePatch[sk] = targetToolId;
+                } else if (sv && typeof sv === 'object' && typeof sv.name === 'string' && /^LineTool/i.test(sv.name)) {
+                  // Find matching tool descriptor in props/instance
+                  const list = inst.props?.tools || inst.props?.items || inst._tools || inst._items;
+                  if (Array.isArray(list)) {
+                    const foundDesc = list.find(item => item && (item.name === targetToolId || item.id === targetToolId || item.toolName === targetToolId));
+                    if (foundDesc) statePatch[sk] = foundDesc;
+                  }
+                }
+              }
+              if (Object.keys(statePatch).length > 0) {
+                try {
+                  inst.setState(statePatch);
+                  updated = true;
+                } catch (e) {}
+              }
+            }
+          }
+
+          // 2. Check memoizedProps on the Fiber node
+          const mp = fiber.memoizedProps;
+          if (mp && typeof mp === 'object') {
+            for (const fnName of ['onSelect', 'onToolSelect', 'onItemSelect', 'setActiveTool', 'selectTool']) {
+              if (typeof mp[fnName] === 'function') {
+                try {
+                  mp[fnName](targetToolId);
+                  updated = true;
+                } catch (e) {}
+              }
+            }
+            // Check if tools/items array has individual item onClick/onSelect handlers
+            const itemList = mp.tools || mp.items || mp.children;
+            if (Array.isArray(itemList)) {
+              for (const item of itemList) {
+                if (!item || typeof item !== 'object') continue;
+                const itemName = item.name || item.id || item.toolName || item.props?.name || item.props?.toolName || item.props?.['data-name'];
+                if (itemName && normalizeToolId(String(itemName)) === targetToolId) {
+                  const fn = item.onClick || item.onSelect || item.execute || item.props?.onClick || item.props?.onSelect;
+                  if (typeof fn === 'function') {
+                    try {
+                      fn(item);
+                      updated = true;
+                    } catch (e) {}
+                  }
+                }
+              }
+            }
+          }
+
+          // 3. Check hooks linked list (memoizedState) for useState setter holding a LineTool string
+          let hook = fiber.memoizedState;
+          let hookGuard = 0;
+          while (hook && hookGuard < 20) {
+            if (
+              hook.queue &&
+              typeof hook.queue.dispatch === 'function' &&
+              typeof hook.memoizedState === 'string' &&
+              /^LineTool/i.test(hook.memoizedState)
+            ) {
+              try {
+                hook.queue.dispatch(targetToolId);
+                updated = true;
+              } catch (e) {}
+            }
+            hook = hook.next;
+            hookGuard++;
+          }
+
+          fiber = fiber.return;
+          fiberDepth++;
+        }
+      }
+
+      currDom = currDom.parentElement;
+      domDepth++;
     }
+
+    return updated;
   }
 
-  // Ensure a left-sidebar group slot actually displays `norm` as its selected icon.
-  // If `selectLineTool` alone didn't swap the sidebar slot icon (e.g. slot still shows Brush instead of Rectangle),
-  // we silently open that slot's flyout submenu and click the target item Row once (which closes the submenu naturally).
+  // Ensure a left-sidebar group slot displays `norm` as its selected tool using TradingView's internal
+  // WatchedValue / React Fiber state WITHOUT opening any DOM flyout menus.
   function ensureSidebarGroupSlotDisplaysTool(norm) {
     if (!norm || norm === 'cursor' || norm === 'dot' || norm === 'arrow' || norm === 'eraser') return;
 
@@ -2803,7 +2915,6 @@
 
     const docs = getSidebarDocuments();
     let currentSlotBtn = null;
-    let ownerDoc = document;
 
     for (const doc of docs) {
       try {
@@ -2823,7 +2934,6 @@
 
           if (tId && siblingSet.has(tId.toLowerCase())) {
             currentSlotBtn = el;
-            ownerDoc = doc;
             break;
           }
         }
@@ -2831,113 +2941,8 @@
       } catch (e) {}
     }
 
-    if (!currentSlotBtn) return;
-
-    try {
-      // Find the submenu trigger/arrow next to or inside the group button
-      const slotContainer =
-        currentSlotBtn.closest('[class*="group"], [class*="wrap"], [class*="slot"], [class*="buttonWrap"], [class*="control"]') ||
-        currentSlotBtn.parentElement;
-
-      let arrowTrigger = null;
-      if (slotContainer) {
-        arrowTrigger = slotContainer.querySelector(
-          '[data-role="menu-handle"], [class*="arrow"], [class*="caret"], [class*="submenu"], [class*="trigger"], [aria-haspopup="true"]'
-        );
-        if (!arrowTrigger && currentSlotBtn.nextElementSibling) {
-          arrowTrigger = currentSlotBtn.nextElementSibling;
-        }
-      }
-      if (!arrowTrigger) {
-        arrowTrigger = currentSlotBtn;
-      }
-
-      // Hide the flyout menu visually while we click the target item so the user never sees a pull-out menu flash open
-      setTemporaryFlyoutStealthStyle(ownerDoc, true);
-      dispatchFullPointerClick(arrowTrigger);
-
-      setTimeout(() => {
-        try {
-          const targetLabelLower = TOOL_TO_LABEL_MAP[norm] || norm.replace(/^LineTool/i, '').toLowerCase();
-          const menuContainers = ownerDoc.querySelectorAll(
-            '[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"]'
-          );
-
-          let matchedMenuItem = null;
-
-          // 1. Search by data-name / aria-label / title inside the open menu
-          for (const container of menuContainers) {
-            const allItems = container.querySelectorAll('[data-name], [role="menuitem"], [role="option"], [data-role="menuitem"], [class*="item-"], [class*="row-"]');
-            for (const item of allItems) {
-              const dName = item.getAttribute('data-name');
-              if (dName && normalizeToolId(dName) === norm) {
-                matchedMenuItem = item;
-                break;
-              }
-              const ariaL = item.getAttribute('aria-label') || item.getAttribute('title') || item.getAttribute('data-tooltip');
-              if (ariaL && normalizeToolId(ariaL) === norm) {
-                matchedMenuItem = item;
-                break;
-              }
-            }
-            if (matchedMenuItem) break;
-          }
-
-          // 2. Search by exact label text (e.g., "Rectangle", "Horizontal Line", "Long Position", "Callout")
-          if (!matchedMenuItem) {
-            for (const container of menuContainers) {
-              const allNodes = container.querySelectorAll('*');
-              for (const node of allNodes) {
-                if (node.children.length === 0) {
-                  const txt = (node.textContent || '').trim().toLowerCase();
-                  if (txt === targetLabelLower || normalizeToolId(txt) === norm) {
-                    matchedMenuItem =
-                      node.closest('[data-name], [data-role="menuitem"], [role="menuitem"], [role="option"], [class*="item-"], [class*="row-"]') ||
-                      node.parentElement ||
-                      node;
-                    break;
-                  }
-                }
-              }
-              if (matchedMenuItem) break;
-            }
-          }
-
-          if (matchedMenuItem) {
-            // Click the menu item row and its inner label if needed to select the tool
-            dispatchFullPointerClick(matchedMenuItem);
-            const innerLabel = matchedMenuItem.querySelector('[class*="label-"], [class*="title-"], span');
-            if (innerLabel && innerLabel !== matchedMenuItem) {
-              try { innerLabel.click(); } catch (e) {}
-            }
-            // Wait 30ms for TradingView's menu handler to process the selection; if the menu is STILL open, close it cleanly
-            setTimeout(() => {
-              try {
-                const stillOpenMenu = ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]');
-                if (stillOpenMenu) {
-                  // Dispatch Escape key on the menu/document to close the flyout without toggling arrowTrigger back open
-                  const escOpts = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
-                  stillOpenMenu.dispatchEvent(new KeyboardEvent('keydown', escOpts));
-                  ownerDoc.dispatchEvent(new KeyboardEvent('keydown', escOpts));
-                  if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
-                    dispatchFullPointerClick(arrowTrigger);
-                  }
-                }
-              } catch (e) {}
-            }, 30);
-            log(`Updated sidebar slot [${groupKey}] via submenu click -> ${norm}`);
-          } else {
-            // Item wasn't found; toggle the arrow trigger closed
-            dispatchFullPointerClick(arrowTrigger);
-          }
-        } catch (e) {} finally {
-          setTimeout(() => {
-            setTemporaryFlyoutStealthStyle(ownerDoc, false);
-          }, 90);
-        }
-      }, 65);
-    } catch (e) {
-      setTemporaryFlyoutStealthStyle(ownerDoc, false);
+    if (currentSlotBtn) {
+      tryUpdateGroupSlotViaReactFiber(currentSlotBtn, norm);
     }
   }
 
@@ -3238,6 +3243,9 @@
     currentSettings.sidebarState = sidebarState;
     try {
       window.localStorage.setItem('__trading_cortex_sidebar_state__', nextJson);
+      if (window.top && window.top !== window && window.top.localStorage) {
+        window.top.localStorage.setItem('__trading_cortex_sidebar_state__', nextJson);
+      }
     } catch (e) {}
     log('Captured current sidebar drawing state:', sidebarState);
 
@@ -3287,7 +3295,7 @@
         } catch (e) {}
       }
 
-      // 1. Restore each remembered drawing tool group slot on the left-hand sidebar
+      // 1. Update each remembered drawing tool group slot in-memory via React Fiber / API
       const groupTools = targetState.groupTools || {};
       const toolsToRestore = Object.values(groupTools)
         .map(t => normalizeToolId(t))
@@ -3295,76 +3303,70 @@
 
       const finalActiveTool = normalizeToolId(targetState.activeTool) || 'cursor';
 
-      let stepDelay = 0;
       toolsToRestore.forEach((toolId) => {
-        if (toolId === finalActiveTool) return; // Will be selected last
-        setTimeout(() => {
-          selectSingleLineTool(toolId, true);
-        }, stepDelay);
-        stepDelay += 240;
+        if (toolId === finalActiveTool) return;
+        ensureSidebarGroupSlotDisplaysTool(toolId);
       });
 
-      // 2. Select the user's last active drawing tool (or cursor) after group slots are populated
+      // 2. Select the user's last active drawing tool (or cursor)
+      if (finalActiveTool) {
+        selectSingleLineTool(finalActiveTool, true);
+      }
+
+      // 3. Restore Magnet Mode (included inside "Remember selected drawing tools")
+      if (targetState.magnet !== undefined) {
+        const mBtn = getMagnetButton();
+        if (mBtn) {
+          const currentlyOn = isElementActive(mBtn);
+          if (Boolean(targetState.magnet) !== currentlyOn) {
+            log('Restoring Magnet to', targetState.magnet);
+            mBtn.click();
+          }
+        } else if (targetState.magnet && activeChart && typeof activeChart.executeActionById === 'function') {
+          try { activeChart.executeActionById('magnet'); } catch (e) {}
+        }
+      }
+
+      // 4. Restore Stay in Drawing Mode
+      if (targetState.stayInDrawingMode !== undefined) {
+        const stayBtn = getStayInDrawingModeButton();
+        if (stayBtn) {
+          const currentlyOn = isElementActive(stayBtn);
+          if (Boolean(targetState.stayInDrawingMode) !== currentlyOn) {
+            log('Restoring Stay in Drawing Mode to', targetState.stayInDrawingMode);
+            stayBtn.click();
+          }
+        }
+      }
+
+      // 5. Restore Lock All Drawings
+      if (targetState.lockDrawings !== undefined) {
+        const lockBtn = getLockDrawingsButton();
+        if (lockBtn) {
+          const currentlyOn = isElementActive(lockBtn);
+          if (Boolean(targetState.lockDrawings) !== currentlyOn) {
+            log('Restoring Lock All Drawings to', targetState.lockDrawings);
+            lockBtn.click();
+          }
+        }
+      }
+
+      // 6. Restore Hide All Drawings
+      if (targetState.hideDrawings !== undefined) {
+        const hideBtn = getHideDrawingsButton();
+        if (hideBtn) {
+          const currentlyOn = isElementActive(hideBtn);
+          if (Boolean(targetState.hideDrawings) !== currentlyOn) {
+            log('Restoring Hide All Drawings to', targetState.hideDrawings);
+            hideBtn.click();
+          }
+        }
+      }
+
       setTimeout(() => {
-        if (finalActiveTool) {
-          selectSingleLineTool(finalActiveTool, true);
-        }
-
-        // 3. Restore Magnet Mode (included inside "Remember selected drawing tools")
-        if (targetState.magnet !== undefined) {
-          const mBtn = getMagnetButton();
-          if (mBtn) {
-            const currentlyOn = isElementActive(mBtn);
-            if (Boolean(targetState.magnet) !== currentlyOn) {
-              log('Restoring Magnet to', targetState.magnet);
-              mBtn.click();
-            }
-          } else if (targetState.magnet && activeChart && typeof activeChart.executeActionById === 'function') {
-            try { activeChart.executeActionById('magnet'); } catch (e) {}
-          }
-        }
-
-        // 4. Restore Stay in Drawing Mode
-        if (targetState.stayInDrawingMode !== undefined) {
-          const stayBtn = getStayInDrawingModeButton();
-          if (stayBtn) {
-            const currentlyOn = isElementActive(stayBtn);
-            if (Boolean(targetState.stayInDrawingMode) !== currentlyOn) {
-              log('Restoring Stay in Drawing Mode to', targetState.stayInDrawingMode);
-              stayBtn.click();
-            }
-          }
-        }
-
-        // 5. Restore Lock All Drawings
-        if (targetState.lockDrawings !== undefined) {
-          const lockBtn = getLockDrawingsButton();
-          if (lockBtn) {
-            const currentlyOn = isElementActive(lockBtn);
-            if (Boolean(targetState.lockDrawings) !== currentlyOn) {
-              log('Restoring Lock All Drawings to', targetState.lockDrawings);
-              lockBtn.click();
-            }
-          }
-        }
-
-        // 6. Restore Hide All Drawings
-        if (targetState.hideDrawings !== undefined) {
-          const hideBtn = getHideDrawingsButton();
-          if (hideBtn) {
-            const currentlyOn = isElementActive(hideBtn);
-            if (Boolean(targetState.hideDrawings) !== currentlyOn) {
-              log('Restoring Hide All Drawings to', targetState.hideDrawings);
-              hideBtn.click();
-            }
-          }
-        }
-
-        setTimeout(() => {
-          isRestoringSidebar = false;
-          hasCompletedInitialSidebarRestore = true;
-        }, 400);
-      }, stepDelay + 180);
+        isRestoringSidebar = false;
+        hasCompletedInitialSidebarRestore = true;
+      }, 250);
     } catch (err) {
       log('Error restoring sidebar selections:', err);
       isRestoringSidebar = false;

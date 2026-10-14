@@ -1,1 +1,1 @@
-﻿v1.1.5: Add Check for Update button with Last Checked date/time readout, keep Update Center open in-place during updates without closing/reopening, reload trading browser windows smoothly, and persist all 7 sidebar drawing tool submenu selections + local JSON database.
+﻿v1.1.5: Restore drawing toolbox slots in-memory via document_start window.top.localStorage hydration & React Fiber state without ever opening DOM dropdown menus, add Check for Update button with Last Checked date/time readout, and keep Update Center open in-place during updates.
