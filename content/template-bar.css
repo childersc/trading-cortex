@@ -1494,6 +1494,27 @@ body.vest-popout-body #vest-action-log-box {
     0 0 16px rgba(56, 189, 248, 0.32);
 }
 
+@keyframes vestCortexUpdateGlow {
+  0%, 100% {
+    border-color: rgba(56, 189, 248, 0.28);
+    box-shadow:
+      0 0 4px rgba(56, 189, 248, 0.10),
+      0 0 8px rgba(16, 185, 129, 0.05),
+      inset 0 1px 0 rgba(186, 230, 253, 0.10);
+  }
+  50% {
+    border-color: rgba(52, 211, 153, 0.92);
+    box-shadow:
+      0 0 14px rgba(52, 211, 153, 0.55),
+      0 0 28px rgba(56, 189, 248, 0.42),
+      inset 0 1px 0 rgba(167, 243, 208, 0.35);
+  }
+}
+
+.vest-studio-pill-trigger.update-ready {
+  animation: vestCortexUpdateGlow 2.1s ease-in-out infinite;
+}
+
 .vest-studio-pill-icon {
   width: 22px;
   height: 22px;
@@ -1547,10 +1568,16 @@ body.vest-popout-body #vest-action-log-box {
   font-weight: 600;
   font-family: "JetBrains Mono", Consolas, monospace;
   color: #38bdf8;
-  max-width: 96px;
+  max-width: 110px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.vest-studio-pill-sub.update-ready-text {
+  color: #34d399;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.45);
 }
 
 .vest-studio-pill-chevron {
@@ -1572,12 +1599,12 @@ body.vest-popout-body #vest-action-log-box {
   position: fixed !important;
   top: 72px;
   left: 44px;
-  width: 264px;
+  width: 210px;
   background: #131722;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(0, 0, 0, 0.6);
-  padding: 6px 0;
+  padding: 4px 0;
   display: none;
   flex-direction: column;
   z-index: 2147483647 !important;

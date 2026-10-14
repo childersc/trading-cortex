@@ -170,23 +170,36 @@
   }
 
   async function safeStorageGet(keys) {
-    if (!isExtensionValid()) return {};
+    let result = {};
+    if (isExtensionValid()) {
+      try {
+        const localData = await chrome.storage.local.get(keys).catch(() => ({}));
+        if (localData && (localData.templates || localData.settings)) {
+          result = localData;
+        } else if (chrome.storage.sync) {
+          const syncData = await chrome.storage.sync.get(keys).catch(() => ({}));
+          if (syncData && (syncData.templates || syncData.settings)) {
+            await chrome.storage.local.set(syncData).catch(() => {});
+            result = syncData;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Also merge/fallback with window.localStorage mirror so settings survive even if extension was reloaded without refreshing the tab
     try {
-      const localData = await chrome.storage.local.get(keys).catch(() => ({}));
-      if (localData && (localData.templates || localData.settings)) {
-        return localData;
-      }
-      if (chrome.storage.sync) {
-        const syncData = await chrome.storage.sync.get(keys).catch(() => ({}));
-        if (syncData && (syncData.templates || syncData.settings)) {
-          await chrome.storage.local.set(syncData).catch(() => {});
-          return syncData;
+      const rawLocalSettings = window.localStorage.getItem('__trading_cortex_isolated_settings__');
+      if (rawLocalSettings) {
+        const parsedLocalSettings = JSON.parse(rawLocalSettings);
+        if (parsedLocalSettings && typeof parsedLocalSettings === 'object') {
+          if (!result.settings || (parsedLocalSettings._savedAt && (!result.settings._savedAt || parsedLocalSettings._savedAt >= result.settings._savedAt))) {
+            result.settings = { ...(result.settings || {}), ...parsedLocalSettings };
+          }
         }
       }
-      return {};
-    } catch (e) {
-      return {};
-    }
+    } catch (e) {}
+
+    return result;
   }
 
   let saveSettingsTimeout = null;
@@ -195,6 +208,14 @@
   let pendingSyncData = {};
 
   function safeStorageSet(data) {
+    // Always mirror settings synchronously to window.localStorage so it never gets lost on rapid reload or invalidated extension context
+    if (data && data.settings) {
+      try {
+        data.settings._savedAt = Date.now();
+        window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(data.settings));
+      } catch (e) {}
+    }
+
     if (!isExtensionValid()) return Promise.resolve();
     try {
       // Write immediately to chrome.storage.local (unlimited write operations per minute)
@@ -220,13 +241,27 @@
   // Debounced settings sync to prevent storage hammering and context crashes
   function queueSettingsSave(newSettings) {
     pendingSettingsUpdate = { ...(pendingSettingsUpdate || {}), ...newSettings };
+    if ( dataSettingsMirrorAvailable() ) {
+      try {
+        const merged = { ...settings, ...pendingSettingsUpdate, _savedAt: Date.now() };
+        window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(merged));
+      } catch (e) {}
+    }
     if (saveSettingsTimeout) clearTimeout(saveSettingsTimeout);
     saveSettingsTimeout = setTimeout(() => {
-      if (pendingSettingsUpdate && isExtensionValid()) {
+      if (pendingSettingsUpdate) {
         safeStorageSet({ settings: { ...settings, ...pendingSettingsUpdate } });
         pendingSettingsUpdate = null;
       }
-    }, 500);
+    }, 350);
+  }
+
+  function dataSettingsMirrorAvailable() {
+    try {
+      return Boolean(window.localStorage);
+    } catch (e) {
+      return false;
+    }
   }
 
   function postToMainWorlds(msg) {
@@ -270,6 +305,15 @@
         }
         if (changes.settings && changes.settings.newValue) {
           settings = { ...settings, ...changes.settings.newValue };
+        }
+        if (changes.updaterState && changes.updaterState.newValue && isTopWindow) {
+          const newState = changes.updaterState.newValue;
+          const wasAvailable = isUpdateAvailable;
+          isUpdateAvailable = Boolean(newState.updateAvailable);
+          latestAvailableVersion = newState.latestVersion || null;
+          if (wasAvailable !== isUpdateAvailable) {
+            renderStudioHeaderPill();
+          }
         }
 
         notifyMainWorldConfig();
@@ -1029,6 +1073,83 @@
 
   let studioMenuOpen = false;
   let studioDropdownEl = null;
+  let isUpdateAvailable = false;
+  let latestAvailableVersion = null;
+  let isCheckingForUpdate = false;
+
+  function cleanSemver(v) {
+    return String(v || '').trim().replace(/^v/i, '');
+  }
+
+  function compareSemver(a, b) {
+    const pa = cleanSemver(a).split('.').map(n => parseInt(n, 10) || 0);
+    const pb = cleanSemver(b).split('.').map(n => parseInt(n, 10) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const na = pa[i] || 0;
+      const nb = pb[i] || 0;
+      if (na > nb) return 1;
+      if (na < nb) return -1;
+    }
+    return 0;
+  }
+
+  async function triggerQuickUpdateCheck() {
+    if (isCheckingForUpdate) return;
+    isCheckingForUpdate = true;
+
+    try {
+      const installedVer = getSafeExtVersion();
+      let state = null;
+
+      // 1. Try background service worker check first
+      if (isExtensionValid() && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        try {
+          const resp = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'checkForUpdatesNow' }, (res) => {
+              if (chrome.runtime.lastError) {
+                resolve(null);
+              } else {
+                resolve(res);
+              }
+            });
+          });
+          if (resp && resp.updaterState) {
+            state = resp.updaterState;
+          }
+        } catch (e) {}
+      }
+
+      // 2. Direct fallback fetch to GitHub Releases API in case service worker was asleep or unreachable
+      if (!state) {
+        const res = await fetch('https://api.github.com/repos/childersc/trading-cortex/releases/latest', {
+          headers: { Accept: 'application/vnd.github+json' },
+          cache: 'no-store'
+        });
+        if (res.ok) {
+          const release = await res.json();
+          const latestVer = cleanSemver(release.tag_name || release.name || installedVer);
+          state = {
+            latestVersion: latestVer,
+            updateAvailable: compareSemver(latestVer, installedVer) > 0
+          };
+        }
+      }
+
+      if (state) {
+        const wasAvailable = isUpdateAvailable;
+        isUpdateAvailable = Boolean(state.updateAvailable);
+        latestAvailableVersion = state.latestVersion || null;
+        if (wasAvailable !== isUpdateAvailable) {
+          renderStudioHeaderPill();
+        }
+      }
+    } catch (e) {
+      // Ignore network errors silently
+    } finally {
+      isCheckingForUpdate = false;
+    }
+  }
 
   function updateStudioDropdownPosition(pill) {
     const targetPill = pill || studioPillEl || document.getElementById('vest-studio-header-pill');
@@ -1056,9 +1177,13 @@
     studioPillEl = pill;
 
     const extVersion = getSafeExtVersion();
+    const subText = isUpdateAvailable ? 'Update ready' : `v${extVersion}`;
+    const pillTitle = isUpdateAvailable
+      ? `Trading Cortex · Update ready (v${latestAvailableVersion || 'new'})`
+      : `Trading Cortex v${extVersion}`;
 
     pill.innerHTML = `
-      <button type="button" class="vest-studio-pill-trigger ${studioMenuOpen ? 'open' : ''}" id="vest-studio-pill-btn" title="Trading Cortex v${extVersion}">
+      <button type="button" class="vest-studio-pill-trigger ${studioMenuOpen ? 'open' : ''} ${isUpdateAvailable ? 'update-ready' : ''}" id="vest-studio-pill-btn" title="${pillTitle}">
         <div class="vest-studio-pill-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -1070,7 +1195,7 @@
           <div class="vest-studio-pill-title-row">
             <span class="vest-studio-pill-title">CORTEX</span>
           </div>
-          <span class="vest-studio-pill-sub">v${extVersion}</span>
+          <span class="vest-studio-pill-sub ${isUpdateAvailable ? 'update-ready-text' : ''}">${subText}</span>
         </div>
         <svg class="vest-studio-pill-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <polyline points="6 9 12 15 18 9"></polyline>
@@ -1090,13 +1215,11 @@
     }
     studioDropdownEl = menuEl;
 
-    const memoryActive = settings.rememberSidebarTools !== false;
-
     menuEl.style.display = studioMenuOpen ? 'flex' : 'none';
     menuEl.innerHTML = `
-      <!-- Top Settings Entry -->
+      <!-- Settings Entry Only -->
       <div class="vest-sdm-section">
-        <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 8px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); margin-bottom: 2px;">
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
               <circle cx="12" cy="12" r="3"></circle>
@@ -1105,89 +1228,6 @@
             <span style="font-weight:600; color:#f8fafc;">Cortex Settings...</span>
           </div>
           <span class="vest-sdm-hotkey">⚙</span>
-        </div>
-      </div>
-
-      <div class="vest-sdm-divider"></div>
-
-      <!-- Core Systems -->
-      <div class="vest-sdm-section">
-        <div class="vest-sdm-section-header">
-          <span>CORE SYSTEMS</span>
-        </div>
-        <div class="vest-sdm-menu-item" id="vest-sdm-chart-memory-btn">
-          <div class="vest-sdm-item-left">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
-              <line x1="4" y1="6" x2="20" y2="6"></line>
-              <line x1="4" y1="12" x2="14" y2="12"></line>
-              <line x1="4" y1="18" x2="18" y2="18"></line>
-            </svg>
-            <span>Chart Memory Features</span>
-          </div>
-          <span class="vest-sdm-badge-pill ${memoryActive ? 'on' : ''}">${memoryActive ? 'ON' : 'OFF'}</span>
-        </div>
-        <div class="vest-sdm-menu-item" id="vest-sdm-about-btn">
-          <div class="vest-sdm-item-left">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#10b981;">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="16" x2="12" y2="12"></line>
-              <line x1="12" y1="8" x2="12.01" y2="8"></line>
-            </svg>
-            <span>About Trading Cortex</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="vest-sdm-divider"></div>
-
-      <!-- Workspace & Layout -->
-      <div class="vest-sdm-section">
-        <div class="vest-sdm-section-header">
-          <span>WORKSPACE & PANELS</span>
-        </div>
-        <div class="vest-sdm-menu-item" id="vest-sdm-max-chart-btn">
-          <div class="vest-sdm-item-left">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <polyline points="9 21 3 21 3 15"></polyline>
-              <line x1="21" y1="3" x2="14" y2="10"></line>
-              <line x1="3" y1="21" x2="10" y2="14"></line>
-            </svg>
-            <span>${chartMaximized ? 'Restore Docked Panels' : 'Maximize Chart View'}</span>
-          </div>
-          <span class="vest-sdm-hotkey">Alt+M</span>
-        </div>
-        <div class="vest-sdm-menu-item" id="vest-sdm-reset-panels-btn">
-          <div class="vest-sdm-item-left">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-              <path d="M3 3v5h5"></path>
-            </svg>
-            <span>Reset Panel Positions</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="vest-sdm-divider"></div>
-
-      <!-- Telemetry & Updates -->
-      <div class="vest-sdm-section">
-        <div class="vest-sdm-section-header">
-          <span>SYSTEM & TELEMETRY</span>
-        </div>
-        <div class="vest-sdm-menu-item ${isLogBoxOpen ? 'active' : ''}" id="vest-sdm-event-log-btn">
-          <div class="vest-sdm-item-left">
-            <span style="color:#f59e0b; font-size:13px;">⚡</span>
-            <span>Action & Market Event Log</span>
-          </div>
-          <span class="vest-sdm-hotkey">Alt+L</span>
-        </div>
-        <div class="vest-sdm-menu-item" id="vest-sdm-updater-btn">
-          <div class="vest-sdm-item-left">
-            <span style="color:#10b981; font-size:13px;">↻</span>
-            <span>OTA Release & Sync Center</span>
-          </div>
-          <span class="vest-sdm-ver-tag">v${extVersion}</span>
         </div>
       </div>
     `;
@@ -1216,6 +1256,8 @@
         } else {
           menuEl.style.display = 'none';
         }
+        // Run a quick background update check anytime the Cortex menu is clicked
+        triggerQuickUpdateCheck();
       });
     }
 
@@ -1228,47 +1270,6 @@
     menuEl.querySelector('#vest-sdm-open-settings-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('about');
-    });
-
-    // Chart Memory Features tab
-    menuEl.querySelector('#vest-sdm-chart-memory-btn')?.addEventListener('click', () => {
-      closeStudioDropdown();
-      openStudioSettingsModal('memory');
-    });
-
-    // About Vest Studio tab
-    menuEl.querySelector('#vest-sdm-about-btn')?.addEventListener('click', () => {
-      closeStudioDropdown();
-      openStudioSettingsModal('about');
-    });
-
-    // Maximize Chart
-    menuEl.querySelector('#vest-sdm-max-chart-btn')?.addEventListener('click', () => {
-      closeStudioDropdown();
-      toggleMaximizeChart();
-      renderStudioHeaderPill();
-    });
-
-    // Reset Panels
-    menuEl.querySelector('#vest-sdm-reset-panels-btn')?.addEventListener('click', () => {
-      closeStudioDropdown();
-      resetAllPanels();
-      renderStudioHeaderPill();
-    });
-
-    // Event Log
-    menuEl.querySelector('#vest-sdm-event-log-btn')?.addEventListener('click', () => {
-      closeStudioDropdown();
-      toggleActionLogBox();
-      renderStudioHeaderPill();
-    });
-
-    // OTA Updater
-    menuEl.querySelector('#vest-sdm-updater-btn')?.addEventListener('click', () => {
-      closeStudioDropdown();
-      if (isExtensionValid() && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: 'openUpdaterPage' });
-      }
     });
   }
 
@@ -1620,6 +1621,11 @@
 
     function commitDraftAndClose() {
       syncCurrentPaneToDraft();
+      if (saveSettingsTimeout) {
+        clearTimeout(saveSettingsTimeout);
+        saveSettingsTimeout = null;
+      }
+      pendingSettingsUpdate = null;
       settings = {
         ...settings,
         ...draftSettings
@@ -1664,12 +1670,11 @@
         });
       });
 
-      // Live toggle preview on Chart Memory Features tab
+      // Live toggle state sync on Chart Memory Features tab
       const remToggle = overlay.querySelector('#vest-tvs-remember-tools-toggle');
       if (remToggle) {
         remToggle.addEventListener('change', () => {
           draftSettings.rememberSidebarTools = Boolean(remToggle.checked);
-          renderDialog();
         });
       }
 
@@ -1677,7 +1682,6 @@
       if (remChartToggle) {
         remChartToggle.addEventListener('change', () => {
           draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
-          renderDialog();
         });
       }
 
@@ -3378,7 +3382,7 @@
   // -------------------------------------------------------------
   async function init() {
     try {
-      const data = await safeStorageGet(['templates', 'settings']);
+      const data = await safeStorageGet(['templates', 'settings', 'updaterState']);
       if (data.templates && Array.isArray(data.templates) && data.templates.length > 0) {
         templates = data.templates;
       } else {
@@ -3387,6 +3391,10 @@
       }
       if (data.settings) {
         settings = { ...settings, ...data.settings };
+      }
+      if (data.updaterState) {
+        isUpdateAvailable = Boolean(data.updaterState.updateAvailable);
+        latestAvailableVersion = data.updaterState.latestVersion || null;
       }
 
       settingsLoaded = true;
@@ -3402,6 +3410,8 @@
       if (isTopWindow) {
         initPanelManager();
         setupIsolatedActionTracking();
+        // Run background update check on page refresh / load
+        triggerQuickUpdateCheck();
       }
 
       setupHotkeys();

@@ -173,6 +173,19 @@
   };
   let hasReceivedConfigUpdate = false;
 
+  // Read isolated settings mirror (if present on same origin) so we know immediately at document_start if rememberSidebarTools is enabled
+  try {
+    const rawIso =
+      window.localStorage.getItem('__trading_cortex_isolated_settings__') ||
+      (window.top && window.top !== window ? window.top.localStorage.getItem('__trading_cortex_isolated_settings__') : null);
+    if (rawIso) {
+      const parsedIso = JSON.parse(rawIso);
+      if (parsedIso && typeof parsedIso === 'object') {
+        currentSettings = { ...currentSettings, ...parsedIso };
+      }
+    }
+  } catch (e) {}
+
   // Immediately hydrate sidebarState and lastChartSettings from localStorage mirror if present in this frame
   try {
     const rawSavedSidebar = window.localStorage.getItem('__trading_cortex_sidebar_state__');
@@ -180,6 +193,16 @@
       const parsedSidebar = JSON.parse(rawSavedSidebar);
       if (parsedSidebar && typeof parsedSidebar === 'object') {
         currentSettings.sidebarState = parsedSidebar;
+        // Pre-populate TradingView's native toolbar localStorage keys at document_start BEFORE TradingView's scripts run!
+        if (currentSettings.rememberSidebarTools !== false && parsedSidebar.toolbarStorage) {
+          Object.entries(parsedSidebar.toolbarStorage).forEach(([k, v]) => {
+            if (typeof v === 'string' && !k.startsWith('__trading_cortex_')) {
+              try {
+                window.localStorage.setItem(k, v);
+              } catch (e) {}
+            }
+          });
+        }
       }
     }
     const rawSavedChart = window.localStorage.getItem('__trading_cortex_chart_settings__');
@@ -187,7 +210,64 @@
       const parsedChart = JSON.parse(rawSavedChart);
       if (parsedChart && typeof parsedChart === 'object') {
         currentSettings.lastChartSettings = parsedChart;
+        if (currentSettings.rememberLastChartSettings !== false && parsedChart.localStorageEntries) {
+          Object.entries(parsedChart.localStorageEntries).forEach(([k, v]) => {
+            if (typeof v === 'string' && !k.startsWith('__trading_cortex_')) {
+              try {
+                window.localStorage.setItem(k, v);
+              } catch (e) {}
+            }
+          });
+        }
       }
+    }
+  } catch (e) {}
+
+  // Hook window.localStorage.setItem in this frame so any key TradingView writes when changing drawing tools or magnet mode is immediately captured
+  try {
+    const origSetItem = Storage.prototype.setItem;
+    if (origSetItem && !Storage.prototype.__tradingCortexHooked__) {
+      Storage.prototype.__tradingCortexHooked__ = true;
+      Storage.prototype.setItem = function (key, value) {
+        const res = origSetItem.apply(this, arguments);
+        try {
+          if (
+            this === window.localStorage &&
+            typeof key === 'string' &&
+            !key.startsWith('__trading_cortex_') &&
+            !key.startsWith('tv-chart-drawings-') &&
+            !key.startsWith('vest') &&
+            typeof value === 'string' &&
+            value.length < 16000
+          ) {
+            // If TradingView writes a tool/magnet/settings key while user is interacting, record it into toolbarStorage
+            if (
+              currentSettings.rememberSidebarTools !== false &&
+              (/linetool|drawing|toolbar|magnet|combobox|group|active|tool/i.test(key) || /LineTool/i.test(value))
+            ) {
+              const prev = currentSettings.sidebarState || {};
+              const nextToolbarStorage = {
+                ...(prev.toolbarStorage || {}),
+                [key]: value
+              };
+              currentSettings.sidebarState = {
+                ...prev,
+                toolbarStorage: nextToolbarStorage
+              };
+              origSetItem.call(
+                window.localStorage,
+                '__trading_cortex_sidebar_state__',
+                JSON.stringify(currentSettings.sidebarState)
+              );
+              postToIsolated({
+                type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
+                sidebarState: currentSettings.sidebarState
+              });
+            }
+          }
+        } catch (e) {}
+        return res;
+      };
     }
   } catch (e) {}
 
@@ -2146,12 +2226,14 @@
   let hasCompletedInitialSidebarRestore = false;
 
   // Map TradingView drawing tool IDs to their left-hand sidebar group slot
+  // Note: On TradingView's left drawing toolbar, Arrows (Arrow Marker, Arrow, Arrow Mark Up/Down/Left/Right)
+  // live inside the Brushes/Shapes group slot!
   const SIDEBAR_TOOL_GROUPS = {
     cursors: [
       'cursor', 'dot', 'arrow', 'eraser'
     ],
     trendline: [
-      'LineToolTrendLine', 'LineToolArrow', 'LineToolRay', 'LineToolInfoLine',
+      'LineToolTrendLine', 'LineToolRay', 'LineToolInfoLine',
       'LineToolExtended', 'LineToolTrendAngle', 'LineToolHorzLine', 'LineToolHorzRay',
       'LineToolVertLine', 'LineToolCrossLine', 'LineToolParallelChannel',
       'LineToolRegressionTrend', 'LineToolFlatBottom', 'LineToolDisjointAngle',
@@ -2166,16 +2248,17 @@
       'LineToolGannComplex', 'LineToolGannFan'
     ],
     shapes: [
-      'LineToolBrush', 'LineToolHighlighter', 'LineToolRectangle', 'LineToolCircle',
-      'LineToolEllipse', 'LineToolPath', 'LineToolBezierQuadro', 'LineToolBezierCubic',
-      'LineToolPolygonalLine', 'LineToolTriangle', 'LineToolRotatedRectangle', 'LineToolArc'
+      'LineToolBrush', 'LineToolHighlighter',
+      'LineToolArrowMarker', 'LineToolArrow', 'LineToolArrowMarkUp', 'LineToolArrowMarkDown',
+      'LineToolArrowMarkLeft', 'LineToolArrowMarkRight',
+      'LineToolRectangle', 'LineToolRotatedRectangle', 'LineToolPath',
+      'LineToolCircle', 'LineToolEllipse', 'LineToolPolygonalLine',
+      'LineToolTriangle', 'LineToolArc', 'LineToolBezierQuadro', 'LineToolBezierCubic'
     ],
     annotation: [
       'LineToolText', 'LineToolTextAbsolute', 'LineToolNote', 'LineToolNoteAbsolute',
       'LineToolSignpost', 'LineToolCallout', 'LineToolComment', 'LineToolPriceLabel',
-      'LineToolPriceNote', 'LineToolArrowMarker', 'LineToolArrowMarkLeft',
-      'LineToolArrowMarkRight', 'LineToolArrowMarkUp', 'LineToolArrowMarkDown',
-      'LineToolFlagMark', 'LineToolTable'
+      'LineToolPriceNote', 'LineToolFlagMark', 'LineToolTable', 'LineToolBalloon', 'LineToolImage'
     ],
     patterns: [
       'LineTool5PointsPattern', 'LineToolCypherPattern', 'LineToolABCD',
@@ -2188,7 +2271,7 @@
       'LineToolRiskRewardLong', 'LineToolRiskRewardShort', 'LineToolPrediction',
       'LineToolBarsPattern', 'LineToolGhostFeed', 'LineToolProjection',
       'LineToolDateRange', 'LineToolPriceRange', 'LineToolDateAndPriceRange',
-      'LineToolVolumeProfileFixed'
+      'LineToolVolumeProfileFixed', 'LineToolAnchoredVWAP'
     ],
     icons: [
       'LineToolIcon', 'LineToolEmoji', 'LineToolSticker'
@@ -2212,7 +2295,8 @@
     'cross': 'cursor',
     'crosshair': 'cursor',
     'dot': 'dot',
-    'arrow': 'arrow',
+    'arrow cursor': 'arrow',
+    'demonstration': 'eraser',
     'eraser': 'eraser',
     'trend line': 'LineToolTrendLine',
     'ray': 'LineToolRay',
@@ -2248,31 +2332,36 @@
     'gann fan': 'LineToolGannFan',
     'brush': 'LineToolBrush',
     'highlighter': 'LineToolHighlighter',
+    'arrow marker': 'LineToolArrowMarker',
+    'arrow': 'LineToolArrow',
+    'arrow mark up': 'LineToolArrowMarkUp',
+    'arrow mark down': 'LineToolArrowMarkDown',
+    'arrow mark left': 'LineToolArrowMarkLeft',
+    'arrow mark right': 'LineToolArrowMarkRight',
     'rectangle': 'LineToolRectangle',
+    'rotated rectangle': 'LineToolRotatedRectangle',
+    'path': 'LineToolPath',
     'circle': 'LineToolCircle',
     'ellipse': 'LineToolEllipse',
-    'path': 'LineToolPath',
-    'curve': 'LineToolBezierQuadro',
-    'double curve': 'LineToolBezierCubic',
     'polyline': 'LineToolPolygonalLine',
     'triangle': 'LineToolTriangle',
-    'rotated rectangle': 'LineToolRotatedRectangle',
     'arc': 'LineToolArc',
+    'curve': 'LineToolBezierQuadro',
+    'double curve': 'LineToolBezierCubic',
     'text': 'LineToolText',
     'anchored text': 'LineToolTextAbsolute',
     'note': 'LineToolNote',
     'anchored note': 'LineToolNoteAbsolute',
+    'pin': 'LineToolSignpost',
     'signpost': 'LineToolSignpost',
     'callout': 'LineToolCallout',
+    'balloon': 'LineToolBalloon',
     'comment': 'LineToolComment',
     'price label': 'LineToolPriceLabel',
     'price note': 'LineToolPriceNote',
-    'arrow marker': 'LineToolArrowMarker',
-    'arrow mark left': 'LineToolArrowMarkLeft',
-    'arrow mark right': 'LineToolArrowMarkRight',
-    'arrow mark up': 'LineToolArrowMarkUp',
-    'arrow mark down': 'LineToolArrowMarkDown',
     'flag mark': 'LineToolFlagMark',
+    'table': 'LineToolTable',
+    'image': 'LineToolImage',
     'xabcd pattern': 'LineTool5PointsPattern',
     'cypher pattern': 'LineToolCypherPattern',
     'abcd pattern': 'LineToolABCD',
@@ -2296,13 +2385,20 @@
     'date range': 'LineToolDateRange',
     'price range': 'LineToolPriceRange',
     'date and price range': 'LineToolDateAndPriceRange',
-    'fixed range volume profile': 'LineToolVolumeProfileFixed'
+    'fixed range volume profile': 'LineToolVolumeProfileFixed',
+    'anchored vwap': 'LineToolAnchoredVWAP'
   };
 
   function normalizeToolId(rawName) {
     if (!rawName || typeof rawName !== 'string') return null;
     let trimmed = rawName.trim();
     if (!trimmed) return null;
+
+    // Strip hotkey suffixes often appended in tooltips/labels like "Trend Line (Alt + T)" or "Rectangle Alt + Shift + R"
+    trimmed = trimmed
+      .replace(/\s*\((?:alt|ctrl|shift|cmd|meta|opt)[^)]*\)\s*$/i, '')
+      .replace(/\s+(?:alt|ctrl|shift|cmd|meta)\s*\+.*$/i, '')
+      .trim();
 
     // Strip common TradingView DOM prefixes/suffixes on data-name attributes
     trimmed = trimmed
@@ -2327,11 +2423,11 @@
   function extractToolIdFromDomElement(el) {
     if (!el || el.nodeType !== 1) return null;
 
-    // 1. Check data-name / data-tool / data-value on element or closest ancestor
+    // 1. Check data-name / data-tool / data-value on element or closest ancestor (up to 7 levels)
     const attrNames = ['data-name', 'data-tool', 'data-value', 'name'];
     let curr = el;
     let depth = 0;
-    while (curr && curr.nodeType === 1 && depth < 5) {
+    while (curr && curr.nodeType === 1 && depth < 7) {
       for (const attr of attrNames) {
         const val = curr.getAttribute(attr);
         if (val) {
@@ -2354,9 +2450,19 @@
     // 3. Check menu item label text if clicked inside a popup/flyout submenu
     const rowEl = el.closest('[role="menuitem"], [role="option"], [data-role="menuitem"], [class*="item"], [class*="row"]');
     if (rowEl) {
-      const labelEl = rowEl.querySelector('[class*="label"], [class*="title"]') || rowEl;
-      const rawText = (labelEl.textContent || '').trim();
-      if (rawText && rawText.length < 42) {
+      // Check dedicated label/title child first so hotkey spans ("Alt + Shift + R") don't pollute textContent
+      const labelCandidates = rowEl.querySelectorAll('[class*="label"], [class*="title"], span, div');
+      for (const cand of labelCandidates) {
+        if (cand.children.length === 0) {
+          const txt = (cand.textContent || '').trim();
+          if (txt && txt.length < 48) {
+            const norm = normalizeToolId(txt);
+            if (norm) return norm;
+          }
+        }
+      }
+      const rawText = (rowEl.textContent || '').trim();
+      if (rawText && rawText.length < 52) {
         const norm = normalizeToolId(rawText);
         if (norm) return norm;
       }
@@ -2399,6 +2505,8 @@
 
   function getMagnetButton() {
     const direct = findSidebarElement([
+      'button[data-name="magnet-button"]',
+      'div[data-name="magnet-button"]',
       'button[data-name="magnet"]',
       'div[data-name="magnet"]',
       '[data-role="button"][data-name="magnet"]',
@@ -2533,7 +2641,7 @@
         const candidates = doc.querySelectorAll('[data-name], [aria-label], [data-tooltip], [title]');
         candidates.forEach(el => {
           // Skip items inside floating dropdown menus so we only read the docked sidebar slots
-          if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
+          if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
             return;
           }
           let toolId = normalizeToolId(el.getAttribute('data-name'));
@@ -2567,9 +2675,10 @@
         const key = window.localStorage.key(i);
         if (!key) continue;
         if (
-          /drawing|linetool|toolbar|favorite|magnet|chartcontrols/i.test(key) &&
+          /drawing|linetool|toolbar|favorite|magnet|chartcontrols|combobox/i.test(key) &&
           !key.startsWith('tv-chart-drawings-') &&
-          !key.startsWith('vest')
+          !key.startsWith('vest') &&
+          !key.startsWith('__trading_cortex_')
         ) {
           const val = window.localStorage.getItem(key);
           if (typeof val === 'string' && val.length < 16000) {
@@ -2581,7 +2690,7 @@
     return entries;
   }
 
-  // Reverse map from canonical tool ID to human-readable label (e.g. LineToolRectangle -> "Rectangle")
+  // Reverse map from canonical tool ID to human-readable label (e.g. LineToolRectangle -> "rectangle")
   const TOOL_TO_LABEL_MAP = {};
   Object.entries(LABEL_TO_TOOL_MAP).forEach(([labelLower, canonicalId]) => {
     if (!TOOL_TO_LABEL_MAP[canonicalId]) {
@@ -2589,42 +2698,103 @@
     }
   });
 
+  function dispatchFullPointerClick(el) {
+    if (!el) return;
+    try {
+      const win = el.ownerDocument ? el.ownerDocument.defaultView : window;
+      const opts = { bubbles: true, cancelable: true, view: win, button: 0, buttons: 1 };
+      if (typeof PointerEvent === 'function') {
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+      }
+      el.dispatchEvent(new MouseEvent('mousedown', opts));
+      if (typeof PointerEvent === 'function') {
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+      }
+      el.dispatchEvent(new MouseEvent('mouseup', opts));
+      el.click();
+    } catch (e) {
+      try { el.click(); } catch (err) {}
+    }
+  }
+
+  // Force-close any open TradingView drawing toolbar flyout menu so it never stays open on refresh
+  function closeAnyOpenSidebarFlyoutMenus(ownerDoc) {
+    const docs = ownerDoc ? [ownerDoc] : getSidebarDocuments();
+    docs.forEach(doc => {
+      try {
+        // 1. Dispatch Escape keydown to close any active TradingView popup menu cleanly
+        doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
+        // 2. Also check if any sidebar submenu trigger is still marked open/expanded and click it or click body outside
+        const openMenus = doc.querySelectorAll('[data-name="menu-inner"], [class*="menuWrap-"][class*="isOpened"], [role="menu"]');
+        if (openMenus.length > 0 && doc.body) {
+          const opts = { bubbles: true, cancelable: true, view: doc.defaultView || window, clientX: 400, clientY: 12 };
+          if (typeof PointerEvent === 'function') {
+            doc.body.dispatchEvent(new PointerEvent('pointerdown', opts));
+          }
+          doc.body.dispatchEvent(new MouseEvent('mousedown', opts));
+        }
+      } catch (e) {}
+    });
+  }
+
+  // Temporarily hide popup menus in `ownerDoc` during programmatic slot restoration so the flyout never flashes on screen
+  function setTemporaryFlyoutStealthStyle(ownerDoc, enabled) {
+    if (!ownerDoc || !ownerDoc.head) return;
+    const styleId = 'vest-cortex-stealth-flyout-style';
+    let styleEl = ownerDoc.getElementById(styleId);
+    if (enabled) {
+      if (!styleEl) {
+        styleEl = ownerDoc.createElement('style');
+        styleEl.id = styleId;
+        styleEl.textContent = `
+          [data-name="menu-inner"], [role="menu"], [class*="menuWrap-"] {
+            opacity: 0 !important;
+            pointer-events: none !important;
+            transition: none !important;
+          }
+        `;
+        ownerDoc.head.appendChild(styleEl);
+      }
+    } else if (styleEl) {
+      styleEl.remove();
+    }
+  }
+
   // Ensure a left-sidebar group slot actually displays `norm` as its selected icon.
   // If `selectLineTool` alone didn't swap the sidebar slot icon (e.g. slot still shows Brush instead of Rectangle),
-  // we programmatically open that slot's flyout submenu and click the target item.
+  // we silently open that slot's flyout submenu, click the target item Row, and immediately close the flyout.
   function ensureSidebarGroupSlotDisplaysTool(norm) {
     if (!norm || norm === 'cursor' || norm === 'dot' || norm === 'arrow' || norm === 'eraser') return;
 
-    // Check if the desired tool is already the visible button on the docked sidebar
     const { detectedGroups } = scanDomSidebarGroupSlots();
     const groupKey = getToolGroupKey(norm);
     if (!groupKey || detectedGroups[groupKey] === norm) {
       return; // Already displaying the right tool in this group slot!
     }
 
-    // Find which sibling tool is currently occupying this group's slot on the left sidebar
     const currentSlotTool = detectedGroups[groupKey];
-    const siblingSelectors = [];
-    if (currentSlotTool) {
-      siblingSelectors.push(`[data-name="${currentSlotTool}"]`);
-      siblingSelectors.push(`[data-name="${currentSlotTool.toLowerCase()}"]`);
-      siblingSelectors.push(`[data-name="linetool-group-${groupKey}"]`);
-    }
-    if (SIDEBAR_TOOL_GROUPS[groupKey]) {
-      SIDEBAR_TOOL_GROUPS[groupKey].forEach(sib => {
-        siblingSelectors.push(`[data-name="${sib}"]`);
-        siblingSelectors.push(`[data-name="${sib.toLowerCase()}"]`);
-      });
-    }
+    const siblingList = SIDEBAR_TOOL_GROUPS[groupKey] || [];
+    const siblingSet = new Set(siblingList.map(s => s.toLowerCase()));
+    if (currentSlotTool) siblingSet.add(currentSlotTool.toLowerCase());
 
     const docs = getSidebarDocuments();
     let currentSlotBtn = null;
     let ownerDoc = document;
+
     for (const doc of docs) {
       try {
-        for (const sel of siblingSelectors) {
-          const el = doc.querySelector(sel);
-          if (el && !el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"]')) {
+        const candidates = doc.querySelectorAll('[data-name], [aria-label], [data-tooltip], [title]');
+        for (const el of candidates) {
+          if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
+            continue;
+          }
+          const tId =
+            normalizeToolId(el.getAttribute('data-name')) ||
+            normalizeToolId(el.getAttribute('aria-label')) ||
+            normalizeToolId(el.getAttribute('data-tooltip')) ||
+            normalizeToolId(el.getAttribute('title'));
+
+          if (tId && siblingSet.has(tId.toLowerCase())) {
             currentSlotBtn = el;
             ownerDoc = doc;
             break;
@@ -2639,56 +2809,93 @@
     try {
       // Find the submenu trigger/arrow next to or inside the group button
       const slotContainer =
-        currentSlotBtn.closest('[class*="group"], [class*="wrap"], [class*="slot"], [class*="buttonWrap"]') ||
+        currentSlotBtn.closest('[class*="group"], [class*="wrap"], [class*="slot"], [class*="buttonWrap"], [class*="control"]') ||
         currentSlotBtn.parentElement;
 
-      const arrowTrigger =
-        (slotContainer &&
-          slotContainer.querySelector(
-            '[data-role="menu-handle"], [class*="arrow"], [class*="caret"], [class*="submenu"], [aria-haspopup="true"]'
-          )) ||
-        currentSlotBtn;
+      let arrowTrigger = null;
+      if (slotContainer) {
+        arrowTrigger = slotContainer.querySelector(
+          '[data-role="menu-handle"], [class*="arrow"], [class*="caret"], [class*="submenu"], [class*="trigger"], [aria-haspopup="true"]'
+        );
+        if (!arrowTrigger && currentSlotBtn.nextElementSibling) {
+          arrowTrigger = currentSlotBtn.nextElementSibling;
+        }
+      }
+      if (!arrowTrigger) {
+        arrowTrigger = currentSlotBtn;
+      }
 
-      // Dispatch pointerdown/mousedown/click to open TradingView's submenu flyout
-      arrowTrigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-      arrowTrigger.click();
+      // Hide the flyout menu visually while we click the target item so the user never sees a pull-out menu flash open
+      setTemporaryFlyoutStealthStyle(ownerDoc, true);
+      dispatchFullPointerClick(arrowTrigger);
 
       setTimeout(() => {
         try {
           const targetLabelLower = TOOL_TO_LABEL_MAP[norm] || norm.replace(/^LineTool/i, '').toLowerCase();
-          const menuCandidates = ownerDoc.querySelectorAll(
-            '[data-name="menu-inner"] [data-name], [role="menu"] [data-name], [class*="menuWrap"] [data-name], [data-role="menuitem"], [role="menuitem"], [role="option"], [class*="item"]'
+          const menuContainers = ownerDoc.querySelectorAll(
+            '[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"]'
           );
 
           let matchedMenuItem = null;
-          for (const item of menuCandidates) {
-            // Must be inside a popup/menu container, not the sidebar itself
-            if (!item.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"]')) {
-              continue;
+
+          // 1. Search by data-name / aria-label / title inside the open menu
+          for (const container of menuContainers) {
+            const allItems = container.querySelectorAll('[data-name], [role="menuitem"], [role="option"], [data-role="menuitem"], [class*="item-"], [class*="row-"]');
+            for (const item of allItems) {
+              const dName = item.getAttribute('data-name');
+              if (dName && normalizeToolId(dName) === norm) {
+                matchedMenuItem = item;
+                break;
+              }
+              const ariaL = item.getAttribute('aria-label') || item.getAttribute('title') || item.getAttribute('data-tooltip');
+              if (ariaL && normalizeToolId(ariaL) === norm) {
+                matchedMenuItem = item;
+                break;
+              }
             }
-            const itemToolId = extractToolIdFromDomElement(item);
-            if (itemToolId === norm) {
-              matchedMenuItem = item;
-              break;
-            }
-            const txt = (item.textContent || '').trim().toLowerCase();
-            if (txt === targetLabelLower) {
-              matchedMenuItem = item;
-              break;
+            if (matchedMenuItem) break;
+          }
+
+          // 2. Search by exact label text (e.g., "Rectangle", "Horizontal Line", "Long Position", "Callout")
+          if (!matchedMenuItem) {
+            for (const container of menuContainers) {
+              const allNodes = container.querySelectorAll('*');
+              for (const node of allNodes) {
+                if (node.children.length === 0) {
+                  const txt = (node.textContent || '').trim().toLowerCase();
+                  if (txt === targetLabelLower || normalizeToolId(txt) === norm) {
+                    matchedMenuItem =
+                      node.closest('[data-name], [data-role="menuitem"], [role="menuitem"], [role="option"], [class*="item-"], [class*="row-"]') ||
+                      node.parentElement ||
+                      node;
+                    break;
+                  }
+                }
+              }
+              if (matchedMenuItem) break;
             }
           }
 
           if (matchedMenuItem) {
-            matchedMenuItem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-            matchedMenuItem.click();
+            // Click the inner label/row and also the row container so TradingView's React/ internal handler always receives it and closes the menu
+            dispatchFullPointerClick(matchedMenuItem);
+            const labelChild = matchedMenuItem.querySelector('[class*="label-"], [class*="title-"]');
+            if (labelChild && labelChild !== matchedMenuItem) {
+              dispatchFullPointerClick(labelChild);
+            }
             log(`Updated sidebar slot [${groupKey}] via submenu click -> ${norm}`);
-          } else {
-            // Close menu if item wasn't found
-            arrowTrigger.click();
           }
-        } catch (e) {}
-      }, 35);
-    } catch (e) {}
+        } catch (e) {} finally {
+          // Always ensure the pull-out submenu is closed afterwards and remove stealth CSS
+          setTimeout(() => {
+            closeAnyOpenSidebarFlyoutMenus(ownerDoc);
+            setTemporaryFlyoutStealthStyle(ownerDoc, false);
+          }, 35);
+        }
+      }, 45);
+    } catch (e) {
+      setTemporaryFlyoutStealthStyle(ownerDoc, false);
+    }
   }
 
   // Select a single drawing tool via TradingView API, internal Widget, or DOM flyout so its left-sidebar group slot updates
@@ -2801,7 +3008,41 @@
     }
   }
 
+  const sidebarHookedDocs = new WeakSet();
+
+  function attachSidebarListenersToAllDocs() {
+    const docs = getSidebarDocuments();
+    docs.forEach(doc => {
+      if (!doc || sidebarHookedDocs.has(doc)) return;
+      sidebarHookedDocs.add(doc);
+
+      const handleSidebarInteraction = (e) => {
+        if (isRestoringSidebar) return;
+        if (currentSettings.rememberSidebarTools === false) return;
+
+        // Detect if user clicked a specific drawing tool button or flyout submenu item
+        const clickedToolId = extractToolIdFromDomElement(e.target);
+
+        // Capture immediately after TradingView updates its DOM slot & activeLineTool state
+        setTimeout(() => {
+          saveCurrentSidebarState(clickedToolId);
+        }, 120);
+        setTimeout(() => {
+          saveCurrentSidebarState(clickedToolId);
+        }, 400);
+      };
+
+      try {
+        doc.addEventListener('pointerdown', handleSidebarInteraction, true);
+        doc.addEventListener('click', handleSidebarInteraction, true);
+      } catch (e) {}
+    });
+  }
+
   function setupSidebarObserver() {
+    // Always ensure any newly mounted chart iframes have our pointerdown/click listeners attached
+    attachSidebarListenersToAllDocs();
+
     if (sidebarObserver) return;
 
     // 1. Subscribe to TradingView's native drawing event if available
@@ -2813,29 +3054,13 @@
       }
     } catch (e) {}
 
-    function handleSidebarInteraction(e) {
-      if (isRestoringSidebar) return;
-      if (currentSettings.rememberSidebarTools === false) return;
-
-      // Detect if user clicked a specific drawing tool button or flyout submenu item
-      const clickedToolId = extractToolIdFromDomElement(e.target);
-
-      // Capture immediately after TradingView updates its DOM slot & activeLineTool state
-      setTimeout(() => {
-        saveCurrentSidebarState(clickedToolId);
-      }, 160);
-      setTimeout(() => {
-        saveCurrentSidebarState(clickedToolId);
-      }, 450);
-    }
-
-    const docs = getSidebarDocuments();
-    docs.forEach(doc => {
-      try {
-        doc.addEventListener('pointerdown', handleSidebarInteraction, true);
-        doc.addEventListener('click', handleSidebarInteraction, true);
-      } catch (e) {}
-    });
+    // 2. Periodically re-check for late-mounted iframes and poll for tool changes
+    setInterval(() => {
+      attachSidebarListenersToAllDocs();
+      if (!isRestoringSidebar && hasCompletedInitialSidebarRestore && currentSettings.rememberSidebarTools !== false) {
+        saveCurrentSidebarState();
+      }
+    }, 1500);
 
     sidebarObserver = true;
   }
@@ -2903,9 +3128,10 @@
     const activeTool = explicitNorm || apiTool || detectedActiveTool || prev.activeTool || 'cursor';
 
     // 3. Merge group slot selections:
-    // Start with detected DOM slots, then overlay previously remembered `prev.groupTools` so an un-restored default DOM slot never clobbers a saved submenu tool,
-    // and finally apply any newly detected non-default slot or explicit user click!
+    // Start with previously remembered `prev.groupTools`, then update any group slot where the user selected a tool
+    // (including when the user changes a group slot back to its default tool after initial restore has completed).
     const DEFAULT_GROUP_SLOTS = {
+      cursors: 'cursor',
       trendline: 'LineToolTrendLine',
       fib: 'LineToolFibRetracement',
       shapes: 'LineToolBrush',
@@ -2915,13 +3141,14 @@
     };
 
     const mergedGroupTools = {
-      ...detectedGroups,
       ...(prev.groupTools || {})
     };
 
-    // If the DOM currently shows a non-default tool in any group slot, record it
     Object.entries(detectedGroups).forEach(([gKey, tId]) => {
-      if (tId && DEFAULT_GROUP_SLOTS[gKey] !== tId) {
+      if (!tId) return;
+      // After initial sidebar restore is complete, trust the live DOM group slots directly;
+      // before initial restore completes, only overwrite if it's non-default so we don't clobber saved state on boot
+      if (hasCompletedInitialSidebarRestore || !mergedGroupTools[gKey] || DEFAULT_GROUP_SLOTS[gKey] !== tId) {
         mergedGroupTools[gKey] = tId;
       }
     });
@@ -3011,7 +3238,6 @@
     }
 
     isRestoringSidebar = true;
-    hasCompletedInitialSidebarRestore = true;
 
     try {
       // 0. Restore TradingView's own drawing toolbar localStorage entries if present
@@ -3039,7 +3265,7 @@
         setTimeout(() => {
           selectSingleLineTool(toolId, true);
         }, stepDelay);
-        stepDelay += 120;
+        stepDelay += 170;
       });
 
       // 2. Select the user's last active drawing tool (or cursor) after group slots are populated
@@ -3098,13 +3324,17 @@
           }
         }
 
+        // Ensure all sidebar flyout menus are closed and mark initial restore complete
         setTimeout(() => {
+          closeAnyOpenSidebarFlyoutMenus();
           isRestoringSidebar = false;
-        }, 450);
-      }, stepDelay + 110);
+          hasCompletedInitialSidebarRestore = true;
+        }, 250);
+      }, stepDelay + 140);
     } catch (err) {
       log('Error restoring sidebar selections:', err);
       isRestoringSidebar = false;
+      hasCompletedInitialSidebarRestore = true;
     }
   }
 

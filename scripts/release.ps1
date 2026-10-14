@@ -19,6 +19,12 @@ $ManifestRaw = Get-Content $ManifestPath -Raw
 $ManifestUpdated = $ManifestRaw -replace '"version":\s*"[^"]+"', "`"version`": `"$CleanVer`""
 Set-Content -Path $ManifestPath -Value $ManifestUpdated -Encoding UTF8
 
+# 1b. Update RELEASE_NOTES.md if custom notes were passed
+$ReleaseNotesPath = Join-Path $ProjectRoot "RELEASE_NOTES.md"
+if ($PSBoundParameters.ContainsKey('Notes') -or !(Test-Path $ReleaseNotesPath)) {
+    Set-Content -Path $ReleaseNotesPath -Value $Notes -Encoding UTF8
+}
+
 # 2. Build release zip in dist/
 $DistDir = Join-Path $ProjectRoot "dist"
 if (!(Test-Path $DistDir)) {
@@ -36,20 +42,22 @@ $ItemsToPackage = @(
     "icons",
     "popup",
     "update",
-    "README.md"
+    "README.md",
+    "RELEASE_NOTES.md"
 ) | ForEach-Object { Join-Path $ProjectRoot $_ } | Where-Object { Test-Path $_ }
 
 Compress-Archive -Path $ItemsToPackage -DestinationPath $ZipPath -Force
 Write-Host ">>> Packaged $ZipPath" -ForegroundColor Green
 
-# 3. Commit, Tag, and Push to GitHub
+# 3. Commit, Tag, and Push to GitHub (Push branch first, then push tag separately so GitHub Actions triggers on the tag event)
 Push-Location $ProjectRoot
 try {
     git add -A
     git commit -m "Release $Tag`n`n$Notes" --allow-empty
-    git tag -f $Tag
     git push origin main
-    git push origin $Tag --force
+    git tag -f $Tag
+    git push origin :refs/tags/$Tag 2>$null
+    git push origin $Tag
     Write-Host ">>> Pushed $Tag to GitHub (childersc/trading-cortex)!" -ForegroundColor Green
 } finally {
     Pop-Location

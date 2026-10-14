@@ -229,13 +229,31 @@ function compareSemver(a, b) {
 async function checkGitHubForUpdatesInBackground() {
   try {
     const installedVer = chrome.runtime.getManifest().version || "1.1.0";
+    let release = null;
     const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
       headers: { "Accept": "application/vnd.github+json" },
       cache: "no-store"
     });
-    if (!resp.ok) return null;
+    if (resp.ok) {
+      release = await resp.json();
+    } else if (resp.status === 404) {
+      const tagsResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=5`, {
+        headers: { "Accept": "application/vnd.github+json" },
+        cache: "no-store"
+      });
+      if (tagsResp.ok) {
+        const tags = await tagsResp.json();
+        if (Array.isArray(tags) && tags.length > 0) {
+          release = {
+            tag_name: tags[0].name,
+            name: tags[0].name,
+            html_url: `https://github.com/${GITHUB_REPO}/releases/tag/${tags[0].name}`
+          };
+        }
+      }
+    }
+    if (!release) return null;
 
-    const release = await resp.json();
     const latestVer = cleanSemver(release.tag_name || release.name || installedVer);
     const hasUpdate = compareSemver(latestVer, installedVer) > 0;
 

@@ -200,6 +200,15 @@
     }
   }
 
+  const DEFAULT_RELEASE_NOTES_ITEMS = [
+    '**Chart Viewport & Settings Memory**: Automatically remembers and restores your exact chart position (left/right pan, up/down price scale, zoom level), timeframe, and candle style across page refreshes.',
+    '**Left-Sidebar Drawing Tool & Magnet Persistence**: Remembers the active drawing tool, Magnet mode (Weak/Strong), and selected submenu slot icons across all drawing groups on the left toolbar without leaving pull-out menus open.',
+    '**CORTEX Header Pill & Live Update Indicator**: Added sleek header pill displaying the active version (`v1.1.0`) with automatic background update checks on page refresh and menu click, plus a pulsing `"Update ready"` glow when a new build drops.',
+    '**Native TradingView `Template >` Context Menu**: Right-click any rectangle on the chart to apply, save, or delete custom ICT/SMC box presets (`Bullish OB`, `Bearish OB`, `Fair Value Gap`, `Liquidity`, `Breaker Block`, `Volume Imbalance`).',
+    '**Extended Rectangle Far-Right Label Fix**: Keeps text labels on right-extended rectangles pinned cleanly inside the visible chart canvas next to the price scale.',
+    '**Movable Settings & OTA Sync Engine**: Added draggable Settings dialog and 4-stage OTA Release & Sync Engine connected to `childersc/trading-cortex`.'
+  ];
+
   function renderReleaseNotes(release) {
     const tag = release?.tag_name || `v${installedVersion}`;
     const displayVer = tag.startsWith('v') ? tag : `v${tag}`;
@@ -213,24 +222,19 @@
     notesZipName.textContent = zipAsset ? zipAsset.name : `trading-cortex-${cleanVersion(tag)}.zip`;
 
     const rawBody = (release?.body || '').trim();
-    if (!rawBody) {
-      notesSummary.textContent = `Release ${displayVer} for Trading Cortex.`;
-      notesBody.innerHTML = `<ul class="notes-list"><li>Packaged build ${displayVer} ready on GitHub.</li></ul>`;
-      vboxChanges.textContent = '1';
-      return;
-    }
-
-    const lines = rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const lines = rawBody ? rawBody.split(/\r?\n/).map(l => l.trim()).filter(Boolean) : [];
     const bulletLines = lines.filter(l => /^[-*•]\s+/.test(l));
-    const paragraphLines = lines.filter(l => !/^[-*•#]\s*/.test(l));
+    const paragraphLines = lines.filter(l => !/^[-*•#]\s*/.test(l) && !/^full changelog:/i.test(l));
 
-    notesSummary.textContent = paragraphLines[0] || release.name || `Trading Cortex ${displayVer}`;
+    notesSummary.textContent =
+      paragraphLines[0] ||
+      'Smart chart viewport memory, persistent left-sidebar drawing tools, customizable ICT/SMC rectangle templates, and OTA GitHub sync.';
 
     const items = bulletLines.length > 0
       ? bulletLines.map(b => b.replace(/^[-*•]\s+/, ''))
-      : lines.filter(l => !l.startsWith('#'));
+      : DEFAULT_RELEASE_NOTES_ITEMS;
 
-    vboxChanges.textContent = String(items.length || 1);
+    vboxChanges.textContent = String(items.length);
 
     notesBody.innerHTML = `
       <ul class="notes-list">
@@ -254,16 +258,55 @@
     logTerm(`Polling https://api.github.com/repos/${DEFAULT_REPO}/releases/latest ...`, 'info');
 
     try {
+      let release = null;
       const resp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/releases/latest`, {
         headers: { 'Accept': 'application/vnd.github+json' },
         cache: 'no-store'
       });
 
-      if (!resp.ok) {
+      if (resp.ok) {
+        release = await resp.json();
+      } else if (resp.status === 404) {
+        // Fallback 1: check all releases (including pre-releases)
+        const listResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=5`, {
+          headers: { 'Accept': 'application/vnd.github+json' },
+          cache: 'no-store'
+        });
+        if (listResp.ok) {
+          const list = await listResp.json();
+          if (Array.isArray(list) && list.length > 0) {
+            release = list[0];
+          }
+        }
+        // Fallback 2: check repository tags if GitHub Actions is still building the release
+        if (!release) {
+          const tagsResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/tags?per_page=5`, {
+            headers: { 'Accept': 'application/vnd.github+json' },
+            cache: 'no-store'
+          });
+          if (tagsResp.ok) {
+            const tags = await tagsResp.json();
+            if (Array.isArray(tags) && tags.length > 0) {
+              const topTag = tags[0].name;
+              release = {
+                tag_name: topTag,
+                name: `Trading Cortex ${topTag}`,
+                html_url: `https://github.com/${DEFAULT_REPO}/releases/tag/${topTag}`,
+                zipball_url: tags[0].zipball_url,
+                assets: [],
+                body: `Packaged build ${topTag} on GitHub (${DEFAULT_REPO}).`
+              };
+            }
+          }
+        }
+      } else {
         throw new Error(`GitHub API HTTP ${resp.status}`);
       }
 
-      const release = await resp.json();
+      if (!release) {
+        throw new Error('No published releases or tags found on GitHub yet.');
+      }
+
       latestRelease = release;
 
       const latestVer = cleanVersion(release.tag_name || release.name || installedVersion);
