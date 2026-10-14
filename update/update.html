@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trading Cortex · Release & Sync Center</title>
+  <link rel="stylesheet" href="update.css" />
+</head>
+<body>
+  <div class="bg-glow"></div>
+
+  <div class="studio-shell">
+    <!-- Top Hero Banner -->
+    <header class="hero-banner">
+      <div class="hero-identity">
+        <div class="studio-emblem">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div>
+          <div class="studio-badge-row">
+            <span class="studio-tag">TRADING CORTEX</span>
+            <span class="studio-divider">/</span>
+            <span class="studio-subtag">OTA SYNC ENGINE</span>
+          </div>
+          <h1 class="hero-title" id="status-heading">Checking GitHub release channel...</h1>
+        </div>
+      </div>
+
+      <div class="hero-actions">
+        <button type="button" class="btn-ghost" id="btn-check-now" title="Poll GitHub Releases API now">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+            <path d="M16 16h5v5"></path>
+          </svg>
+          <span>Check Channel</span>
+        </button>
+
+        <button type="button" class="btn-deploy" id="btn-run-update">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+          </svg>
+          <span id="btn-run-update-label">Sync Latest Build</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="error-banner" id="error-banner" style="display: none;"></div>
+
+    <!-- 3-Column Telemetry Strip -->
+    <section class="telemetry-strip">
+      <!-- Tile 1: Local Workspace & Installed Build -->
+      <div class="telemetry-tile">
+        <div class="tile-top">
+          <span class="tile-label">INSTALLED BUILD</span>
+          <span class="status-chip" id="status-eyebrow">CHECKING</span>
+        </div>
+        <div class="tile-metric" id="vbox-installed">v1.1.0</div>
+        <div class="tile-footer">
+          <span class="folder-pill" id="step-1-label" title="Local extension directory used for hot-sync">No directory linked</span>
+          <div class="folder-actions">
+            <button type="button" class="tile-link-btn" id="pick-folder-btn">Link Folder</button>
+            <button type="button" class="tile-unlink-btn" id="btn-forget-folder" title="Unlink saved folder">×</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tile 2: Remote GitHub Release -->
+      <div class="telemetry-tile tile-accent">
+        <div class="tile-top">
+          <span class="tile-label">GITHUB RELEASE CHANNEL</span>
+          <a class="tile-ext-link" id="all-releases-link" href="https://github.com/childersc/trading-cortex/releases" target="_blank" rel="noopener noreferrer">
+            <code id="repo-slug-display">childersc/trading-cortex</code> ↗
+          </a>
+        </div>
+        <div class="tile-metric-row">
+          <span class="tile-metric highlight" id="vbox-latest">v1.1.0</span>
+          <span class="delta-pill" id="vbox-changes-pill"><strong id="vbox-changes">0</strong> changelog items</span>
+        </div>
+        <div class="tile-footer">
+          <span class="asset-label">Package: <code id="notes-zip-name">trading-cortex-1.1.0.zip</code></span>
+          <a class="tile-link-btn" id="release-github-link" href="https://github.com/childersc/trading-cortex/releases" target="_blank" rel="noopener noreferrer">Release Page</a>
+        </div>
+      </div>
+
+      <!-- Tile 3: Background Auto-Poll -->
+      <div class="telemetry-tile">
+        <div class="tile-top">
+          <span class="tile-label">BACKGROUND HEARTBEAT</span>
+          <label class="emerald-switch">
+            <input type="checkbox" id="toggle-auto-check" checked />
+            <span class="emerald-slider"></span>
+          </label>
+        </div>
+        <div class="tile-metric-sm" id="heartbeat-state-text">Active · 30m Interval</div>
+        <div class="tile-footer">
+          <span>Checks GitHub Releases silently and badges the toolbar icon when a new build drops.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Horizontal 4-Stage Deployment Pipeline -->
+    <section class="pipeline-panel">
+      <div class="pipeline-header">
+        <span class="pipeline-title">DEPLOYMENT PIPELINE</span>
+        <div class="pipeline-stats">
+          <span id="progress-label-left">Standby</span>
+          <span class="pipeline-sep">·</span>
+          <span id="progress-label-right" class="mono-stat">0 / 0 files</span>
+        </div>
+      </div>
+
+      <div class="pipeline-track">
+        <div class="pipeline-fill" id="progress-fill" style="width: 0%;"></div>
+      </div>
+
+      <div class="pipeline-nodes">
+        <div class="p-node" id="step-1">
+          <div class="p-node-index" id="step-1-badge">01</div>
+          <div class="p-node-body">
+            <div class="p-node-title">Workspace Link</div>
+            <div class="p-node-desc">Read/Write Directory Handle</div>
+          </div>
+        </div>
+
+        <div class="p-node" id="step-2">
+          <div class="p-node-index" id="step-2-badge">02</div>
+          <div class="p-node-body">
+            <div class="p-node-title">Fetch & Verify</div>
+            <div class="p-node-desc" id="step-2-label">Download ZIP & SHA-256</div>
+          </div>
+        </div>
+
+        <div class="p-node" id="step-3">
+          <div class="p-node-index" id="step-3-badge">03</div>
+          <div class="p-node-body">
+            <div class="p-node-title">In-Place Sync</div>
+            <div class="p-node-desc" id="step-3-label">Stream files to disk</div>
+          </div>
+        </div>
+
+        <div class="p-node" id="step-4">
+          <div class="p-node-index" id="step-4-badge">04</div>
+          <div class="p-node-body">
+            <div class="p-node-title">Hot Reload</div>
+            <div class="p-node-desc" id="step-4-label">Refresh extension & chart</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Split Workspace: Release Changelog & Live Sync Console -->
+    <section class="bottom-workspace">
+      <!-- Left: Release Notes -->
+      <div class="workspace-card">
+        <div class="wcard-header">
+          <div class="wcard-title-group">
+            <span class="wcard-dot"></span>
+            <h2 class="wcard-title">Release Notes <span id="notes-version-title">v1.1.0</span></h2>
+          </div>
+        </div>
+        <p class="notes-lead" id="notes-summary">
+          Customizable TradingView rectangle templates, extended far-right text fix, movable trading panels, and live market event logger.
+        </p>
+        <div class="notes-body" id="notes-body">
+          <ul class="notes-list">
+            <li>Querying GitHub release feed...</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Right: Live Sync Terminal Log -->
+      <div class="workspace-card terminal-card">
+        <div class="wcard-header">
+          <div class="wcard-title-group">
+            <span class="terminal-dot"></span>
+            <h2 class="wcard-title">Live Sync Console</h2>
+          </div>
+          <button type="button" class="btn-clear-log" id="btn-clear-log">Clear</button>
+        </div>
+        <div class="sync-terminal" id="sync-terminal"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="update.js"></script>
+</body>
+</html>

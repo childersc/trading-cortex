@@ -1,0 +1,90 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Trading Cortex",
+  "version": "1.1.0",
+  "description": "Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Trading Cortex",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.vestmarkets.com/*",
+    "https://vestmarkets.com/*",
+    "https://*.vest.exchange/*",
+    "https://vest.exchange/*",
+    "https://api.github.com/*",
+    "https://github.com/*",
+    "https://*.githubusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.vestmarkets.com/*",
+        "https://vestmarkets.com/*",
+        "https://*.vest.exchange/*",
+        "https://vest.exchange/*"
+      ],
+      "js": [
+        "content/content-main.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    },
+    {
+      "matches": [
+        "https://*.vestmarkets.com/*",
+        "https://vestmarkets.com/*",
+        "https://*.vest.exchange/*",
+        "https://vest.exchange/*"
+      ],
+      "js": [
+        "content/content-isolated.js"
+      ],
+      "css": [
+        "content/template-bar.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/template-bar.css",
+        "icons/*.png"
+      ],
+      "matches": [
+        "https://*.vestmarkets.com/*",
+        "https://vestmarkets.com/*",
+        "https://*.vest.exchange/*",
+        "https://vest.exchange/*"
+      ]
+    }
+  ]
+}
+
