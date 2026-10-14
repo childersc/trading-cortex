@@ -1,6 +1,6 @@
 # Trading Cortex (Chrome Extension)
 
-A Chrome extension for **TradingView Charting Library** platforms (`trade.vestmarkets.com`, `next.vestmarkets.com`, `vest.exchange`) that adds **Chart Memory Features, Viewport Position & Zoom Persistence, and Box/Drawing Templates**.
+A Chrome extension for **TradingView Charting Library** platforms (`next.vestmarkets.com`, `vest.exchange`) that adds **Chart Memory Features, Viewport Position & Zoom Persistence, and Box/Drawing Templates**.
 
 Vest Markets embeds TradingView charts, but by default it lacks a drawing template system—meaning every time you draw a box, it defaults to the generic purple color (`#9c27b0`). This extension provides **custom templates, 1-click color presets, center lines (50% / CE), ray extensions (left & right), an on-chart floating quick-bar, and automatic styling**.
 
@@ -61,13 +61,13 @@ Vest Markets embeds TradingView charts, but by default it lacks a drawing templa
    - Enable **Developer mode** using the toggle switch in the top-right corner.
    - Click the **Load unpacked** button in the top-left corner.
    - Select the extracted **`Trading Cortex`** folder (the folder containing `manifest.json`).
-4. **Trading Cortex** is now active! You can also link that extracted folder inside the **OTA Release Center** (`CORTEX` → **Cortex Settings...** → **Open OTA Release Center**) for 1-click in-place updates whenever a new version is released.
+4. **Trading Cortex** is now active! You can also link that extracted folder inside the **Update Center** (`CORTEX` → **Cortex Settings...** → **Open Update Center**) for 1-click in-place updates whenever a new version is released.
 
 ---
 
 ## How to Use on Vest Markets
 
-1. Navigate to [Vest Markets Trading](https://trade.vestmarkets.com) or [Next Vest Markets](https://next.vestmarkets.com/trade).
+1. Navigate to [Next Vest Markets](https://next.vestmarkets.com/trade) or [Vest Exchange](https://vest.exchange).
 2. You will see a small, sleek **Box Templates** floating toolbar on the chart.
    - You can drag it by its header to position it anywhere you prefer.
    - Click the minimize button `—` to collapse it into a compact pill when you need more chart space.

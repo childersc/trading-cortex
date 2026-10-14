@@ -224,7 +224,7 @@
     '**CORTEX Header Pill & Live Update Indicator**: Added sleek header pill displaying the active version (`v1.1.0`) with automatic background update checks on page refresh and menu click, plus a pulsing `"Update ready"` glow when a new build drops.',
     '**Native TradingView `Template >` Context Menu**: Right-click any rectangle on the chart to apply, save, or delete custom ICT/SMC box presets (`Bullish OB`, `Bearish OB`, `Fair Value Gap`, `Liquidity`, `Breaker Block`, `Volume Imbalance`).',
     '**Extended Rectangle Far-Right Label Fix**: Keeps text labels on right-extended rectangles pinned cleanly inside the visible chart canvas next to the price scale.',
-    '**Movable Settings & OTA Sync Engine**: Added draggable Settings dialog and 4-stage OTA Release & Sync Engine connected to `childersc/trading-cortex`.'
+    '**Movable Settings & Update Center**: Added draggable Settings dialog and 4-stage Update Center connected to `childersc/trading-cortex`.'
   ];
 
   function renderReleaseNotes(release) {
@@ -246,7 +246,7 @@
 
     notesSummary.textContent =
       paragraphLines[0] ||
-      'Smart chart viewport memory, persistent left-sidebar drawing tools, customizable ICT/SMC rectangle templates, and OTA GitHub sync.';
+      'Smart chart viewport memory, persistent left-sidebar drawing tools, customizable ICT/SMC rectangle templates, and 1-click Update Center.';
 
     const items = bulletLines.length > 0
       ? bulletLines.map(b => b.replace(/^[-*•]\s+/, ''))
@@ -485,7 +485,7 @@
       const targetVer = cleanVersion(latestRelease.tag_name || installedVersion);
       statusEyebrow.textContent = 'DEPLOYING';
       statusHeading.textContent = `Deploying Trading Cortex v${targetVer}...`;
-      logTerm(`Starting OTA deployment for v${targetVer}...`, 'info');
+      logTerm(`Starting update to v${targetVer}...`, 'info');
 
       // STAGE 01: Workspace Link
       updateStepState(step1Row, step1Badge, 'active', 1);
@@ -674,7 +674,7 @@
     repoSlugDisplay.textContent = DEFAULT_REPO;
     allReleasesLink.href = `https://github.com/${DEFAULT_REPO}/releases`;
 
-    logTerm(`Trading Cortex OTA Sync Engine initialized (Local v${installedVersion})`);
+    logTerm(`Trading Cortex Update Center initialized (Local v${installedVersion})`);
 
     const data = await chrome.storage.local.get(['settings', 'pendingUpdaterSuccess']).catch(() => ({}));
     if (data.settings && data.settings.autoCheckUpdates === false) {

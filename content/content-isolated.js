@@ -1506,9 +1506,9 @@
                 <span style="color:#e2e8f0;">TradingView Charting Library Platforms</span>
               </div>
               <div class="vest-tvs-about-meta-row" style="margin-top:6px;">
-                <span>OTA Release & Sync</span>
+                <span>Update Center</span>
                 <button type="button" class="vest-tvs-action-btn" id="vest-tvs-open-ota-btn" style="border-color:#10b981; color:#10b981;">
-                  Open OTA Release Center ↗
+                  Open Update Center ↗
                 </button>
               </div>
             </div>
