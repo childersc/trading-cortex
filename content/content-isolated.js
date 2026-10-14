@@ -1237,10 +1237,25 @@
     }
     studioDropdownEl = menuEl;
 
+    const updateItemHtml = isUpdateAvailable
+      ? `
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-updater-btn" style="padding: 8px 10px; margin-bottom: 6px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.14)); border: 1px solid rgba(52, 211, 153, 0.55); box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="color:#34d399;">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+            </svg>
+            <span style="font-weight:700; color:#6ee7b7;">Update Ready (${latestAvailableVersion ? `v${escapeHtml(latestAvailableVersion)}` : 'Open Updater'})</span>
+          </div>
+          <span class="vest-sdm-hotkey" style="color:#34d399; border-color:rgba(52,211,153,0.4);">↗</span>
+        </div>
+      `
+      : '';
+
     menuEl.style.display = studioMenuOpen ? 'flex' : 'none';
     menuEl.innerHTML = `
-      <!-- Settings Entry Only -->
+      <!-- Settings & Update Entry -->
       <div class="vest-sdm-section">
+        ${updateItemHtml}
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
@@ -1287,6 +1302,16 @@
     if (menuEl) {
       menuEl.onclick = (e) => e.stopPropagation();
     }
+
+    // Update Ready Button -> opens Update Center directly
+    menuEl.querySelector('#vest-sdm-open-updater-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      try {
+        chrome.runtime.sendMessage({ action: 'openUpdaterPage' });
+      } catch (e) {
+        window.open(chrome.runtime.getURL('update/update.html'), '_blank');
+      }
+    });
 
     // Top Settings Button -> opens Settings Dialog on About tab
     menuEl.querySelector('#vest-sdm-open-settings-btn')?.addEventListener('click', () => {
