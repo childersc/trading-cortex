@@ -809,9 +809,12 @@
     return null;
   }
 
+  let lastAppliedOverridesJson = null;
+
   function applyTemplateOverrides(tpl) {
     if (!tpl) return;
     const overrides = buildRectangleOverrides(tpl);
+    lastAppliedOverridesJson = JSON.stringify(overrides);
 
     if (activeWidget && typeof activeWidget.applyOverrides === 'function') {
       try {
@@ -830,6 +833,14 @@
         log('Error applying overrides to activeChartApi:', e);
       }
     }
+  }
+
+  function applyTemplateOverridesIfChanged(tpl) {
+    if (!tpl) return;
+    const overrides = buildRectangleOverrides(tpl);
+    const nextJson = JSON.stringify(overrides);
+    if (nextJson === lastAppliedOverridesJson) return;
+    applyTemplateOverrides(tpl);
   }
 
   let rectTextPollTimer = null;
@@ -1997,7 +2008,7 @@
 
         const activeTpl = getActiveTemplate();
         if (activeTpl) {
-          applyTemplateOverrides(activeTpl);
+          applyTemplateOverridesIfChanged(activeTpl);
         }
         const isRemembering = currentSettings.rememberSidebarTools !== false;
         if (
@@ -2649,10 +2660,16 @@
       try {
         const candidates = doc.querySelectorAll('[data-name], [aria-label], [data-tooltip], [title]');
         candidates.forEach(el => {
-          // Skip items inside floating dropdown menus so we only read the docked sidebar slots
+          // Skip items inside floating dropdown menus or settings modals
           if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
             return;
           }
+          // Only consider buttons on the left-hand drawing sidebar (x < 120px)
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.left > 140) {
+            return;
+          }
+
           let toolId = normalizeToolId(el.getAttribute('data-name'));
           if (!toolId) {
             toolId =
@@ -2711,7 +2728,10 @@
     if (!el) return;
     try {
       const win = el.ownerDocument ? el.ownerDocument.defaultView : window;
-      const opts = { bubbles: true, cancelable: true, view: win, button: 0, buttons: 1 };
+      const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : { left: 10, top: 10, width: 10, height: 10 };
+      const clientX = Math.round(rect.left + (rect.width || 10) / 2);
+      const clientY = Math.round(rect.top + (rect.height || 10) / 2);
+      const opts = { bubbles: true, cancelable: true, view: win, button: 0, buttons: 1, clientX, clientY };
       if (typeof PointerEvent === 'function') {
         el.dispatchEvent(new PointerEvent('pointerdown', opts));
       }
@@ -2736,7 +2756,7 @@
         styleEl = ownerDoc.createElement('style');
         styleEl.id = styleId;
         styleEl.textContent = `
-          [data-name="menu-inner"], [role="menu"], [class*="menuWrap-"] {
+          [data-name="menu-inner"], [role="menu"], [class*="menuWrap-"], [class*="drawer-"] {
             opacity: 0 !important;
             pointer-events: none !important;
             transition: none !important;
@@ -2777,6 +2797,9 @@
           if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
             continue;
           }
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.left > 140) continue;
+
           const tId =
             normalizeToolId(el.getAttribute('data-name')) ||
             normalizeToolId(el.getAttribute('aria-label')) ||
@@ -2869,12 +2892,16 @@
             dispatchFullPointerClick(matchedMenuItem);
             const innerLabel = matchedMenuItem.querySelector('[class*="label-"], [class*="title-"], span');
             if (innerLabel && innerLabel !== matchedMenuItem) {
-              try { innerLabel.click(); } catch (e) {}
+              dispatchFullPointerClick(innerLabel);
             }
             // If the menu is still in the DOM after clicking the item, click the arrowTrigger once to toggle it shut
-            if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
-              dispatchFullPointerClick(arrowTrigger);
-            }
+            setTimeout(() => {
+              try {
+                if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
+                  dispatchFullPointerClick(arrowTrigger);
+                }
+              } catch (e) {}
+            }, 25);
             log(`Updated sidebar slot [${groupKey}] via submenu click -> ${norm}`);
           } else {
             // Item wasn't found; toggle the arrow trigger closed
@@ -2883,9 +2910,9 @@
         } catch (e) {} finally {
           setTimeout(() => {
             setTemporaryFlyoutStealthStyle(ownerDoc, false);
-          }, 30);
+          }, 60);
         }
-      }, 45);
+      }, 65);
     } catch (e) {
       setTemporaryFlyoutStealthStyle(ownerDoc, false);
     }
@@ -2936,7 +2963,7 @@
 
     if (directBtn && !directBtn.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"]')) {
       try {
-        directBtn.click();
+        dispatchFullPointerClick(directBtn);
         selected = true;
       } catch (e) {}
     } else if (updateSlotViaSubmenu) {
@@ -3002,6 +3029,7 @@
   }
 
   const sidebarHookedDocs = new WeakSet();
+  let lastExplicitUserToolId = null;
 
   function attachSidebarListenersToAllDocs() {
     const docs = getSidebarDocuments();
@@ -3018,14 +3046,17 @@
 
         // Detect if user clicked a specific drawing tool button or flyout submenu item
         const clickedToolId = extractToolIdFromDomElement(target);
+        if (clickedToolId) {
+          lastExplicitUserToolId = clickedToolId;
+        }
 
         // Capture after TradingView updates its DOM slot & activeLineTool state
         setTimeout(() => {
           saveCurrentSidebarState(clickedToolId);
-        }, 140);
+        }, 120);
         setTimeout(() => {
           saveCurrentSidebarState(clickedToolId);
-        }, 420);
+        }, 380);
       };
 
       try {
@@ -3113,7 +3144,12 @@
     }
 
     const explicitNorm = normalizeToolId(explicitToolId);
-    const activeTool = explicitNorm || apiTool || detectedActiveTool || prev.activeTool || 'cursor';
+    // Avoid letting a passive chart click overwrite a remembered drawing tool with 'cursor' unless the user actually clicked the cursor tool
+    let activeTool = explicitNorm || detectedActiveTool || apiTool || lastExplicitUserToolId || prev.activeTool || 'cursor';
+    if (activeTool === 'cursor' && !explicitNorm && prev.activeTool && prev.activeTool !== 'cursor' && !stayActive) {
+      // Keep the user's last selected drawing tool remembered as active if they didn't explicitly switch to cursor
+      activeTool = detectedActiveTool || prev.activeTool;
+    }
 
     // 3. Merge group slot selections:
     // Start with previously remembered `prev.groupTools`, then update any group slot where the user selected a tool
@@ -3147,7 +3183,7 @@
         mergedGroupTools[explicitGrp] = explicitNorm;
       }
     }
-    if (activeTool) {
+    if (activeTool && activeTool !== 'cursor') {
       const grp = getToolGroupKey(activeTool);
       if (grp) {
         mergedGroupTools[grp] = activeTool;
@@ -3201,32 +3237,20 @@
       return;
     }
 
-    // Wait until BOTH the left sidebar DOM is rendered AND the chart API is ready (up to 10 attempts)
+    // Wait until the left-hand drawing toolbar DOM buttons are actually rendered in the document (up to 14 attempts)
     const magnetBtn = getMagnetButton();
     const { detectedGroups } = scanDomSidebarGroupSlots();
     const hasSidebarDom = Boolean(magnetBtn || Object.keys(detectedGroups).length > 0);
-    const hasChartApi = Boolean(
-      (activeChartApi && typeof activeChartApi.selectLineTool === 'function') ||
-      (activeWidget && typeof activeWidget.selectLineTool === 'function')
-    );
 
-    if (!hasSidebarDom && !hasChartApi) {
-      if (restoreAttempts < 10) {
+    if (!hasSidebarDom) {
+      if (restoreAttempts < 14) {
         restoreAttempts++;
-        setTimeout(restoreSidebarSelections, 700);
+        setTimeout(restoreSidebarSelections, 500);
       }
       return;
     }
 
-    // Wait until the left-hand drawing toolbar DOM buttons are actually in the document so submenu slots can be updated
-    if (!hasSidebarDom && restoreAttempts < 7) {
-      restoreAttempts++;
-      setTimeout(restoreSidebarSelections, 550);
-      return;
-    }
-
     isRestoringSidebar = true;
-    hasCompletedInitialSidebarRestore = true;
 
     try {
       // 0. Restore TradingView's own drawing toolbar localStorage entries if present
@@ -3254,7 +3278,7 @@
         setTimeout(() => {
           selectSingleLineTool(toolId, true);
         }, stepDelay);
-        stepDelay += 150;
+        stepDelay += 180;
       });
 
       // 2. Select the user's last active drawing tool (or cursor) after group slots are populated
@@ -3316,8 +3340,8 @@
         setTimeout(() => {
           isRestoringSidebar = false;
           hasCompletedInitialSidebarRestore = true;
-        }, 250);
-      }, stepDelay + 140);
+        }, 400);
+      }, stepDelay + 180);
     } catch (err) {
       log('Error restoring sidebar selections:', err);
       isRestoringSidebar = false;
