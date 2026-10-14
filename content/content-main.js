@@ -2878,8 +2878,8 @@
     }
   }
 
-  // Select a single drawing tool via TradingView API, internal Widget, or DOM flyout so its left-sidebar group slot updates
-  function selectSingleLineTool(toolId, updateSlotViaSubmenu = true) {
+  // Select a single drawing tool via TradingView API or direct button without opening any DOM flyout menus
+  function selectSingleLineTool(toolId) {
     const norm = normalizeToolId(toolId);
     if (!norm) return false;
 
@@ -2913,23 +2913,6 @@
           selected = true;
         }
       } catch (e) {}
-    }
-
-    // 4. Click direct button if already visible on the left sidebar
-    const directBtn = findSidebarElement([
-      `[data-name="${norm}"]`,
-      `[data-name="${norm.toLowerCase()}"]`
-    ]);
-
-    if (directBtn && !directBtn.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"]')) {
-      try {
-        directBtn.click();
-        selected = true;
-      } catch (e) {}
-    } else if (updateSlotViaSubmenu) {
-      // Ensure the sidebar group slot icon updates to `norm` (e.g. changing Brush slot icon to Rectangle)
-      ensureSidebarGroupSlotDisplaysTool(norm);
-      selected = true;
     }
 
     return selected;
@@ -3219,6 +3202,7 @@
     }
 
     isRestoringSidebar = true;
+    hasCompletedInitialSidebarRestore = true;
 
     try {
       // 0. Restore TradingView's own drawing toolbar localStorage entries if present

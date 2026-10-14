@@ -1046,12 +1046,33 @@
     return null;
   }
 
+  let cachedMarketRowEl = null;
+  let cachedMarketPillEl = null;
+
   function dockStudioPillNextToMarketSelector(pillArg) {
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
     if (!pill) return false;
 
+    // Fast path: if the pill is already docked inside a connected header row, do NOT scan the DOM or touch any styles!
+    if (
+      pill.isConnected &&
+      pill.parentElement &&
+      pill.parentElement !== document.body &&
+      !pill.classList.contains('vest-studio-pill-floating-fallback')
+    ) {
+      return true;
+    }
+
+    if (cachedMarketRowEl && cachedMarketRowEl.isConnected && cachedMarketPillEl && cachedMarketPillEl.isConnected && cachedMarketPillEl.parentElement === cachedMarketRowEl) {
+      pill.classList.remove('vest-studio-pill-floating-fallback');
+      cachedMarketRowEl.insertBefore(pill, cachedMarketPillEl);
+      return true;
+    }
+
     const found = findMarketSelectorElement();
     if (found && found.rowEl && found.marketPillEl) {
+      cachedMarketRowEl = found.rowEl;
+      cachedMarketPillEl = found.marketPillEl;
       const rowStyle = window.getComputedStyle(found.rowEl);
       if (rowStyle.display === 'grid' || rowStyle.display === 'inline-grid') {
         found.rowEl.style.display = 'flex';
