@@ -87,22 +87,12 @@
     for (const t of rawList) {
       if (!t || typeof t !== 'object') continue;
       if (t.id && LEGACY_PRESET_IDS.has(String(t.id))) continue;
-      const drawingType = t.drawingType || 'rectangle';
-      const nameKey = `${drawingType}::${String(t.name || '').trim().toLowerCase()}`;
+      const hydrated = hydrateTemplateForEditor(t);
+      const drawingType = hydrated.drawingType || 'rectangle';
+      const nameKey = `${drawingType}::${String(hydrated.name || '').trim().toLowerCase()}`;
       if (seenKeys.has(nameKey)) continue;
       seenKeys.add(nameKey);
-      cleaned.push(hydrateTemplateForEditor({
-        drawingType,
-        extendRight: Boolean(t.extendRight),
-        extendLeft: Boolean(t.extendLeft),
-        showMiddleLine: Boolean(t.showMiddleLine),
-        middleLineColor: t.middleLineColor || t.color || '#22c55e',
-        middleLineWidth: Number(t.middleLineWidth) || 1,
-        middleLineStyle: t.middleLineStyle !== undefined ? Number(t.middleLineStyle) : 2,
-        horzLabelsAlign: t.horzLabelsAlign || 'right',
-        vertLabelsAlign: t.vertLabelsAlign || 'middle',
-        ...t
-      }));
+      cleaned.push(hydrated);
     }
     return cleaned;
   }
@@ -3214,19 +3204,78 @@
   function hydrateTemplateForEditor(tpl) {
     if (!tpl || typeof tpl !== 'object') return tpl;
     const copy = JSON.parse(JSON.stringify(tpl));
-    const raw = (copy.rawProperties && typeof copy.rawProperties === 'object') ? copy.rawProperties : {};
+    let raw = (copy.rawProperties && typeof copy.rawProperties === 'object') ? copy.rawProperties : {};
 
-    const rawPrimary = copy.color || raw.color || raw.linecolor || raw.borderColor || raw.textcolor || raw.textColor || '#22c55e';
+    const hadOrderLineContamination = Boolean(
+      'bodyBorderActiveBuyColor' in raw ||
+      'cancelButtonBorderActiveBuyColor' in raw ||
+      'quantityBackgroundActiveBuyColor' in raw ||
+      'lineActiveBuyColor' in raw
+    );
+
+    // If rawProperties was accidentally captured from a TradingView Order/Position Line, wipe rawProperties so it never corrupts drawings
+    if (hadOrderLineContamination) {
+      raw = {};
+      copy.rawProperties = {};
+      // If an Order Line contamination overwrote a RED template with the #22c55e fallback, restore red (#f23645)
+      if (/\bred\b/i.test(String(copy.name || '')) && (!copy.color || copy.color.toLowerCase() === '#22c55e')) {
+        copy.color = '#f23645';
+        copy.backgroundColor = '#f23645';
+        copy.middleLineColor = '#f23645';
+      }
+      // If an Order Line contamination wiped "3m FVG GREEN" text/extendRight, restore its FVG defaults
+      if (/^3m\s+fvg\s+green$/i.test(String(copy.name || '').trim()) && !copy.text) {
+        copy.extendLeft = false;
+        copy.extendRight = true;
+        copy.showMiddleLine = true;
+        copy.linewidth = 2;
+        copy.opacity = 50;
+        copy.showLabel = true;
+        copy.text = '3m FVG';
+        copy.textColor = '#ffffff';
+        copy.fontSize = 14;
+      }
+    } else {
+      // Strip read-only TradingView entity metadata keys and dotted keys from rawProperties
+      const cleanedRaw = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (k.includes('.')) continue;
+        if (['symbol', 'symbolStateVersion', 'zOrderVersion', 'currencyId', 'unitId', 'interval', 'points', 'intervalsVisibilities', 'ownerSource', 'linkKey', 'id', 'type', 'zorder', 'isSelectionEnabled', 'userEditEnabled'].includes(k)) {
+          continue;
+        }
+        if (v === 'inherit') continue;
+        cleanedRaw[k] = v;
+      }
+      raw = cleanedRaw;
+      copy.rawProperties = cleanedRaw;
+    }
+
+    // Helper: if top-level color is the generic default '#22c55e' while rawProperties has an actual non-default color (e.g. rgba(...)), prefer rawProperties!
+    const pickBestColor = (topVal, ...rawCandidates) => {
+      const topHex = topVal ? parseCssColor(topVal, '').hex : '';
+      for (const rc of rawCandidates) {
+        if (!rc || typeof rc !== 'string') continue;
+        const parsed = parseCssColor(rc, '');
+        if (parsed.hex && (!topHex || (topHex === '#22c55e' && parsed.hex !== '#22c55e'))) {
+          return rc;
+        }
+      }
+      return topVal || rawCandidates.find(Boolean) || '#22c55e';
+    };
+
+    const rawPrimary = pickBestColor(copy.color, raw.color, raw.linecolor, raw.borderColor);
     const parsedPrimary = parseCssColor(rawPrimary, '#22c55e');
     copy.color = parsedPrimary.hex;
 
-    const rawBg = copy.backgroundColor || raw.backgroundColor || raw.fillColor || rawPrimary;
+    const rawBg = pickBestColor(copy.backgroundColor, raw.backgroundColor, raw.fillColor, rawPrimary);
     const parsedBg = parseCssColor(rawBg, copy.color);
     copy.backgroundColor = parsedBg.hex;
 
     // If opacity was defaulted to 20 because raw.backgroundColor was rgba(...) without raw.transparency, recover actual alpha!
     if (raw.fillBackground === false) {
       copy.opacity = 0;
+    } else if (typeof copy.opacity === 'number' && copy.opacity !== 20) {
+      copy.opacity = Math.max(0, Math.min(100, Math.round(copy.opacity)));
     } else if (typeof raw.transparency === 'number') {
       copy.opacity = Math.max(0, Math.min(100, Math.round(100 - raw.transparency)));
     } else if (parsedBg.alpha !== null && (copy.opacity === undefined || copy.opacity === 20)) {
@@ -3239,15 +3288,18 @@
     copy.linestyle = Number(copy.linestyle ?? raw.linestyle ?? raw.borderStyle ?? 0);
 
     const rawMidObj = raw.middleLine && typeof raw.middleLine === 'object' ? raw.middleLine : {};
-    copy.showMiddleLine = Boolean(
-      copy.showMiddleLine ||
-      rawMidObj.showLine ||
-      rawMidObj.visible ||
-      raw.showMiddleLine ||
-      raw['middleLine.showLine'] ||
-      raw.showMidline
-    );
-    const rawMidColor = copy.middleLineColor || rawMidObj.lineColor || rawMidObj.color || raw.middleLineColor || raw.midlinecolor || copy.color;
+    if (copy.showMiddleLine === undefined) {
+      copy.showMiddleLine = Boolean(
+        rawMidObj.showLine ||
+        rawMidObj.visible ||
+        raw.showMiddleLine ||
+        raw['middleLine.showLine'] ||
+        raw.showMidline
+      );
+    } else {
+      copy.showMiddleLine = Boolean(copy.showMiddleLine);
+    }
+    const rawMidColor = pickBestColor(copy.middleLineColor, rawMidObj.lineColor, rawMidObj.color, raw.middleLineColor, raw.midlinecolor, copy.color);
     copy.middleLineColor = parseCssColor(rawMidColor, copy.color).hex;
     copy.middleLineWidth = Number(copy.middleLineWidth ?? rawMidObj.lineWidth ?? raw.middleLineWidth ?? raw.midlinewidth ?? 1) || 1;
     copy.middleLineStyle = Number(copy.middleLineStyle ?? rawMidObj.lineStyle ?? raw.middleLineStyle ?? raw.midlinestyle ?? 2);
@@ -3258,7 +3310,8 @@
     const rawText = copy.text !== undefined ? String(copy.text || '') : (raw.text !== undefined ? String(raw.text || '') : '');
     copy.text = rawText;
     copy.showLabel = Boolean(copy.showLabel || raw.showLabel || raw.showText || rawText.trim().length > 0);
-    copy.textColor = parseCssColor(copy.textColor || raw.textColor || raw.textcolor || copy.color, copy.color).hex;
+    const rawTxtColor = pickBestColor(copy.textColor, raw.textColor, raw.textcolor, copy.color);
+    copy.textColor = parseCssColor(rawTxtColor, copy.color).hex;
     copy.fontSize = Number(copy.fontSize ?? raw.fontSize ?? raw.fontsize ?? 12) || 12;
     copy.horzLabelsAlign = copy.horzLabelsAlign || raw.horzLabelsAlign || raw.horzTextAlign || 'right';
     copy.vertLabelsAlign = copy.vertLabelsAlign || raw.vertLabelsAlign || raw.vertTextAlign || 'middle';

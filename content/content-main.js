@@ -278,6 +278,93 @@
     );
   }
 
+  const FORBIDDEN_SHAPE_PROP_KEYS = new Set([
+    'symbol',
+    'symbolStateVersion',
+    'zOrderVersion',
+    'currencyId',
+    'unitId',
+    'interval',
+    'points',
+    'intervalsVisibilities',
+    'ownerSource',
+    'linkKey',
+    'id',
+    'type',
+    'zorder',
+    'isSelectionEnabled',
+    'userEditEnabled',
+    // TradingView Order/Position Line keys that must never be passed to drawing shapes
+    'bodyBackgroundColor',
+    'bodyBackgroundTransparency',
+    'bodyBorderActiveBuyColor',
+    'bodyBorderActiveSellColor',
+    'bodyBorderInactiveBuyColor',
+    'bodyBorderInactiveSellColor',
+    'bodyFontBold',
+    'bodyFontFamily',
+    'bodyFontItalic',
+    'bodyFontSize',
+    'bodyTextActiveBuyColor',
+    'bodyTextActiveLimitColor',
+    'bodyTextActiveSellColor',
+    'bodyTextActiveStopColor',
+    'bodyTextInactiveBuyColor',
+    'bodyTextInactiveLimitColor',
+    'bodyTextInactiveSellColor',
+    'bodyTextInactiveStopColor',
+    'cancelButtonBackgroundColor',
+    'cancelButtonBackgroundTransparency',
+    'cancelButtonBorderActiveBuyColor',
+    'cancelButtonBorderActiveSellColor',
+    'cancelButtonBorderInactiveBuyColor',
+    'cancelButtonBorderInactiveSellColor',
+    'cancelButtonIconActiveBuyColor',
+    'cancelButtonIconActiveSellColor',
+    'cancelButtonIconInactiveBuyColor',
+    'cancelButtonIconInactiveSellColor',
+    'cancelTooltip',
+    'lineActiveBuyColor',
+    'lineActiveSellColor',
+    'lineInactiveBuyColor',
+    'lineInactiveSellColor',
+    'lineLength',
+    'lineLengthUnit',
+    'modifyTooltip',
+    'quantityBackgroundActiveBuyColor',
+    'quantityBackgroundActiveSellColor',
+    'quantityBackgroundInactiveBuyColor',
+    'quantityBackgroundInactiveSellColor',
+    'quantityBorderActiveBuyColor',
+    'quantityBorderActiveSellColor',
+    'quantityBorderInactiveBuyColor',
+    'quantityBorderInactiveSellColor',
+    'quantityFontBold',
+    'quantityFontFamily',
+    'quantityFontItalic',
+    'quantityFontSize',
+    'quantityTextColor',
+    'quantityTextTransparency',
+    'tooltip'
+  ]);
+
+  function sanitizeRawShapeProperties(raw) {
+    if (!raw || typeof raw !== 'object') return {};
+    const cleaned = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (k.includes('.')) continue;
+      if (FORBIDDEN_SHAPE_PROP_KEYS.has(k)) continue;
+      if (v === 'inherit') continue;
+      cleaned[k] = v;
+    }
+    if ('bodyBorderActiveBuyColor' in raw || 'cancelButtonBorderActiveBuyColor' in raw) {
+      delete cleaned.lineColor;
+      delete cleaned.lineStyle;
+      delete cleaned.lineWidth;
+    }
+    return cleaned;
+  }
+
   /**
    * Convert template object into TradingView shape properties for ANY drawing type
    */
@@ -286,16 +373,13 @@
     const drawingType = canonicalizeDrawingType(drawingTypeOverride || tpl.drawingType || 'rectangle');
     const existingProps = (shape && typeof shape.getProperties === 'function') ? (shape.getProperties() || {}) : {};
 
-    // Start from captured rawProperties if available so tool-specific fields (fib levels, channel styles, etc.) are preserved
-    const baseRaw = (tpl.rawProperties && typeof tpl.rawProperties === 'object')
-      ? JSON.parse(JSON.stringify(tpl.rawProperties))
-      : {};
+    // Start from sanitized rawProperties if available so tool-specific fields (fib levels, channel styles, etc.) are preserved
+    const baseRaw = sanitizeRawShapeProperties(tpl.rawProperties);
 
     const opacityPct = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
     const transparency = Math.max(0, Math.min(100, 100 - opacityPct));
     const mainColor = parseColorAndAlpha(tpl.color, '#22c55e').hex;
     const bgColor = parseColorAndAlpha(tpl.backgroundColor || mainColor, mainColor).hex;
-    const bgRgba = hexToRgbaString(bgColor, opacityPct);
     const lineW = Number(tpl.linewidth) || 1;
     const lineS = Number(tpl.linestyle ?? 0);
     const showMiddleLine = Boolean(tpl.showMiddleLine);
@@ -312,7 +396,9 @@
     };
 
     // Map primary stroke/line color across all TradingView tool property naming conventions
-    props.color = mainColor;
+    if ('color' in existingProps || 'color' in baseRaw || drawingType === 'rectangle' || drawingType === 'rotated_rectangle') {
+      props.color = mainColor;
+    }
     if ('linecolor' in existingProps || 'linecolor' in baseRaw || ['horiz_line', 'horiz_ray', 'vert_line', 'cross_line', 'trend_line', 'ray', 'extended', 'info_line', 'parallel_channel', 'arrow'].includes(drawingType)) {
       props.linecolor = mainColor;
     }
@@ -325,18 +411,16 @@
     props.linestyle = lineS;
 
     // Background / fill properties (for rectangles, channels, circles, callouts, etc.)
+    // IMPORTANT: TradingView's LineToolRectangle / LineToolParallelChannel render fill alpha directly from
+    // an rgba(r, g, b, alpha) backgroundColor string AND transparency (0..100). Passing a solid #rrggbb
+    // string makes the fill 100% opaque in TradingView's canvas renderer!
+    const bgRgba = hexToRgbaString(bgColor, opacityPct);
     if (
       'backgroundColor' in existingProps ||
       'backgroundColor' in baseRaw ||
       ['rectangle', 'rotated_rectangle', 'parallel_channel', 'flat_bottom', 'disjoint_angle', 'circle', 'ellipse', 'triangle', 'callout', 'price_label'].includes(drawingType)
     ) {
-      // If TradingView's existing backgroundColor on this shape was an rgba() string without a separate transparency prop, provide rgba; otherwise provide hex + transparency
-      const existingBg = existingProps.backgroundColor || baseRaw.backgroundColor || '';
-      if (typeof existingBg === 'string' && existingBg.trim().startsWith('rgba(') && !('transparency' in existingProps)) {
-        props.backgroundColor = bgRgba;
-      } else {
-        props.backgroundColor = bgColor;
-      }
+      props.backgroundColor = bgRgba;
       props.transparency = transparency;
       if ('backgroundTransparency' in existingProps || 'backgroundTransparency' in baseRaw) {
         props.backgroundTransparency = transparency;
@@ -366,16 +450,12 @@
       drawingType === 'parallel_channel'
     ) {
       props.middleLine = {
-        ...(props.middleLine || {}),
+        ...(props.middleLine && typeof props.middleLine === 'object' ? props.middleLine : {}),
         showLine: showMiddleLine,
         lineColor: middleLineColor,
         lineWidth: middleLineWidth,
         lineStyle: middleLineStyle
       };
-      props['middleLine.showLine'] = showMiddleLine;
-      props['middleLine.lineColor'] = middleLineColor;
-      props['middleLine.lineWidth'] = middleLineWidth;
-      props['middleLine.lineStyle'] = middleLineStyle;
       props.showMiddleLine = showMiddleLine;
       props.middleLineColor = middleLineColor;
       props.middleLineWidth = middleLineWidth;
@@ -388,13 +468,15 @@
       }
     }
 
-    // Text & label properties:
-    // If tpl.text is non-empty OR tpl.showLabel is true, apply the template's text & label settings.
-    // Even if tpl.text is empty, always apply textColor, fontSize, and alignment so existing text on the rectangle updates its color!
+    // Text & label properties
     props.textColor = txtColor;
-    props.textcolor = txtColor;
+    if ('textcolor' in existingProps || 'textcolor' in baseRaw) {
+      props.textcolor = txtColor;
+    }
     props.fontSize = fontSz;
-    props.fontsize = fontSz;
+    if ('fontsize' in existingProps || 'fontsize' in baseRaw) {
+      props.fontsize = fontSz;
+    }
     props.horzLabelsAlign = horzAlign;
     props.vertLabelsAlign = vertAlign;
     if (tpl.bold !== undefined) props.bold = Boolean(tpl.bold);
@@ -406,13 +488,10 @@
       if ('showText' in existingProps || 'showText' in baseRaw) {
         props.showText = true;
       }
-      if (hasTemplateText) {
-        props.text = tpl.text;
-      }
-    } else if (tpl.showLabel === false && !hasTemplateText && existingProps.text) {
-      // Keep the shape's existing text if the template didn't specify replacement text
-      props.text = existingProps.text;
-      props.showLabel = existingProps.showLabel !== false;
+      props.text = tpl.text || '';
+    } else {
+      props.showLabel = false;
+      props.text = '';
     }
 
     return props;
@@ -425,16 +504,19 @@
     if (!tpl || canonicalizeDrawingType(tpl.drawingType) !== 'rectangle') return {};
     const opacityPct = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
     const transparency = Math.max(0, Math.min(100, 100 - opacityPct));
+    const mainColor = parseColorAndAlpha(tpl.color, '#22c55e').hex;
+    const bgHex = parseColorAndAlpha(tpl.backgroundColor || mainColor, mainColor).hex;
+    const bgRgba = hexToRgbaString(bgHex, opacityPct);
     const showMiddleLine = Boolean(tpl.showMiddleLine);
-    const middleLineColor = tpl.middleLineColor || tpl.color || '#22c55e';
+    const middleLineColor = parseColorAndAlpha(tpl.middleLineColor || mainColor, mainColor).hex;
     const middleLineWidth = Number(tpl.middleLineWidth) || 1;
     const middleLineStyle = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
     const horzAlign = tpl.horzLabelsAlign || 'right';
     const vertAlign = tpl.vertLabelsAlign || 'middle';
 
     return {
-      'linetoolrectangle.color': tpl.color || '#22c55e',
-      'linetoolrectangle.backgroundColor': tpl.backgroundColor || tpl.color || '#22c55e',
+      'linetoolrectangle.color': mainColor,
+      'linetoolrectangle.backgroundColor': bgRgba,
       'linetoolrectangle.fillBackground': opacityPct > 0,
       'linetoolrectangle.transparency': transparency,
       'linetoolrectangle.linewidth': Number(tpl.linewidth) || 1,
@@ -689,22 +771,166 @@
 
   function extractInternalSourceFromShape(shape, entityId) {
     if (!shape || typeof shape !== 'object') return null;
-    if (typeof shape.paneViews === 'function' || Array.isArray(shape._paneViews)) return shape;
+    if (typeof shape.paneViews === 'function' || Array.isArray(shape._paneViews)) {
+      if (!entityId || typeof shape.id !== 'function' || shape.id() === entityId) {
+        return shape;
+      }
+    }
 
     const keys = [...Object.keys(shape), ...Object.getOwnPropertyNames(shape), ...Object.getOwnPropertySymbols(shape)];
+    // First pass: strictly match entityId if available so we NEVER return a sibling source (like an Order Line)
+    if (entityId) {
+      for (const k of keys) {
+        try {
+          const val = shape[k];
+          if (val && typeof val === 'object' && typeof val.id === 'function' && val.id() === entityId) {
+            return val;
+          }
+        } catch (e) {}
+      }
+    }
+    // Second pass: look for _source or paneViews excluding _model
     for (const k of keys) {
+      if (k === '_model' || k === 'model') continue;
       try {
         const val = shape[k];
         if (val && typeof val === 'object') {
           if (typeof val.paneViews === 'function' || Array.isArray(val._paneViews)) {
-            return val;
-          }
-          if (entityId && typeof val.id === 'function' && val.id() === entityId) {
-            return val;
+            if (!entityId || typeof val.id !== 'function' || val.id() === entityId) {
+              return val;
+            }
           }
         }
       } catch (e) {}
     }
+    return null;
+  }
+
+  /**
+   * Obtains TradingView's internal ChartModel instance so we can query model.selection() and model.hoveredSource()
+   * directly (since public IChartWidgetApi does not always expose .selection()).
+   */
+  function getChartModel() {
+    if (!activeChart) {
+      if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
+        try { activeChart = activeChartApi.activeChart(); } catch (e) {}
+      }
+    }
+    if (!activeChart) return null;
+
+    try {
+      // 1. Check direct references on activeChart or activeChart._chartWidget
+      const cw = activeChart._chartWidget || activeChart._widget;
+      if (cw) {
+        const m = typeof cw.model === 'function' ? cw.model() : cw._model;
+        if (m) {
+          const innerModel = typeof m.model === 'function' ? m.model() : m;
+          if (innerModel && (typeof innerModel.selection === 'function' || typeof innerModel.hoveredSource === 'function')) {
+            return innerModel;
+          }
+        }
+      }
+      const directKeys = [...Object.keys(activeChart), ...Object.getOwnPropertyNames(activeChart)];
+      for (const k of directKeys) {
+        try {
+          const v = activeChart[k];
+          if (v && typeof v === 'object') {
+            if (typeof v.selection === 'function' || typeof v.hoveredSource === 'function') return v;
+            if (typeof v.model === 'function') {
+              const m = v.model();
+              if (m && (typeof m.selection === 'function' || typeof m.hoveredSource === 'function')) return m;
+              if (m && typeof m.model === 'function') {
+                const mm = m.model();
+                if (mm && (typeof mm.selection === 'function' || typeof mm.hoveredSource === 'function')) return mm;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+      // 2. Fallback: grab _model from any shape on the chart
+      if (typeof activeChart.getAllShapes === 'function') {
+        const all = activeChart.getAllShapes() || [];
+        for (const s of all) {
+          if (!s || !s.id) continue;
+          const sh = activeChart.getShapeById(s.id);
+          const src = extractInternalSourceFromShape(sh, s.id);
+          if (src && src._model) return src._model;
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  /**
+   * Queries TradingView's internal ChartModel for the currently hovered or selected drawing shape ID.
+   */
+  function getHoveredOrSelectedIdFromModel(preferHovered = false) {
+    try {
+      const model = getChartModel();
+      if (!model || !activeChart) return null;
+
+      const isValidDrawingId = (id) => {
+        if (!id || typeof id !== 'string') return false;
+        try {
+          const meta = getShapeMetadataById(id);
+          if (meta && meta.isOrderLine) return false;
+          const sh = activeChart.getShapeById(id);
+          return Boolean(sh);
+        } catch (e) {
+          return false;
+        }
+      };
+
+      const checkHovered = () => {
+        if (typeof model.hoveredSource === 'function') {
+          const hov = model.hoveredSource();
+          if (hov && typeof hov.id === 'function') {
+            const hid = hov.id();
+            if (isValidDrawingId(hid)) return hid;
+          }
+        }
+        return null;
+      };
+
+      const checkSelected = () => {
+        if (typeof model.selection === 'function') {
+          const sel = model.selection();
+          if (sel) {
+            if (typeof sel.lineDataSources === 'function') {
+              const lds = sel.lineDataSources() || [];
+              for (const src of lds) {
+                const sid = src && typeof src.id === 'function' ? src.id() : null;
+                if (isValidDrawingId(sid)) return sid;
+              }
+            }
+            if (typeof sel.dataSources === 'function') {
+              const ds = sel.dataSources() || [];
+              for (const src of ds) {
+                const sid = src && typeof src.id === 'function' ? src.id() : null;
+                if (isValidDrawingId(sid)) return sid;
+              }
+            }
+            if (typeof sel.isSelected === 'function' && typeof activeChart.getAllShapes === 'function') {
+              const all = activeChart.getAllShapes() || [];
+              for (const s of all) {
+                if (!s || !s.id) continue;
+                const sh = activeChart.getShapeById(s.id);
+                const src = extractInternalSourceFromShape(sh, s.id);
+                if (src && sel.isSelected(src) && isValidDrawingId(s.id)) {
+                  return s.id;
+                }
+              }
+            }
+          }
+        }
+        return null;
+      };
+
+      if (preferHovered) {
+        return checkHovered() || checkSelected();
+      }
+      return checkSelected() || checkHovered();
+    } catch (e) {}
     return null;
   }
 
@@ -934,6 +1160,25 @@
     return true;
   }
 
+  /**
+   * Detects if a shape or properties object belongs to a TradingView Order Line / Position Line
+   * (which also appears in activeChart.selection().all() and getAllShapes() when an order/position is on the chart!)
+   */
+  function isOrderOrPositionLineProps(p, rawName) {
+    const nameStr = String(rawName || '').toLowerCase();
+    if (nameStr.includes('order') || nameStr.includes('execution')) return true;
+    if (!p || typeof p !== 'object') return false;
+    if (
+      'bodyBorderActiveBuyColor' in p ||
+      'cancelButtonBorderActiveBuyColor' in p ||
+      'quantityBackgroundActiveBuyColor' in p ||
+      'lineActiveBuyColor' in p
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   // -------------------------------------------------------------
   // Drawing Event Handling
   // -------------------------------------------------------------
@@ -946,13 +1191,17 @@
       }
       if (!activeChart) return;
 
-      lastInteractedShapeId = entityId;
-
       const shape = activeChart.getShapeById(entityId);
       if (!shape) return;
 
       const allShapes = typeof activeChart.getAllShapes === 'function' ? activeChart.getAllShapes() : [];
       const shapeMeta = allShapes.find(s => s.id === entityId);
+      const rawProps = typeof shape.getProperties === 'function' ? (shape.getProperties() || {}) : {};
+      if (isOrderOrPositionLineProps(rawProps, shapeMeta && shapeMeta.name)) {
+        return;
+      }
+
+      lastInteractedShapeId = entityId;
       const drawingType = shapeMeta ? canonicalizeDrawingType(shapeMeta.name) : 'rectangle';
       const isRectangle = drawingType === 'rectangle' || drawingType === 'rotated_rectangle';
 
@@ -994,34 +1243,40 @@
   }
 
   function getShapeMetadataById(entityId) {
-    if (!activeChart || !entityId) return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
+    if (!activeChart || !entityId) return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle', isOrderLine: false };
     try {
+      const shape = activeChart.getShapeById(entityId);
+      const p = (shape && typeof shape.getProperties === 'function') ? (shape.getProperties() || {}) : {};
+
       if (typeof activeChart.getAllShapes === 'function') {
         const all = activeChart.getAllShapes() || [];
         const found = all.find(s => s.id === entityId);
         if (found && found.name) {
+          if (isOrderOrPositionLineProps(p, found.name)) {
+            return { id: entityId, drawingType: 'order_line', rawName: found.name, isOrderLine: true };
+          }
           return {
             id: entityId,
             drawingType: canonicalizeDrawingType(found.name),
-            rawName: found.name
+            rawName: found.name,
+            isOrderLine: false
           };
         }
       }
-      const shape = activeChart.getShapeById(entityId);
-      if (shape && typeof shape.getProperties === 'function') {
-        const p = shape.getProperties() || {};
-        if (p.fillBackground !== undefined && p.middleLine !== undefined) {
-          return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
-        }
-        if (p.showMidline !== undefined) {
-          return { id: entityId, drawingType: 'parallel_channel', rawName: 'parallel_channel' };
-        }
-        if (p.linecolor !== undefined && p.extendRight === undefined && p.extendLeft === undefined) {
-          return { id: entityId, drawingType: 'horiz_line', rawName: 'horiz_line' };
-        }
+      if (isOrderOrPositionLineProps(p, '')) {
+        return { id: entityId, drawingType: 'order_line', rawName: 'order_line', isOrderLine: true };
+      }
+      if (p.fillBackground !== undefined && p.middleLine !== undefined) {
+        return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle', isOrderLine: false };
+      }
+      if (p.showMidline !== undefined) {
+        return { id: entityId, drawingType: 'parallel_channel', rawName: 'parallel_channel', isOrderLine: false };
+      }
+      if (p.linecolor !== undefined && p.extendRight === undefined && p.extendLeft === undefined) {
+        return { id: entityId, drawingType: 'horiz_line', rawName: 'horiz_line', isOrderLine: false };
       }
     } catch (e) {}
-    return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
+    return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle', isOrderLine: false };
   }
 
   function applyPropertiesToInternalSource(shape, entityId, props) {
@@ -1074,9 +1329,40 @@
       const meta = entityId ? getShapeMetadataById(entityId) : null;
       const drawingType = drawingTypeOverride || (meta && meta.drawingType) || tpl.drawingType || 'rectangle';
       const props = buildShapePropertiesForTemplate(tpl, shape, drawingType);
+
       if (typeof shape.setProperties === 'function') {
-        shape.setProperties(props);
+        const existingProps = (typeof shape.getProperties === 'function' ? shape.getProperties() : null) || {};
+        const validKeys = Object.keys(existingProps);
+
+        // 1. Build a safe subset containing only keys that exist in shape.getProperties()
+        const safeProps = {};
+        if (validKeys.length > 0) {
+          for (const k of Object.keys(props)) {
+            if (k in existingProps) {
+              safeProps[k] = props[k];
+            }
+          }
+        } else {
+          Object.assign(safeProps, props);
+        }
+
+        try {
+          shape.setProperties(safeProps);
+        } catch (batchErr) {
+          log('Batch shape.setProperties threw, falling back to per-property setProperties:', batchErr);
+        }
+
+        // 2. Also apply each property individually inside its own try/catch so if one nested key (e.g. middleLine)
+        // or custom key throws in TradingView's LineDataSourceApi.setProperties, it NEVER blocks color/text/etc.!
+        for (const [k, v] of Object.entries(props)) {
+          if (validKeys.length > 0 && !(k in existingProps)) continue;
+          try {
+            shape.setProperties({ [k]: v });
+          } catch (singleErr) {}
+        }
       }
+
+      // 3. Also set values directly on the internal TradingView Property tree & trigger lightUpdate()
       applyPropertiesToInternalSource(shape, entityId, props);
       log(`Applied template "${tpl.name}" (${drawingType}) to shape ${entityId || ''}:`, props);
 
@@ -1084,14 +1370,13 @@
       syncExtendedRectangleTextHooks();
       return true;
     } catch (e) {
-      log('Error calling shape.setProperties:', e);
+      log('Error in applyTemplateToShape:', e);
       return false;
     }
   }
 
   /**
-   * Applies a template ONLY to the explicitly targeted or currently selected shape on the chart.
-   * Never falls back to lastRectangleId or unselected shapes so saving/editing one drawing never mutates another drawing!
+   * Applies a template to the targeted, right-clicked, or currently selected/last-interacted shape matching the template's drawingType.
    */
   function applyTemplateToSelectedOrLast(tpl, explicitTargetId = null) {
     if (!tpl) return false;
@@ -1105,15 +1390,37 @@
     }
     if (!activeChart) return false;
 
+    const tplType = canonicalizeDrawingType(tpl.drawingType || 'rectangle');
     let targetShape = null;
     let targetId = explicitTargetId || null;
 
     if (targetId) {
       try {
-        targetShape = activeChart.getShapeById(targetId);
+        const meta = getShapeMetadataById(targetId);
+        if (!meta.isOrderLine) {
+          targetShape = activeChart.getShapeById(targetId);
+        }
       } catch (e) {}
     }
 
+    // 1. Check TradingView's internal ChartModel selection / hovered source first!
+    if (!targetShape) {
+      try {
+        const modelSelId = getHoveredOrSelectedIdFromModel(false);
+        if (modelSelId) {
+          const meta = getShapeMetadataById(modelSelId);
+          if (!meta.isOrderLine && meta.drawingType === tplType) {
+            const shape = activeChart.getShapeById(modelSelId);
+            if (shape) {
+              targetId = modelSelId;
+              targetShape = shape;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Check activeChart.selection() if exposed
     if (!targetShape) {
       try {
         if (typeof activeChart.selection === 'function') {
@@ -1121,55 +1428,80 @@
           if (sel && typeof sel.all === 'function') {
             const all = sel.all();
             if (all && all.length > 0) {
-              targetId = all[0];
-              targetShape = activeChart.getShapeById(targetId);
+              for (const id of all) {
+                const meta = getShapeMetadataById(id);
+                if (meta.isOrderLine) continue;
+                const shape = activeChart.getShapeById(id);
+                if (shape && meta.drawingType === tplType) {
+                  targetId = id;
+                  targetShape = shape;
+                  break;
+                }
+              }
             }
           }
         }
       } catch (e) {}
     }
 
-    if (targetShape && targetId) {
-      const meta = getShapeMetadataById(targetId);
-      // Only apply to the selected shape if its drawingType matches the template's drawingType (or if explicitly targeted)
-      const tplType = canonicalizeDrawingType(tpl.drawingType || 'rectangle');
-      if (explicitTargetId || meta.drawingType === tplType) {
-        return applyTemplateToShape(targetShape, tpl, targetId, meta.drawingType);
+    // 3. Fallback to rightClickedShapeId, lastInteractedShapeId, or lastRectangleId if its drawingType matches tplType
+    if (!targetShape) {
+      const candidates = [rightClickedShapeId, lastInteractedShapeId, lastRectangleId].filter(Boolean);
+      for (const cid of candidates) {
+        try {
+          const meta = getShapeMetadataById(cid);
+          if (!meta.isOrderLine && meta.drawingType === tplType) {
+            const shape = activeChart.getShapeById(cid);
+            if (shape) {
+              targetId = cid;
+              targetShape = shape;
+              break;
+            }
+          }
+        } catch (e) {}
       }
     }
 
-    return true;
+    if (targetShape && targetId) {
+      const meta = getShapeMetadataById(targetId);
+      return applyTemplateToShape(targetShape, tpl, targetId, meta.drawingType);
+    }
+
+    return false;
   }
 
   function syncToVestLocalStorage(entityId, newProps) {
     try {
-      if (!activeChart || typeof activeChart.symbol !== 'function') return;
-      const symbol = activeChart.symbol();
-      if (!symbol) return;
+      if (!entityId) return;
+      for (let kIdx = 0; kIdx < localStorage.length; kIdx++) {
+        const key = localStorage.key(kIdx);
+        if (!key || (!key.startsWith('tv-chart-drawings-') && !key.startsWith('tv-drawings-flush:'))) continue;
+        const saved = localStorage.getItem(key);
+        if (!saved || !saved.includes(entityId)) continue;
 
-      const key = `tv-chart-drawings-${symbol}`;
-      const saved = localStorage.getItem(key);
-      if (!saved) return;
+        const data = JSON.parse(saved);
+        if (!data || !Array.isArray(data.sources)) continue;
 
-      const data = JSON.parse(saved);
-      if (!data.sources || !Array.isArray(data.sources)) return;
-
-      let found = false;
-      for (let i = 0; i < data.sources.length; i++) {
-        const entry = data.sources[i];
-        if (Array.isArray(entry) && entry[0] === entityId && entry[1]) {
-          const stateObj = entry[1];
-          if (stateObj.state) {
-            Object.assign(stateObj.state, newProps);
-            found = true;
-            break;
+        let found = false;
+        for (let i = 0; i < data.sources.length; i++) {
+          const entry = data.sources[i];
+          if (Array.isArray(entry) && entry[0] === entityId && entry[1]) {
+            const outer = entry[1];
+            const innerState = (outer.state && outer.state.state && typeof outer.state.state === 'object')
+              ? outer.state.state
+              : (outer.state && typeof outer.state === 'object' ? outer.state : null);
+            if (innerState) {
+              Object.assign(innerState, newProps);
+              found = true;
+              break;
+            }
           }
         }
-      }
 
-      if (found) {
-        localStorage.setItem(key, JSON.stringify(data));
-        log(`Synced updated properties for ${entityId} to localStorage [${key}]`);
+        if (found) {
+          localStorage.setItem(key, JSON.stringify(data));
+          log(`Synced updated properties for ${entityId} to localStorage [${key}]`);
+        }
       }
     } catch (e) {
       log('Could not sync to localStorage:', e);
@@ -1562,7 +1894,7 @@
   /**
    * Detects the exact selected/right-clicked drawing on the chart and returns its { id, shape, drawingType, rawName }.
    */
-  function getRightClickedOrSelectedShapeInfo() {
+  function getRightClickedOrSelectedShapeInfo(preferHovered = false) {
     if (!activeChart) {
       if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
         try { activeChart = activeChartApi.activeChart(); } catch (e) {}
@@ -1570,17 +1902,38 @@
     }
     if (!activeChart) return null;
 
-    // 1. Check TradingView's active selection first (when right-clicking any drawing, TradingView selects it)
+    // 1. Check TradingView's internal ChartModel hoveredSource / selection first!
+    try {
+      const modelId = getHoveredOrSelectedIdFromModel(preferHovered);
+      if (modelId) {
+        const shape = activeChart.getShapeById(modelId);
+        if (shape) {
+          const meta = getShapeMetadataById(modelId);
+          if (!meta.isOrderLine) {
+            rightClickedShapeId = modelId;
+            rightClickedDrawingType = meta.drawingType;
+            lastInteractedShapeId = modelId;
+            if (meta.drawingType === 'rectangle' || meta.drawingType === 'rotated_rectangle') {
+              lastRectangleId = modelId;
+            }
+            return { id: modelId, shape, drawingType: meta.drawingType, rawName: meta.rawName };
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 2. Check activeChart.selection() if exposed (iterating through all selected IDs and skipping Order/Position lines!)
     try {
       if (typeof activeChart.selection === 'function') {
         const sel = activeChart.selection();
         if (sel && typeof sel.all === 'function') {
           const all = sel.all();
           if (all && all.length > 0) {
-            const id = all[0];
-            const shape = activeChart.getShapeById(id);
-            if (shape) {
+            for (const id of all) {
+              const shape = activeChart.getShapeById(id);
+              if (!shape) continue;
               const meta = getShapeMetadataById(id);
+              if (meta.isOrderLine) continue;
               rightClickedShapeId = id;
               rightClickedDrawingType = meta.drawingType;
               lastInteractedShapeId = id;
@@ -1594,14 +1947,16 @@
       }
     } catch (e) {}
 
-    // 2. Fallback to rightClickedShapeId or lastInteractedShapeId if still valid on chart
-    const fallbackId = rightClickedShapeId || lastInteractedShapeId;
-    if (fallbackId) {
+    // 3. Fallback to rightClickedShapeId, lastInteractedShapeId, or lastRectangleId if still valid on chart
+    const fallbackIds = [rightClickedShapeId, lastInteractedShapeId, lastRectangleId].filter(Boolean);
+    for (const fallbackId of fallbackIds) {
       try {
         const shape = activeChart.getShapeById(fallbackId);
         if (shape) {
           const meta = getShapeMetadataById(fallbackId);
-          return { id: fallbackId, shape, drawingType: meta.drawingType, rawName: meta.rawName };
+          if (!meta.isOrderLine) {
+            return { id: fallbackId, shape, drawingType: meta.drawingType, rawName: meta.rawName };
+          }
         }
       } catch (e) {}
     }
@@ -2114,8 +2469,8 @@
     const handleContextMenuEvent = () => {
       lastRightClickTime = Date.now();
       closeAllContextMenus();
-      // Immediately record which drawing is selected when right-click happens
-      getRightClickedOrSelectedShapeInfo();
+      // Immediately record which drawing is hovered/selected when right-click happens
+      getRightClickedOrSelectedShapeInfo(true);
 
       if (tryInjectTemplatesMenu(doc)) return;
 
@@ -2128,8 +2483,22 @@
       }, 25);
     };
 
+    // Track hovered/selected shape on any pointerdown or mousedown on the chart canvas
+    // so clicking or right-clicking an existing drawing always locks in its exact ID!
+    const captureHoveredOrSelectedOnPointer = (e) => {
+      try {
+        const t = e.target;
+        if (t && t.tagName === 'CANVAS') {
+          getRightClickedOrSelectedShapeInfo(true);
+          setTimeout(() => getRightClickedOrSelectedShapeInfo(false), 30);
+        }
+      } catch (err) {}
+    };
+
+    doc.addEventListener('pointerdown', captureHoveredOrSelectedOnPointer, true);
     doc.addEventListener('contextmenu', handleContextMenuEvent, true);
     doc.addEventListener('mousedown', (e) => {
+      captureHoveredOrSelectedOnPointer(e);
       if (activeSubmenuEl && !activeSubmenuEl.contains(e.target) && (!activeTemplateRowEl || !activeTemplateRowEl.contains(e.target))) {
         closeAllContextMenus();
       }
@@ -2430,12 +2799,10 @@
 
     const drawingType = canonicalizeDrawingType(drawingTypeHint || 'rectangle');
 
-    // Deep clone rawProperties so tool-specific settings (Fib levels, channel lines, risk/reward parameters, etc.) are preserved
+    // Deep clone and sanitize rawProperties so tool-specific settings (Fib levels, channel lines, etc.) are preserved without read-only metadata
     let rawProperties = {};
     try {
-      rawProperties = JSON.parse(JSON.stringify(p));
-      delete rawProperties.points;
-      delete rawProperties.intervalsVisibilities;
+      rawProperties = sanitizeRawShapeProperties(JSON.parse(JSON.stringify(p)));
     } catch (e) {}
 
     // Primary color across different TradingView tools (color, linecolor, borderColor, textcolor)
