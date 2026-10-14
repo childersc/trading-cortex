@@ -59,6 +59,7 @@
   const toggleAutoCheck = document.getElementById('toggle-auto-check');
   const heartbeatStateText = document.getElementById('heartbeat-state-text');
   const btnCheckNow = document.getElementById('btn-check-now');
+  const btnCheckNowLabel = document.getElementById('btn-check-now-label');
   const btnForgetFolder = document.getElementById('btn-forget-folder');
 
   const notesVersionTitle = document.getElementById('notes-version-title');
@@ -269,10 +270,17 @@
   // -------------------------------------------------------------
   // Check GitHub Releases
   // -------------------------------------------------------------
-  async function checkGitHubRelease() {
+  async function checkGitHubRelease(isManualClick = false) {
     showError(null);
     statusEyebrow.textContent = 'POLLING';
-    statusHeading.textContent = 'Querying GitHub release channel...';
+    statusHeading.textContent = 'Checking GitHub for updates...';
+    if (btnCheckNow) {
+      btnCheckNow.classList.add('checking');
+      btnCheckNow.disabled = true;
+    }
+    if (btnCheckNowLabel) {
+      btnCheckNowLabel.textContent = 'Checking...';
+    }
     logTerm(`Polling https://api.github.com/repos/${DEFAULT_REPO}/releases/latest ...`, 'info');
 
     try {
@@ -350,6 +358,9 @@
         chrome.action.setBadgeText({ text: 'NEW' });
         chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
         logTerm(`Update available: v${installedVersion} -> v${latestVer}`, 'ok');
+        if (isManualClick) {
+          showSuccess(`⚡ Update available! New release v${latestVer} is ready to deploy (installed: v${installedVersion}).`);
+        }
       } else {
         statusEyebrow.textContent = 'SYNCHRONIZED';
         statusHeading.textContent = `Trading Cortex v${installedVersion} is up to date`;
@@ -357,6 +368,9 @@
         btnRunUpdate.disabled = false;
         chrome.action.setBadgeText({ text: '' });
         logTerm(`Local build v${installedVersion} matches latest GitHub release.`, 'ok');
+        if (isManualClick) {
+          showSuccess(`✓ You're up to date! Trading Cortex v${installedVersion} is the latest release.`);
+        }
       }
     } catch (err) {
       statusEyebrow.textContent = 'STANDBY';
@@ -364,6 +378,14 @@
       vboxLatest.textContent = `v${installedVersion}`;
       vboxChanges.textContent = '0';
       showError(`GitHub channel check (${DEFAULT_REPO}): ${err.message}`);
+    } finally {
+      if (btnCheckNow) {
+        btnCheckNow.classList.remove('checking');
+        btnCheckNow.disabled = false;
+      }
+      if (btnCheckNowLabel) {
+        btnCheckNowLabel.textContent = 'Check for Update';
+      }
     }
   }
 
@@ -751,7 +773,7 @@
 
   btnCheckNow.addEventListener('click', () => {
     showSuccess(null);
-    checkGitHubRelease();
+    checkGitHubRelease(true);
   });
 
   btnRunUpdate.addEventListener('click', () => {
