@@ -7,6 +7,7 @@
 (function () {
   'use strict';
 
+  if (window.location && window.location.hostname === 'trade.vestmarkets.com') return;
   if (window.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) return;
   window.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__ = true;
 

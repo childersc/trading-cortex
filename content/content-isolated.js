@@ -9,6 +9,7 @@
   // Only run isolated world manager in the top window (it communicates with all frames via postToMainWorlds)
   const isTopWindow = window.top === window;
   if (!isTopWindow) return;
+  if (window.location && window.location.hostname === 'trade.vestmarkets.com') return;
 
   const DEFAULT_TEMPLATES = [
     {
