@@ -293,25 +293,26 @@
 
     const opacityPct = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
     const transparency = Math.max(0, Math.min(100, 100 - opacityPct));
-    const mainColor = tpl.color || '#22c55e';
-    const bgColor = tpl.backgroundColor || mainColor;
+    const mainColor = parseColorAndAlpha(tpl.color, '#22c55e').hex;
+    const bgColor = parseColorAndAlpha(tpl.backgroundColor || mainColor, mainColor).hex;
+    const bgRgba = hexToRgbaString(bgColor, opacityPct);
     const lineW = Number(tpl.linewidth) || 1;
     const lineS = Number(tpl.linestyle ?? 0);
     const showMiddleLine = Boolean(tpl.showMiddleLine);
-    const middleLineColor = tpl.middleLineColor || mainColor;
+    const middleLineColor = parseColorAndAlpha(tpl.middleLineColor || mainColor, mainColor).hex;
     const middleLineWidth = Number(tpl.middleLineWidth) || 1;
     const middleLineStyle = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
     const horzAlign = tpl.horzLabelsAlign || 'right';
     const vertAlign = tpl.vertLabelsAlign || 'middle';
+    const txtColor = parseColorAndAlpha(tpl.textColor || mainColor, mainColor).hex;
+    const fontSz = Number(tpl.fontSize) || 12;
 
     const props = {
       ...baseRaw
     };
 
     // Map primary stroke/line color across all TradingView tool property naming conventions
-    if ('color' in existingProps || 'color' in baseRaw || drawingType === 'rectangle') {
-      props.color = mainColor;
-    }
+    props.color = mainColor;
     if ('linecolor' in existingProps || 'linecolor' in baseRaw || ['horiz_line', 'horiz_ray', 'vert_line', 'cross_line', 'trend_line', 'ray', 'extended', 'info_line', 'parallel_channel', 'arrow'].includes(drawingType)) {
       props.linecolor = mainColor;
     }
@@ -329,8 +330,17 @@
       'backgroundColor' in baseRaw ||
       ['rectangle', 'rotated_rectangle', 'parallel_channel', 'flat_bottom', 'disjoint_angle', 'circle', 'ellipse', 'triangle', 'callout', 'price_label'].includes(drawingType)
     ) {
-      props.backgroundColor = bgColor;
+      // If TradingView's existing backgroundColor on this shape was an rgba() string without a separate transparency prop, provide rgba; otherwise provide hex + transparency
+      const existingBg = existingProps.backgroundColor || baseRaw.backgroundColor || '';
+      if (typeof existingBg === 'string' && existingBg.trim().startsWith('rgba(') && !('transparency' in existingProps)) {
+        props.backgroundColor = bgRgba;
+      } else {
+        props.backgroundColor = bgColor;
+      }
       props.transparency = transparency;
+      if ('backgroundTransparency' in existingProps || 'backgroundTransparency' in baseRaw) {
+        props.backgroundTransparency = transparency;
+      }
       if ('fillBackground' in existingProps || 'fillBackground' in baseRaw || drawingType === 'rectangle' || drawingType === 'parallel_channel') {
         props.fillBackground = opacityPct > 0;
       }
@@ -362,6 +372,10 @@
         lineWidth: middleLineWidth,
         lineStyle: middleLineStyle
       };
+      props['middleLine.showLine'] = showMiddleLine;
+      props['middleLine.lineColor'] = middleLineColor;
+      props['middleLine.lineWidth'] = middleLineWidth;
+      props['middleLine.lineStyle'] = middleLineStyle;
       props.showMiddleLine = showMiddleLine;
       props.middleLineColor = middleLineColor;
       props.middleLineWidth = middleLineWidth;
@@ -374,26 +388,31 @@
       }
     }
 
-    // Text & label properties
-    if (tpl.text !== undefined) {
-      const hasText = Boolean(tpl.showLabel && String(tpl.text || '').trim().length > 0);
-      props.text = tpl.showLabel ? (tpl.text || '') : '';
-      props.showLabel = Boolean(tpl.showLabel);
-      props.textColor = tpl.textColor || mainColor;
-      if ('textcolor' in existingProps || 'textcolor' in baseRaw) {
-        props.textcolor = tpl.textColor || mainColor;
-      }
-      props.fontSize = Number(tpl.fontSize) || 12;
-      if ('fontsize' in existingProps || 'fontsize' in baseRaw) {
-        props.fontsize = Number(tpl.fontSize) || 12;
-      }
-      props.horzLabelsAlign = horzAlign;
-      props.vertLabelsAlign = vertAlign;
-      props.bold = Boolean(tpl.bold);
-      props.italic = Boolean(tpl.italic);
-      if (hasText && ('showText' in existingProps || 'showText' in baseRaw)) {
+    // Text & label properties:
+    // If tpl.text is non-empty OR tpl.showLabel is true, apply the template's text & label settings.
+    // Even if tpl.text is empty, always apply textColor, fontSize, and alignment so existing text on the rectangle updates its color!
+    props.textColor = txtColor;
+    props.textcolor = txtColor;
+    props.fontSize = fontSz;
+    props.fontsize = fontSz;
+    props.horzLabelsAlign = horzAlign;
+    props.vertLabelsAlign = vertAlign;
+    if (tpl.bold !== undefined) props.bold = Boolean(tpl.bold);
+    if (tpl.italic !== undefined) props.italic = Boolean(tpl.italic);
+
+    const hasTemplateText = typeof tpl.text === 'string' && tpl.text.trim().length > 0;
+    if (tpl.showLabel || hasTemplateText) {
+      props.showLabel = true;
+      if ('showText' in existingProps || 'showText' in baseRaw) {
         props.showText = true;
       }
+      if (hasTemplateText) {
+        props.text = tpl.text;
+      }
+    } else if (tpl.showLabel === false && !hasTemplateText && existingProps.text) {
+      // Keep the shape's existing text if the template didn't specify replacement text
+      props.text = existingProps.text;
+      props.showLabel = existingProps.showLabel !== false;
     }
 
     return props;
@@ -1005,13 +1024,60 @@
     return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
   }
 
+  function applyPropertiesToInternalSource(shape, entityId, props) {
+    try {
+      const src = extractInternalSourceFromShape(shape, entityId);
+      if (!src) return;
+      const propTree = typeof src.properties === 'function' ? src.properties() : src._properties;
+      if (propTree) {
+        const childs = typeof propTree.childs === 'function' ? propTree.childs() : propTree;
+        if (childs && typeof childs === 'object') {
+          Object.entries(props).forEach(([k, val]) => {
+            if (k.includes('.')) return;
+            const child = childs[k];
+            if (child && typeof child === 'object') {
+              if (typeof child.setValue === 'function' && (typeof val !== 'object' || val === null)) {
+                try { child.setValue(val); } catch (e) {}
+              } else if (val && typeof val === 'object' && !Array.isArray(val)) {
+                const subChilds = typeof child.childs === 'function' ? child.childs() : child;
+                if (subChilds && typeof subChilds === 'object') {
+                  Object.entries(val).forEach(([sk, sval]) => {
+                    const sc = subChilds[sk];
+                    if (sc && typeof sc.setValue === 'function') {
+                      try { sc.setValue(sval); } catch (e) {}
+                    }
+                  });
+                }
+              }
+            }
+          });
+        }
+      }
+      const pvs = typeof src.paneViews === 'function' ? src.paneViews() : src._paneViews;
+      if (Array.isArray(pvs)) {
+        pvs.forEach(pv => {
+          try {
+            if (typeof pv.invalidate === 'function') pv.invalidate();
+            pv._invalidated = true;
+          } catch (e) {}
+        });
+      }
+      if (src._model && typeof src._model.lightUpdate === 'function') {
+        try { src._model.lightUpdate(); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
   function applyTemplateToShape(shape, tpl, entityId, drawingTypeOverride) {
     if (!shape || !tpl) return false;
     try {
       const meta = entityId ? getShapeMetadataById(entityId) : null;
       const drawingType = drawingTypeOverride || (meta && meta.drawingType) || tpl.drawingType || 'rectangle';
       const props = buildShapePropertiesForTemplate(tpl, shape, drawingType);
-      shape.setProperties(props);
+      if (typeof shape.setProperties === 'function') {
+        shape.setProperties(props);
+      }
+      applyPropertiesToInternalSource(shape, entityId, props);
       log(`Applied template "${tpl.name}" (${drawingType}) to shape ${entityId || ''}:`, props);
 
       syncToVestLocalStorage(entityId, props);
@@ -2246,7 +2312,7 @@
           }
           break;
         }
-        const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
+        const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType, targetInfo.id);
         if (extracted) {
           postToIsolated({
             type: 'VEST_TV_SHAPE_PROPERTIES_FOR_EDITOR',
@@ -2259,11 +2325,109 @@
   });
 
   /**
+   * Parses any CSS color string (#rgb, #rrggbb, #rrggbbaa, rgb(), rgba()) into { hex: '#rrggbb', alpha: 0..1 | null }
+   */
+  function parseColorAndAlpha(rawColor, fallbackHex = '#22c55e') {
+    if (!rawColor || typeof rawColor !== 'string') {
+      return { hex: fallbackHex, alpha: null };
+    }
+    const s = rawColor.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(s)) {
+      return { hex: s.toLowerCase(), alpha: null };
+    }
+    if (/^#[0-9a-fA-F]{3}$/.test(s)) {
+      const hex = '#' + s.slice(1).split('').map(c => c + c).join('').toLowerCase();
+      return { hex, alpha: null };
+    }
+    if (/^#[0-9a-fA-F]{8}$/.test(s)) {
+      const hex = s.slice(0, 7).toLowerCase();
+      const a = parseInt(s.slice(7, 9), 16) / 255;
+      return { hex, alpha: Math.round(a * 100) / 100 };
+    }
+    const rgbMatch = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+    if (rgbMatch) {
+      const r = Math.max(0, Math.min(255, parseInt(rgbMatch[1], 10)));
+      const g = Math.max(0, Math.min(255, parseInt(rgbMatch[2], 10)));
+      const b = Math.max(0, Math.min(255, parseInt(rgbMatch[3], 10)));
+      const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+      const alpha = rgbMatch[4] !== undefined ? Math.max(0, Math.min(1, parseFloat(rgbMatch[4]))) : null;
+      return { hex, alpha };
+    }
+    return { hex: fallbackHex, alpha: null };
+  }
+
+  function hexToRgbaString(hex, opacityPct) {
+    const parsed = parseColorAndAlpha(hex, '#22c55e');
+    const c = parsed.hex.replace('#', '');
+    const num = parseInt(c, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    const a = Math.max(0, Math.min(1, (typeof opacityPct === 'number' ? opacityPct : 20) / 100));
+    return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 100) / 100})`;
+  }
+
+  /**
+   * Unwraps a TradingView internal Property object tree into a plain JS object
+   */
+  function unwrapPropertyTree(propObj, depth = 0) {
+    if (!propObj || typeof propObj !== 'object' || depth > 4) return {};
+    const out = {};
+    try {
+      if (typeof propObj.state === 'function') {
+        const st = propObj.state();
+        if (st && typeof st === 'object') {
+          Object.assign(out, st);
+        }
+      }
+    } catch (e) {}
+    try {
+      const childs = typeof propObj.childs === 'function' ? propObj.childs() : propObj;
+      if (childs && typeof childs === 'object') {
+        for (const k of Object.keys(childs)) {
+          if (k.startsWith('_')) continue;
+          const child = childs[k];
+          if (child && typeof child === 'object') {
+            if (typeof child.value === 'function') {
+              try { out[k] = child.value(); } catch (e) {}
+            } else if (typeof child.childs === 'function' || typeof child.state === 'function') {
+              out[k] = unwrapPropertyTree(child, depth + 1);
+            }
+          } else if (child !== undefined && typeof child !== 'function') {
+            out[k] = child;
+          }
+        }
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  /**
    * Reads ALL properties from a drawing shape (any TradingView drawing type) and extracts both normalized fields and rawProperties
    */
-  function extractPropertiesFromShape(shape, drawingTypeHint = null) {
-    if (!shape || typeof shape.getProperties !== 'function') return null;
-    const p = shape.getProperties() || {};
+  function extractPropertiesFromShape(shape, drawingTypeHint = null, entityId = null) {
+    if (!shape) return null;
+    let p = {};
+    try {
+      if (typeof shape.getProperties === 'function') {
+        p = { ...(shape.getProperties() || {}) };
+      }
+    } catch (e) {}
+
+    // Also inspect internal source properties in case shape.getProperties() omits nested fields
+    try {
+      const internalSrc = extractInternalSourceFromShape(shape, entityId);
+      if (internalSrc) {
+        const internalPropsObj = typeof internalSrc.properties === 'function'
+          ? internalSrc.properties()
+          : internalSrc._properties;
+        if (internalPropsObj) {
+          const unwrapped = unwrapPropertyTree(internalPropsObj);
+          p = { ...unwrapped, ...p };
+        }
+      }
+    } catch (e) {}
+
     const drawingType = canonicalizeDrawingType(drawingTypeHint || 'rectangle');
 
     // Deep clone rawProperties so tool-specific settings (Fib levels, channel lines, risk/reward parameters, etc.) are preserved
@@ -2274,29 +2438,47 @@
       delete rawProperties.intervalsVisibilities;
     } catch (e) {}
 
-    const transparency = typeof p.transparency === 'number' ? p.transparency : 80;
-    const opacity = Math.max(0, Math.min(100, 100 - transparency));
-
     // Primary color across different TradingView tools (color, linecolor, borderColor, textcolor)
-    const primaryColor = p.color || p.linecolor || p.borderColor || p.textcolor || p.textColor || '#22c55e';
-    const bgColor = p.backgroundColor || p.fillColor || primaryColor;
+    const rawPrimaryColor = p.color || p.linecolor || p.borderColor || p.textcolor || p.textColor || '#22c55e';
+    const parsedPrimary = parseColorAndAlpha(rawPrimaryColor, '#22c55e');
+    const primaryColor = parsedPrimary.hex;
+
+    const rawBgColor = p.backgroundColor || p.fillColor || rawPrimaryColor;
+    const parsedBg = parseColorAndAlpha(rawBgColor, primaryColor);
+    const bgColor = parsedBg.hex;
+
+    // Determine fill opacity (0..100):
+    // 1. If fillBackground is explicitly false, opacity is 0
+    // 2. If p.transparency is a number (TradingView 0=opaque, 100=transparent), opacity = 100 - transparency
+    // 3. Otherwise if backgroundColor was an rgba(..., a) string, use alpha * 100
+    let opacity = 20;
+    if (p.fillBackground === false) {
+      opacity = 0;
+    } else if (typeof p.transparency === 'number') {
+      opacity = Math.max(0, Math.min(100, Math.round(100 - p.transparency)));
+    } else if (typeof p.backgroundTransparency === 'number') {
+      opacity = Math.max(0, Math.min(100, Math.round(100 - p.backgroundTransparency)));
+    } else if (parsedBg.alpha !== null) {
+      opacity = Math.max(0, Math.min(100, Math.round(parsedBg.alpha * 100)));
+    }
 
     // Detect center / middle line (Rectangles use middleLine / showMiddleLine; Parallel Channels use showMidline / midlinecolor)
     const showMiddleLine = Boolean(
-      (p.middleLine && p.middleLine.showLine) ||
+      (p.middleLine && (p.middleLine.showLine || p.middleLine.visible)) ||
       p.showMiddleLine ||
       p['middleLine.showLine'] ||
       p.showMidline
     );
 
-    const middleLineColor = (p.middleLine && p.middleLine.lineColor) ||
+    const rawMiddleColor = (p.middleLine && (p.middleLine.lineColor || p.middleLine.color)) ||
       p.middleLineColor ||
       p['middleLine.lineColor'] ||
       p.midlinecolor ||
       primaryColor;
+    const middleLineColor = parseColorAndAlpha(rawMiddleColor, primaryColor).hex;
 
     const middleLineWidth = Number(
-      (p.middleLine && p.middleLine.lineWidth) ||
+      (p.middleLine && (p.middleLine.lineWidth || p.middleLine.width)) ||
       p.middleLineWidth ||
       p['middleLine.lineWidth'] ||
       p.midlinewidth || 1
@@ -2308,16 +2490,18 @@
           ? Number(p.middleLineStyle)
           : (p.midlinestyle !== undefined ? Number(p.midlinestyle) : 2));
 
-    const textStr = p.text !== undefined ? String(p.text || '') : '';
+    const textStr = p.text !== undefined ? String(p.text || '') : (p.title !== undefined ? String(p.title || '') : '');
     const hasLabel = Boolean(p.showLabel || p.showText || textStr.trim().length > 0);
+    const rawTextColor = p.textColor || p.textcolor || primaryColor;
+    const textColor = parseColorAndAlpha(rawTextColor, primaryColor).hex;
 
     return {
       drawingType,
       color: primaryColor,
       backgroundColor: bgColor,
       opacity: opacity,
-      linewidth: Number(p.linewidth) || 1,
-      linestyle: Number(p.linestyle ?? 0),
+      linewidth: Number(p.linewidth || p.borderWidth) || 1,
+      linestyle: Number(p.linestyle ?? p.borderStyle ?? 0),
       extendRight: Boolean(p.extendRight || p.extendLines),
       extendLeft: Boolean(p.extendLeft),
       showMiddleLine: showMiddleLine,
@@ -2326,10 +2510,10 @@
       middleLineStyle: middleLineStyle,
       showLabel: hasLabel,
       text: textStr,
-      textColor: p.textColor || p.textcolor || primaryColor,
+      textColor: textColor,
       fontSize: Number(p.fontSize || p.fontsize) || 12,
-      horzLabelsAlign: p.horzLabelsAlign || 'right',
-      vertLabelsAlign: p.vertLabelsAlign || 'middle',
+      horzLabelsAlign: p.horzLabelsAlign || p.horzTextAlign || 'right',
+      vertLabelsAlign: p.vertLabelsAlign || p.vertTextAlign || 'middle',
       rawProperties
     };
   }
@@ -2365,7 +2549,7 @@
     if (!targetInfo || !targetInfo.shape) return;
 
     try {
-      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
+      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType, targetInfo.id);
       if (!extracted) return;
 
       const typeLabel = getDrawingTypeLabel(targetInfo.drawingType);
@@ -2389,7 +2573,7 @@
     if (!targetInfo || !targetInfo.shape) return;
 
     try {
-      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
+      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType, targetInfo.id);
       if (!extracted) return;
 
       postToIsolated({
@@ -2414,7 +2598,7 @@
     }
 
     try {
-      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
+      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType, targetInfo.id);
       if (!extracted) return;
 
       postToIsolated({

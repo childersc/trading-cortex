@@ -91,7 +91,7 @@
       const nameKey = `${drawingType}::${String(t.name || '').trim().toLowerCase()}`;
       if (seenKeys.has(nameKey)) continue;
       seenKeys.add(nameKey);
-      cleaned.push({
+      cleaned.push(hydrateTemplateForEditor({
         drawingType,
         extendRight: Boolean(t.extendRight),
         extendLeft: Boolean(t.extendLeft),
@@ -102,7 +102,7 @@
         horzLabelsAlign: t.horzLabelsAlign || 'right',
         vertLabelsAlign: t.vertLabelsAlign || 'middle',
         ...t
-      });
+      }));
     }
     return cleaned;
   }
@@ -412,8 +412,9 @@
       if (isTopWindow) renderFloatingBar();
     } else if (type === 'VEST_TV_TEMPLATE_CREATED_FROM_SHAPE') {
       if (template) {
-        const dt = template.drawingType || 'rectangle';
-        const sig = `${dt}::${String(template.name || '').trim().toLowerCase()}`;
+        const hydrated = hydrateTemplateForEditor(template);
+        const dt = hydrated.drawingType || 'rectangle';
+        const sig = `${dt}::${String(hydrated.name || '').trim().toLowerCase()}`;
         const now = Date.now();
         // Prevent duplicate creation if message arrived twice within 1.5s
         if (sig === lastCreatedTemplateSig && (now - lastCreatedTemplateTime) < 1500) {
@@ -424,34 +425,34 @@
 
         // If a template with the exact same name & drawingType already exists, update it in-place instead of creating a duplicate
         const existingIdx = templates.findIndex(
-          t => (t.drawingType || 'rectangle') === dt && String(t.name || '').trim().toLowerCase() === String(template.name || '').trim().toLowerCase()
+          t => (t.drawingType || 'rectangle') === dt && String(t.name || '').trim().toLowerCase() === String(hydrated.name || '').trim().toLowerCase()
         );
         if (existingIdx !== -1) {
-          templates[existingIdx] = {
+          templates[existingIdx] = hydrateTemplateForEditor({
             ...templates[existingIdx],
-            ...template,
+            ...hydrated,
             id: templates[existingIdx].id
-          };
+          });
           settings.activeTemplateId = templates[existingIdx].id;
           safeStorageSet({ templates, settings });
           notifyMainWorldConfig();
-          showToast(`Updated "${template.name}" (${getDrawingTypeLabel(dt)})!`);
+          showToast(`Updated "${hydrated.name}" (${getDrawingTypeLabel(dt)})!`);
         } else {
-          templates.push(template);
-          settings.activeTemplateId = template.id;
+          templates.push(hydrated);
+          settings.activeTemplateId = hydrated.id;
           safeStorageSet({ templates, settings });
           notifyMainWorldConfig();
-          showToast(`Saved "${template.name}" (${getDrawingTypeLabel(dt)})!`);
+          showToast(`Saved "${hydrated.name}" (${getDrawingTypeLabel(dt)})!`);
         }
         if (isTopWindow) renderFloatingBar();
       }
     } else if (type === 'VEST_TV_ACTIVE_TEMPLATE_UPDATED_FROM_SHAPE') {
       const activeIdx = templates.findIndex(t => t.id === settings.activeTemplateId);
       if (activeIdx !== -1 && updates) {
-        templates[activeIdx] = {
+        templates[activeIdx] = hydrateTemplateForEditor({
           ...templates[activeIdx],
           ...updates
-        };
+        });
         safeStorageSet({ templates });
         notifyMainWorldConfig();
         showToast(`Saved current drawing settings to "${templates[activeIdx].name}"!`);
@@ -460,10 +461,10 @@
     } else if (type === 'VEST_TV_TEMPLATE_OVERRIDDEN') {
       const targetIdx = templates.findIndex(t => t.id === templateId);
       if (targetIdx !== -1 && updates) {
-        templates[targetIdx] = {
+        templates[targetIdx] = hydrateTemplateForEditor({
           ...templates[targetIdx],
           ...updates
-        };
+        });
         settings.activeTemplateId = templates[targetIdx].id;
         safeStorageSet({ templates, settings });
         notifyMainWorldConfig();
@@ -3175,14 +3176,95 @@
   // -------------------------------------------------------------
   // In-Page Template Editor Modal (Pencil Button Handler)
   // -------------------------------------------------------------
-  function normalizeHexColor(c, fallback = '#22c55e') {
-    if (!c || typeof c !== 'string') return fallback;
+  function parseCssColor(c, fallback = '#22c55e') {
+    if (!c || typeof c !== 'string') return { hex: fallback, alpha: null };
     const trimmed = c.trim();
-    if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed;
+    if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return { hex: trimmed.toLowerCase(), alpha: null };
     if (/^#[0-9a-fA-F]{3}$/.test(trimmed)) {
-      return '#' + trimmed.slice(1).split('').map(ch => ch + ch).join('');
+      return {
+        hex: '#' + trimmed.slice(1).split('').map(ch => ch + ch).join('').toLowerCase(),
+        alpha: null
+      };
     }
-    return fallback;
+    if (/^#[0-9a-fA-F]{8}$/.test(trimmed)) {
+      const hex = trimmed.slice(0, 7).toLowerCase();
+      const a = parseInt(trimmed.slice(7, 9), 16) / 255;
+      return { hex, alpha: Math.round(a * 100) / 100 };
+    }
+    const rgbMatch = trimmed.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+    if (rgbMatch) {
+      const r = Math.max(0, Math.min(255, parseInt(rgbMatch[1], 10)));
+      const g = Math.max(0, Math.min(255, parseInt(rgbMatch[2], 10)));
+      const b = Math.max(0, Math.min(255, parseInt(rgbMatch[3], 10)));
+      const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+      const alpha = rgbMatch[4] !== undefined ? Math.max(0, Math.min(1, parseFloat(rgbMatch[4]))) : null;
+      return { hex, alpha };
+    }
+    return { hex: fallback, alpha: null };
+  }
+
+  function normalizeHexColor(c, fallback = '#22c55e') {
+    return parseCssColor(c, fallback).hex;
+  }
+
+  /**
+   * Hydrates a template object (including older saved templates or templates with rgba() / rawProperties)
+   * so all editor fields (color, backgroundColor, opacity, middleLine, text, etc.) are normalized.
+   */
+  function hydrateTemplateForEditor(tpl) {
+    if (!tpl || typeof tpl !== 'object') return tpl;
+    const copy = JSON.parse(JSON.stringify(tpl));
+    const raw = (copy.rawProperties && typeof copy.rawProperties === 'object') ? copy.rawProperties : {};
+
+    const rawPrimary = copy.color || raw.color || raw.linecolor || raw.borderColor || raw.textcolor || raw.textColor || '#22c55e';
+    const parsedPrimary = parseCssColor(rawPrimary, '#22c55e');
+    copy.color = parsedPrimary.hex;
+
+    const rawBg = copy.backgroundColor || raw.backgroundColor || raw.fillColor || rawPrimary;
+    const parsedBg = parseCssColor(rawBg, copy.color);
+    copy.backgroundColor = parsedBg.hex;
+
+    // If opacity was defaulted to 20 because raw.backgroundColor was rgba(...) without raw.transparency, recover actual alpha!
+    if (raw.fillBackground === false) {
+      copy.opacity = 0;
+    } else if (typeof raw.transparency === 'number') {
+      copy.opacity = Math.max(0, Math.min(100, Math.round(100 - raw.transparency)));
+    } else if (parsedBg.alpha !== null && (copy.opacity === undefined || copy.opacity === 20)) {
+      copy.opacity = Math.max(0, Math.min(100, Math.round(parsedBg.alpha * 100)));
+    } else if (typeof copy.opacity !== 'number') {
+      copy.opacity = 20;
+    }
+
+    copy.linewidth = Number(copy.linewidth ?? raw.linewidth ?? raw.borderWidth ?? 1) || 1;
+    copy.linestyle = Number(copy.linestyle ?? raw.linestyle ?? raw.borderStyle ?? 0);
+
+    const rawMidObj = raw.middleLine && typeof raw.middleLine === 'object' ? raw.middleLine : {};
+    copy.showMiddleLine = Boolean(
+      copy.showMiddleLine ||
+      rawMidObj.showLine ||
+      rawMidObj.visible ||
+      raw.showMiddleLine ||
+      raw['middleLine.showLine'] ||
+      raw.showMidline
+    );
+    const rawMidColor = copy.middleLineColor || rawMidObj.lineColor || rawMidObj.color || raw.middleLineColor || raw.midlinecolor || copy.color;
+    copy.middleLineColor = parseCssColor(rawMidColor, copy.color).hex;
+    copy.middleLineWidth = Number(copy.middleLineWidth ?? rawMidObj.lineWidth ?? raw.middleLineWidth ?? raw.midlinewidth ?? 1) || 1;
+    copy.middleLineStyle = Number(copy.middleLineStyle ?? rawMidObj.lineStyle ?? raw.middleLineStyle ?? raw.midlinestyle ?? 2);
+
+    copy.extendLeft = Boolean(copy.extendLeft ?? raw.extendLeft);
+    copy.extendRight = Boolean(copy.extendRight ?? raw.extendRight ?? raw.extendLines);
+
+    const rawText = copy.text !== undefined ? String(copy.text || '') : (raw.text !== undefined ? String(raw.text || '') : '');
+    copy.text = rawText;
+    copy.showLabel = Boolean(copy.showLabel || raw.showLabel || raw.showText || rawText.trim().length > 0);
+    copy.textColor = parseCssColor(copy.textColor || raw.textColor || raw.textcolor || copy.color, copy.color).hex;
+    copy.fontSize = Number(copy.fontSize ?? raw.fontSize ?? raw.fontsize ?? 12) || 12;
+    copy.horzLabelsAlign = copy.horzLabelsAlign || raw.horzLabelsAlign || raw.horzTextAlign || 'right';
+    copy.vertLabelsAlign = copy.vertLabelsAlign || raw.vertLabelsAlign || raw.vertTextAlign || 'middle';
+    if (!copy.drawingType) copy.drawingType = 'rectangle';
+
+    return copy;
   }
 
   function closeTemplateEditorModal() {
@@ -3220,8 +3302,7 @@
       isCreatingNew = false;
       editingId = found.id;
       currentEditingTemplateId = found.id;
-      editDraft = JSON.parse(JSON.stringify(found));
-      if (!editDraft.drawingType) editDraft.drawingType = 'rectangle';
+      editDraft = hydrateTemplateForEditor(found);
       renderManagerDialog();
     }
 
@@ -3262,8 +3343,7 @@
       if (found) {
         editingId = found.id;
         currentEditingTemplateId = found.id;
-        editDraft = JSON.parse(JSON.stringify(found));
-        if (!editDraft.drawingType) editDraft.drawingType = 'rectangle';
+        editDraft = hydrateTemplateForEditor(found);
       }
     }
 
@@ -3359,23 +3439,59 @@
       const q = (sel) => overlay.querySelector(sel);
       if (q('#vest-tm-name')) editDraft.name = q('#vest-tm-name').value.trim() || editDraft.name;
       if (q('#vest-tm-type')) editDraft.drawingType = q('#vest-tm-type').value || 'rectangle';
-      if (q('#vest-tm-color')) editDraft.color = q('#vest-tm-color').value || '#22c55e';
-      if (q('#vest-tm-bg-color')) editDraft.backgroundColor = q('#vest-tm-bg-color').value || editDraft.color;
+      if (q('#vest-tm-color')) editDraft.color = normalizeHexColor(q('#vest-tm-color').value, '#22c55e');
+      if (q('#vest-tm-bg-color')) editDraft.backgroundColor = normalizeHexColor(q('#vest-tm-bg-color').value, editDraft.color);
       if (q('#vest-tm-opacity')) editDraft.opacity = Number(q('#vest-tm-opacity').value ?? 20);
       if (q('#vest-tm-linewidth')) editDraft.linewidth = Number(q('#vest-tm-linewidth').value || 1);
       if (q('#vest-tm-linestyle')) editDraft.linestyle = Number(q('#vest-tm-linestyle').value ?? 0);
       if (q('#vest-tm-show-mid')) editDraft.showMiddleLine = Boolean(q('#vest-tm-show-mid').checked);
-      if (q('#vest-tm-mid-color')) editDraft.middleLineColor = q('#vest-tm-mid-color').value || editDraft.color;
+      if (q('#vest-tm-mid-color')) editDraft.middleLineColor = normalizeHexColor(q('#vest-tm-mid-color').value, editDraft.color);
       if (q('#vest-tm-mid-width')) editDraft.middleLineWidth = Number(q('#vest-tm-mid-width').value || 1);
       if (q('#vest-tm-mid-style')) editDraft.middleLineStyle = Number(q('#vest-tm-mid-style').value ?? 2);
       if (q('#vest-tm-extend-left')) editDraft.extendLeft = Boolean(q('#vest-tm-extend-left').checked);
       if (q('#vest-tm-extend-right')) editDraft.extendRight = Boolean(q('#vest-tm-extend-right').checked);
       if (q('#vest-tm-show-label')) editDraft.showLabel = Boolean(q('#vest-tm-show-label').checked);
-      if (q('#vest-tm-text')) editDraft.text = q('#vest-tm-text').value || '';
-      if (q('#vest-tm-text-color')) editDraft.textColor = q('#vest-tm-text-color').value || editDraft.color;
+      if (q('#vest-tm-text')) {
+        editDraft.text = q('#vest-tm-text').value || '';
+        // If user typed label text into the input, automatically enable showLabel so it gets applied!
+        if (editDraft.text.trim().length > 0 && q('#vest-tm-show-label')) {
+          editDraft.showLabel = Boolean(q('#vest-tm-show-label').checked);
+        }
+      }
+      if (q('#vest-tm-text-color')) editDraft.textColor = normalizeHexColor(q('#vest-tm-text-color').value, editDraft.color);
       if (q('#vest-tm-fontsize')) editDraft.fontSize = Number(q('#vest-tm-fontsize').value || 12);
       if (q('#vest-tm-horz-align')) editDraft.horzLabelsAlign = q('#vest-tm-horz-align').value || 'right';
       if (q('#vest-tm-vert-align')) editDraft.vertLabelsAlign = q('#vest-tm-vert-align').value || 'middle';
+
+      // Keep rawProperties in sync with the edited fields so rawProperties never holds stale colors/text
+      if (editDraft.rawProperties && typeof editDraft.rawProperties === 'object') {
+        const rp = editDraft.rawProperties;
+        if ('color' in rp) rp.color = editDraft.color;
+        if ('linecolor' in rp) rp.linecolor = editDraft.color;
+        if ('borderColor' in rp) rp.borderColor = editDraft.color;
+        if ('backgroundColor' in rp) rp.backgroundColor = editDraft.backgroundColor;
+        rp.transparency = Math.max(0, Math.min(100, 100 - editDraft.opacity));
+        if ('fillBackground' in rp) rp.fillBackground = editDraft.opacity > 0;
+        rp.linewidth = editDraft.linewidth;
+        rp.linestyle = editDraft.linestyle;
+        rp.extendLeft = editDraft.extendLeft;
+        rp.extendRight = editDraft.extendRight;
+        rp.showMiddleLine = editDraft.showMiddleLine;
+        if (rp.middleLine && typeof rp.middleLine === 'object') {
+          rp.middleLine.showLine = editDraft.showMiddleLine;
+          rp.middleLine.lineColor = editDraft.middleLineColor;
+          rp.middleLine.lineWidth = editDraft.middleLineWidth;
+          rp.middleLine.lineStyle = editDraft.middleLineStyle;
+        }
+        rp.showLabel = editDraft.showLabel;
+        rp.text = editDraft.text;
+        rp.textColor = editDraft.textColor;
+        if ('textcolor' in rp) rp.textcolor = editDraft.textColor;
+        rp.fontSize = editDraft.fontSize;
+        if ('fontsize' in rp) rp.fontsize = editDraft.fontSize;
+        rp.horzLabelsAlign = editDraft.horzLabelsAlign;
+        rp.vertLabelsAlign = editDraft.vertLabelsAlign;
+      }
     }
 
     function renderRightPaneContent() {
@@ -3930,9 +4046,8 @@
   }
 
   function hexToRgba(hex, alpha) {
-    if (!hex) return `rgba(34, 197, 94, ${alpha})`;
-    let c = hex.replace('#', '');
-    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    const cleanHex = normalizeHexColor(hex, '#22c55e');
+    const c = cleanHex.replace('#', '');
     const num = parseInt(c, 16);
     const r = (num >> 16) & 255;
     const g = (num >> 8) & 255;
