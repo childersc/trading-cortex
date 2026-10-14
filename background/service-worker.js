@@ -203,9 +203,29 @@ chrome.runtime.onInstalled.addListener(async () => {
       checkGitHubForUpdatesInBackground();
     }
 
-    // If an OTA update just completed and called chrome.runtime.reload(), keep the update page open so the user sees the success banner
+    // If an update just completed and called chrome.runtime.reload(), reload active trading tabs now that the new runtime is live, and keep Update Center open
     const postUpdateData = await chrome.storage.local.get(["pendingUpdaterSuccess"]).catch(() => ({}));
     if (postUpdateData && postUpdateData.pendingUpdaterSuccess) {
+      const info = postUpdateData.pendingUpdaterSuccess;
+
+      // Wait briefly for the new extension runtime and content script registrations to settle, then reload all trading tabs
+      setTimeout(async () => {
+        try {
+          const vestTabs = await chrome.tabs.query({
+            url: [
+              "https://next.vestmarkets.com/*",
+              "https://*.vest.exchange/*",
+              "https://vest.exchange/*"
+            ]
+          });
+          for (const tab of vestTabs) {
+            if (tab.id) {
+              await chrome.tabs.reload(tab.id).catch(() => {});
+            }
+          }
+        } catch (e) {}
+      }, 650);
+
       const updaterUrl = chrome.runtime.getURL("update/update.html");
       const existingUpdaterTabs = await chrome.tabs.query({ url: updaterUrl }).catch(() => []);
       if (!existingUpdaterTabs || existingUpdaterTabs.length === 0) {

@@ -566,11 +566,11 @@
 
       // STAGE 04: Hot Reload
       updateStepState(step4Row, step4Badge, 'active', 4);
-      progressLabelLeft.textContent = 'Hot-reloading trading tabs & extension...';
+      progressLabelLeft.textContent = 'Finalizing disk flush & reloading extension runtime...';
 
       await chrome.action.setBadgeText({ text: '' });
 
-      let reloadedTabsCount = 0;
+      let tradingTabsCount = 0;
       try {
         const vestTabs = await chrome.tabs.query({
           url: [
@@ -579,21 +579,17 @@
             'https://vest.exchange/*'
           ]
         });
-        for (const tab of vestTabs) {
-          if (tab.id) {
-            chrome.tabs.reload(tab.id);
-            reloadedTabsCount++;
-          }
-        }
-        logTerm(`Reloaded ${reloadedTabsCount} active trading tab(s)`, 'ok');
+        tradingTabsCount = vestTabs.length;
       } catch (e) {}
 
-      // Persist post-update state so the reopened / preserved update page shows the success banner immediately after runtime reload
+      // Persist post-update state so after chrome.runtime.reload() boots the new version,
+      // the new runtime reloads the trading tabs and shows the completed Update Center page
       await chrome.storage.local.set({
         pendingUpdaterSuccess: {
           version: targetVer,
           filesSynced: total,
-          reloadedTabs: reloadedTabsCount,
+          reloadedTabs: tradingTabsCount,
+          needsTabReload: true,
           completedAt: Date.now()
         }
       }).catch(() => {});
@@ -602,12 +598,12 @@
       statusEyebrow.textContent = 'UPDATED';
       statusHeading.textContent = `Trading Cortex successfully updated to v${targetVer}!`;
       progressLabelLeft.textContent = `Update complete · v${targetVer} active`;
-      showSuccess(`✓ Trading Cortex has been successfully updated to v${targetVer}! (${total} files synced, ${reloadedTabsCount} trading tab${reloadedTabsCount === 1 ? '' : 's'} reloaded)`);
-      logTerm(`Successfully updated to v${targetVer}! Reloading extension runtime...`, 'ok');
+      showSuccess(`✓ Trading Cortex has been successfully updated to v${targetVer}! Reloading extension & ${tradingTabsCount} trading tab${tradingTabsCount === 1 ? '' : 's'}...`);
+      logTerm(`Disk sync complete (${total} files). Waiting 1.2s before restarting runtime & reloading ${tradingTabsCount} trading tab(s)...`, 'ok');
 
       setTimeout(() => {
         chrome.runtime.reload();
-      }, 900);
+      }, 1200);
     } catch (err) {
       statusEyebrow.textContent = 'INTERRUPTED';
       statusHeading.textContent = 'Deployment paused';
