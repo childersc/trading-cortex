@@ -2867,6 +2867,10 @@
 
           if (matchedMenuItem) {
             dispatchFullPointerClick(matchedMenuItem);
+            const innerLabel = matchedMenuItem.querySelector('[class*="label-"], [class*="title-"], span');
+            if (innerLabel && innerLabel !== matchedMenuItem) {
+              try { innerLabel.click(); } catch (e) {}
+            }
             // If the menu is still in the DOM after clicking the item, click the arrowTrigger once to toggle it shut
             if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
               dispatchFullPointerClick(arrowTrigger);
@@ -2887,8 +2891,8 @@
     }
   }
 
-  // Select a single drawing tool via TradingView API or direct button without opening any DOM flyout menus
-  function selectSingleLineTool(toolId) {
+  // Select a single drawing tool via TradingView API, internal Widget, or DOM flyout so its left-sidebar group slot updates
+  function selectSingleLineTool(toolId, updateSlotViaSubmenu = true) {
     const norm = normalizeToolId(toolId);
     if (!norm) return false;
 
@@ -2922,6 +2926,23 @@
           selected = true;
         }
       } catch (e) {}
+    }
+
+    // 4. Click direct button if already visible on the left sidebar
+    const directBtn = findSidebarElement([
+      `[data-name="${norm}"]`,
+      `[data-name="${norm.toLowerCase()}"]`
+    ]);
+
+    if (directBtn && !directBtn.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"]')) {
+      try {
+        directBtn.click();
+        selected = true;
+      } catch (e) {}
+    } else if (updateSlotViaSubmenu) {
+      // Ensure the sidebar group slot icon updates to `norm` (e.g. changing Brush slot icon to Rectangle)
+      ensureSidebarGroupSlotDisplaysTool(norm);
+      selected = true;
     }
 
     return selected;
@@ -2997,20 +3018,14 @@
 
         // Detect if user clicked a specific drawing tool button or flyout submenu item
         const clickedToolId = extractToolIdFromDomElement(target);
-        const isMagnetOrControl = Boolean(
-          target.closest('[data-name*="magnet"], [aria-label*="Magnet" i], [data-name*="drawing"], [data-name*="lock"], [data-name*="hide"]')
-        );
-
-        // Only run saveCurrentSidebarState when the user actually interacted with a drawing tool or sidebar control!
-        if (!clickedToolId && !isMagnetOrControl) return;
 
         // Capture after TradingView updates its DOM slot & activeLineTool state
         setTimeout(() => {
           saveCurrentSidebarState(clickedToolId);
-        }, 120);
+        }, 140);
         setTimeout(() => {
           saveCurrentSidebarState(clickedToolId);
-        }, 380);
+        }, 420);
       };
 
       try {
