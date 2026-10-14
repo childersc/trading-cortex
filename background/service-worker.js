@@ -372,36 +372,6 @@ chrome.runtime.onInstalled.addListener(async () => {
       chrome.alarms.create("vest_studio_update_check", { periodInMinutes: 30 });
       checkGitHubForUpdatesInBackground();
     }
-
-    // If an update just completed and called chrome.runtime.reload(), reload active trading tabs now that the new runtime is live, and keep Update Center open
-    const postUpdateData = await chrome.storage.local.get(["pendingUpdaterSuccess"]).catch(() => ({}));
-    if (postUpdateData && postUpdateData.pendingUpdaterSuccess) {
-      const info = postUpdateData.pendingUpdaterSuccess;
-
-      // Wait briefly for the new extension runtime and content script registrations to settle, then reload all trading tabs
-      setTimeout(async () => {
-        try {
-          const vestTabs = await chrome.tabs.query({
-            url: [
-              "https://next.vestmarkets.com/*",
-              "https://*.vest.exchange/*",
-              "https://vest.exchange/*"
-            ]
-          });
-          for (const tab of vestTabs) {
-            if (tab.id) {
-              await chrome.tabs.reload(tab.id).catch(() => {});
-            }
-          }
-        } catch (e) {}
-      }, 650);
-
-      const updaterUrl = chrome.runtime.getURL("update/update.html");
-      const existingUpdaterTabs = await chrome.tabs.query({ url: updaterUrl }).catch(() => []);
-      if (!existingUpdaterTabs || existingUpdaterTabs.length === 0) {
-        await chrome.tabs.create({ url: updaterUrl, active: true }).catch(() => {});
-      }
-    }
   } catch (err) {
     // Ignore sync quota errors during rapid extension reloads
   }
@@ -428,7 +398,16 @@ function compareSemver(a, b) {
 
 async function checkGitHubForUpdatesInBackground() {
   try {
-    const installedVer = chrome.runtime.getManifest().version || "1.1.0";
+    let installedVer = chrome.runtime.getManifest().version || "1.1.0";
+    const storedOverride = await chrome.storage.local.get(["installedVersionOverride"]).catch(() => ({}));
+    if (
+      storedOverride &&
+      storedOverride.installedVersionOverride &&
+      compareSemver(storedOverride.installedVersionOverride, installedVer) > 0
+    ) {
+      installedVer = storedOverride.installedVersionOverride;
+    }
+
     let release = null;
     const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
       headers: { "Accept": "application/vnd.github+json" },
@@ -549,6 +528,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "openUpdaterPage") {
     const updaterUrl = chrome.runtime.getURL("update/update.html");
     chrome.tabs.create({ url: updaterUrl });
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  if (request.action === "updaterPageClosed") {
+    chrome.storage.local.get(["reloadRuntimeOnUpdaterClose"]).then(async (data) => {
+      if (data && data.reloadRuntimeOnUpdaterClose) {
+        await chrome.storage.local.remove("reloadRuntimeOnUpdaterClose").catch(() => {});
+        chrome.runtime.reload();
+      }
+    }).catch(() => {});
     sendResponse({ ok: true });
     return true;
   }

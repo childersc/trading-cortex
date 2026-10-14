@@ -14,7 +14,7 @@
   const IDB_KEY = 'extension_dir_handle';
 
   const manifest = chrome.runtime.getManifest();
-  const installedVersion = manifest.version || '1.1.0';
+  let installedVersion = manifest.version || '1.1.0';
 
   let savedDirHandle = null;
   let latestRelease = null;
@@ -661,13 +661,18 @@
 
       // STAGE 04: Hot Reload
       updateStepState(step4Row, step4Badge, 'active', 4);
-      progressLabelLeft.textContent = 'Finalizing disk flush & reloading extension runtime...';
+      progressLabelLeft.textContent = 'Finalizing disk flush & reloading trading browser tabs...';
 
       await chrome.action.setBadgeText({ text: '' });
 
+      // Update installedVersion in memory and storage so UI immediately reflects the deployed release
+      installedVersion = targetVer;
+      vboxInstalled.textContent = `v${targetVer}`;
+
       let tradingTabsCount = 0;
+      let vestTabs = [];
       try {
-        const vestTabs = await chrome.tabs.query({
+        vestTabs = await chrome.tabs.query({
           url: [
             'https://next.vestmarkets.com/*',
             'https://*.vest.exchange/*',
@@ -677,28 +682,39 @@
         tradingTabsCount = vestTabs.length;
       } catch (e) {}
 
-      // Persist post-update state so after chrome.runtime.reload() boots the new version,
-      // the new runtime reloads the trading tabs and shows the completed Update Center page
       await chrome.storage.local.set({
-        pendingUpdaterSuccess: {
-          version: targetVer,
-          filesSynced: total,
-          reloadedTabs: tradingTabsCount,
-          needsTabReload: true,
-          completedAt: Date.now()
+        installedVersionOverride: targetVer,
+        reloadRuntimeOnUpdaterClose: true,
+        updaterState: {
+          lastCheckedAt: Date.now(),
+          latestVersion: targetVer,
+          updateAvailable: false,
+          htmlUrl: latestRelease.html_url
         }
       }).catch(() => {});
+
+      // Wait briefly for OS disk buffers to flush, then reload all active trading tabs in-place
+      await new Promise(r => setTimeout(r, 450));
+      for (const tab of vestTabs) {
+        if (tab.id) {
+          await chrome.tabs.reload(tab.id).catch(() => {});
+        }
+      }
 
       updateStepState(step4Row, step4Badge, 'done', 4);
       statusEyebrow.textContent = 'UPDATED';
       statusHeading.textContent = `Trading Cortex successfully updated to v${targetVer}!`;
       progressLabelLeft.textContent = `Update complete · v${targetVer} active`;
-      showSuccess(`✓ Trading Cortex has been successfully updated to v${targetVer}! Reloading extension & ${tradingTabsCount} trading tab${tradingTabsCount === 1 ? '' : 's'}...`);
-      logTerm(`Disk sync complete (${total} files). Waiting 1.2s before restarting runtime & reloading ${tradingTabsCount} trading tab(s)...`, 'ok');
+      if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync v${targetVer}`;
+      btnRunUpdate.disabled = false;
 
-      setTimeout(() => {
-        chrome.runtime.reload();
-      }, 1200);
+      showSuccess(
+        `✓ Trading Cortex has been successfully updated to v${targetVer}! Your trading browser windows (${tradingTabsCount} tab${tradingTabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
+      );
+      logTerm(
+        `Update to v${targetVer} complete (${total} files synced). Reloaded ${tradingTabsCount} trading tab(s) cleanly without closing Update Center.`,
+        'ok'
+      );
     } catch (err) {
       statusEyebrow.textContent = 'INTERRUPTED';
       statusHeading.textContent = 'Deployment paused';
@@ -762,13 +778,17 @@
   });
 
   async function init() {
+    const data = await chrome.storage.local.get(['settings', 'installedVersionOverride']).catch(() => ({}));
+    if (data.installedVersionOverride && compareVersions(data.installedVersionOverride, installedVersion) > 0) {
+      installedVersion = data.installedVersionOverride;
+    }
+
     vboxInstalled.textContent = `v${installedVersion}`;
     repoSlugDisplay.textContent = DEFAULT_REPO;
     allReleasesLink.href = `https://github.com/${DEFAULT_REPO}/releases`;
 
     logTerm(`Trading Cortex Update Center initialized (Local v${installedVersion})`);
 
-    const data = await chrome.storage.local.get(['settings', 'pendingUpdaterSuccess']).catch(() => ({}));
     if (data.settings && data.settings.autoCheckUpdates === false) {
       toggleAutoCheck.checked = false;
       if (heartbeatStateText) heartbeatStateText.textContent = 'Paused · Manual Only';
@@ -782,37 +802,14 @@
     }
 
     await checkGitHubRelease();
-
-    // If we just completed a hot-reload from an OTA update, keep the page in its completed state and notify the user
-    if (data.pendingUpdaterSuccess) {
-      const info = data.pendingUpdaterSuccess;
-      await chrome.storage.local.remove('pendingUpdaterSuccess').catch(() => {});
-
-      const ver = info.version || installedVersion;
-      const filesCount = info.filesSynced || 0;
-      const tabsCount = info.reloadedTabs || 0;
-
-      updateStepState(step1Row, step1Badge, 'done', 1);
-      updateStepState(step2Row, step2Badge, 'done', 2);
-      step2Label.textContent = 'Package verified';
-      updateStepState(step3Row, step3Badge, 'done', 3);
-      step3Label.textContent = filesCount ? `Synced ${filesCount} files` : 'Files synced';
-      updateStepState(step4Row, step4Badge, 'done', 4);
-
-      progressFill.style.width = '100%';
-      progressLabelLeft.textContent = `Update complete · v${ver} active`;
-      if (filesCount) {
-        progressLabelRight.textContent = `${filesCount} / ${filesCount} files`;
-      }
-
-      statusEyebrow.textContent = 'UPDATED';
-      statusHeading.textContent = `Trading Cortex successfully updated to v${ver}!`;
-      showSuccess(
-        `✓ Trading Cortex has been successfully updated to v${ver}! Your trading browser windows (${tabsCount} tab${tabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
-      );
-      logTerm(`Update to v${ver} completed! Extension runtime and ${tabsCount} trading tab(s) reloaded.`, 'ok');
-    }
   }
+
+  // When the user closes the Update Center tab after an update, let the service worker silently refresh the manifest runtime
+  window.addEventListener('pagehide', () => {
+    try {
+      chrome.runtime.sendMessage({ action: 'updaterPageClosed' });
+    } catch (e) {}
+  });
 
   init();
 })();

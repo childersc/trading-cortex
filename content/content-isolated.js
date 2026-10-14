@@ -161,13 +161,19 @@
     }
   }
 
+  let installedVersionOverride = null;
+
   function getSafeExtVersion() {
+    let manifestVer = '1.1.0';
     try {
       if (isExtensionValid() && chrome.runtime.getManifest) {
-        return chrome.runtime.getManifest().version || '1.1.0';
+        manifestVer = chrome.runtime.getManifest().version || '1.1.0';
       }
     } catch (e) {}
-    return '1.1.0';
+    if (installedVersionOverride && compareSemver(installedVersionOverride, manifestVer) > 0) {
+      return installedVersionOverride;
+    }
+    return manifestVer;
   }
 
   const DOMAIN_VAULT_KEY = '__trading_cortex_vault_db_v1__';
@@ -373,10 +379,20 @@
         if (changes.settings && changes.settings.newValue) {
           settings = { ...settings, ...changes.settings.newValue };
         }
+        if (changes.installedVersionOverride && changes.installedVersionOverride.newValue) {
+          installedVersionOverride = changes.installedVersionOverride.newValue;
+          if (isTopWindow) {
+            renderStudioHeaderPill();
+          }
+        }
         if (changes.updaterState && changes.updaterState.newValue && isTopWindow) {
           const newState = changes.updaterState.newValue;
           const wasAvailable = isUpdateAvailable;
-          isUpdateAvailable = Boolean(newState.updateAvailable);
+          const currentVer = getSafeExtVersion();
+          isUpdateAvailable = Boolean(
+            newState.updateAvailable &&
+            (!newState.latestVersion || compareSemver(newState.latestVersion, currentVer) > 0)
+          );
           latestAvailableVersion = newState.latestVersion || null;
           if (wasAvailable !== isUpdateAvailable) {
             renderStudioHeaderPill();
@@ -3495,7 +3511,10 @@
   // -------------------------------------------------------------
   async function init() {
     try {
-      const data = await safeStorageGet(['templates', 'settings', 'updaterState']);
+      const data = await safeStorageGet(['templates', 'settings', 'updaterState', 'installedVersionOverride']);
+      if (data.installedVersionOverride) {
+        installedVersionOverride = data.installedVersionOverride;
+      }
       if (data.templates && Array.isArray(data.templates) && data.templates.length > 0) {
         templates = data.templates;
       } else {
@@ -3506,7 +3525,11 @@
         settings = { ...settings, ...data.settings };
       }
       if (data.updaterState) {
-        isUpdateAvailable = Boolean(data.updaterState.updateAvailable);
+        const currentVer = getSafeExtVersion();
+        isUpdateAvailable = Boolean(
+          data.updaterState.updateAvailable &&
+          (!data.updaterState.latestVersion || compareSemver(data.updaterState.latestVersion, currentVer) > 0)
+        );
         latestAvailableVersion = data.updaterState.latestVersion || null;
       }
 

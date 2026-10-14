@@ -1,7 +1,1 @@
-Smart chart viewport memory, persistent left-sidebar drawing tools, customizable ICT/SMC rectangle templates, and 1-click Update Center.
-
-- **Multi-Slot Left-Sidebar Submenu Persistence (`v1.1.4`)**: Fixed submenu restoration timing and clean menu dismissal across all 7 left-sidebar drawing groups so every group slot restores its last selected tool on load without leaving any pull-out menu open.
-- **Local File System JSON Database & Schema Migrations**: Automatically persists all custom templates, settings, and chart memory to `user-data/cortex-db.json` in your linked extension folder plus a domain-level backup vault—so your templates are never lost even if the extension is unloaded/reinstalled or updated, with automatic schema migrations (`schemaVersion: 1`) across future releases.
-- **Update Center & Post-Update Confirmation**: Renamed the updater to **Update Center**, added a 1-click **`Update Ready`** button inside the `CORTEX` dropdown menu when a new version drops, and keeps the Update Center page open with a confirmation banner while cleanly reloading your trading tabs after the extension runtime restarts.
-- **Scoped Exclusively to Supported Terminals**: Restricted host permissions and content scripts to `next.vestmarkets.com` and `vest.exchange` (excluding `trade.vestmarkets.com`).
-- **Chart Viewport & Settings Memory**: Automatically remembers and restores your exact chart position (left/right pan, up/down price scale, zoom level), timeframe, and candle style across page refreshes.
+﻿v1.1.5: Keep Update Center open in-place during updates without closing and reopening the tab, reload trading browser windows smoothly, and persist all 7 sidebar drawing tool submenu selections + local JSON database.

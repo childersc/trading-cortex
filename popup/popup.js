@@ -95,7 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // -------------------------------------------------------------
   async function loadData() {
     try {
-      let data = await chrome.storage.local.get(['templates', 'settings', 'updaterState']).catch(() => ({}));
+      let data = await chrome.storage.local.get(['templates', 'settings', 'updaterState', 'installedVersionOverride']).catch(() => ({}));
       if (!data.templates && chrome.storage.sync) {
         data = await chrome.storage.sync.get(['templates', 'settings']).catch(() => ({}));
       }
@@ -104,6 +104,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (data.settings) {
         settings = { ...settings, ...data.settings };
+      }
+      if (data.installedVersionOverride && popupVersionLabel) {
+        popupVersionLabel.textContent = `v${data.installedVersionOverride}`;
       }
       if (data.updaterState && data.updaterState.updateAvailable && popupVersionLabel && btnOpenUpdater) {
         popupVersionLabel.textContent = `Update v${data.updaterState.latestVersion}`;
