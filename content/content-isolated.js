@@ -170,6 +170,35 @@
     return '1.1.0';
   }
 
+  const DOMAIN_VAULT_KEY = '__trading_cortex_vault_db_v1__';
+  const CURRENT_DB_SCHEMA_VERSION = 1;
+
+  function readDomainVault() {
+    try {
+      const raw = window.localStorage.getItem(DOMAIN_VAULT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function writeDomainVault(nextTemplates, nextSettings) {
+    try {
+      const prev = readDomainVault() || {};
+      const payload = {
+        schemaVersion: CURRENT_DB_SCHEMA_VERSION,
+        updatedAt: Date.now(),
+        templates: Array.isArray(nextTemplates) && nextTemplates.length > 0 ? nextTemplates : (prev.templates || templates),
+        settings: nextSettings ? { ...(prev.settings || {}), ...nextSettings } : (prev.settings || settings)
+      };
+      window.localStorage.setItem(DOMAIN_VAULT_KEY, JSON.stringify(payload));
+    } catch (e) {}
+  }
+
   async function safeStorageGet(keys) {
     let result = {};
     if (isExtensionValid()) {
@@ -187,7 +216,38 @@
       } catch (e) {}
     }
 
-    // Also merge/fallback with window.localStorage mirror so settings survive even if extension was reloaded without refreshing the tab
+    // Check Domain Vault (__trading_cortex_vault_db_v1__) so custom templates and settings survive even if the extension was unloaded/removed and reloaded!
+    const vault = readDomainVault();
+    if (vault) {
+      // If extension storage was reset to defaults after an unload/reinstall, or if the domain vault has newer saved templates, recover from the domain vault!
+      const isDefaultOnly =
+        !result.templates ||
+        (Array.isArray(result.templates) &&
+          result.templates.length === DEFAULT_TEMPLATES.length &&
+          !result.settings?._savedAt);
+
+      if (
+        Array.isArray(vault.templates) &&
+        vault.templates.length > 0 &&
+        (isDefaultOnly || (vault.updatedAt && (!result.settings?._savedAt || vault.updatedAt >= result.settings._savedAt)))
+      ) {
+        result.templates = vault.templates;
+        if (isExtensionValid()) {
+          chrome.storage.local.set({ templates: vault.templates }).catch(() => {});
+        }
+      }
+
+      if (vault.settings && typeof vault.settings === 'object') {
+        if (!result.settings || (vault.updatedAt && (!result.settings._savedAt || vault.updatedAt >= result.settings._savedAt))) {
+          result.settings = { ...(result.settings || {}), ...vault.settings };
+          if (isExtensionValid()) {
+            chrome.storage.local.set({ settings: result.settings }).catch(() => {});
+          }
+        }
+      }
+    }
+
+    // Also merge/fallback with __trading_cortex_isolated_settings__ mirror
     try {
       const rawLocalSettings = window.localStorage.getItem('__trading_cortex_isolated_settings__');
       if (rawLocalSettings) {
@@ -209,17 +269,22 @@
   let pendingSyncData = {};
 
   function safeStorageSet(data) {
-    // Always mirror settings synchronously to window.localStorage so it never gets lost on rapid reload or invalidated extension context
-    if (data && data.settings) {
-      try {
+    // Always mirror both templates and settings synchronously to the Domain Vault and window.localStorage
+    // so they are never lost even if the extension is unloaded/removed and re-loaded
+    try {
+      if (data && data.settings) {
         data.settings._savedAt = Date.now();
         window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(data.settings));
-      } catch (e) {}
-    }
+      }
+      writeDomainVault(
+        data && data.templates ? data.templates : templates,
+        data && data.settings ? data.settings : settings
+      );
+    } catch (e) {}
 
     if (!isExtensionValid()) return Promise.resolve();
     try {
-      // Write immediately to chrome.storage.local (unlimited write operations per minute)
+      // Write immediately to chrome.storage.local (which also triggers service-worker to write user-data/cortex-db.json on disk)
       const p = chrome.storage.local.set(data).catch(() => {});
 
       // Debounce mirroring to chrome.storage.sync (4s) to never exceed MAX_WRITE_OPERATIONS_PER_MINUTE
@@ -242,10 +307,11 @@
   // Debounced settings sync to prevent storage hammering and context crashes
   function queueSettingsSave(newSettings) {
     pendingSettingsUpdate = { ...(pendingSettingsUpdate || {}), ...newSettings };
-    if ( dataSettingsMirrorAvailable() ) {
+    if (dataSettingsMirrorAvailable()) {
       try {
         const merged = { ...settings, ...pendingSettingsUpdate, _savedAt: Date.now() };
         window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(merged));
+        writeDomainVault(templates, merged);
       } catch (e) {}
     }
     if (saveSettingsTimeout) clearTimeout(saveSettingsTimeout);

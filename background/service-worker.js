@@ -152,43 +152,213 @@ const DEFAULT_SETTINGS = {
     stayInDrawingMode: false,
     lockDrawings: false,
     hideDrawings: false,
-    activeTool: null
+    activeTool: null,
+    groupTools: {}
   }
 };
+
+// -------------------------------------------------------------
+// Schema-Versioned Local File System JSON Database & Migrations
+// File path inside linked extension folder: user-data/cortex-db.json
+// -------------------------------------------------------------
+const CURRENT_DB_SCHEMA_VERSION = 1;
+const IDB_NAME = "vest_studio_updater_db";
+const IDB_STORE = "handles";
+const IDB_KEY = "extension_dir_handle";
+const DB_FOLDER_NAME = "user-data";
+const DB_FILE_NAME = "cortex-db.json";
+
+function openUpdaterDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getSavedFolderHandle() {
+  try {
+    const db = await openUpdaterDB();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Normalizes and migrates any database object from older schema versions up to CURRENT_DB_SCHEMA_VERSION
+ */
+function runDatabaseMigrations(rawDb) {
+  const db = rawDb && typeof rawDb === "object" ? { ...rawDb } : {};
+  const fromVersion = Number(db.schemaVersion) || 0;
+  const history = Array.isArray(db.migrations) ? [...db.migrations] : [];
+
+  // Migration v0 -> v1: Ensure all templates have middleLine, horz/vert label alignment, and ray fields,
+  // and ensure settings has sidebarState.groupTools and rememberLastChartSettings
+  if (fromVersion < 1) {
+    if (Array.isArray(db.templates) && db.templates.length > 0) {
+      db.templates = db.templates.map(t => ({
+        extendRight: Boolean(t.extendRight),
+        extendLeft: Boolean(t.extendLeft),
+        showMiddleLine: Boolean(t.showMiddleLine),
+        middleLineColor: t.middleLineColor || t.color || "#22c55e",
+        middleLineWidth: Number(t.middleLineWidth) || 1,
+        middleLineStyle: t.middleLineStyle !== undefined ? Number(t.middleLineStyle) : 2,
+        horzLabelsAlign: t.horzLabelsAlign || "right",
+        vertLabelsAlign: t.vertLabelsAlign || "middle",
+        ...t
+      }));
+    } else {
+      db.templates = DEFAULT_TEMPLATES;
+    }
+
+    db.settings = {
+      ...DEFAULT_SETTINGS,
+      ...(db.settings || {}),
+      showFloatingBar: false,
+      sidebarState: {
+        ...DEFAULT_SETTINGS.sidebarState,
+        ...((db.settings && db.settings.sidebarState) || {}),
+        groupTools: {
+          ...((db.settings && db.settings.sidebarState && db.settings.sidebarState.groupTools) || {})
+        }
+      }
+    };
+
+    history.push({
+      version: 1,
+      migratedAt: new Date().toISOString(),
+      description: "Initial v1 schema normalization for templates, middleLine, label alignment, and sidebarState.groupTools"
+    });
+  }
+
+  db.schemaVersion = CURRENT_DB_SCHEMA_VERSION;
+  db.migrations = history;
+  db.updatedAt = db.updatedAt || Date.now();
+  return db;
+}
+
+async function readLocalDiskDatabase(dirHandleOverride = null) {
+  try {
+    const dirHandle = dirHandleOverride || (await getSavedFolderHandle());
+    if (!dirHandle) return null;
+
+    if (typeof dirHandle.queryPermission === "function") {
+      const perm = await dirHandle.queryPermission({ mode: "read" });
+      if (perm !== "granted") return null;
+    }
+
+    const userDataDir = await dirHandle.getDirectoryHandle(DB_FOLDER_NAME, { create: false });
+    const fileHandle = await userDataDir.getFileHandle(DB_FILE_NAME, { create: false });
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    if (!text || !text.trim()) return null;
+
+    const parsed = JSON.parse(text);
+    return runDatabaseMigrations(parsed);
+  } catch (e) {
+    return null;
+  }
+}
+
+let diskWriteTimer = null;
+async function writeLocalDiskDatabase(templates, settings, dirHandleOverride = null) {
+  try {
+    const dirHandle = dirHandleOverride || (await getSavedFolderHandle());
+    if (!dirHandle) return false;
+
+    if (typeof dirHandle.queryPermission === "function") {
+      const perm = await dirHandle.queryPermission({ mode: "readwrite" });
+      if (perm !== "granted") return false;
+    }
+
+    const existingDiskDb = await readLocalDiskDatabase(dirHandle);
+    const dbPayload = runDatabaseMigrations({
+      schemaVersion: CURRENT_DB_SCHEMA_VERSION,
+      updatedAt: Date.now(),
+      extensionVersion: chrome.runtime.getManifest().version || "1.1.0",
+      migrations: existingDiskDb ? existingDiskDb.migrations : [],
+      templates: Array.isArray(templates) && templates.length > 0 ? templates : (existingDiskDb?.templates || DEFAULT_TEMPLATES),
+      settings: settings || existingDiskDb?.settings || DEFAULT_SETTINGS
+    });
+
+    const userDataDir = await dirHandle.getDirectoryHandle(DB_FOLDER_NAME, { create: true });
+    const fileHandle = await userDataDir.getFileHandle(DB_FILE_NAME, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(dbPayload, null, 2));
+    await writable.close();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Automatically sync any template or settings changes in chrome.storage.local to user-data/cortex-db.json
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (!changes.templates && !changes.settings) return;
+
+  if (diskWriteTimer) clearTimeout(diskWriteTimer);
+  diskWriteTimer = setTimeout(async () => {
+    diskWriteTimer = null;
+    try {
+      const data = await chrome.storage.local.get(["templates", "settings"]).catch(() => ({}));
+      if (data.templates || data.settings) {
+        await writeLocalDiskDatabase(data.templates, data.settings);
+      }
+    } catch (e) {}
+  }, 600);
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
     const localData = await chrome.storage.local.get(["templates", "settings"]).catch(() => ({}));
     const syncData = await chrome.storage.sync.get(["templates", "settings"]).catch(() => ({}));
+    const diskDb = await readLocalDiskDatabase();
 
+    // Priority: 1. Disk Database (if newer or if local storage was wiped), 2. chrome.storage.local, 3. chrome.storage.sync
     const existingTemplates =
       (Array.isArray(localData.templates) && localData.templates.length > 0 && localData.templates) ||
+      (diskDb && Array.isArray(diskDb.templates) && diskDb.templates.length > 0 && diskDb.templates) ||
       (Array.isArray(syncData.templates) && syncData.templates.length > 0 && syncData.templates) ||
       null;
 
-    const existingSettings = localData.settings || syncData.settings || null;
+    const existingSettings =
+      localData.settings ||
+      (diskDb && diskDb.settings) ||
+      syncData.settings ||
+      null;
 
-    const finalTemplates = existingTemplates
-      ? existingTemplates.map(t => ({
-          extendRight: Boolean(t.extendRight),
-          extendLeft: Boolean(t.extendLeft),
-          showMiddleLine: Boolean(t.showMiddleLine),
-          middleLineColor: t.middleLineColor || t.color || "#22c55e",
-          middleLineWidth: Number(t.middleLineWidth) || 1,
-          middleLineStyle: t.middleLineStyle !== undefined ? Number(t.middleLineStyle) : 2,
-          ...t
-        }))
-      : DEFAULT_TEMPLATES;
+    const migrated = runDatabaseMigrations({
+      schemaVersion: diskDb ? diskDb.schemaVersion : 0,
+      migrations: diskDb ? diskDb.migrations : [],
+      templates: existingTemplates || DEFAULT_TEMPLATES,
+      settings: existingSettings || DEFAULT_SETTINGS
+    });
 
-    const finalSettings = existingSettings
-      ? { ...DEFAULT_SETTINGS, ...existingSettings, showFloatingBar: false }
-      : DEFAULT_SETTINGS;
+    const finalTemplates = migrated.templates;
+    const finalSettings = migrated.settings;
 
     // Always store in chrome.storage.local (unlimited write quota)
     await chrome.storage.local.set({
       templates: finalTemplates,
-      settings: finalSettings
+      settings: finalSettings,
+      dbSchemaVersion: migrated.schemaVersion
     }).catch(() => {});
+
+    // Persist migrated state back to disk if folder is linked
+    await writeLocalDiskDatabase(finalTemplates, finalSettings);
 
     // Only write to chrome.storage.sync if it wasn't initialized yet
     if (!syncData.templates || !syncData.settings) {
@@ -320,16 +490,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!request) return;
 
   if (request.action === "getTemplatesAndSettings") {
-    chrome.storage.local.get(["templates", "settings"]).then((data) => {
-      sendResponse({
-        templates: data.templates || DEFAULT_TEMPLATES,
-        settings: data.settings || DEFAULT_SETTINGS
-      });
+    chrome.storage.local.get(["templates", "settings"]).then(async (data) => {
+      if (data && data.templates && data.templates.length > 0 && data.settings) {
+        sendResponse({
+          templates: data.templates,
+          settings: data.settings
+        });
+      } else {
+        const diskDb = await readLocalDiskDatabase();
+        sendResponse({
+          templates: (diskDb && diskDb.templates) || data.templates || DEFAULT_TEMPLATES,
+          settings: (diskDb && diskDb.settings) || data.settings || DEFAULT_SETTINGS
+        });
+      }
     }).catch(() => {
       sendResponse({
         templates: DEFAULT_TEMPLATES,
         settings: DEFAULT_SETTINGS
       });
+    });
+    return true;
+  }
+
+  if (request.action === "syncDiskDatabaseNow") {
+    chrome.storage.local.get(["templates", "settings"]).then(async (data) => {
+      const diskDb = await readLocalDiskDatabase();
+      // If disk has custom templates and chrome.storage only has defaults or is empty, hydrate from disk
+      const templatesToUse =
+        (Array.isArray(data.templates) && data.templates.length > 0 ? data.templates : null) ||
+        (diskDb && Array.isArray(diskDb.templates) && diskDb.templates.length > 0 ? diskDb.templates : DEFAULT_TEMPLATES);
+      const settingsToUse = data.settings || (diskDb && diskDb.settings) || DEFAULT_SETTINGS;
+
+      const wrote = await writeLocalDiskDatabase(templatesToUse, settingsToUse);
+      sendResponse({ ok: wrote, schemaVersion: CURRENT_DB_SCHEMA_VERSION });
+    }).catch(() => {
+      sendResponse({ ok: false });
     });
     return true;
   }

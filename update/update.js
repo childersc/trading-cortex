@@ -467,7 +467,96 @@
   }
 
   // -------------------------------------------------------------
-  // Run the 4-Stage OTA Sync Pipeline
+  // -------------------------------------------------------------
+  // Local File System JSON Database Sync & Migration (user-data/cortex-db.json)
+  // -------------------------------------------------------------
+  const DB_FOLDER_NAME = 'user-data';
+  const DB_FILE_NAME = 'cortex-db.json';
+  const CURRENT_DB_SCHEMA_VERSION = 1;
+
+  async function syncLocalJsonDatabase(dirHandle) {
+    if (!dirHandle) return;
+    try {
+      const perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') return;
+
+      const userDataDir = await dirHandle.getDirectoryHandle(DB_FOLDER_NAME, { create: true });
+      let existingDiskDb = null;
+      try {
+        const existingFileHandle = await userDataDir.getFileHandle(DB_FILE_NAME, { create: false });
+        const existingFile = await existingFileHandle.getFile();
+        const rawText = await existingFile.text();
+        if (rawText && rawText.trim()) {
+          existingDiskDb = JSON.parse(rawText);
+        }
+      } catch (e) {
+        // File does not exist yet
+      }
+
+      const storageData = await chrome.storage.local.get(['templates', 'settings']).catch(() => ({}));
+
+      // If chrome.storage was wiped (e.g. extension was unloaded/reloaded) or disk database has newer custom templates, restore from disk!
+      let finalTemplates = storageData.templates;
+      let finalSettings = storageData.settings;
+      let restoredFromDisk = false;
+
+      if (existingDiskDb && Array.isArray(existingDiskDb.templates) && existingDiskDb.templates.length > 0) {
+        const isStorageDefaultOrEmpty =
+          !Array.isArray(finalTemplates) ||
+          finalTemplates.length === 0 ||
+          (!finalSettings?._savedAt && existingDiskDb.updatedAt);
+
+        if (isStorageDefaultOrEmpty) {
+          finalTemplates = existingDiskDb.templates;
+          restoredFromDisk = true;
+        }
+      }
+
+      if (existingDiskDb && existingDiskDb.settings && typeof existingDiskDb.settings === 'object') {
+        if (!finalSettings || (!finalSettings._savedAt && existingDiskDb.updatedAt)) {
+          finalSettings = { ...(finalSettings || {}), ...existingDiskDb.settings };
+          restoredFromDisk = true;
+        }
+      }
+
+      if (restoredFromDisk) {
+        await chrome.storage.local.set({
+          templates: finalTemplates,
+          settings: finalSettings,
+          dbSchemaVersion: CURRENT_DB_SCHEMA_VERSION
+        }).catch(() => {});
+        logTerm(`Restored templates & settings from local disk database (${DB_FOLDER_NAME}/${DB_FILE_NAME})`, 'ok');
+      }
+
+      // Write latest migrated database state back to user-data/cortex-db.json
+      const migrations = Array.isArray(existingDiskDb?.migrations) ? [...existingDiskDb.migrations] : [];
+      if (!existingDiskDb || (Number(existingDiskDb.schemaVersion) || 0) < CURRENT_DB_SCHEMA_VERSION) {
+        migrations.push({
+          version: CURRENT_DB_SCHEMA_VERSION,
+          migratedAt: new Date().toISOString(),
+          extensionVersion: installedVersion
+        });
+      }
+
+      const nextDbPayload = {
+        schemaVersion: CURRENT_DB_SCHEMA_VERSION,
+        updatedAt: Date.now(),
+        extensionVersion: installedVersion,
+        migrations,
+        templates: finalTemplates || existingDiskDb?.templates || [],
+        settings: finalSettings || existingDiskDb?.settings || {}
+      };
+
+      const fileHandle = await userDataDir.getFileHandle(DB_FILE_NAME, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(nextDbPayload, null, 2));
+      await writable.close();
+      logTerm(`Synced local database: ${DB_FOLDER_NAME}/${DB_FILE_NAME} (schema v${CURRENT_DB_SCHEMA_VERSION})`, 'ok');
+    } catch (e) {}
+  }
+
+  // -------------------------------------------------------------
+  // Run the 4-Stage Update Pipeline
   // -------------------------------------------------------------
   async function runSelfUpdate() {
     if (isUpdating) return;
@@ -507,6 +596,9 @@
 
       renderFolderStepUI();
       logTerm(`Workspace directory ready: ${savedDirHandle.name}`, 'ok');
+
+      // Backup & migrate local JSON database (user-data/cortex-db.json) before extracting update
+      await syncLocalJsonDatabase(savedDirHandle);
 
       // STAGE 02: Fetch & Verify
       updateStepState(step2Row, step2Badge, 'active', 2);
@@ -563,6 +655,9 @@
       updateStepState(step3Row, step3Badge, 'done', 3);
       step3Label.textContent = `Synced ${total} files`;
       logTerm(`Successfully wrote ${total} files into ${savedDirHandle.name}`, 'ok');
+
+      // Ensure local JSON database is synced after file extraction
+      await syncLocalJsonDatabase(savedDirHandle);
 
       // STAGE 04: Hot Reload
       updateStepState(step4Row, step4Badge, 'active', 4);
@@ -626,6 +721,7 @@
         await saveFolderHandle(handle);
         renderFolderStepUI();
         logTerm(`Linked local workspace folder: ${handle.name}`, 'ok');
+        await syncLocalJsonDatabase(handle);
       }
     } catch (e) {}
   });
@@ -682,6 +778,7 @@
     renderFolderStepUI();
     if (savedDirHandle) {
       logTerm(`Restored directory link from IndexedDB: ${savedDirHandle.name}`, 'ok');
+      await syncLocalJsonDatabase(savedDirHandle);
     }
 
     await checkGitHubRelease();
