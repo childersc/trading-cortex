@@ -52,12 +52,12 @@ Write-Host ">>> Packaged $ZipPath" -ForegroundColor Green
 # 3. Commit, Tag, and Push to GitHub (Push branch first, then push tag separately so GitHub Actions triggers on the tag event)
 Push-Location $ProjectRoot
 try {
+    $ErrorActionPreference = "Continue"
     git add -A
     git commit -m "Release $Tag`n`n$Notes" --allow-empty
     git push origin main
     git tag -f $Tag
-    git push origin :refs/tags/$Tag 2>$null
-    git push origin $Tag
+    git push origin $Tag --force
     Write-Host ">>> Pushed $Tag to GitHub (childersc/trading-cortex)!" -ForegroundColor Green
 } finally {
     Pop-Location
