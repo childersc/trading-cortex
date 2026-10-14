@@ -246,12 +246,12 @@
   }
 
   const DEFAULT_RELEASE_NOTES_ITEMS = [
-    '**Chart Viewport & Settings Memory**: Automatically remembers and restores your exact chart position (left/right pan, up/down price scale, zoom level), timeframe, and candle style across page refreshes.',
-    '**Left-Sidebar Drawing Tool & Magnet Persistence**: Remembers the active drawing tool, Magnet mode (Weak/Strong), and selected submenu slot icons across all drawing groups on the left toolbar without leaving pull-out menus open.',
-    '**CORTEX Header Pill & Live Update Indicator**: Added sleek header pill displaying the active version (`v1.1.0`) with automatic background update checks on page refresh and menu click, plus a pulsing `"Update ready"` glow when a new build drops.',
-    '**Native TradingView `Template >` Context Menu**: Right-click any rectangle on the chart to apply, save, or delete custom ICT/SMC box presets (`Bullish OB`, `Bearish OB`, `Fair Value Gap`, `Liquidity`, `Breaker Block`, `Volume Imbalance`).',
-    '**Extended Rectangle Far-Right Label Fix**: Keeps text labels on right-extended rectangles pinned cleanly inside the visible chart canvas next to the price scale.',
-    '**Movable Settings & Update Center**: Added draggable Settings dialog and 4-stage Update Center connected to `childersc/trading-cortex`.'
+    '**In-Memory Drawing Toolbox Persistence (`v1.1.6`)**: Pre-hydrates TradingView\'s internal `toolbarStorage` across `window.top.localStorage` and `blob:` chart iframes at `document_start` and updates all 7 left-sidebar tool slots via React Fiber (`__reactFiber$`) in-memory without ever opening DOM dropdown menus.',
+    '**Update Center Controls & Telemetry (`v1.1.6`)**: Added a **"Check for Update"** button with live status banner and a **"Last Checked"** date/time readout in both the hero banner and Background Heartbeat tile.',
+    '**Zero-Flash In-Place Update Flow (`v1.1.6`)**: Keeps the Update Center tab open in-place during deployment without closing and reopening the tab, while automatically reloading active trading browser windows (`next.vestmarkets.com` & `vest.exchange`).',
+    '**Local File System JSON Database & Migrations (`user-data/cortex-db.json`)**: Automatically backs up and migrates your custom templates and workspace settings to `user-data/cortex-db.json` (plus Domain Vault storage) so templates are never lost if the extension is unloaded or updated.',
+    '**Chart Viewport & Settings Memory**: Remembers and restores your exact chart position (left/right pan, up/down price scale, zoom level), timeframe, and candle style across page refreshes.',
+    '**CORTEX Dropdown Quick-Update Button**: Added a highlighted **`⚡ Update Ready (vX.Y.Z) ↗`** button directly inside the `CORTEX` dropdown menu whenever a new release is detected.'
   ];
 
   function renderReleaseNotes(release) {
