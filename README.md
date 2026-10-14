@@ -48,18 +48,20 @@ Vest Markets embeds TradingView charts, but by default it lacks a drawing templa
 
 ## Installation in Chrome
 
-1. Open Google Chrome.
-2. In the address bar, go to:
-   ```
-   chrome://extensions/
-   ```
-3. Enable **Developer mode** using the toggle switch in the top-right corner.
-4. Click the **Load unpacked** button in the top-left corner (or click the reload icon if you previously loaded it).
-5. Select the folder containing this extension:
-   ```
-   C:\Chris's Personal Dev Stuff\Claude Development Projects\Browser Plugins\Trading Cortex
-   ```
-6. The extension **Trading Cortex** is now active!
+1. **Download the Latest Release**:
+   - Go to the [Trading Cortex Releases page](https://github.com/childersc/trading-cortex/releases/latest).
+   - Download the latest **`trading-cortex-x.x.x.zip`** package (or clone this repository).
+2. **Extract the Archive**:
+   - Unzip the downloaded `.zip` file to a permanent folder on your computer (for example, `Documents/Trading Cortex`).
+3. **Load into Chrome**:
+   - Open Google Chrome and navigate to:
+     ```
+     chrome://extensions/
+     ```
+   - Enable **Developer mode** using the toggle switch in the top-right corner.
+   - Click the **Load unpacked** button in the top-left corner.
+   - Select the extracted **`Trading Cortex`** folder (the folder containing `manifest.json`).
+4. **Trading Cortex** is now active! You can also link that extracted folder inside the **OTA Release Center** (`CORTEX` → **Cortex Settings...** → **Open OTA Release Center**) for 1-click in-place updates whenever a new version is released.
 
 ---
 
