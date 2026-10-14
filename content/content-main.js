@@ -2468,7 +2468,10 @@
     }
 
     // 3. Check menu item label text if clicked inside a popup/flyout submenu
-    const rowEl = el.closest('[role="menuitem"], [role="option"], [data-role="menuitem"], [class*="item"], [class*="row"]');
+    const rowEl =
+      el.closest('[data-role="menuitem"], [role="menuitem"], [role="option"], [class*="item-"], [class*="row-"], [class*="tool-"]') ||
+      (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="drawer"]') ? el.parentElement : null);
+
     if (rowEl) {
       // Check dedicated label/title child first so hotkey spans ("Alt + Shift + R") don't pollute textContent
       const labelCandidates = rowEl.querySelectorAll('[class*="label"], [class*="title"], span, div');
@@ -2485,6 +2488,18 @@
       if (rawText && rawText.length < 52) {
         const norm = normalizeToolId(rawText);
         if (norm) return norm;
+      }
+    }
+
+    // 4. Fallback: check direct leaf text of clicked element or its children
+    const leafNodes = el.children.length === 0 ? [el] : Array.from(el.querySelectorAll('span, div'));
+    for (const node of leafNodes) {
+      if (node.children && node.children.length === 0) {
+        const txt = (node.textContent || '').trim();
+        if (txt && txt.length < 48) {
+          const norm = normalizeToolId(txt);
+          if (norm) return norm;
+        }
       }
     }
 
@@ -2771,7 +2786,7 @@
 
   // Ensure a left-sidebar group slot actually displays `norm` as its selected icon.
   // If `selectLineTool` alone didn't swap the sidebar slot icon (e.g. slot still shows Brush instead of Rectangle),
-  // we silently open that slot's flyout submenu and click the target item Row.
+  // we silently open that slot's flyout submenu and click the target item Row once (which closes the submenu naturally).
   function ensureSidebarGroupSlotDisplaysTool(norm) {
     if (!norm || norm === 'cursor' || norm === 'dot' || norm === 'arrow' || norm === 'eraser') return;
 
@@ -2889,19 +2904,27 @@
           }
 
           if (matchedMenuItem) {
+            // Click the menu item row and its inner label if needed to select the tool
             dispatchFullPointerClick(matchedMenuItem);
             const innerLabel = matchedMenuItem.querySelector('[class*="label-"], [class*="title-"], span');
             if (innerLabel && innerLabel !== matchedMenuItem) {
-              dispatchFullPointerClick(innerLabel);
+              try { innerLabel.click(); } catch (e) {}
             }
-            // If the menu is still in the DOM after clicking the item, click the arrowTrigger once to toggle it shut
+            // Wait 30ms for TradingView's menu handler to process the selection; if the menu is STILL open, close it cleanly
             setTimeout(() => {
               try {
-                if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
-                  dispatchFullPointerClick(arrowTrigger);
+                const stillOpenMenu = ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]');
+                if (stillOpenMenu) {
+                  // Dispatch Escape key on the menu/document to close the flyout without toggling arrowTrigger back open
+                  const escOpts = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true };
+                  stillOpenMenu.dispatchEvent(new KeyboardEvent('keydown', escOpts));
+                  ownerDoc.dispatchEvent(new KeyboardEvent('keydown', escOpts));
+                  if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
+                    dispatchFullPointerClick(arrowTrigger);
+                  }
                 }
               } catch (e) {}
-            }, 25);
+            }, 30);
             log(`Updated sidebar slot [${groupKey}] via submenu click -> ${norm}`);
           } else {
             // Item wasn't found; toggle the arrow trigger closed
@@ -2910,7 +2933,7 @@
         } catch (e) {} finally {
           setTimeout(() => {
             setTemporaryFlyoutStealthStyle(ownerDoc, false);
-          }, 60);
+          }, 90);
         }
       }, 65);
     } catch (e) {
@@ -3278,7 +3301,7 @@
         setTimeout(() => {
           selectSingleLineTool(toolId, true);
         }, stepDelay);
-        stepDelay += 180;
+        stepDelay += 240;
       });
 
       // 2. Select the user's last active drawing tool (or cursor) after group slots are populated
