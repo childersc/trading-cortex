@@ -1991,16 +1991,15 @@
           applyTemplateOverrides(activeTpl);
         }
         const isRemembering = currentSettings.rememberSidebarTools !== false;
-        const nextSidebarJson = JSON.stringify(currentSettings.sidebarState || {});
         if (
           isRemembering &&
-          (firstConfigArrival || !hasCompletedInitialSidebarRestore || !wasRemembering || prevSidebarJson !== nextSidebarJson)
+          (!hasCompletedInitialSidebarRestore || !wasRemembering)
         ) {
           restoreAttempts = 0;
           restoreSidebarSelections();
         }
         const isRememberingChart = currentSettings.rememberLastChartSettings !== false;
-        if (isRememberingChart && (firstConfigArrival || !hasCompletedInitialChartSettingsRestore || !wasRememberingChart)) {
+        if (isRememberingChart && (!hasCompletedInitialChartSettingsRestore || !wasRememberingChart)) {
           chartSettingsRestoreAttempts = 0;
           restoreLastChartSettings();
         }
@@ -2718,26 +2717,6 @@
     }
   }
 
-  // Force-close any open TradingView drawing toolbar flyout menu so it never stays open on refresh
-  function closeAnyOpenSidebarFlyoutMenus(ownerDoc) {
-    const docs = ownerDoc ? [ownerDoc] : getSidebarDocuments();
-    docs.forEach(doc => {
-      try {
-        // 1. Dispatch Escape keydown to close any active TradingView popup menu cleanly
-        doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
-        // 2. Also check if any sidebar submenu trigger is still marked open/expanded and click it or click body outside
-        const openMenus = doc.querySelectorAll('[data-name="menu-inner"], [class*="menuWrap-"][class*="isOpened"], [role="menu"]');
-        if (openMenus.length > 0 && doc.body) {
-          const opts = { bubbles: true, cancelable: true, view: doc.defaultView || window, clientX: 400, clientY: 12 };
-          if (typeof PointerEvent === 'function') {
-            doc.body.dispatchEvent(new PointerEvent('pointerdown', opts));
-          }
-          doc.body.dispatchEvent(new MouseEvent('mousedown', opts));
-        }
-      } catch (e) {}
-    });
-  }
-
   // Temporarily hide popup menus in `ownerDoc` during programmatic slot restoration so the flyout never flashes on screen
   function setTemporaryFlyoutStealthStyle(ownerDoc, enabled) {
     if (!ownerDoc || !ownerDoc.head) return;
@@ -2763,7 +2742,7 @@
 
   // Ensure a left-sidebar group slot actually displays `norm` as its selected icon.
   // If `selectLineTool` alone didn't swap the sidebar slot icon (e.g. slot still shows Brush instead of Rectangle),
-  // we silently open that slot's flyout submenu, click the target item Row, and immediately close the flyout.
+  // we silently open that slot's flyout submenu and click the target item Row.
   function ensureSidebarGroupSlotDisplaysTool(norm) {
     if (!norm || norm === 'cursor' || norm === 'dot' || norm === 'arrow' || norm === 'eraser') return;
 
@@ -2878,20 +2857,20 @@
           }
 
           if (matchedMenuItem) {
-            // Click the inner label/row and also the row container so TradingView's React/ internal handler always receives it and closes the menu
             dispatchFullPointerClick(matchedMenuItem);
-            const labelChild = matchedMenuItem.querySelector('[class*="label-"], [class*="title-"]');
-            if (labelChild && labelChild !== matchedMenuItem) {
-              dispatchFullPointerClick(labelChild);
+            // If the menu is still in the DOM after clicking the item, click the arrowTrigger once to toggle it shut
+            if (ownerDoc.querySelector('[data-name="menu-inner"], [role="menu"]')) {
+              dispatchFullPointerClick(arrowTrigger);
             }
             log(`Updated sidebar slot [${groupKey}] via submenu click -> ${norm}`);
+          } else {
+            // Item wasn't found; toggle the arrow trigger closed
+            dispatchFullPointerClick(arrowTrigger);
           }
         } catch (e) {} finally {
-          // Always ensure the pull-out submenu is closed afterwards and remove stealth CSS
           setTimeout(() => {
-            closeAnyOpenSidebarFlyoutMenus(ownerDoc);
             setTemporaryFlyoutStealthStyle(ownerDoc, false);
-          }, 35);
+          }, 30);
         }
       }, 45);
     } catch (e) {
@@ -3021,16 +3000,25 @@
         if (isRestoringSidebar) return;
         if (currentSettings.rememberSidebarTools === false) return;
 
-        // Detect if user clicked a specific drawing tool button or flyout submenu item
-        const clickedToolId = extractToolIdFromDomElement(e.target);
+        const target = e.target;
+        if (!target || target.nodeType !== 1) return;
 
-        // Capture immediately after TradingView updates its DOM slot & activeLineTool state
+        // Detect if user clicked a specific drawing tool button or flyout submenu item
+        const clickedToolId = extractToolIdFromDomElement(target);
+        const isMagnetOrControl = Boolean(
+          target.closest('[data-name*="magnet"], [aria-label*="Magnet" i], [data-name*="drawing"], [data-name*="lock"], [data-name*="hide"]')
+        );
+
+        // Only run saveCurrentSidebarState when the user actually interacted with a drawing tool or sidebar control!
+        if (!clickedToolId && !isMagnetOrControl) return;
+
+        // Capture after TradingView updates its DOM slot & activeLineTool state
         setTimeout(() => {
           saveCurrentSidebarState(clickedToolId);
         }, 120);
         setTimeout(() => {
           saveCurrentSidebarState(clickedToolId);
-        }, 400);
+        }, 380);
       };
 
       try {
@@ -3041,12 +3029,12 @@
   }
 
   function setupSidebarObserver() {
-    // Always ensure any newly mounted chart iframes have our pointerdown/click listeners attached
+    // Ensure any newly mounted chart iframes have our pointerdown/click listeners attached
     attachSidebarListenersToAllDocs();
 
     if (sidebarObserver) return;
 
-    // 1. Subscribe to TradingView's native drawing event if available
+    // Subscribe to TradingView's native drawing event if available
     try {
       if (activeChartApi && typeof activeChartApi.subscribe === 'function') {
         activeChartApi.subscribe('drawing', () => {
@@ -3054,14 +3042,6 @@
         });
       }
     } catch (e) {}
-
-    // 2. Periodically re-check for late-mounted iframes and poll for tool changes
-    setInterval(() => {
-      attachSidebarListenersToAllDocs();
-      if (!isRestoringSidebar && hasCompletedInitialSidebarRestore && currentSettings.rememberSidebarTools !== false) {
-        saveCurrentSidebarState();
-      }
-    }, 1500);
 
     sidebarObserver = true;
   }
@@ -3266,7 +3246,7 @@
         setTimeout(() => {
           selectSingleLineTool(toolId, true);
         }, stepDelay);
-        stepDelay += 170;
+        stepDelay += 150;
       });
 
       // 2. Select the user's last active drawing tool (or cursor) after group slots are populated
@@ -3325,9 +3305,7 @@
           }
         }
 
-        // Ensure all sidebar flyout menus are closed and mark initial restore complete
         setTimeout(() => {
-          closeAnyOpenSidebarFlyoutMenus();
           isRestoringSidebar = false;
           hasCompletedInitialSidebarRestore = true;
         }, 250);
