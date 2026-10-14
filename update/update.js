@@ -246,12 +246,12 @@
   }
 
   const DEFAULT_RELEASE_NOTES_ITEMS = [
+    '**New "Template Manager..." Dialog (`v1.1.7`)**: Added a TradingView-style glassmorphic **Template Manager** directly inside the `CORTEX` dropdown menu (and right-click `Template > Template Manager...`) with left-sidebar filtering by drawing type, live count badges, inline editor, **"Pull from Selected Chart Drawing"**, 1-click Apply, Duplicate, and Delete.',
+    '**Per-Drawing-Type Right-Click Detection & Full Settings Storage (`v1.1.7`)**: Automatically detects the exact TradingView drawing tool when right-clicking any shape on the chart (`Rectangle`, `Horizontal Line`, `Horizontal Ray`, `Trend Line`, `Ray`, `Parallel Channel`, `Fib Retracement`, `Long/Short Position`, `Callout`, `Text`, etc.), filters the `Template >` submenu to that tool type, and stores both normalized styles and raw TradingView shape properties (`rawProperties`).',
+    '**Fixed Template Saving Overwriting Existing Drawings (`v1.1.7`)**: Fixed the bug where saving a new template (e.g. `5m FVG`) could overwrite another drawing (`3m FVG`) on the chart by removing `linetoolrectangle.text` from global overrides, disabling forced `lastRectangleId` fallbacks, and locking context-menu template actions strictly to the right-clicked shape ID.',
+    '**Removed Hardcoded Default Templates & Schema v2 Migration (`v1.1.7`)**: Cleared all built-in preset templates and added an automatic Schema v2 migration that removes legacy preset IDs and deduplicates user templates across `chrome.storage`, the Domain Vault, and `user-data/cortex-db.json`.',
     '**In-Memory Drawing Toolbox Persistence (`v1.1.6`)**: Pre-hydrates TradingView\'s internal `toolbarStorage` across `window.top.localStorage` and `blob:` chart iframes at `document_start` and updates all 7 left-sidebar tool slots via React Fiber (`__reactFiber$`) in-memory without ever opening DOM dropdown menus.',
-    '**Update Center Controls & Telemetry (`v1.1.6`)**: Added a **"Check for Update"** button with live status banner and a **"Last Checked"** date/time readout in both the hero banner and Background Heartbeat tile.',
-    '**Zero-Flash In-Place Update Flow (`v1.1.6`)**: Keeps the Update Center tab open in-place during deployment without closing and reopening the tab, while automatically reloading active trading browser windows (`next.vestmarkets.com` & `vest.exchange`).',
-    '**Local File System JSON Database & Migrations (`user-data/cortex-db.json`)**: Automatically backs up and migrates your custom templates and workspace settings to `user-data/cortex-db.json` (plus Domain Vault storage) so templates are never lost if the extension is unloaded or updated.',
-    '**Chart Viewport & Settings Memory**: Remembers and restores your exact chart position (left/right pan, up/down price scale, zoom level), timeframe, and candle style across page refreshes.',
-    '**CORTEX Dropdown Quick-Update Button**: Added a highlighted **`⚡ Update Ready (vX.Y.Z) ↗`** button directly inside the `CORTEX` dropdown menu whenever a new release is detected.'
+    '**Update Center Controls & Zero-Flash In-Place Updates**: Includes **"Check for Update"**, **"Last Checked"** date/time telemetry, and zero-flash in-place extension updates.'
   ];
 
   function renderReleaseNotes(release) {
