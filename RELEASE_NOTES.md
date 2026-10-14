@@ -1,1 +1,1 @@
-﻿v1.1.5: Add Check for Update button with live status banner, keep Update Center open in-place during updates without closing/reopening, reload trading browser windows smoothly, and persist all 7 sidebar drawing tool submenu selections + local JSON database.
+﻿v1.1.5: Add Check for Update button with Last Checked date/time readout, keep Update Center open in-place during updates without closing/reopening, reload trading browser windows smoothly, and persist all 7 sidebar drawing tool submenu selections + local JSON database.

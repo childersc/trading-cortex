@@ -58,6 +58,8 @@
 
   const toggleAutoCheck = document.getElementById('toggle-auto-check');
   const heartbeatStateText = document.getElementById('heartbeat-state-text');
+  const heroLastChecked = document.getElementById('hero-last-checked');
+  const tileLastChecked = document.getElementById('tile-last-checked');
   const btnCheckNow = document.getElementById('btn-check-now');
   const btnCheckNowLabel = document.getElementById('btn-check-now-label');
   const btnForgetFolder = document.getElementById('btn-forget-folder');
@@ -70,6 +72,30 @@
 
   const syncTerminal = document.getElementById('sync-terminal');
   const btnClearLog = document.getElementById('btn-clear-log');
+
+  function formatLastCheckedTimestamp(ts) {
+    if (!ts) return '--';
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '--';
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  }
+
+  function updateLastCheckedUI(ts) {
+    const formatted = formatLastCheckedTimestamp(ts);
+    if (heroLastChecked) {
+      heroLastChecked.textContent = `Last Checked: ${formatted}`;
+    }
+    if (tileLastChecked) {
+      tileLastChecked.textContent = formatted;
+    }
+  }
 
   function logTerm(msg, level = '') {
     if (!syncTerminal) return;
@@ -340,10 +366,12 @@
       renderReleaseNotes(release);
 
       const cmp = compareVersions(latestVer, installedVersion);
+      const checkedAt = Date.now();
+      updateLastCheckedUI(checkedAt);
 
       await chrome.storage.local.set({
         updaterState: {
-          lastCheckedAt: Date.now(),
+          lastCheckedAt: checkedAt,
           latestVersion: latestVer,
           updateAvailable: cmp > 0,
           htmlUrl: release.html_url
@@ -800,9 +828,12 @@
   });
 
   async function init() {
-    const data = await chrome.storage.local.get(['settings', 'installedVersionOverride']).catch(() => ({}));
+    const data = await chrome.storage.local.get(['settings', 'installedVersionOverride', 'updaterState']).catch(() => ({}));
     if (data.installedVersionOverride && compareVersions(data.installedVersionOverride, installedVersion) > 0) {
       installedVersion = data.installedVersionOverride;
+    }
+    if (data.updaterState && data.updaterState.lastCheckedAt) {
+      updateLastCheckedUI(data.updaterState.lastCheckedAt);
     }
 
     vboxInstalled.textContent = `v${installedVersion}`;
@@ -825,6 +856,16 @@
 
     await checkGitHubRelease();
   }
+
+  try {
+    if (chrome.storage && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.updaterState && changes.updaterState.newValue?.lastCheckedAt) {
+          updateLastCheckedUI(changes.updaterState.newValue.lastCheckedAt);
+        }
+      });
+    }
+  } catch (e) {}
 
   // When the user closes the Update Center tab after an update, let the service worker silently refresh the manifest runtime
   window.addEventListener('pagehide', () => {
