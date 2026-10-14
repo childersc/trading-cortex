@@ -202,6 +202,16 @@ chrome.runtime.onInstalled.addListener(async () => {
       chrome.alarms.create("vest_studio_update_check", { periodInMinutes: 30 });
       checkGitHubForUpdatesInBackground();
     }
+
+    // If an OTA update just completed and called chrome.runtime.reload(), keep the update page open so the user sees the success banner
+    const postUpdateData = await chrome.storage.local.get(["pendingUpdaterSuccess"]).catch(() => ({}));
+    if (postUpdateData && postUpdateData.pendingUpdaterSuccess) {
+      const updaterUrl = chrome.runtime.getURL("update/update.html");
+      const existingUpdaterTabs = await chrome.tabs.query({ url: updaterUrl }).catch(() => []);
+      if (!existingUpdaterTabs || existingUpdaterTabs.length === 0) {
+        await chrome.tabs.create({ url: updaterUrl, active: true }).catch(() => {});
+      }
+    }
   } catch (err) {
     // Ignore sync quota errors during rapid extension reloads
   }

@@ -54,6 +54,7 @@
   const btnRunUpdate = document.getElementById('btn-run-update');
   const btnRunUpdateLabel = document.getElementById('btn-run-update-label');
   const errorBanner = document.getElementById('error-banner');
+  const successBanner = document.getElementById('success-banner');
 
   const toggleAutoCheck = document.getElementById('toggle-auto-check');
   const heartbeatStateText = document.getElementById('heartbeat-state-text');
@@ -170,9 +171,26 @@
       errorBanner.textContent = '';
       return;
     }
+    if (successBanner) {
+      successBanner.style.display = 'none';
+      successBanner.textContent = '';
+    }
     errorBanner.textContent = msg;
     errorBanner.style.display = 'block';
     logTerm(`ERROR: ${msg}`, 'err');
+  }
+
+  function showSuccess(msg) {
+    if (!successBanner) return;
+    if (!msg) {
+      successBanner.style.display = 'none';
+      successBanner.textContent = '';
+      return;
+    }
+    errorBanner.style.display = 'none';
+    errorBanner.textContent = '';
+    successBanner.textContent = msg;
+    successBanner.style.display = 'flex';
   }
 
   function updateStepState(stepRow, badgeEl, state, numberText) {
@@ -552,25 +570,40 @@
 
       await chrome.action.setBadgeText({ text: '' });
 
+      let reloadedTabsCount = 0;
       try {
         const vestTabs = await chrome.tabs.query({
           url: [
-            'https://*.vestmarkets.com/*',
-            'https://vestmarkets.com/*',
+            'https://next.vestmarkets.com/*',
             'https://*.vest.exchange/*',
             'https://vest.exchange/*'
           ]
         });
         for (const tab of vestTabs) {
-          if (tab.id) chrome.tabs.reload(tab.id);
+          if (tab.id) {
+            chrome.tabs.reload(tab.id);
+            reloadedTabsCount++;
+          }
         }
-        logTerm(`Reloaded ${vestTabs.length} active trading tab(s)`, 'ok');
+        logTerm(`Reloaded ${reloadedTabsCount} active trading tab(s)`, 'ok');
       } catch (e) {}
 
+      // Persist post-update state so the reopened / preserved update page shows the success banner immediately after runtime reload
+      await chrome.storage.local.set({
+        pendingUpdaterSuccess: {
+          version: targetVer,
+          filesSynced: total,
+          reloadedTabs: reloadedTabsCount,
+          completedAt: Date.now()
+        }
+      }).catch(() => {});
+
       updateStepState(step4Row, step4Badge, 'done', 4);
-      statusEyebrow.textContent = 'COMPLETE';
-      statusHeading.textContent = `Deployed v${targetVer}! Reloading runtime...`;
-      logTerm('Calling chrome.runtime.reload()...', 'ok');
+      statusEyebrow.textContent = 'UPDATED';
+      statusHeading.textContent = `Trading Cortex successfully updated to v${targetVer}!`;
+      progressLabelLeft.textContent = `Update complete · v${targetVer} active`;
+      showSuccess(`✓ Trading Cortex has been successfully updated to v${targetVer}! (${total} files synced, ${reloadedTabsCount} trading tab${reloadedTabsCount === 1 ? '' : 's'} reloaded)`);
+      logTerm(`Successfully updated to v${targetVer}! Reloading extension runtime...`, 'ok');
 
       setTimeout(() => {
         chrome.runtime.reload();
@@ -609,10 +642,12 @@
   });
 
   btnCheckNow.addEventListener('click', () => {
+    showSuccess(null);
     checkGitHubRelease();
   });
 
   btnRunUpdate.addEventListener('click', () => {
+    showSuccess(null);
     runSelfUpdate();
   });
 
@@ -641,7 +676,7 @@
 
     logTerm(`Trading Cortex OTA Sync Engine initialized (Local v${installedVersion})`);
 
-    const data = await chrome.storage.local.get(['settings']).catch(() => ({}));
+    const data = await chrome.storage.local.get(['settings', 'pendingUpdaterSuccess']).catch(() => ({}));
     if (data.settings && data.settings.autoCheckUpdates === false) {
       toggleAutoCheck.checked = false;
       if (heartbeatStateText) heartbeatStateText.textContent = 'Paused · Manual Only';
@@ -654,6 +689,36 @@
     }
 
     await checkGitHubRelease();
+
+    // If we just completed a hot-reload from an OTA update, keep the page in its completed state and notify the user
+    if (data.pendingUpdaterSuccess) {
+      const info = data.pendingUpdaterSuccess;
+      await chrome.storage.local.remove('pendingUpdaterSuccess').catch(() => {});
+
+      const ver = info.version || installedVersion;
+      const filesCount = info.filesSynced || 0;
+      const tabsCount = info.reloadedTabs || 0;
+
+      updateStepState(step1Row, step1Badge, 'done', 1);
+      updateStepState(step2Row, step2Badge, 'done', 2);
+      step2Label.textContent = 'Package verified';
+      updateStepState(step3Row, step3Badge, 'done', 3);
+      step3Label.textContent = filesCount ? `Synced ${filesCount} files` : 'Files synced';
+      updateStepState(step4Row, step4Badge, 'done', 4);
+
+      progressFill.style.width = '100%';
+      progressLabelLeft.textContent = `Update complete · v${ver} active`;
+      if (filesCount) {
+        progressLabelRight.textContent = `${filesCount} / ${filesCount} files`;
+      }
+
+      statusEyebrow.textContent = 'UPDATED';
+      statusHeading.textContent = `Trading Cortex successfully updated to v${ver}!`;
+      showSuccess(
+        `✓ Trading Cortex has been successfully updated to v${ver}! Your trading browser windows (${tabsCount} tab${tabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
+      );
+      logTerm(`Update to v${ver} completed! Extension runtime and ${tabsCount} trading tab(s) reloaded.`, 'ok');
+    }
   }
 
   init();
