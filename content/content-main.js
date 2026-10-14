@@ -2866,19 +2866,38 @@
             }
           }
 
-          // 3. Check hooks linked list (memoizedState) for useState setter holding a LineTool string
+          // 3. Check hooks linked list (memoizedState) & WatchedValue objects on fiber/stateNode
           let hook = fiber.memoizedState;
           let hookGuard = 0;
           while (hook && hookGuard < 20) {
-            if (
-              hook.queue &&
-              typeof hook.queue.dispatch === 'function' &&
-              typeof hook.memoizedState === 'string' &&
-              /^LineTool/i.test(hook.memoizedState)
-            ) {
+            if (hook.queue && typeof hook.queue.dispatch === 'function') {
+              if (typeof hook.memoizedState === 'string' && /^LineTool/i.test(hook.memoizedState)) {
+                try {
+                  hook.queue.dispatch(targetToolId);
+                  updated = true;
+                } catch (e) {}
+              } else if (hook.memoizedState && typeof hook.memoizedState === 'object' && typeof hook.memoizedState.name === 'string' && /^LineTool/i.test(hook.memoizedState.name)) {
+                const list = fiber.memoizedProps?.tools || fiber.memoizedProps?.items;
+                if (Array.isArray(list)) {
+                  const foundDesc = list.find(item => item && (item.name === targetToolId || item.id === targetToolId || item.toolName === targetToolId));
+                  if (foundDesc) {
+                    try {
+                      hook.queue.dispatch(foundDesc);
+                      updated = true;
+                    } catch (e) {}
+                  }
+                }
+              }
+            }
+            // Also check if a ref/memoizedState holds a TradingView WatchedValue (`setValue` / `value`)
+            const ms = hook.memoizedState?.current || hook.memoizedState;
+            if (ms && typeof ms === 'object' && typeof ms.setValue === 'function' && typeof ms.value === 'function') {
               try {
-                hook.queue.dispatch(targetToolId);
-                updated = true;
+                const curVal = ms.value();
+                if (typeof curVal === 'string' && /^LineTool/i.test(curVal)) {
+                  ms.setValue(targetToolId);
+                  updated = true;
+                }
               } catch (e) {}
             }
             hook = hook.next;
@@ -2897,7 +2916,7 @@
     return updated;
   }
 
-  // Ensure a left-sidebar group slot displays `norm` as its selected tool using TradingView's internal
+  // Ensure a left-sidebar group slot displays `norm` as its selected tool using TradingView's API +
   // WatchedValue / React Fiber state WITHOUT opening any DOM flyout menus.
   function ensureSidebarGroupSlotDisplaysTool(norm) {
     if (!norm || norm === 'cursor' || norm === 'dot' || norm === 'arrow' || norm === 'eraser') return;
@@ -3100,11 +3119,19 @@
 
     if (sidebarObserver) return;
 
-    // Subscribe to TradingView's native drawing event if available
+    // Subscribe to TradingView's native drawing & drawing_tool_changed events
     try {
       if (activeChartApi && typeof activeChartApi.subscribe === 'function') {
         activeChartApi.subscribe('drawing', () => {
           setTimeout(() => saveCurrentSidebarState(), 120);
+        });
+        activeChartApi.subscribe('drawing_tool_changed', (toolName) => {
+          if (isRestoringSidebar) return;
+          const norm = normalizeToolId(toolName);
+          if (norm && norm !== 'cursor') {
+            lastExplicitUserToolId = norm;
+            setTimeout(() => saveCurrentSidebarState(norm), 80);
+          }
         });
       }
     } catch (e) {}
@@ -3295,7 +3322,7 @@
         } catch (e) {}
       }
 
-      // 1. Update each remembered drawing tool group slot in-memory via React Fiber / API
+      // 1. Update each remembered drawing tool group slot via TradingView's API + React Fiber
       const groupTools = targetState.groupTools || {};
       const toolsToRestore = Object.values(groupTools)
         .map(t => normalizeToolId(t))
@@ -3303,15 +3330,21 @@
 
       const finalActiveTool = normalizeToolId(targetState.activeTool) || 'cursor';
 
+      let stepIdx = 0;
       toolsToRestore.forEach((toolId) => {
         if (toolId === finalActiveTool) return;
-        ensureSidebarGroupSlotDisplaysTool(toolId);
+        setTimeout(() => {
+          selectSingleLineTool(toolId, true);
+        }, stepIdx * 45);
+        stepIdx++;
       });
 
-      // 2. Select the user's last active drawing tool (or cursor)
-      if (finalActiveTool) {
-        selectSingleLineTool(finalActiveTool, true);
-      }
+      // 2. Select the user's last active drawing tool (or cursor) right after the group slots update
+      setTimeout(() => {
+        if (finalActiveTool) {
+          selectSingleLineTool(finalActiveTool, true);
+        }
+      }, stepIdx * 45 + 30);
 
       // 3. Restore Magnet Mode (included inside "Remember selected drawing tools")
       if (targetState.magnet !== undefined) {
@@ -3366,7 +3399,7 @@
       setTimeout(() => {
         isRestoringSidebar = false;
         hasCompletedInitialSidebarRestore = true;
-      }, 250);
+      }, stepIdx * 45 + 220);
     } catch (err) {
       log('Error restoring sidebar selections:', err);
       isRestoringSidebar = false;
