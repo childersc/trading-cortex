@@ -224,6 +224,8 @@
     }
   } catch (e) {}
 
+  let storageHookPostTimer = null;
+
   // Hook window.localStorage.setItem in this frame so any key TradingView writes when changing drawing tools or magnet mode is immediately captured
   try {
     const origSetItem = Storage.prototype.setItem;
@@ -247,23 +249,30 @@
               (/linetool|drawing|toolbar|magnet|combobox|group|active|tool/i.test(key) || /LineTool/i.test(value))
             ) {
               const prev = currentSettings.sidebarState || {};
-              const nextToolbarStorage = {
-                ...(prev.toolbarStorage || {}),
-                [key]: value
-              };
-              currentSettings.sidebarState = {
-                ...prev,
-                toolbarStorage: nextToolbarStorage
-              };
-              origSetItem.call(
-                window.localStorage,
-                '__trading_cortex_sidebar_state__',
-                JSON.stringify(currentSettings.sidebarState)
-              );
-              postToIsolated({
-                type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
-                sidebarState: currentSettings.sidebarState
-              });
+              const prevToolbar = prev.toolbarStorage || {};
+              if (prevToolbar[key] !== value) {
+                const nextToolbarStorage = {
+                  ...prevToolbar,
+                  [key]: value
+                };
+                currentSettings.sidebarState = {
+                  ...prev,
+                  toolbarStorage: nextToolbarStorage
+                };
+                origSetItem.call(
+                  window.localStorage,
+                  '__trading_cortex_sidebar_state__',
+                  JSON.stringify(currentSettings.sidebarState)
+                );
+                if (storageHookPostTimer) clearTimeout(storageHookPostTimer);
+                storageHookPostTimer = setTimeout(() => {
+                  storageHookPostTimer = null;
+                  postToIsolated({
+                    type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
+                    sidebarState: currentSettings.sidebarState
+                  });
+                }, 400);
+              }
             }
           }
         } catch (e) {}
@@ -4284,13 +4293,11 @@
     }
   }, 300);
 
-  // Keep a lightweight 1.5s maintenance interval so newly created iframes or rectangles always get hooked
+  // Keep a lightweight maintenance interval only to hook the chart if it hasn't loaded yet
   setInterval(() => {
     setupContextMenuHandler();
     if (!activeChart) {
       hookChart();
-    } else {
-      syncExtendedRectangleTextHooks();
     }
   }, 1500);
 
