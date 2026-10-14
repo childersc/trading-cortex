@@ -11,121 +11,109 @@
   if (!isTopWindow) return;
   if (window.location && window.location.hostname === 'trade.vestmarkets.com') return;
 
-  const DEFAULT_TEMPLATES = [
-    {
-      id: 'bullish_ob',
-      name: 'Bullish OB (Demand)',
-      color: '#22c55e',
-      backgroundColor: '#22c55e',
-      opacity: 20,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: true,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#22c55e',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Demand / +OB',
-      textColor: '#22c55e',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'bearish_ob',
-      name: 'Bearish OB (Supply)',
-      color: '#ef4444',
-      backgroundColor: '#ef4444',
-      opacity: 20,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: true,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#ef4444',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Supply / -OB',
-      textColor: '#ef4444',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'fvg_imbalance',
-      name: 'Fair Value Gap (FVG)',
-      color: '#eab308',
-      backgroundColor: '#eab308',
-      opacity: 15,
-      linewidth: 1,
-      linestyle: 2,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#eab308',
-      middleLineWidth: 1,
-      middleLineStyle: 1,
-      showLabel: false,
-      text: 'FVG',
-      textColor: '#eab308',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'range_consolidation',
-      name: 'Range / Consolidation',
-      color: '#3b82f6',
-      backgroundColor: '#3b82f6',
-      opacity: 12,
-      linewidth: 2,
-      linestyle: 0,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#60a5fa',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Range EQ',
-      textColor: '#3b82f6',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'liquidity_sweep',
-      name: 'Liquidity Zone',
-      color: '#a855f7',
-      backgroundColor: '#a855f7',
-      opacity: 25,
-      linewidth: 1,
-      linestyle: 1,
-      extendRight: true,
-      extendLeft: false,
-      showMiddleLine: false,
-      middleLineColor: '#a855f7',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Liquidity',
-      textColor: '#a855f7',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    }
+  const DEFAULT_TEMPLATES = [];
+
+  const LEGACY_PRESET_IDS = new Set([
+    'bullish_ob',
+    'bearish_ob',
+    'fvg',
+    'fvg_imbalance',
+    'liquidity',
+    'liquidity_sweep',
+    'breaker_block',
+    'consolidation',
+    'range_consolidation',
+    'volume_imbalance'
+  ]);
+
+  const DRAWING_TYPE_CATALOG = [
+    { id: 'rectangle', label: 'Rectangle', group: 'Shapes' },
+    { id: 'rotated_rectangle', label: 'Rotated Rectangle', group: 'Shapes' },
+    { id: 'horiz_line', label: 'Horizontal Line', group: 'Lines & Channels' },
+    { id: 'horiz_ray', label: 'Horizontal Ray', group: 'Lines & Channels' },
+    { id: 'vert_line', label: 'Vertical Line', group: 'Lines & Channels' },
+    { id: 'cross_line', label: 'Cross Line', group: 'Lines & Channels' },
+    { id: 'trend_line', label: 'Trend Line', group: 'Lines & Channels' },
+    { id: 'ray', label: 'Ray', group: 'Lines & Channels' },
+    { id: 'extended', label: 'Extended Line', group: 'Lines & Channels' },
+    { id: 'info_line', label: 'Info Line', group: 'Lines & Channels' },
+    { id: 'trend_angle', label: 'Trend Angle', group: 'Lines & Channels' },
+    { id: 'parallel_channel', label: 'Parallel Channel', group: 'Lines & Channels' },
+    { id: 'regression_trend', label: 'Regression Trend', group: 'Lines & Channels' },
+    { id: 'flat_bottom', label: 'Flat Top/Bottom', group: 'Lines & Channels' },
+    { id: 'disjoint_angle', label: 'Disjoint Channel', group: 'Lines & Channels' },
+    { id: 'pitchfork', label: 'Pitchfork', group: 'Pitchforks & Fibs' },
+    { id: 'fib_retracement', label: 'Fib Retracement', group: 'Pitchforks & Fibs' },
+    { id: 'fib_trend_ext', label: 'Trend-Based Fib Ext', group: 'Pitchforks & Fibs' },
+    { id: 'fib_channel', label: 'Fib Channel', group: 'Pitchforks & Fibs' },
+    { id: 'fib_time_zone', label: 'Fib Time Zone', group: 'Pitchforks & Fibs' },
+    { id: 'fib_fan', label: 'Fib Speed Fan', group: 'Pitchforks & Fibs' },
+    { id: 'gann_box', label: 'Gann Box', group: 'Pitchforks & Fibs' },
+    { id: 'long_position', label: 'Long Position', group: 'Positions & Ranges' },
+    { id: 'short_position', label: 'Short Position', group: 'Positions & Ranges' },
+    { id: 'price_range', label: 'Price Range', group: 'Positions & Ranges' },
+    { id: 'date_range', label: 'Date Range', group: 'Positions & Ranges' },
+    { id: 'date_and_price_range', label: 'Date & Price Range', group: 'Positions & Ranges' },
+    { id: 'anchored_vwap', label: 'Anchored VWAP', group: 'Positions & Ranges' },
+    { id: 'volume_profile', label: 'Fixed Range Volume Profile', group: 'Positions & Ranges' },
+    { id: 'text', label: 'Text', group: 'Annotation & Shapes' },
+    { id: 'anchored_text', label: 'Anchored Text', group: 'Annotation & Shapes' },
+    { id: 'note', label: 'Note', group: 'Annotation & Shapes' },
+    { id: 'callout', label: 'Callout', group: 'Annotation & Shapes' },
+    { id: 'price_label', label: 'Price Label', group: 'Annotation & Shapes' },
+    { id: 'arrow_marker', label: 'Arrow Marker', group: 'Annotation & Shapes' },
+    { id: 'arrow', label: 'Arrow Line', group: 'Annotation & Shapes' },
+    { id: 'brush', label: 'Brush', group: 'Annotation & Shapes' },
+    { id: 'highlighter', label: 'Highlighter', group: 'Annotation & Shapes' },
+    { id: 'path', label: 'Path', group: 'Annotation & Shapes' },
+    { id: 'circle', label: 'Circle', group: 'Annotation & Shapes' },
+    { id: 'ellipse', label: 'Ellipse', group: 'Annotation & Shapes' },
+    { id: 'triangle', label: 'Triangle', group: 'Annotation & Shapes' },
+    { id: 'arc', label: 'Arc', group: 'Annotation & Shapes' },
+    { id: 'polyline', label: 'Polyline', group: 'Annotation & Shapes' }
   ];
 
-  let templates = [...DEFAULT_TEMPLATES];
+  function getDrawingTypeLabel(typeId) {
+    if (!typeId) return 'Rectangle';
+    const found = DRAWING_TYPE_CATALOG.find(d => d.id === typeId);
+    if (found) return found.label;
+    return String(typeId).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  function sanitizeUserTemplates(rawList) {
+    if (!Array.isArray(rawList)) return [];
+    const seenKeys = new Set();
+    const cleaned = [];
+    for (const t of rawList) {
+      if (!t || typeof t !== 'object') continue;
+      if (t.id && LEGACY_PRESET_IDS.has(String(t.id))) continue;
+      const drawingType = t.drawingType || 'rectangle';
+      const nameKey = `${drawingType}::${String(t.name || '').trim().toLowerCase()}`;
+      if (seenKeys.has(nameKey)) continue;
+      seenKeys.add(nameKey);
+      cleaned.push({
+        drawingType,
+        extendRight: Boolean(t.extendRight),
+        extendLeft: Boolean(t.extendLeft),
+        showMiddleLine: Boolean(t.showMiddleLine),
+        middleLineColor: t.middleLineColor || t.color || '#22c55e',
+        middleLineWidth: Number(t.middleLineWidth) || 1,
+        middleLineStyle: t.middleLineStyle !== undefined ? Number(t.middleLineStyle) : 2,
+        horzLabelsAlign: t.horzLabelsAlign || 'right',
+        vertLabelsAlign: t.vertLabelsAlign || 'middle',
+        ...t
+      });
+    }
+    return cleaned;
+  }
+
+  let templates = [];
   let settings = {
-    activeTemplateId: 'bullish_ob',
-    defaultTemplateId: 'bullish_ob',
+    activeTemplateId: null,
+    defaultTemplateId: null,
     showFloatingBar: false,
     floatingBarPosition: { top: 80, left: 16 },
-    autoApplyToNew: true,
+    autoApplyToNew: false,
     hotkeysEnabled: true,
     rememberSidebarTools: true,
     rememberLastChartSettings: true,
@@ -177,7 +165,7 @@
   }
 
   const DOMAIN_VAULT_KEY = '__trading_cortex_vault_db_v1__';
-  const CURRENT_DB_SCHEMA_VERSION = 1;
+  const CURRENT_DB_SCHEMA_VERSION = 2;
 
   function readDomainVault() {
     try {
@@ -198,7 +186,7 @@
       const payload = {
         schemaVersion: CURRENT_DB_SCHEMA_VERSION,
         updatedAt: Date.now(),
-        templates: Array.isArray(nextTemplates) && nextTemplates.length > 0 ? nextTemplates : (prev.templates || templates),
+        templates: Array.isArray(nextTemplates) ? sanitizeUserTemplates(nextTemplates) : sanitizeUserTemplates(prev.templates || templates),
         settings: nextSettings ? { ...(prev.settings || {}), ...nextSettings } : (prev.settings || settings)
       };
       window.localStorage.setItem(DOMAIN_VAULT_KEY, JSON.stringify(payload));
@@ -210,11 +198,11 @@
     if (isExtensionValid()) {
       try {
         const localData = await chrome.storage.local.get(keys).catch(() => ({}));
-        if (localData && (localData.templates || localData.settings)) {
+        if (localData && (localData.templates !== undefined || localData.settings !== undefined)) {
           result = localData;
         } else if (chrome.storage.sync) {
           const syncData = await chrome.storage.sync.get(keys).catch(() => ({}));
-          if (syncData && (syncData.templates || syncData.settings)) {
+          if (syncData && (syncData.templates !== undefined || syncData.settings !== undefined)) {
             await chrome.storage.local.set(syncData).catch(() => {});
             result = syncData;
           }
@@ -225,22 +213,19 @@
     // Check Domain Vault (__trading_cortex_vault_db_v1__) so custom templates and settings survive even if the extension was unloaded/removed and reloaded!
     const vault = readDomainVault();
     if (vault) {
-      // If extension storage was reset to defaults after an unload/reinstall, or if the domain vault has newer saved templates, recover from the domain vault!
-      const isDefaultOnly =
-        !result.templates ||
-        (Array.isArray(result.templates) &&
-          result.templates.length === DEFAULT_TEMPLATES.length &&
-          !result.settings?._savedAt);
+      const vaultTemplates = sanitizeUserTemplates(vault.templates);
+      const storageTemplates = sanitizeUserTemplates(result.templates);
 
       if (
-        Array.isArray(vault.templates) &&
-        vault.templates.length > 0 &&
-        (isDefaultOnly || (vault.updatedAt && (!result.settings?._savedAt || vault.updatedAt >= result.settings._savedAt)))
+        vaultTemplates.length > 0 &&
+        (storageTemplates.length === 0 || (vault.updatedAt && (!result.settings?._savedAt || vault.updatedAt >= result.settings._savedAt)))
       ) {
-        result.templates = vault.templates;
+        result.templates = vaultTemplates;
         if (isExtensionValid()) {
-          chrome.storage.local.set({ templates: vault.templates }).catch(() => {});
+          chrome.storage.local.set({ templates: vaultTemplates }).catch(() => {});
         }
+      } else if (result.templates !== undefined) {
+        result.templates = storageTemplates;
       }
 
       if (vault.settings && typeof vault.settings === 'object') {
@@ -251,6 +236,8 @@
           }
         }
       }
+    } else if (result.templates !== undefined) {
+      result.templates = sanitizeUserTemplates(result.templates);
     }
 
     // Also merge/fallback with __trading_cortex_isolated_settings__ mirror
@@ -278,12 +265,15 @@
     // Always mirror both templates and settings synchronously to the Domain Vault and window.localStorage
     // so they are never lost even if the extension is unloaded/removed and re-loaded
     try {
+      if (data && data.templates) {
+        data.templates = sanitizeUserTemplates(data.templates);
+      }
       if (data && data.settings) {
         data.settings._savedAt = Date.now();
         window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(data.settings));
       }
       writeDomainVault(
-        data && data.templates ? data.templates : templates,
+        data && data.templates !== undefined ? data.templates : templates,
         data && data.settings ? data.settings : settings
       );
     } catch (e) {}
@@ -373,8 +363,8 @@
         if (!isExtensionValid()) return;
         if (area !== 'local' && area !== 'sync') return;
 
-        if (changes.templates && Array.isArray(changes.templates.newValue) && changes.templates.newValue.length > 0) {
-          templates = changes.templates.newValue;
+        if (changes.templates && Array.isArray(changes.templates.newValue)) {
+          templates = sanitizeUserTemplates(changes.templates.newValue);
         }
         if (changes.settings && changes.settings.newValue) {
           settings = { ...settings, ...changes.settings.newValue };
@@ -404,6 +394,9 @@
     }
   } catch (e) {}
 
+  let lastCreatedTemplateSig = '';
+  let lastCreatedTemplateTime = 0;
+
   // Listen for messages from MAIN world
   window.addEventListener('message', async (event) => {
     if (!event.data || typeof event.data !== 'object') return;
@@ -419,15 +412,40 @@
       if (isTopWindow) renderFloatingBar();
     } else if (type === 'VEST_TV_TEMPLATE_CREATED_FROM_SHAPE') {
       if (template) {
-        templates.push(template);
-        settings.activeTemplateId = template.id;
-        safeStorageSet({ templates, settings });
-        notifyMainWorldConfig();
-        showToast(`Template "${template.name}" created!`);
+        const dt = template.drawingType || 'rectangle';
+        const sig = `${dt}::${String(template.name || '').trim().toLowerCase()}`;
+        const now = Date.now();
+        // Prevent duplicate creation if message arrived twice within 1.5s
+        if (sig === lastCreatedTemplateSig && (now - lastCreatedTemplateTime) < 1500) {
+          return;
+        }
+        lastCreatedTemplateSig = sig;
+        lastCreatedTemplateTime = now;
+
+        // If a template with the exact same name & drawingType already exists, update it in-place instead of creating a duplicate
+        const existingIdx = templates.findIndex(
+          t => (t.drawingType || 'rectangle') === dt && String(t.name || '').trim().toLowerCase() === String(template.name || '').trim().toLowerCase()
+        );
+        if (existingIdx !== -1) {
+          templates[existingIdx] = {
+            ...templates[existingIdx],
+            ...template,
+            id: templates[existingIdx].id
+          };
+          settings.activeTemplateId = templates[existingIdx].id;
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          showToast(`Updated "${template.name}" (${getDrawingTypeLabel(dt)})!`);
+        } else {
+          templates.push(template);
+          settings.activeTemplateId = template.id;
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          showToast(`Saved "${template.name}" (${getDrawingTypeLabel(dt)})!`);
+        }
         if (isTopWindow) renderFloatingBar();
       }
     } else if (type === 'VEST_TV_ACTIVE_TEMPLATE_UPDATED_FROM_SHAPE') {
-      // User clicked "Sync to Active" or updated active template from a selected box
       const activeIdx = templates.findIndex(t => t.id === settings.activeTemplateId);
       if (activeIdx !== -1 && updates) {
         templates[activeIdx] = {
@@ -436,11 +454,10 @@
         };
         safeStorageSet({ templates });
         notifyMainWorldConfig();
-        showToast(`Saved current box settings to "${templates[activeIdx].name}"!`);
+        showToast(`Saved current drawing settings to "${templates[activeIdx].name}"!`);
         if (isTopWindow) renderFloatingBar();
       }
     } else if (type === 'VEST_TV_TEMPLATE_OVERRIDDEN') {
-      // Override a specific template by ID with properties from current box
       const targetIdx = templates.findIndex(t => t.id === templateId);
       if (targetIdx !== -1 && updates) {
         templates[targetIdx] = {
@@ -450,31 +467,31 @@
         settings.activeTemplateId = templates[targetIdx].id;
         safeStorageSet({ templates, settings });
         notifyMainWorldConfig();
-        showToast(`Template "${templates[targetIdx].name}" updated from box!`);
+        showToast(`Template "${templates[targetIdx].name}" updated from drawing!`);
         if (isTopWindow) renderFloatingBar();
+      }
+    } else if (type === 'VEST_TV_OPEN_TEMPLATE_MANAGER') {
+      if (isTopWindow) {
+        openTemplateManagerModal(event.data.drawingType || 'all', event.data.templateId || null);
       }
     } else if (type === 'VEST_TV_EDIT_TEMPLATE_REQUEST') {
       if (isTopWindow && templateId) {
-        openTemplateEditorModal(templateId);
+        const targetTpl = templates.find(t => t.id === templateId);
+        openTemplateManagerModal(targetTpl ? (targetTpl.drawingType || 'rectangle') : 'all', templateId);
       }
     } else if (type === 'VEST_TV_SHAPE_PROPERTIES_FOR_EDITOR') {
       if (isTopWindow && event.data.properties) {
         populateEditorModalFromProperties(event.data.properties);
       }
     } else if (type === 'VEST_TV_DELETE_TEMPLATE_REQUEST') {
-      // Delete a template
-      if (templates.length <= 1) {
-        showToast('Must keep at least 1 template');
-        return;
-      }
       const tplToDelete = templates.find(t => t.id === templateId);
       const name = tplToDelete ? tplToDelete.name : (event.data.templateName || 'Template');
       templates = templates.filter(t => t.id !== templateId);
       if (settings.activeTemplateId === templateId) {
-        settings.activeTemplateId = templates[0].id;
+        settings.activeTemplateId = templates[0]?.id || null;
       }
       if (settings.defaultTemplateId === templateId) {
-        settings.defaultTemplateId = templates[0].id;
+        settings.defaultTemplateId = templates[0]?.id || null;
       }
       safeStorageSet({ templates, settings });
       notifyMainWorldConfig();
@@ -1336,8 +1353,20 @@
     menuEl.style.display = studioMenuOpen ? 'flex' : 'none';
     menuEl.innerHTML = `
       <!-- Settings & Update Entry -->
-      <div class="vest-sdm-section">
+      <div class="vest-sdm-section" style="gap: 6px;">
         ${updateItemHtml}
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-templates-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
+              <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+              <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+              <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+              <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Template Manager...</span>
+          </div>
+          <span class="vest-sdm-hotkey">${templates.length}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
@@ -1393,6 +1422,12 @@
       } catch (e) {
         window.open(chrome.runtime.getURL('update/update.html'), '_blank');
       }
+    });
+
+    // Template Manager Button -> opens Settings-style Template Manager Dialog
+    menuEl.querySelector('#vest-sdm-open-templates-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openTemplateManagerModal('all');
     });
 
     // Top Settings Button -> opens Settings Dialog on About tab
@@ -3155,72 +3190,262 @@
       editorModalEl.remove();
       editorModalEl = null;
     }
+    const existingMgr = document.getElementById('vest-template-manager-dialog');
+    if (existingMgr) existingMgr.remove();
     currentEditingTemplateId = null;
   }
 
   function openTemplateEditorModal(templateId) {
+    const targetTpl = templates.find(t => t.id === templateId);
+    openTemplateManagerModal(targetTpl ? (targetTpl.drawingType || 'rectangle') : 'all', templateId);
+  }
+
+  // -------------------------------------------------------------
+  // TradingView Settings-Style "Template Manager" Dialog Box
+  // -------------------------------------------------------------
+  function openTemplateManagerModal(initialCategory = 'all', initialEditTemplateId = null) {
     if (!isTopWindow) return;
-    const tpl = templates.find(t => t.id === templateId);
-    if (!tpl) {
-      showToast('Template not found');
-      return;
+    closeTemplateEditorModal();
+
+    let activeCategory = initialCategory || 'all';
+    let editingId = initialEditTemplateId || null;
+
+    // Draft copy of the template currently being edited (or null when viewing list)
+    let editDraft = null;
+    let isCreatingNew = false;
+
+    function startEditingTemplate(tplId) {
+      const found = templates.find(t => t.id === tplId);
+      if (!found) return;
+      isCreatingNew = false;
+      editingId = found.id;
+      currentEditingTemplateId = found.id;
+      editDraft = JSON.parse(JSON.stringify(found));
+      if (!editDraft.drawingType) editDraft.drawingType = 'rectangle';
+      renderManagerDialog();
     }
 
-    closeTemplateEditorModal();
-    currentEditingTemplateId = tpl.id;
+    function startCreatingNewTemplate(defaultType) {
+      const dt = (defaultType && defaultType !== 'all') ? defaultType : 'rectangle';
+      const label = getDrawingTypeLabel(dt);
+      isCreatingNew = true;
+      editingId = `custom_${Date.now()}`;
+      currentEditingTemplateId = editingId;
+      editDraft = {
+        id: editingId,
+        name: `Custom ${label}`,
+        drawingType: dt,
+        color: '#22c55e',
+        backgroundColor: '#22c55e',
+        opacity: 20,
+        linewidth: 1,
+        linestyle: 0,
+        showMiddleLine: false,
+        middleLineColor: '#22c55e',
+        middleLineWidth: 1,
+        middleLineStyle: 2,
+        extendLeft: false,
+        extendRight: false,
+        showLabel: false,
+        text: '',
+        textColor: '#22c55e',
+        fontSize: 12,
+        horzLabelsAlign: 'right',
+        vertLabelsAlign: 'middle',
+        rawProperties: {}
+      };
+      renderManagerDialog();
+    }
 
-    const borderHex = normalizeHexColor(tpl.color, '#22c55e');
-    const bgHex = normalizeHexColor(tpl.backgroundColor || tpl.color, borderHex);
-    const midHex = normalizeHexColor(tpl.middleLineColor || tpl.color, borderHex);
-    const txtHex = normalizeHexColor(tpl.textColor || tpl.color, borderHex);
-    const opacityVal = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
-    const lineW = Number(tpl.linewidth) || 1;
-    const lineS = Number(tpl.linestyle) || 0;
-    const midW = Number(tpl.middleLineWidth) || 1;
-    const midS = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
-    const fontSz = Number(tpl.fontSize) || 12;
-    const horzAlign = tpl.horzLabelsAlign || 'right';
-    const vertAlign = tpl.vertLabelsAlign || 'middle';
+    if (initialEditTemplateId) {
+      const found = templates.find(t => t.id === initialEditTemplateId);
+      if (found) {
+        editingId = found.id;
+        currentEditingTemplateId = found.id;
+        editDraft = JSON.parse(JSON.stringify(found));
+        if (!editDraft.drawingType) editDraft.drawingType = 'rectangle';
+      }
+    }
 
     const overlay = document.createElement('div');
-    overlay.id = 'vest-template-editor-modal';
-    overlay.className = 'vest-modal-overlay';
+    overlay.id = 'vest-template-manager-dialog';
+    overlay.className = 'vest-tvs-overlay';
+    editorModalEl = overlay;
 
-    overlay.innerHTML = `
-      <div class="vest-modal-card" role="dialog" aria-label="Edit Box Template">
-        <div class="vest-modal-header">
-          <div class="vest-modal-title">
-            <span class="vest-modal-swatch" id="vest-ed-header-swatch" style="background:${borderHex};"></span>
-            <span>Edit Template: ${escapeHtml(tpl.name)}</span>
+    let modalOffset = { x: 0, y: 0 };
+    let isDraggingModal = false;
+    let dragStartMouse = { x: 0, y: 0 };
+    let dragStartOffset = { x: 0, y: 0 };
+    let justFinishedDragging = false;
+
+    function closeManagerOverlay() {
+      window.removeEventListener('mousemove', onModalMouseMove, true);
+      window.removeEventListener('mouseup', onModalMouseUp, true);
+      overlay.remove();
+      if (editorModalEl === overlay) editorModalEl = null;
+      currentEditingTemplateId = null;
+    }
+
+    function onModalMouseMove(e) {
+      if (!isDraggingModal) return;
+      const dx = e.clientX - dragStartMouse.x;
+      const dy = e.clientY - dragStartMouse.y;
+      modalOffset.x = dragStartOffset.x + dx;
+      modalOffset.y = dragStartOffset.y + dy;
+      const cardEl = overlay.querySelector('.vest-tvs-card');
+      if (cardEl) {
+        cardEl.style.transform = `translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0)`;
+      }
+    }
+
+    function onModalMouseUp() {
+      if (!isDraggingModal) return;
+      isDraggingModal = false;
+      justFinishedDragging = true;
+      setTimeout(() => {
+        justFinishedDragging = false;
+      }, 60);
+    }
+
+    window.addEventListener('mousemove', onModalMouseMove, true);
+    window.addEventListener('mouseup', onModalMouseUp, true);
+
+    function getSidebarCategories() {
+      // Always include All Templates + common drawing types + any drawing types that have saved templates
+      const CORE_TYPES = [
+        'rectangle',
+        'horiz_line',
+        'horiz_ray',
+        'trend_line',
+        'ray',
+        'parallel_channel',
+        'fib_retracement',
+        'long_position',
+        'short_position',
+        'callout',
+        'text'
+      ];
+      const countByType = {};
+      templates.forEach(t => {
+        const dt = t.drawingType || 'rectangle';
+        countByType[dt] = (countByType[dt] || 0) + 1;
+      });
+
+      const typeSet = new Set(CORE_TYPES);
+      Object.keys(countByType).forEach(dt => typeSet.add(dt));
+      if (activeCategory !== 'all') typeSet.add(activeCategory);
+
+      const items = [
+        {
+          id: 'all',
+          label: 'All Templates',
+          count: templates.length
+        }
+      ];
+
+      Array.from(typeSet).forEach(dt => {
+        items.push({
+          id: dt,
+          label: getDrawingTypeLabel(dt),
+          count: countByType[dt] || 0
+        });
+      });
+
+      return items;
+    }
+
+    function syncFormFieldsToDraft() {
+      if (!editDraft) return;
+      const q = (sel) => overlay.querySelector(sel);
+      if (q('#vest-tm-name')) editDraft.name = q('#vest-tm-name').value.trim() || editDraft.name;
+      if (q('#vest-tm-type')) editDraft.drawingType = q('#vest-tm-type').value || 'rectangle';
+      if (q('#vest-tm-color')) editDraft.color = q('#vest-tm-color').value || '#22c55e';
+      if (q('#vest-tm-bg-color')) editDraft.backgroundColor = q('#vest-tm-bg-color').value || editDraft.color;
+      if (q('#vest-tm-opacity')) editDraft.opacity = Number(q('#vest-tm-opacity').value ?? 20);
+      if (q('#vest-tm-linewidth')) editDraft.linewidth = Number(q('#vest-tm-linewidth').value || 1);
+      if (q('#vest-tm-linestyle')) editDraft.linestyle = Number(q('#vest-tm-linestyle').value ?? 0);
+      if (q('#vest-tm-show-mid')) editDraft.showMiddleLine = Boolean(q('#vest-tm-show-mid').checked);
+      if (q('#vest-tm-mid-color')) editDraft.middleLineColor = q('#vest-tm-mid-color').value || editDraft.color;
+      if (q('#vest-tm-mid-width')) editDraft.middleLineWidth = Number(q('#vest-tm-mid-width').value || 1);
+      if (q('#vest-tm-mid-style')) editDraft.middleLineStyle = Number(q('#vest-tm-mid-style').value ?? 2);
+      if (q('#vest-tm-extend-left')) editDraft.extendLeft = Boolean(q('#vest-tm-extend-left').checked);
+      if (q('#vest-tm-extend-right')) editDraft.extendRight = Boolean(q('#vest-tm-extend-right').checked);
+      if (q('#vest-tm-show-label')) editDraft.showLabel = Boolean(q('#vest-tm-show-label').checked);
+      if (q('#vest-tm-text')) editDraft.text = q('#vest-tm-text').value || '';
+      if (q('#vest-tm-text-color')) editDraft.textColor = q('#vest-tm-text-color').value || editDraft.color;
+      if (q('#vest-tm-fontsize')) editDraft.fontSize = Number(q('#vest-tm-fontsize').value || 12);
+      if (q('#vest-tm-horz-align')) editDraft.horzLabelsAlign = q('#vest-tm-horz-align').value || 'right';
+      if (q('#vest-tm-vert-align')) editDraft.vertLabelsAlign = q('#vest-tm-vert-align').value || 'middle';
+    }
+
+    function renderRightPaneContent() {
+      // If editing or creating a template, render the full Drawing Template Editor inside the right pane
+      if (editDraft) {
+        const dt = editDraft.drawingType || 'rectangle';
+        const dtLabel = getDrawingTypeLabel(dt);
+        const borderHex = normalizeHexColor(editDraft.color, '#22c55e');
+        const bgHex = normalizeHexColor(editDraft.backgroundColor || editDraft.color, borderHex);
+        const midHex = normalizeHexColor(editDraft.middleLineColor || editDraft.color, borderHex);
+        const txtHex = normalizeHexColor(editDraft.textColor || editDraft.color, borderHex);
+        const opacityVal = typeof editDraft.opacity === 'number' ? editDraft.opacity : 20;
+        const lineW = Number(editDraft.linewidth) || 1;
+        const lineS = Number(editDraft.linestyle ?? 0);
+        const midW = Number(editDraft.middleLineWidth) || 1;
+        const midS = editDraft.middleLineStyle !== undefined ? Number(editDraft.middleLineStyle) : 2;
+        const fontSz = Number(editDraft.fontSize) || 12;
+        const horzAlign = editDraft.horzLabelsAlign || 'right';
+        const vertAlign = editDraft.vertLabelsAlign || 'middle';
+        const rawKeyCount = editDraft.rawProperties ? Object.keys(editDraft.rawProperties).length : 0;
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <button type="button" class="vest-tvs-action-btn" id="vest-tm-back-btn" style="height:28px; padding:0 10px; font-size:12px;">
+                ← Back to List
+              </button>
+              <div class="vest-tvs-section-title" style="margin:0;">
+                ${isCreatingNew ? 'NEW DRAWING TEMPLATE' : `EDIT TEMPLATE · ${escapeHtml(dtLabel.toUpperCase())}`}
+              </div>
+            </div>
+            <button type="button" class="vest-tvs-action-btn" id="vest-tm-copy-selected-btn" style="height:28px; border-color:rgba(56,189,248,0.45); color:#38bdf8; font-size:11.5px;" title="Copy all properties from the currently selected drawing on the chart">
+              Copy from Selected Drawing
+            </button>
           </div>
-          <button type="button" class="vest-modal-close" id="vest-ed-close-btn" title="Close">×</button>
-        </div>
 
-        <div class="vest-modal-body">
-          <div class="vest-ed-row">
-            <label class="vest-ed-label">Template Name</label>
-            <input type="text" class="vest-ed-input" id="vest-ed-name" value="${escapeHtml(tpl.name)}" placeholder="e.g. Bullish OB (Demand)" />
-          </div>
-
-          <div class="vest-ed-grid-3">
+          <div class="vest-ed-grid-2" style="margin-bottom:12px;">
             <div class="vest-ed-field">
-              <label class="vest-ed-label">Border Color</label>
-              <input type="color" class="vest-ed-color" id="vest-ed-color" value="${borderHex}" />
+              <label class="vest-ed-label">Template Name</label>
+              <input type="text" class="vest-ed-input" id="vest-tm-name" value="${escapeHtml(editDraft.name)}" placeholder="e.g. 5m FVG GREEN" />
             </div>
             <div class="vest-ed-field">
-              <label class="vest-ed-label">Fill Color</label>
-              <input type="color" class="vest-ed-color" id="vest-ed-bg-color" value="${bgHex}" />
-            </div>
-            <div class="vest-ed-field">
-              <label class="vest-ed-label">Fill Opacity: <span id="vest-ed-opacity-val">${opacityVal}%</span></label>
-              <input type="range" class="vest-ed-range" id="vest-ed-opacity" min="0" max="100" value="${opacityVal}" />
+              <label class="vest-ed-label">Drawing Type</label>
+              <select class="vest-ed-select" id="vest-tm-type">
+                ${DRAWING_TYPE_CATALOG.map(item => `
+                  <option value="${item.id}" ${item.id === dt ? 'selected' : ''}>${escapeHtml(item.label)} (${escapeHtml(item.group)})</option>
+                `).join('')}
+              </select>
             </div>
           </div>
 
-          <div class="vest-ed-grid-2">
+          <div class="vest-ed-grid-3" style="margin-bottom:12px;">
             <div class="vest-ed-field">
-              <label class="vest-ed-label">Border Width</label>
-              <select class="vest-ed-select" id="vest-ed-linewidth">
+              <label class="vest-ed-label">Line / Border Color</label>
+              <input type="color" class="vest-ed-color" id="vest-tm-color" value="${borderHex}" />
+            </div>
+            <div class="vest-ed-field">
+              <label class="vest-ed-label">Background / Fill Color</label>
+              <input type="color" class="vest-ed-color" id="vest-tm-bg-color" value="${bgHex}" />
+            </div>
+            <div class="vest-ed-field">
+              <label class="vest-ed-label">Fill Opacity: <span id="vest-tm-opacity-val">${opacityVal}%</span></label>
+              <input type="range" class="vest-ed-range" id="vest-tm-opacity" min="0" max="100" value="${opacityVal}" />
+            </div>
+          </div>
+
+          <div class="vest-ed-grid-2" style="margin-bottom:12px;">
+            <div class="vest-ed-field">
+              <label class="vest-ed-label">Line / Border Width</label>
+              <select class="vest-ed-select" id="vest-tm-linewidth">
                 <option value="1" ${lineW === 1 ? 'selected' : ''}>1 px</option>
                 <option value="2" ${lineW === 2 ? 'selected' : ''}>2 px</option>
                 <option value="3" ${lineW === 3 ? 'selected' : ''}>3 px</option>
@@ -3228,8 +3453,8 @@
               </select>
             </div>
             <div class="vest-ed-field">
-              <label class="vest-ed-label">Border Style</label>
-              <select class="vest-ed-select" id="vest-ed-linestyle">
+              <label class="vest-ed-label">Line / Border Style</label>
+              <select class="vest-ed-select" id="vest-tm-linestyle">
                 <option value="0" ${lineS === 0 ? 'selected' : ''}>Solid (───)</option>
                 <option value="1" ${lineS === 1 ? 'selected' : ''}>Dotted (···)</option>
                 <option value="2" ${lineS === 2 ? 'selected' : ''}>Dashed (- - -)</option>
@@ -3237,21 +3462,21 @@
             </div>
           </div>
 
-          <div class="vest-ed-section">
+          <div class="vest-ed-section" style="margin-bottom:12px;">
             <div class="vest-ed-section-header">
               <label class="vest-ed-checkbox-label">
-                <input type="checkbox" id="vest-ed-show-mid" ${tpl.showMiddleLine ? 'checked' : ''} />
-                <span>50% Equilibrium / Center Line</span>
+                <input type="checkbox" id="vest-tm-show-mid" ${editDraft.showMiddleLine ? 'checked' : ''} />
+                <span>50% Equilibrium / Center Line (Boxes & Channels)</span>
               </label>
             </div>
-            <div class="vest-ed-grid-3" id="vest-ed-mid-controls" style="${tpl.showMiddleLine ? '' : 'opacity:0.45; pointer-events:none;'}">
+            <div class="vest-ed-grid-3" id="vest-tm-mid-controls" style="${editDraft.showMiddleLine ? '' : 'opacity:0.45; pointer-events:none;'}">
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Center Color</label>
-                <input type="color" class="vest-ed-color" id="vest-ed-mid-color" value="${midHex}" />
+                <input type="color" class="vest-ed-color" id="vest-tm-mid-color" value="${midHex}" />
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Width</label>
-                <select class="vest-ed-select" id="vest-ed-mid-width">
+                <select class="vest-ed-select" id="vest-tm-mid-width">
                   <option value="1" ${midW === 1 ? 'selected' : ''}>1 px</option>
                   <option value="2" ${midW === 2 ? 'selected' : ''}>2 px</option>
                   <option value="3" ${midW === 3 ? 'selected' : ''}>3 px</option>
@@ -3259,7 +3484,7 @@
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Style</label>
-                <select class="vest-ed-select" id="vest-ed-mid-style">
+                <select class="vest-ed-select" id="vest-tm-mid-style">
                   <option value="0" ${midS === 0 ? 'selected' : ''}>Solid</option>
                   <option value="1" ${midS === 1 ? 'selected' : ''}>Dotted</option>
                   <option value="2" ${midS === 2 ? 'selected' : ''}>Dashed</option>
@@ -3268,13 +3493,13 @@
             </div>
           </div>
 
-          <div class="vest-ed-grid-2">
+          <div class="vest-ed-grid-2" style="margin-bottom:12px;">
             <label class="vest-ed-checkbox-label">
-              <input type="checkbox" id="vest-ed-extend-left" ${tpl.extendLeft ? 'checked' : ''} />
+              <input type="checkbox" id="vest-tm-extend-left" ${editDraft.extendLeft ? 'checked' : ''} />
               <span>⬅ Extend Left</span>
             </label>
             <label class="vest-ed-checkbox-label">
-              <input type="checkbox" id="vest-ed-extend-right" ${tpl.extendRight ? 'checked' : ''} />
+              <input type="checkbox" id="vest-tm-extend-right" ${editDraft.extendRight ? 'checked' : ''} />
               <span>➜ Extend Right</span>
             </label>
           </div>
@@ -3282,27 +3507,27 @@
           <div class="vest-ed-section">
             <div class="vest-ed-section-header">
               <label class="vest-ed-checkbox-label">
-                <input type="checkbox" id="vest-ed-show-label" ${tpl.showLabel ? 'checked' : ''} />
-                <span>Show Text Label Inside Box</span>
+                <input type="checkbox" id="vest-tm-show-label" ${editDraft.showLabel ? 'checked' : ''} />
+                <span>Include Saved Text Label when Applied</span>
               </label>
             </div>
             <div class="vest-ed-row" style="margin-top:6px;">
-              <input type="text" class="vest-ed-input" id="vest-ed-text" value="${escapeHtml(tpl.text || '')}" placeholder="Label text (e.g. Demand / +OB)" />
+              <input type="text" class="vest-ed-input" id="vest-tm-text" value="${escapeHtml(editDraft.text || '')}" placeholder="Label text (leave unchecked above to keep existing drawing text)" />
             </div>
             <div class="vest-ed-grid-4" style="margin-top:6px;">
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Text Color</label>
-                <input type="color" class="vest-ed-color" id="vest-ed-text-color" value="${txtHex}" />
+                <input type="color" class="vest-ed-color" id="vest-tm-text-color" value="${txtHex}" />
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Font Size</label>
-                <select class="vest-ed-select" id="vest-ed-fontsize">
+                <select class="vest-ed-select" id="vest-tm-fontsize">
                   ${[10, 11, 12, 14, 16, 18, 20, 24].map(sz => `<option value="${sz}" ${fontSz === sz ? 'selected' : ''}>${sz}px</option>`).join('')}
                 </select>
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Horiz Align</label>
-                <select class="vest-ed-select" id="vest-ed-horz-align">
+                <select class="vest-ed-select" id="vest-tm-horz-align">
                   <option value="right" ${horzAlign === 'right' ? 'selected' : ''}>Far Right</option>
                   <option value="center" ${horzAlign === 'center' ? 'selected' : ''}>Center</option>
                   <option value="left" ${horzAlign === 'left' ? 'selected' : ''}>Left</option>
@@ -3310,7 +3535,7 @@
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Vert Align</label>
-                <select class="vest-ed-select" id="vest-ed-vert-align">
+                <select class="vest-ed-select" id="vest-tm-vert-align">
                   <option value="top" ${vertAlign === 'top' ? 'selected' : ''}>Top</option>
                   <option value="middle" ${vertAlign === 'middle' ? 'selected' : ''}>Middle</option>
                   <option value="bottom" ${vertAlign === 'bottom' ? 'selected' : ''}>Bottom</option>
@@ -3318,173 +3543,382 @@
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="vest-modal-footer">
-          <button type="button" class="vest-ed-btn vest-ed-btn-secondary" id="vest-ed-copy-box-btn" title="Copy colors, lines, and text from the currently selected rectangle on the chart">
-            Copy from Selected Box
-          </button>
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="vest-ed-btn vest-ed-btn-ghost" id="vest-ed-cancel-btn">Cancel</button>
-            <button type="button" class="vest-ed-btn vest-ed-btn-primary" id="vest-ed-save-btn">Save & Apply</button>
+          ${rawKeyCount > 0 ? `
+            <div style="margin-top:10px; font-size:11px; color:#64748b; display:flex; align-items:center; justify-content:space-between;">
+              <span>✓ Full TradingView drawing state captured (${rawKeyCount} native tool properties stored)</span>
+            </div>
+          ` : ''}
+        `;
+      }
+
+      // Otherwise render the Template List for the selected drawing category
+      const filtered = activeCategory === 'all'
+        ? templates
+        : templates.filter(t => (t.drawingType || 'rectangle') === activeCategory);
+
+      const categoryTitle = activeCategory === 'all'
+        ? 'ALL DRAWING TEMPLATES'
+        : `${getDrawingTypeLabel(activeCategory).toUpperCase()} TEMPLATES`;
+
+      return `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+          <div class="vest-tvs-section-title" style="margin:0;">${escapeHtml(categoryTitle)} (${filtered.length})</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="vest-tvs-action-btn" id="vest-tm-save-selected-chart-btn" style="height:30px; border-color:rgba(56,189,248,0.45); color:#38bdf8; font-size:12px;" title="Save the currently selected drawing on the chart as a template">
+              + Save Selected Chart Drawing
+            </button>
+            <button type="button" class="vest-tvs-action-btn" id="vest-tm-new-btn" style="height:30px; border-color:rgba(16,185,129,0.5); color:#34d399; font-size:12px;">
+              + New Template
+            </button>
           </div>
         </div>
-      </div>
-    `;
 
-    document.body.appendChild(overlay);
-    editorModalEl = overlay;
+        ${filtered.length === 0 ? `
+          <div class="vest-tvs-about-card" style="align-items:center; text-align:center; padding:34px 24px; gap:10px;">
+            <div style="font-size:15px; font-weight:600; color:#f1f5f9;">No saved templates ${activeCategory === 'all' ? 'yet' : `for ${escapeHtml(getDrawingTypeLabel(activeCategory))}`}</div>
+            <p class="vest-tvs-about-desc" style="max-width:400px; color:#94a3b8;">
+              Right-click any drawing on the TradingView chart and choose <strong>Template → Save as...</strong>, or click <strong>+ New Template</strong> above to create one.
+            </p>
+          </div>
+        ` : `
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            ${filtered.map(t => {
+              const dt = t.drawingType || 'rectangle';
+              const dtLabel = getDrawingTypeLabel(dt);
+              const borderHex = normalizeHexColor(t.color, '#22c55e');
+              const opacity = typeof t.opacity === 'number' ? t.opacity : 20;
+              const fillRgba = hexToRgba(t.backgroundColor || borderHex, opacity / 100);
+              const styleNames = ['Solid', 'Dotted', 'Dashed'];
+              const lineStyleLabel = styleNames[Number(t.linestyle) || 0] || 'Solid';
+              const metaBadges = [
+                `${Number(t.linewidth) || 1}px ${lineStyleLabel}`
+              ];
+              if (['rectangle', 'rotated_rectangle', 'parallel_channel', 'circle', 'ellipse', 'callout'].includes(dt)) {
+                metaBadges.push(`${opacity}% Fill`);
+              }
+              if (t.showMiddleLine) metaBadges.push('50% Center');
+              if (t.extendRight) metaBadges.push('Extend ➜');
+              if (t.extendLeft) metaBadges.push('Extend ⬅');
+              if (t.showLabel && t.text) metaBadges.push(`Label: "${t.text}"`);
 
-    // Wire up modal events
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closeTemplateEditorModal();
-    });
-
-    const closeBtn = overlay.querySelector('#vest-ed-close-btn');
-    const cancelBtn = overlay.querySelector('#vest-ed-cancel-btn');
-    if (closeBtn) closeBtn.addEventListener('click', closeTemplateEditorModal);
-    if (cancelBtn) cancelBtn.addEventListener('click', closeTemplateEditorModal);
-
-    const opacityInput = overlay.querySelector('#vest-ed-opacity');
-    const opacityValEl = overlay.querySelector('#vest-ed-opacity-val');
-    if (opacityInput && opacityValEl) {
-      opacityInput.addEventListener('input', () => {
-        opacityValEl.textContent = `${opacityInput.value}%`;
-      });
+              return `
+                <div class="vest-tvs-toggle-box" data-tpl-id="${escapeHtml(t.id)}" style="padding:12px 14px; margin-bottom:0; transition:border-color 0.15s ease;">
+                  <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+                    <div style="width:24px; height:24px; border-radius:5px; border:2px solid ${borderHex}; background:${fillRgba}; position:relative; flex-shrink:0;">
+                      ${t.showMiddleLine ? `<div style="position:absolute; top:50%; left:0; right:0; height:1px; background:${normalizeHexColor(t.middleLineColor || borderHex)}; transform:translateY(-50%);"></div>` : ''}
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:3px; min-width:0; flex:1;">
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:14px; font-weight:600; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(t.name)}</span>
+                        <span style="font-size:10.5px; font-weight:600; padding:1px 7px; border-radius:999px; background:rgba(56,189,248,0.14); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; flex-shrink:0;">
+                          ${escapeHtml(dtLabel)}
+                        </span>
+                      </div>
+                      <div style="font-size:11.5px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                        ${escapeHtml(metaBadges.join(' • '))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                    <button type="button" class="vest-tvs-action-btn vest-tm-apply-btn" data-id="${escapeHtml(t.id)}" title="Apply to currently selected ${escapeHtml(dtLabel)} on the chart" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(16,185,129,0.45); color:#34d399;">
+                      Apply
+                    </button>
+                    <button type="button" class="vest-tvs-action-btn vest-tm-edit-btn" data-id="${escapeHtml(t.id)}" title="Edit template settings" style="height:28px; padding:0 10px; font-size:11.5px;">
+                      Edit
+                    </button>
+                    <button type="button" class="vest-tvs-action-btn vest-tm-dup-btn" data-id="${escapeHtml(t.id)}" title="Duplicate template" style="height:28px; padding:0 9px; font-size:11.5px;">
+                      Copy
+                    </button>
+                    <button type="button" class="vest-tvs-action-btn vest-tm-del-btn" data-id="${escapeHtml(t.id)}" title="Delete template" style="height:28px; padding:0 9px; font-size:12px; border-color:rgba(239,68,68,0.35); color:#f87171;">
+                      ×
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      `;
     }
 
-    const colorInput = overlay.querySelector('#vest-ed-color');
-    const headerSwatch = overlay.querySelector('#vest-ed-header-swatch');
-    if (colorInput && headerSwatch) {
-      colorInput.addEventListener('input', () => {
-        headerSwatch.style.background = colorInput.value;
-      });
+    function renderManagerDialog() {
+      const navItems = getSidebarCategories();
+      overlay.innerHTML = `
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Template Manager" style="width: 820px; height: 560px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
+          <div class="vest-tvs-header" id="vest-tm-drag-handle" title="Drag to move">
+            <div class="vest-tvs-title">Template Manager</div>
+            <button type="button" class="vest-tvs-close-btn" id="vest-tm-close" title="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+
+          <div class="vest-tvs-body">
+            <div class="vest-tvs-sidebar" style="width: 230px;">
+              ${navItems.map(item => `
+                <button type="button" class="vest-tvs-nav-item ${item.id === activeCategory && !editDraft ? 'active' : ''}" data-cat="${escapeHtml(item.id)}" style="justify-content:space-between;">
+                  <span class="vest-tvs-nav-label">${escapeHtml(item.label)}</span>
+                  <span style="font-size:11px; font-family:'JetBrains Mono', monospace; color:${item.count > 0 ? '#38bdf8' : '#64748b'}; background:rgba(255,255,255,0.05); padding:1px 6px; border-radius:999px;">
+                    ${item.count}
+                  </span>
+                </button>
+              `).join('')}
+            </div>
+
+            <div class="vest-tvs-content" id="vest-tm-right-pane">
+              ${renderRightPaneContent()}
+            </div>
+          </div>
+
+          <div class="vest-tvs-footer" style="justify-content:space-between;">
+            <div style="font-size:12px; color:#94a3b8;">
+              ${editDraft
+                ? `Editing <strong>${escapeHtml(editDraft.name)}</strong> (${escapeHtml(getDrawingTypeLabel(editDraft.drawingType))})`
+                : `${templates.length} saved drawing ${templates.length === 1 ? 'template' : 'templates'}`
+              }
+            </div>
+            <div class="vest-tvs-footer-right">
+              ${editDraft ? `
+                <button type="button" class="vest-tvs-btn-cancel" id="vest-tm-cancel-edit">Cancel</button>
+                <button type="button" class="vest-tvs-btn-ok" id="vest-tm-save-edit">Save Template</button>
+              ` : `
+                <button type="button" class="vest-tvs-btn-ok" id="vest-tm-done">Done</button>
+              `}
+            </div>
+          </div>
+        </div>
+      `;
+
+      wireManagerEvents();
     }
 
-    const showMidCheck = overlay.querySelector('#vest-ed-show-mid');
-    const midControls = overlay.querySelector('#vest-ed-mid-controls');
-    if (showMidCheck && midControls) {
-      showMidCheck.addEventListener('change', () => {
-        midControls.style.opacity = showMidCheck.checked ? '1' : '0.45';
-        midControls.style.pointerEvents = showMidCheck.checked ? 'auto' : 'none';
-      });
+    function saveCurrentEditDraft() {
+      if (!editDraft) return;
+      syncFormFieldsToDraft();
+
+      const existingIdx = templates.findIndex(t => t.id === editDraft.id);
+      if (existingIdx !== -1) {
+        templates[existingIdx] = { ...editDraft };
+      } else {
+        templates.push({ ...editDraft });
+      }
+
+      settings.activeTemplateId = editDraft.id;
+      safeStorageSet({ templates, settings });
+      notifyMainWorldConfig();
+      renderStudioHeaderPill();
+
+      const savedName = editDraft.name;
+      const savedType = editDraft.drawingType || 'rectangle';
+      editDraft = null;
+      editingId = null;
+      currentEditingTemplateId = null;
+      isCreatingNew = false;
+      activeCategory = savedType;
+      renderManagerDialog();
+      showToast(`Saved template "${savedName}" (${getDrawingTypeLabel(savedType)})`);
     }
 
-    const copyBoxBtn = overlay.querySelector('#vest-ed-copy-box-btn');
-    if (copyBoxBtn) {
-      copyBoxBtn.addEventListener('click', () => {
+    function wireManagerEvents() {
+      const dragHandle = overlay.querySelector('#vest-tm-drag-handle');
+      if (dragHandle) {
+        dragHandle.addEventListener('mousedown', (e) => {
+          if (e.button !== 0) return;
+          if (e.target.closest('#vest-tm-close')) return;
+          isDraggingModal = true;
+          dragStartMouse = { x: e.clientX, y: e.clientY };
+          dragStartOffset = { x: modalOffset.x, y: modalOffset.y };
+          e.preventDefault();
+        });
+      }
+
+      overlay.querySelector('#vest-tm-close')?.addEventListener('click', closeManagerOverlay);
+      overlay.querySelector('#vest-tm-done')?.addEventListener('click', closeManagerOverlay);
+
+      // Left sidebar category switching
+      overlay.querySelectorAll('.vest-tvs-nav-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeCategory = btn.dataset.cat || 'all';
+          editDraft = null;
+          editingId = null;
+          currentEditingTemplateId = null;
+          isCreatingNew = false;
+          renderManagerDialog();
+        });
+      });
+
+      // List view buttons
+      overlay.querySelector('#vest-tm-new-btn')?.addEventListener('click', () => {
+        startCreatingNewTemplate(activeCategory);
+      });
+
+      overlay.querySelector('#vest-tm-save-selected-chart-btn')?.addEventListener('click', () => {
+        const name = prompt('Enter a name for the selected chart drawing template:', 'Custom Template');
+        if (name && name.trim()) {
+          postToMainWorlds({
+            type: 'VEST_TV_SAVE_SELECTION_AS_TEMPLATE',
+            payload: { name: name.trim() }
+          });
+          setTimeout(() => {
+            if (overlay.isConnected) renderManagerDialog();
+          }, 250);
+        }
+      });
+
+      overlay.querySelectorAll('.vest-tm-apply-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          const tpl = templates.find(t => t.id === id);
+          if (!tpl) return;
+          settings.activeTemplateId = tpl.id;
+          safeStorageSet({ settings });
+          postToMainWorlds({
+            type: 'VEST_TV_APPLY_TEMPLATE',
+            payload: { templateId: tpl.id, applyToSelectedOnly: true, activateTool: false }
+          });
+          showToast(`Applied "${tpl.name}" to selected ${getDrawingTypeLabel(tpl.drawingType)}`);
+        });
+      });
+
+      overlay.querySelectorAll('.vest-tm-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          startEditingTemplate(btn.dataset.id);
+        });
+      });
+
+      overlay.querySelectorAll('.vest-tm-dup-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const orig = templates.find(t => t.id === btn.dataset.id);
+          if (!orig) return;
+          const copy = {
+            ...JSON.parse(JSON.stringify(orig)),
+            id: `custom_${Date.now()}`,
+            name: `${orig.name} (Copy)`
+          };
+          templates.push(copy);
+          safeStorageSet({ templates });
+          notifyMainWorldConfig();
+          renderStudioHeaderPill();
+          renderManagerDialog();
+          showToast(`Duplicated "${orig.name}"`);
+        });
+      });
+
+      overlay.querySelectorAll('.vest-tm-del-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          const tpl = templates.find(t => t.id === id);
+          if (!tpl) return;
+          templates = templates.filter(t => t.id !== id);
+          if (settings.activeTemplateId === id) {
+            settings.activeTemplateId = templates[0]?.id || null;
+          }
+          if (settings.defaultTemplateId === id) {
+            settings.defaultTemplateId = templates[0]?.id || null;
+          }
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          renderStudioHeaderPill();
+          renderManagerDialog();
+          showToast(`Removed "${tpl.name}"`);
+        });
+      });
+
+      // Editor view events
+      overlay.querySelector('#vest-tm-back-btn')?.addEventListener('click', () => {
+        editDraft = null;
+        editingId = null;
+        currentEditingTemplateId = null;
+        isCreatingNew = false;
+        renderManagerDialog();
+      });
+
+      overlay.querySelector('#vest-tm-cancel-edit')?.addEventListener('click', () => {
+        editDraft = null;
+        editingId = null;
+        currentEditingTemplateId = null;
+        isCreatingNew = false;
+        renderManagerDialog();
+      });
+
+      overlay.querySelector('#vest-tm-save-edit')?.addEventListener('click', () => {
+        saveCurrentEditDraft();
+      });
+
+      overlay.querySelector('#vest-tm-copy-selected-btn')?.addEventListener('click', () => {
+        syncFormFieldsToDraft();
         postToMainWorlds({
           type: 'VEST_TV_REQUEST_SHAPE_PROPERTIES_FOR_EDITOR'
         });
       });
-    }
 
-    const saveBtn = overlay.querySelector('#vest-ed-save-btn');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', () => {
-        const idx = templates.findIndex(t => t.id === currentEditingTemplateId);
-        if (idx === -1) return;
-
-        const updatedName = (overlay.querySelector('#vest-ed-name')?.value || '').trim() || templates[idx].name;
-        const updatedColor = overlay.querySelector('#vest-ed-color')?.value || '#22c55e';
-        const updatedBg = overlay.querySelector('#vest-ed-bg-color')?.value || updatedColor;
-        const updatedOpacity = Number(overlay.querySelector('#vest-ed-opacity')?.value ?? 20);
-        const updatedLineW = Number(overlay.querySelector('#vest-ed-linewidth')?.value || 1);
-        const updatedLineS = Number(overlay.querySelector('#vest-ed-linestyle')?.value || 0);
-        const updatedShowMid = Boolean(overlay.querySelector('#vest-ed-show-mid')?.checked);
-        const updatedMidColor = overlay.querySelector('#vest-ed-mid-color')?.value || updatedColor;
-        const updatedMidW = Number(overlay.querySelector('#vest-ed-mid-width')?.value || 1);
-        const updatedMidS = Number(overlay.querySelector('#vest-ed-mid-style')?.value ?? 2);
-        const updatedExtL = Boolean(overlay.querySelector('#vest-ed-extend-left')?.checked);
-        const updatedExtR = Boolean(overlay.querySelector('#vest-ed-extend-right')?.checked);
-        const updatedShowLabel = Boolean(overlay.querySelector('#vest-ed-show-label')?.checked);
-        const updatedText = overlay.querySelector('#vest-ed-text')?.value || '';
-        const updatedTextColor = overlay.querySelector('#vest-ed-text-color')?.value || updatedColor;
-        const updatedFontSize = Number(overlay.querySelector('#vest-ed-fontsize')?.value || 12);
-        const updatedHorzAlign = overlay.querySelector('#vest-ed-horz-align')?.value || 'right';
-        const updatedVertAlign = overlay.querySelector('#vest-ed-vert-align')?.value || 'middle';
-
-        templates[idx] = {
-          ...templates[idx],
-          name: updatedName,
-          color: updatedColor,
-          backgroundColor: updatedBg,
-          opacity: updatedOpacity,
-          linewidth: updatedLineW,
-          linestyle: updatedLineS,
-          showMiddleLine: updatedShowMid,
-          middleLineColor: updatedMidColor,
-          middleLineWidth: updatedMidW,
-          middleLineStyle: updatedMidS,
-          extendLeft: updatedExtL,
-          extendRight: updatedExtR,
-          showLabel: updatedShowLabel,
-          text: updatedText,
-          textColor: updatedTextColor,
-          fontSize: updatedFontSize,
-          horzLabelsAlign: updatedHorzAlign,
-          vertLabelsAlign: updatedVertAlign
-        };
-
-        const editedId = templates[idx].id;
-        settings.activeTemplateId = editedId;
-
-        safeStorageSet({ templates, settings });
-        notifyMainWorldConfig();
-
-        postToMainWorlds({
-          type: 'VEST_TV_APPLY_TEMPLATE',
-          payload: { templateId: editedId, activateTool: false }
+      const opacityInput = overlay.querySelector('#vest-tm-opacity');
+      const opacityValEl = overlay.querySelector('#vest-tm-opacity-val');
+      if (opacityInput && opacityValEl) {
+        opacityInput.addEventListener('input', () => {
+          opacityValEl.textContent = `${opacityInput.value}%`;
         });
+      }
 
-        closeTemplateEditorModal();
-        renderFloatingBar();
-        showToast(`Saved & applied "${updatedName}"`);
-      });
+      const showMidCheck = overlay.querySelector('#vest-tm-show-mid');
+      const midControls = overlay.querySelector('#vest-tm-mid-controls');
+      if (showMidCheck && midControls) {
+        showMidCheck.addEventListener('change', () => {
+          midControls.style.opacity = showMidCheck.checked ? '1' : '0.45';
+          midControls.style.pointerEvents = showMidCheck.checked ? 'auto' : 'none';
+        });
+      }
     }
+
+    // Store a helper on overlay so populateEditorModalFromProperties can update editDraft live
+    overlay.__populateFromShapeProperties = (p) => {
+      if (!editDraft || !p) return;
+      syncFormFieldsToDraft();
+      editDraft = {
+        ...editDraft,
+        drawingType: p.drawingType || editDraft.drawingType || 'rectangle',
+        color: p.color || editDraft.color,
+        backgroundColor: p.backgroundColor || p.color || editDraft.backgroundColor,
+        opacity: p.opacity ?? editDraft.opacity,
+        linewidth: p.linewidth || editDraft.linewidth,
+        linestyle: p.linestyle ?? editDraft.linestyle,
+        showMiddleLine: Boolean(p.showMiddleLine),
+        middleLineColor: p.middleLineColor || p.color || editDraft.middleLineColor,
+        middleLineWidth: p.middleLineWidth || editDraft.middleLineWidth,
+        middleLineStyle: p.middleLineStyle ?? editDraft.middleLineStyle,
+        extendLeft: Boolean(p.extendLeft),
+        extendRight: Boolean(p.extendRight),
+        showLabel: Boolean(p.showLabel),
+        text: p.text !== undefined ? p.text : editDraft.text,
+        textColor: p.textColor || p.color || editDraft.textColor,
+        fontSize: p.fontSize || editDraft.fontSize,
+        horzLabelsAlign: p.horzLabelsAlign || editDraft.horzLabelsAlign,
+        vertLabelsAlign: p.vertLabelsAlign || editDraft.vertLabelsAlign,
+        rawProperties: p.rawProperties || editDraft.rawProperties || {}
+      };
+      renderManagerDialog();
+      showToast(`Copied ${getDrawingTypeLabel(editDraft.drawingType)} properties from chart!`);
+    };
+
+    renderManagerDialog();
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay && !justFinishedDragging) {
+        closeManagerOverlay();
+      }
+    });
   }
 
   function populateEditorModalFromProperties(p) {
     if (!editorModalEl || !p) return;
-    const setVal = (sel, val) => {
-      const el = editorModalEl.querySelector(sel);
-      if (el && val !== undefined) el.value = val;
-    };
-    const setCheck = (sel, val) => {
-      const el = editorModalEl.querySelector(sel);
-      if (el && val !== undefined) el.checked = Boolean(val);
-    };
-
-    setVal('#vest-ed-color', normalizeHexColor(p.color, '#22c55e'));
-    setVal('#vest-ed-bg-color', normalizeHexColor(p.backgroundColor || p.color, '#22c55e'));
-    setVal('#vest-ed-opacity', p.opacity ?? 20);
-    const opVal = editorModalEl.querySelector('#vest-ed-opacity-val');
-    if (opVal) opVal.textContent = `${p.opacity ?? 20}%`;
-
-    setVal('#vest-ed-linewidth', String(p.linewidth || 1));
-    setVal('#vest-ed-linestyle', String(p.linestyle ?? 0));
-    setCheck('#vest-ed-show-mid', p.showMiddleLine);
-    const midControls = editorModalEl.querySelector('#vest-ed-mid-controls');
-    if (midControls) {
-      midControls.style.opacity = p.showMiddleLine ? '1' : '0.45';
-      midControls.style.pointerEvents = p.showMiddleLine ? 'auto' : 'none';
+    if (typeof editorModalEl.__populateFromShapeProperties === 'function') {
+      editorModalEl.__populateFromShapeProperties(p);
+      return;
     }
-    setVal('#vest-ed-mid-color', normalizeHexColor(p.middleLineColor || p.color, '#22c55e'));
-    setVal('#vest-ed-mid-width', String(p.middleLineWidth || 1));
-    setVal('#vest-ed-mid-style', String(p.middleLineStyle ?? 2));
-    setCheck('#vest-ed-extend-left', p.extendLeft);
-    setCheck('#vest-ed-extend-right', p.extendRight);
-    setCheck('#vest-ed-show-label', p.showLabel);
-    setVal('#vest-ed-text', p.text || '');
-    setVal('#vest-ed-text-color', normalizeHexColor(p.textColor || p.color, '#22c55e'));
-    setVal('#vest-ed-fontsize', String(p.fontSize || 12));
-    setVal('#vest-ed-horz-align', p.horzLabelsAlign || 'right');
-    setVal('#vest-ed-vert-align', p.vertLabelsAlign || 'middle');
-
-    const headerSwatch = editorModalEl.querySelector('#vest-ed-header-swatch');
-    if (headerSwatch) headerSwatch.style.background = normalizeHexColor(p.color, '#22c55e');
-
-    showToast('Copied properties from selected box into editor!');
   }
 
   // -------------------------------------------------------------
@@ -3515,15 +3949,27 @@
       if (data.installedVersionOverride) {
         installedVersionOverride = data.installedVersionOverride;
       }
-      if (data.templates && Array.isArray(data.templates) && data.templates.length > 0) {
-        templates = data.templates;
+      if (data.templates && Array.isArray(data.templates)) {
+        templates = sanitizeUserTemplates(data.templates);
       } else {
-        templates = [...DEFAULT_TEMPLATES];
-        safeStorageSet({ templates });
+        templates = [];
       }
       if (data.settings) {
-        settings = { ...settings, ...data.settings };
+        settings = {
+          ...settings,
+          ...data.settings,
+          autoApplyToNew: false
+        };
+        if (settings.activeTemplateId && LEGACY_PRESET_IDS.has(String(settings.activeTemplateId))) {
+          settings.activeTemplateId = templates[0]?.id || null;
+        }
+        if (settings.defaultTemplateId && LEGACY_PRESET_IDS.has(String(settings.defaultTemplateId))) {
+          settings.defaultTemplateId = templates[0]?.id || null;
+        }
       }
+      // Persist cleaned templates & settings so legacy defaults are permanently removed
+      safeStorageSet({ templates, settings });
+
       if (data.updaterState) {
         const currentVer = getSafeExtVersion();
         isUpdateAvailable = Boolean(

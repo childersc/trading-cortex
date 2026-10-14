@@ -1,149 +1,30 @@
 // Background Service Worker for Vest Markets Chart Templates
 
-const DEFAULT_TEMPLATES = [
-  {
-    id: "bullish_ob",
-    name: "Bullish OB",
-    color: "#22c55e",           // Border color (Emerald green)
-    backgroundColor: "#22c55e", // Fill color
-    opacity: 20,                // 20% opacity (transparency 80 in TradingView)
-    linewidth: 1,
-    linestyle: 0,               // 0 = solid, 1 = dotted, 2 = dashed
-    extendRight: false,
-    extendLeft: false,
-    showMiddleLine: false,
-    middleLineColor: "#22c55e",
-    middleLineWidth: 1,
-    middleLineStyle: 2,         // 2 = dashed
-    showLabel: false,
-    text: "Bullish OB",
-    textColor: "#22c55e",
-    fontSize: 12
-  },
-  {
-    id: "bearish_ob",
-    name: "Bearish OB",
-    color: "#ef4444",           // Border color (Red)
-    backgroundColor: "#ef4444", // Fill color
-    opacity: 20,
-    linewidth: 1,
-    linestyle: 0,
-    extendRight: false,
-    extendLeft: false,
-    showMiddleLine: false,
-    middleLineColor: "#ef4444",
-    middleLineWidth: 1,
-    middleLineStyle: 2,
-    showLabel: false,
-    text: "Bearish OB",
-    textColor: "#ef4444",
-    fontSize: 12
-  },
-  {
-    id: "fvg",
-    name: "Fair Value Gap",
-    color: "#eab308",           // Gold / Yellow
-    backgroundColor: "#eab308",
-    opacity: 18,
-    linewidth: 1,
-    linestyle: 0,
-    extendRight: true,          // Extend Right enabled by default for FVG
-    extendLeft: false,
-    showMiddleLine: true,       // 50% Consequent Encroachment / Center line enabled!
-    middleLineColor: "#eab308",
-    middleLineWidth: 1,
-    middleLineStyle: 2,         // Dashed
-    showLabel: false,
-    text: "FVG",
-    textColor: "#eab308",
-    fontSize: 12
-  },
-  {
-    id: "liquidity",
-    name: "Liquidity / Range",
-    color: "#3b82f6",           // Sky Blue
-    backgroundColor: "#3b82f6",
-    opacity: 15,
-    linewidth: 1,
-    linestyle: 2,               // Dashed
-    extendRight: false,
-    extendLeft: false,
-    showMiddleLine: true,
-    middleLineColor: "#3b82f6",
-    middleLineWidth: 1,
-    middleLineStyle: 2,
-    showLabel: false,
-    text: "Liquidity",
-    textColor: "#3b82f6",
-    fontSize: 12
-  },
-  {
-    id: "breaker_block",
-    name: "Breaker Block",
-    color: "#a855f7",           // Purple
-    backgroundColor: "#a855f7",
-    opacity: 20,
-    linewidth: 1,
-    linestyle: 0,
-    extendRight: false,
-    extendLeft: false,
-    showMiddleLine: false,
-    middleLineColor: "#a855f7",
-    middleLineWidth: 1,
-    middleLineStyle: 2,
-    showLabel: false,
-    text: "Breaker",
-    textColor: "#a855f7",
-    fontSize: 12
-  },
-  {
-    id: "consolidation",
-    name: "Consolidation",
-    color: "#64748b",           // Slate / Gray
-    backgroundColor: "#64748b",
-    opacity: 15,
-    linewidth: 1,
-    linestyle: 0,
-    extendRight: false,
-    extendLeft: false,
-    showMiddleLine: true,
-    middleLineColor: "#94a3b8",
-    middleLineWidth: 1,
-    middleLineStyle: 2,
-    showLabel: false,
-    text: "Range",
-    textColor: "#94a3b8",
-    fontSize: 12
-  },
-  {
-    id: "volume_imbalance",
-    name: "Volume Imbalance",
-    color: "#06b6d4",           // Cyan
-    backgroundColor: "#06b6d4",
-    opacity: 22,
-    linewidth: 1,
-    linestyle: 1,               // Dotted
-    extendRight: true,
-    extendLeft: false,
-    showMiddleLine: true,
-    middleLineColor: "#06b6d4",
-    middleLineWidth: 1,
-    middleLineStyle: 1,
-    showLabel: false,
-    text: "VI",
-    textColor: "#06b6d4",
-    fontSize: 12
-  }
-];
+const DEFAULT_TEMPLATES = [];
+
+const LEGACY_PRESET_IDS = new Set([
+  "bullish_ob",
+  "bearish_ob",
+  "fvg",
+  "fvg_imbalance",
+  "liquidity",
+  "liquidity_sweep",
+  "breaker_block",
+  "consolidation",
+  "range_consolidation",
+  "volume_imbalance"
+]);
 
 const DEFAULT_SETTINGS = {
-  activeTemplateId: "bullish_ob",
-  defaultTemplateId: "bullish_ob",
+  activeTemplateId: null,
+  defaultTemplateId: null,
   showFloatingBar: false,
   floatingBarPosition: { top: 80, left: 16 },
-  autoApplyToNew: true,
+  autoApplyToNew: false,
   hotkeysEnabled: true,
   rememberSidebarTools: true,
+  rememberLastChartSettings: true,
+  lastChartSettings: {},
   enablePanelManagement: true,
   panelLayout: {},
   sidebarState: {
@@ -161,7 +42,7 @@ const DEFAULT_SETTINGS = {
 // Schema-Versioned Local File System JSON Database & Migrations
 // File path inside linked extension folder: user-data/cortex-db.json
 // -------------------------------------------------------------
-const CURRENT_DB_SCHEMA_VERSION = 1;
+const CURRENT_DB_SCHEMA_VERSION = 2;
 const IDB_NAME = "vest_studio_updater_db";
 const IDB_STORE = "handles";
 const IDB_KEY = "extension_dir_handle";
@@ -197,6 +78,36 @@ async function getSavedFolderHandle() {
 }
 
 /**
+ * Strips legacy hardcoded presets, assigns drawingType, and deduplicates user templates
+ */
+function sanitizeUserTemplates(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const seenKeys = new Set();
+  const cleaned = [];
+  for (const t of rawList) {
+    if (!t || typeof t !== "object") continue;
+    if (t.id && LEGACY_PRESET_IDS.has(String(t.id))) continue;
+    const drawingType = t.drawingType || "rectangle";
+    const nameKey = `${drawingType}::${String(t.name || "").trim().toLowerCase()}`;
+    if (seenKeys.has(nameKey)) continue;
+    seenKeys.add(nameKey);
+    cleaned.push({
+      drawingType,
+      extendRight: Boolean(t.extendRight),
+      extendLeft: Boolean(t.extendLeft),
+      showMiddleLine: Boolean(t.showMiddleLine),
+      middleLineColor: t.middleLineColor || t.color || "#22c55e",
+      middleLineWidth: Number(t.middleLineWidth) || 1,
+      middleLineStyle: t.middleLineStyle !== undefined ? Number(t.middleLineStyle) : 2,
+      horzLabelsAlign: t.horzLabelsAlign || "right",
+      vertLabelsAlign: t.vertLabelsAlign || "middle",
+      ...t
+    });
+  }
+  return cleaned;
+}
+
+/**
  * Normalizes and migrates any database object from older schema versions up to CURRENT_DB_SCHEMA_VERSION
  */
 function runDatabaseMigrations(rawDb) {
@@ -204,25 +115,9 @@ function runDatabaseMigrations(rawDb) {
   const fromVersion = Number(db.schemaVersion) || 0;
   const history = Array.isArray(db.migrations) ? [...db.migrations] : [];
 
-  // Migration v0 -> v1: Ensure all templates have middleLine, horz/vert label alignment, and ray fields,
-  // and ensure settings has sidebarState.groupTools and rememberLastChartSettings
+  // Migration v0 -> v1
   if (fromVersion < 1) {
-    if (Array.isArray(db.templates) && db.templates.length > 0) {
-      db.templates = db.templates.map(t => ({
-        extendRight: Boolean(t.extendRight),
-        extendLeft: Boolean(t.extendLeft),
-        showMiddleLine: Boolean(t.showMiddleLine),
-        middleLineColor: t.middleLineColor || t.color || "#22c55e",
-        middleLineWidth: Number(t.middleLineWidth) || 1,
-        middleLineStyle: t.middleLineStyle !== undefined ? Number(t.middleLineStyle) : 2,
-        horzLabelsAlign: t.horzLabelsAlign || "right",
-        vertLabelsAlign: t.vertLabelsAlign || "middle",
-        ...t
-      }));
-    } else {
-      db.templates = DEFAULT_TEMPLATES;
-    }
-
+    db.templates = Array.isArray(db.templates) ? db.templates : [];
     db.settings = {
       ...DEFAULT_SETTINGS,
       ...(db.settings || {}),
@@ -235,12 +130,34 @@ function runDatabaseMigrations(rawDb) {
         }
       }
     };
-
     history.push({
       version: 1,
       migratedAt: new Date().toISOString(),
-      description: "Initial v1 schema normalization for templates, middleLine, label alignment, and sidebarState.groupTools"
+      description: "Initial v1 schema normalization"
     });
+  }
+
+  // Migration v1 -> v2: Clear out hardcoded default templates, deduplicate user templates, add drawingType, disable autoApplyToNew
+  if (fromVersion < 2) {
+    db.templates = sanitizeUserTemplates(db.templates);
+    db.settings = {
+      ...DEFAULT_SETTINGS,
+      ...(db.settings || {}),
+      autoApplyToNew: false
+    };
+    if (db.settings.activeTemplateId && LEGACY_PRESET_IDS.has(String(db.settings.activeTemplateId))) {
+      db.settings.activeTemplateId = db.templates[0]?.id || null;
+    }
+    if (db.settings.defaultTemplateId && LEGACY_PRESET_IDS.has(String(db.settings.defaultTemplateId))) {
+      db.settings.defaultTemplateId = db.templates[0]?.id || null;
+    }
+    history.push({
+      version: 2,
+      migratedAt: new Date().toISOString(),
+      description: "Removed hardcoded default templates, added multi-drawing-type template support, and disabled autoApplyToNew"
+    });
+  } else {
+    db.templates = sanitizeUserTemplates(db.templates);
   }
 
   db.schemaVersion = CURRENT_DB_SCHEMA_VERSION;
@@ -289,7 +206,7 @@ async function writeLocalDiskDatabase(templates, settings, dirHandleOverride = n
       updatedAt: Date.now(),
       extensionVersion: chrome.runtime.getManifest().version || "1.1.0",
       migrations: existingDiskDb ? existingDiskDb.migrations : [],
-      templates: Array.isArray(templates) && templates.length > 0 ? templates : (existingDiskDb?.templates || DEFAULT_TEMPLATES),
+      templates: Array.isArray(templates) ? templates : (existingDiskDb?.templates || DEFAULT_TEMPLATES),
       settings: settings || existingDiskDb?.settings || DEFAULT_SETTINGS
     });
 
@@ -314,7 +231,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     diskWriteTimer = null;
     try {
       const data = await chrome.storage.local.get(["templates", "settings"]).catch(() => ({}));
-      if (data.templates || data.settings) {
+      if (data.templates !== undefined || data.settings !== undefined) {
         await writeLocalDiskDatabase(data.templates, data.settings);
       }
     } catch (e) {}
@@ -323,16 +240,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
-    const localData = await chrome.storage.local.get(["templates", "settings"]).catch(() => ({}));
+    const localData = await chrome.storage.local.get(["templates", "settings", "dbSchemaVersion"]).catch(() => ({}));
     const syncData = await chrome.storage.sync.get(["templates", "settings"]).catch(() => ({}));
     const diskDb = await readLocalDiskDatabase();
 
     // Priority: 1. Disk Database (if newer or if local storage was wiped), 2. chrome.storage.local, 3. chrome.storage.sync
     const existingTemplates =
-      (Array.isArray(localData.templates) && localData.templates.length > 0 && localData.templates) ||
-      (diskDb && Array.isArray(diskDb.templates) && diskDb.templates.length > 0 && diskDb.templates) ||
-      (Array.isArray(syncData.templates) && syncData.templates.length > 0 && syncData.templates) ||
-      null;
+      (Array.isArray(localData.templates) && localData.templates) ||
+      (diskDb && Array.isArray(diskDb.templates) && diskDb.templates) ||
+      (Array.isArray(syncData.templates) && syncData.templates) ||
+      [];
 
     const existingSettings =
       localData.settings ||
@@ -341,9 +258,9 @@ chrome.runtime.onInstalled.addListener(async () => {
       null;
 
     const migrated = runDatabaseMigrations({
-      schemaVersion: diskDb ? diskDb.schemaVersion : 0,
+      schemaVersion: Math.min(Number(localData.dbSchemaVersion) || 0, diskDb ? Number(diskDb.schemaVersion) || 0 : 0),
       migrations: diskDb ? diskDb.migrations : [],
-      templates: existingTemplates || DEFAULT_TEMPLATES,
+      templates: existingTemplates,
       settings: existingSettings || DEFAULT_SETTINGS
     });
 
@@ -360,13 +277,12 @@ chrome.runtime.onInstalled.addListener(async () => {
     // Persist migrated state back to disk if folder is linked
     await writeLocalDiskDatabase(finalTemplates, finalSettings);
 
-    // Only write to chrome.storage.sync if it wasn't initialized yet
-    if (!syncData.templates || !syncData.settings) {
-      await chrome.storage.sync.set({
-        templates: finalTemplates,
-        settings: finalSettings
-      }).catch(() => {});
-    }
+    // Sync cleaned templates & settings to chrome.storage.sync
+    await chrome.storage.sync.set({
+      templates: finalTemplates,
+      settings: finalSettings
+    }).catch(() => {});
+
     // Setup 30-minute background update check alarm
     if (finalSettings.autoCheckUpdates !== false) {
       chrome.alarms.create("vest_studio_update_check", { periodInMinutes: 30 });

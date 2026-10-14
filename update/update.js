@@ -522,7 +522,35 @@
   // -------------------------------------------------------------
   const DB_FOLDER_NAME = 'user-data';
   const DB_FILE_NAME = 'cortex-db.json';
-  const CURRENT_DB_SCHEMA_VERSION = 1;
+  const CURRENT_DB_SCHEMA_VERSION = 2;
+  const LEGACY_PRESET_IDS = new Set([
+    'bullish_ob',
+    'bearish_ob',
+    'fvg',
+    'fvg_imbalance',
+    'liquidity',
+    'liquidity_sweep',
+    'breaker_block',
+    'consolidation',
+    'range_consolidation',
+    'volume_imbalance'
+  ]);
+
+  function sanitizeTemplatesList(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const t of list) {
+      if (!t || typeof t !== 'object') continue;
+      if (t.id && LEGACY_PRESET_IDS.has(String(t.id))) continue;
+      const dt = t.drawingType || 'rectangle';
+      const key = `${dt}::${String(t.name || '').trim().toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ drawingType: dt, ...t });
+    }
+    return out;
+  }
 
   async function syncLocalJsonDatabase(dirHandle) {
     if (!dirHandle) return;
@@ -546,18 +574,18 @@
       const storageData = await chrome.storage.local.get(['templates', 'settings']).catch(() => ({}));
 
       // If chrome.storage was wiped (e.g. extension was unloaded/reloaded) or disk database has newer custom templates, restore from disk!
-      let finalTemplates = storageData.templates;
+      let finalTemplates = Array.isArray(storageData.templates) ? sanitizeTemplatesList(storageData.templates) : null;
       let finalSettings = storageData.settings;
       let restoredFromDisk = false;
 
-      if (existingDiskDb && Array.isArray(existingDiskDb.templates) && existingDiskDb.templates.length > 0) {
+      if (existingDiskDb && Array.isArray(existingDiskDb.templates)) {
+        const diskTemplates = sanitizeTemplatesList(existingDiskDb.templates);
         const isStorageDefaultOrEmpty =
           !Array.isArray(finalTemplates) ||
-          finalTemplates.length === 0 ||
-          (!finalSettings?._savedAt && existingDiskDb.updatedAt);
+          (finalTemplates.length === 0 && diskTemplates.length > 0 && (!finalSettings?._savedAt && existingDiskDb.updatedAt));
 
         if (isStorageDefaultOrEmpty) {
-          finalTemplates = existingDiskDb.templates;
+          finalTemplates = diskTemplates;
           restoredFromDisk = true;
         }
       }
@@ -571,7 +599,7 @@
 
       if (restoredFromDisk) {
         await chrome.storage.local.set({
-          templates: finalTemplates,
+          templates: finalTemplates || [],
           settings: finalSettings,
           dbSchemaVersion: CURRENT_DB_SCHEMA_VERSION
         }).catch(() => {});
@@ -593,7 +621,7 @@
         updatedAt: Date.now(),
         extensionVersion: installedVersion,
         migrations,
-        templates: finalTemplates || existingDiskDb?.templates || [],
+        templates: finalTemplates || sanitizeTemplatesList(existingDiskDb?.templates) || [],
         settings: finalSettings || existingDiskDb?.settings || {}
       };
 

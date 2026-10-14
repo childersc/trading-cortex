@@ -11,162 +11,118 @@
   if (window.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) return;
   window.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__ = true;
 
-  const DEFAULT_TEMPLATES = [
-    {
-      id: 'bullish_ob',
-      name: 'Bullish OB',
-      color: '#22c55e',
-      backgroundColor: '#22c55e',
-      opacity: 20,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: false,
-      middleLineColor: '#22c55e',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Bullish OB',
-      textColor: '#22c55e',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'bearish_ob',
-      name: 'Bearish OB',
-      color: '#ef4444',
-      backgroundColor: '#ef4444',
-      opacity: 20,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: false,
-      middleLineColor: '#ef4444',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Bearish OB',
-      textColor: '#ef4444',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'fvg',
-      name: 'Fair Value Gap',
-      color: '#eab308',
-      backgroundColor: '#eab308',
-      opacity: 18,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: true,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#eab308',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'FVG',
-      textColor: '#eab308',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'liquidity',
-      name: 'Liquidity / Range',
-      color: '#3b82f6',
-      backgroundColor: '#3b82f6',
-      opacity: 15,
-      linewidth: 1,
-      linestyle: 2,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#3b82f6',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Liquidity',
-      textColor: '#3b82f6',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'breaker_block',
-      name: 'Breaker Block',
-      color: '#a855f7',
-      backgroundColor: '#a855f7',
-      opacity: 20,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: false,
-      middleLineColor: '#a855f7',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Breaker',
-      textColor: '#a855f7',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'consolidation',
-      name: 'Consolidation',
-      color: '#64748b',
-      backgroundColor: '#64748b',
-      opacity: 15,
-      linewidth: 1,
-      linestyle: 0,
-      extendRight: false,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#94a3b8',
-      middleLineWidth: 1,
-      middleLineStyle: 2,
-      showLabel: false,
-      text: 'Range',
-      textColor: '#94a3b8',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    },
-    {
-      id: 'volume_imbalance',
-      name: 'Volume Imbalance',
-      color: '#06b6d4',
-      backgroundColor: '#06b6d4',
-      opacity: 22,
-      linewidth: 1,
-      linestyle: 1,
-      extendRight: true,
-      extendLeft: false,
-      showMiddleLine: true,
-      middleLineColor: '#06b6d4',
-      middleLineWidth: 1,
-      middleLineStyle: 1,
-      showLabel: false,
-      text: 'VI',
-      textColor: '#06b6d4',
-      fontSize: 12,
-      horzLabelsAlign: 'right',
-      vertLabelsAlign: 'middle'
-    }
-  ];
+  const DEFAULT_TEMPLATES = [];
+
+  const DRAWING_TYPE_LABELS = {
+    rectangle: 'Rectangle',
+    rotated_rectangle: 'Rotated Rectangle',
+    horiz_line: 'Horizontal Line',
+    horiz_ray: 'Horizontal Ray',
+    vert_line: 'Vertical Line',
+    cross_line: 'Cross Line',
+    trend_line: 'Trend Line',
+    ray: 'Ray',
+    extended: 'Extended Line',
+    info_line: 'Info Line',
+    trend_angle: 'Trend Angle',
+    parallel_channel: 'Parallel Channel',
+    regression_trend: 'Regression Trend',
+    flat_bottom: 'Flat Top/Bottom',
+    disjoint_angle: 'Disjoint Channel',
+    pitchfork: 'Pitchfork',
+    fib_retracement: 'Fib Retracement',
+    fib_trend_ext: 'Trend-Based Fib Ext',
+    fib_channel: 'Fib Channel',
+    fib_time_zone: 'Fib Time Zone',
+    fib_fan: 'Fib Speed Fan',
+    gann_box: 'Gann Box',
+    long_position: 'Long Position',
+    short_position: 'Short Position',
+    price_range: 'Price Range',
+    date_range: 'Date Range',
+    date_and_price_range: 'Date & Price Range',
+    anchored_vwap: 'Anchored VWAP',
+    volume_profile: 'Fixed Range Volume Profile',
+    text: 'Text',
+    anchored_text: 'Anchored Text',
+    note: 'Note',
+    callout: 'Callout',
+    price_label: 'Price Label',
+    arrow_marker: 'Arrow Marker',
+    arrow: 'Arrow Line',
+    brush: 'Brush',
+    highlighter: 'Highlighter',
+    path: 'Path',
+    circle: 'Circle',
+    ellipse: 'Ellipse',
+    triangle: 'Triangle',
+    arc: 'Arc',
+    polyline: 'Polyline'
+  };
+
+  function canonicalizeDrawingType(rawName) {
+    if (!rawName) return 'rectangle';
+    const s = String(rawName).trim().toLowerCase();
+    if (!s) return 'rectangle';
+    if (s === 'rectangle' || s === 'linetoolrectangle') return 'rectangle';
+    if (s === 'rotated_rectangle' || s === 'linetoolrotatedrectangle') return 'rotated_rectangle';
+    if (s === 'horiz_line' || s === 'linetoolhorzline' || s === 'horizontal_line') return 'horiz_line';
+    if (s === 'horiz_ray' || s === 'linetoolhorzray' || s === 'horizontal_ray') return 'horiz_ray';
+    if (s === 'vert_line' || s === 'linetoolvertline' || s === 'vertical_line') return 'vert_line';
+    if (s === 'cross_line' || s === 'linetoolcrossline') return 'cross_line';
+    if (s === 'trend_line' || s === 'linetooltrendline') return 'trend_line';
+    if (s === 'ray' || s === 'linetoolray') return 'ray';
+    if (s === 'extended' || s === 'linetoolextended' || s === 'extended_line') return 'extended';
+    if (s === 'info_line' || s === 'linetoolinfoline') return 'info_line';
+    if (s === 'trend_angle' || s === 'linetooltrendangle') return 'trend_angle';
+    if (s === 'parallel_channel' || s === 'linetoolparallelchannel') return 'parallel_channel';
+    if (s === 'regression_trend' || s === 'linetoolregressiontrend') return 'regression_trend';
+    if (s === 'flat_bottom' || s === 'linetoolflatbottom') return 'flat_bottom';
+    if (s === 'disjoint_angle' || s === 'linetooldisjointangle') return 'disjoint_angle';
+    if (s.includes('pitchfork')) return 'pitchfork';
+    if (s === 'fib_retracement' || s === 'linetoolfibretracement') return 'fib_retracement';
+    if (s === 'fib_trend_ext' || s === 'linetooltrendbasedfibextension') return 'fib_trend_ext';
+    if (s === 'fib_channel' || s === 'linetoolfibchannel') return 'fib_channel';
+    if (s === 'fib_time_zone' || s === 'linetoolfibtimezone') return 'fib_time_zone';
+    if (s.includes('fib') && s.includes('fan')) return 'fib_fan';
+    if (s.includes('gann')) return 'gann_box';
+    if (s === 'long_position' || s === 'linetoolriskrewardlong') return 'long_position';
+    if (s === 'short_position' || s === 'linetoolriskrewardshort') return 'short_position';
+    if (s === 'date_and_price_range' || s === 'linetooldateandpricerange') return 'date_and_price_range';
+    if (s === 'price_range' || s === 'linetoolpricerange') return 'price_range';
+    if (s === 'date_range' || s === 'linetooldaterange') return 'date_range';
+    if (s.includes('vwap')) return 'anchored_vwap';
+    if (s.includes('volumeprofile') || s.includes('volume_profile')) return 'volume_profile';
+    if (s === 'anchored_text' || s === 'linetooltextabsolute') return 'anchored_text';
+    if (s === 'text' || s === 'linetooltext') return 'text';
+    if (s.includes('note')) return 'note';
+    if (s === 'callout' || s === 'linetoolcallout') return 'callout';
+    if (s === 'price_label' || s === 'linetoolpricelabel') return 'price_label';
+    if (s === 'arrow_marker' || s === 'linetoolarrowmarker') return 'arrow_marker';
+    if (s.includes('arrow')) return 'arrow';
+    if (s === 'brush' || s === 'linetoolbrush') return 'brush';
+    if (s === 'highlighter' || s === 'linetoolhighlighter') return 'highlighter';
+    if (s === 'path' || s === 'linetoolpath') return 'path';
+    if (s === 'circle' || s === 'linetoolcircle') return 'circle';
+    if (s === 'ellipse' || s === 'linetoolellipse') return 'ellipse';
+    if (s === 'triangle' || s === 'linetooltriangle') return 'triangle';
+    if (s === 'arc' || s === 'linetoolarc') return 'arc';
+    if (s === 'polyline' || s === 'linetoolpolygonalline') return 'polyline';
+    return s.replace(/^linetool/, '');
+  }
+
+  function getDrawingTypeLabel(drawingType) {
+    const canon = canonicalizeDrawingType(drawingType);
+    if (DRAWING_TYPE_LABELS[canon]) return DRAWING_TYPE_LABELS[canon];
+    return canon.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
 
   // Active state
   let currentTemplates = [...DEFAULT_TEMPLATES];
   let currentSettings = {
-    activeTemplateId: 'bullish_ob',
-    defaultTemplateId: 'bullish_ob',
-    autoApplyToNew: true,
+    activeTemplateId: null,
+    defaultTemplateId: null,
+    autoApplyToNew: false,
     hotkeysEnabled: true,
     rememberSidebarTools: true,
     rememberLastChartSettings: true,
@@ -292,6 +248,8 @@
   let activeChartApi = null;
   let lastInteractedShapeId = null;
   let lastRectangleId = null;
+  let rightClickedShapeId = null;
+  let rightClickedDrawingType = null;
 
   function log(...args) {
     console.log('[VestTemplates:Main]', ...args);
@@ -299,17 +257,20 @@
 
   function postToIsolated(msg) {
     try {
-      window.postMessage(msg, '*');
-    } catch (e) {}
-    try {
       if (window.top && window.top !== window) {
         window.top.postMessage(msg, '*');
+      } else {
+        window.postMessage(msg, '*');
       }
-    } catch (e) {}
+    } catch (e) {
+      try {
+        window.postMessage(msg, '*');
+      } catch (e2) {}
+    }
   }
 
   function getActiveTemplate() {
-    if (!currentTemplates.length) return DEFAULT_TEMPLATES[0];
+    if (!currentTemplates.length) return null;
     return (
       currentTemplates.find(t => t.id === currentSettings.activeTemplateId) ||
       currentTemplates.find(t => t.id === currentSettings.defaultTemplateId) ||
@@ -318,74 +279,144 @@
   }
 
   /**
-   * Convert template object into TradingView LineToolRectangle properties
+   * Convert template object into TradingView shape properties for ANY drawing type
    */
-  function buildRectangleProperties(tpl) {
+  function buildShapePropertiesForTemplate(tpl, shape, drawingTypeOverride) {
     if (!tpl) return {};
+    const drawingType = canonicalizeDrawingType(drawingTypeOverride || tpl.drawingType || 'rectangle');
+    const existingProps = (shape && typeof shape.getProperties === 'function') ? (shape.getProperties() || {}) : {};
+
+    // Start from captured rawProperties if available so tool-specific fields (fib levels, channel styles, etc.) are preserved
+    const baseRaw = (tpl.rawProperties && typeof tpl.rawProperties === 'object')
+      ? JSON.parse(JSON.stringify(tpl.rawProperties))
+      : {};
+
     const opacityPct = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
     const transparency = Math.max(0, Math.min(100, 100 - opacityPct));
+    const mainColor = tpl.color || '#22c55e';
+    const bgColor = tpl.backgroundColor || mainColor;
+    const lineW = Number(tpl.linewidth) || 1;
+    const lineS = Number(tpl.linestyle ?? 0);
     const showMiddleLine = Boolean(tpl.showMiddleLine);
-    const middleLineColor = tpl.middleLineColor || tpl.color || '#22c55e';
+    const middleLineColor = tpl.middleLineColor || mainColor;
     const middleLineWidth = Number(tpl.middleLineWidth) || 1;
     const middleLineStyle = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
-    const horzAlign = tpl.horzLabelsAlign || (tpl.extendRight ? 'right' : 'right');
+    const horzAlign = tpl.horzLabelsAlign || 'right';
     const vertAlign = tpl.vertLabelsAlign || 'middle';
 
     const props = {
-      color: tpl.color || '#22c55e',
-      backgroundColor: tpl.backgroundColor || tpl.color || '#22c55e',
-      fillBackground: true,
-      transparency: transparency,
-      linewidth: Number(tpl.linewidth) || 1,
-      linestyle: Number(tpl.linestyle) || 0,
-      extendRight: Boolean(tpl.extendRight),
-      extendLeft: Boolean(tpl.extendLeft),
-      horzLabelsAlign: horzAlign,
-      vertLabelsAlign: vertAlign,
+      ...baseRaw
+    };
 
-      // Center / Middle Line (supports both nested object and flat properties)
-      middleLine: {
+    // Map primary stroke/line color across all TradingView tool property naming conventions
+    if ('color' in existingProps || 'color' in baseRaw || drawingType === 'rectangle') {
+      props.color = mainColor;
+    }
+    if ('linecolor' in existingProps || 'linecolor' in baseRaw || ['horiz_line', 'horiz_ray', 'vert_line', 'cross_line', 'trend_line', 'ray', 'extended', 'info_line', 'parallel_channel', 'arrow'].includes(drawingType)) {
+      props.linecolor = mainColor;
+    }
+    if ('borderColor' in existingProps || 'borderColor' in baseRaw) {
+      props.borderColor = mainColor;
+    }
+
+    // Line width & style
+    props.linewidth = lineW;
+    props.linestyle = lineS;
+
+    // Background / fill properties (for rectangles, channels, circles, callouts, etc.)
+    if (
+      'backgroundColor' in existingProps ||
+      'backgroundColor' in baseRaw ||
+      ['rectangle', 'rotated_rectangle', 'parallel_channel', 'flat_bottom', 'disjoint_angle', 'circle', 'ellipse', 'triangle', 'callout', 'price_label'].includes(drawingType)
+    ) {
+      props.backgroundColor = bgColor;
+      props.transparency = transparency;
+      if ('fillBackground' in existingProps || 'fillBackground' in baseRaw || drawingType === 'rectangle' || drawingType === 'parallel_channel') {
+        props.fillBackground = opacityPct > 0;
+      }
+    }
+
+    // Extend left / right
+    if ('extendRight' in existingProps || 'extendRight' in baseRaw || ['rectangle', 'trend_line', 'parallel_channel', 'horiz_ray', 'ray', 'extended'].includes(drawingType)) {
+      props.extendRight = Boolean(tpl.extendRight);
+    }
+    if ('extendLeft' in existingProps || 'extendLeft' in baseRaw || ['rectangle', 'trend_line', 'parallel_channel', 'extended'].includes(drawingType)) {
+      props.extendLeft = Boolean(tpl.extendLeft);
+    }
+    if ('extendLines' in existingProps || 'extendLines' in baseRaw) {
+      props.extendLines = Boolean(tpl.extendRight);
+    }
+
+    // Middle / Center line (for rectangles, parallel channels, etc.)
+    if (
+      'middleLine' in existingProps ||
+      'showMiddleLine' in existingProps ||
+      'showMidline' in existingProps ||
+      drawingType === 'rectangle' ||
+      drawingType === 'parallel_channel'
+    ) {
+      props.middleLine = {
+        ...(props.middleLine || {}),
         showLine: showMiddleLine,
         lineColor: middleLineColor,
         lineWidth: middleLineWidth,
         lineStyle: middleLineStyle
-      },
-      showMiddleLine: showMiddleLine,
-      middleLineColor: middleLineColor,
-      middleLineWidth: middleLineWidth,
-      middleLineStyle: middleLineStyle
-    };
+      };
+      props.showMiddleLine = showMiddleLine;
+      props.middleLineColor = middleLineColor;
+      props.middleLineWidth = middleLineWidth;
+      props.middleLineStyle = middleLineStyle;
+      if ('showMidline' in existingProps || 'showMidline' in baseRaw || drawingType === 'parallel_channel') {
+        props.showMidline = showMiddleLine;
+        props.midlinecolor = middleLineColor;
+        props.midlinewidth = middleLineWidth;
+        props.midlinestyle = middleLineStyle;
+      }
+    }
 
+    // Text & label properties
     if (tpl.text !== undefined) {
-      props.text = tpl.text || '';
-      props.showLabel = Boolean(tpl.showLabel || tpl.text);
-      props.textColor = tpl.textColor || tpl.color || '#22c55e';
+      const hasText = Boolean(tpl.showLabel && String(tpl.text || '').trim().length > 0);
+      props.text = tpl.showLabel ? (tpl.text || '') : '';
+      props.showLabel = Boolean(tpl.showLabel);
+      props.textColor = tpl.textColor || mainColor;
+      if ('textcolor' in existingProps || 'textcolor' in baseRaw) {
+        props.textcolor = tpl.textColor || mainColor;
+      }
       props.fontSize = Number(tpl.fontSize) || 12;
+      if ('fontsize' in existingProps || 'fontsize' in baseRaw) {
+        props.fontsize = Number(tpl.fontSize) || 12;
+      }
+      props.horzLabelsAlign = horzAlign;
+      props.vertLabelsAlign = vertAlign;
       props.bold = Boolean(tpl.bold);
       props.italic = Boolean(tpl.italic);
+      if (hasText && ('showText' in existingProps || 'showText' in baseRaw)) {
+        props.showText = true;
+      }
     }
 
     return props;
   }
 
   /**
-   * Convert template into TradingView overrides map for new drawings
+   * Convert template into TradingView overrides map (NOTE: never override .text globally so new drawings don't copy old text labels!)
    */
   function buildRectangleOverrides(tpl) {
-    if (!tpl) return {};
+    if (!tpl || canonicalizeDrawingType(tpl.drawingType) !== 'rectangle') return {};
     const opacityPct = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
     const transparency = Math.max(0, Math.min(100, 100 - opacityPct));
     const showMiddleLine = Boolean(tpl.showMiddleLine);
     const middleLineColor = tpl.middleLineColor || tpl.color || '#22c55e';
     const middleLineWidth = Number(tpl.middleLineWidth) || 1;
     const middleLineStyle = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
-    const horzAlign = tpl.horzLabelsAlign || (tpl.extendRight ? 'right' : 'right');
+    const horzAlign = tpl.horzLabelsAlign || 'right';
     const vertAlign = tpl.vertLabelsAlign || 'middle';
 
-    const overrides = {
+    return {
       'linetoolrectangle.color': tpl.color || '#22c55e',
       'linetoolrectangle.backgroundColor': tpl.backgroundColor || tpl.color || '#22c55e',
-      'linetoolrectangle.fillBackground': true,
+      'linetoolrectangle.fillBackground': opacityPct > 0,
       'linetoolrectangle.transparency': transparency,
       'linetoolrectangle.linewidth': Number(tpl.linewidth) || 1,
       'linetoolrectangle.linestyle': Number(tpl.linestyle) || 0,
@@ -393,24 +424,11 @@
       'linetoolrectangle.extendLeft': Boolean(tpl.extendLeft),
       'linetoolrectangle.horzLabelsAlign': horzAlign,
       'linetoolrectangle.vertLabelsAlign': vertAlign,
-
-      // Center Line overrides
       'linetoolrectangle.middleLine.showLine': showMiddleLine,
       'linetoolrectangle.middleLine.lineColor': middleLineColor,
       'linetoolrectangle.middleLine.lineWidth': middleLineWidth,
       'linetoolrectangle.middleLine.lineStyle': middleLineStyle
     };
-
-    if (tpl.text) {
-      overrides['linetoolrectangle.text'] = tpl.text;
-      overrides['linetoolrectangle.showLabel'] = true;
-      overrides['linetoolrectangle.textColor'] = tpl.textColor || tpl.color;
-      overrides['linetoolrectangle.fontSize'] = Number(tpl.fontSize) || 12;
-    } else {
-      overrides['linetoolrectangle.showLabel'] = false;
-    }
-
-    return overrides;
   }
 
   // -------------------------------------------------------------
@@ -916,20 +934,14 @@
 
       const allShapes = typeof activeChart.getAllShapes === 'function' ? activeChart.getAllShapes() : [];
       const shapeMeta = allShapes.find(s => s.id === entityId);
-      const isRectangle = shapeMeta ? /rect/i.test(shapeMeta.name) : true;
+      const drawingType = shapeMeta ? canonicalizeDrawingType(shapeMeta.name) : 'rectangle';
+      const isRectangle = drawingType === 'rectangle' || drawingType === 'rotated_rectangle';
 
       if (isRectangle) {
         lastRectangleId = entityId;
       }
 
-      log(`Drawing event: ${eventType} on ${entityId} (isRect: ${isRectangle})`);
-
-      if (eventType === 'create' && isRectangle && currentSettings.autoApplyToNew) {
-        const tpl = getActiveTemplate();
-        if (tpl) {
-          applyTemplateToShape(shape, tpl, entityId);
-        }
-      }
+      log(`Drawing event: ${eventType} on ${entityId} (type: ${drawingType})`);
 
       syncExtendedRectangleTextHooks();
 
@@ -937,6 +949,7 @@
         type: 'VEST_TV_DRAWING_EVENT',
         entityId,
         eventType,
+        drawingType,
         isRectangle
       });
 
@@ -951,6 +964,7 @@
           entityId,
           eventType,
           shapeName: shapeMeta ? shapeMeta.name : 'unknown',
+          drawingType,
           isRectangle: String(isRectangle)
         }
       });
@@ -960,12 +974,45 @@
     }
   }
 
-  function applyTemplateToShape(shape, tpl, entityId) {
+  function getShapeMetadataById(entityId) {
+    if (!activeChart || !entityId) return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
+    try {
+      if (typeof activeChart.getAllShapes === 'function') {
+        const all = activeChart.getAllShapes() || [];
+        const found = all.find(s => s.id === entityId);
+        if (found && found.name) {
+          return {
+            id: entityId,
+            drawingType: canonicalizeDrawingType(found.name),
+            rawName: found.name
+          };
+        }
+      }
+      const shape = activeChart.getShapeById(entityId);
+      if (shape && typeof shape.getProperties === 'function') {
+        const p = shape.getProperties() || {};
+        if (p.fillBackground !== undefined && p.middleLine !== undefined) {
+          return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
+        }
+        if (p.showMidline !== undefined) {
+          return { id: entityId, drawingType: 'parallel_channel', rawName: 'parallel_channel' };
+        }
+        if (p.linecolor !== undefined && p.extendRight === undefined && p.extendLeft === undefined) {
+          return { id: entityId, drawingType: 'horiz_line', rawName: 'horiz_line' };
+        }
+      }
+    } catch (e) {}
+    return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle' };
+  }
+
+  function applyTemplateToShape(shape, tpl, entityId, drawingTypeOverride) {
     if (!shape || !tpl) return false;
     try {
-      const props = buildRectangleProperties(tpl);
+      const meta = entityId ? getShapeMetadataById(entityId) : null;
+      const drawingType = drawingTypeOverride || (meta && meta.drawingType) || tpl.drawingType || 'rectangle';
+      const props = buildShapePropertiesForTemplate(tpl, shape, drawingType);
       shape.setProperties(props);
-      log(`Applied template "${tpl.name}" to shape ${entityId || ''}:`, props);
+      log(`Applied template "${tpl.name}" (${drawingType}) to shape ${entityId || ''}:`, props);
 
       syncToVestLocalStorage(entityId, props);
       syncExtendedRectangleTextHooks();
@@ -976,7 +1023,11 @@
     }
   }
 
-  function applyTemplateToSelectedOrLast(tpl) {
+  /**
+   * Applies a template ONLY to the explicitly targeted or currently selected shape on the chart.
+   * Never falls back to lastRectangleId or unselected shapes so saving/editing one drawing never mutates another drawing!
+   */
+  function applyTemplateToSelectedOrLast(tpl, explicitTargetId = null) {
     if (!tpl) return false;
 
     applyTemplateOverrides(tpl);
@@ -989,40 +1040,36 @@
     if (!activeChart) return false;
 
     let targetShape = null;
-    let targetId = null;
+    let targetId = explicitTargetId || null;
 
-    try {
-      if (typeof activeChart.selection === 'function') {
-        const sel = activeChart.selection();
-        if (sel && typeof sel.all === 'function') {
-          const all = sel.all();
-          if (all && all.length > 0) {
-            targetId = all[0];
-            targetShape = activeChart.getShapeById(targetId);
+    if (targetId) {
+      try {
+        targetShape = activeChart.getShapeById(targetId);
+      } catch (e) {}
+    }
+
+    if (!targetShape) {
+      try {
+        if (typeof activeChart.selection === 'function') {
+          const sel = activeChart.selection();
+          if (sel && typeof sel.all === 'function') {
+            const all = sel.all();
+            if (all && all.length > 0) {
+              targetId = all[0];
+              targetShape = activeChart.getShapeById(targetId);
+            }
           }
         }
-      }
-    } catch (e) {}
-
-    if (!targetShape && lastRectangleId) {
-      targetId = lastRectangleId;
-      targetShape = activeChart.getShapeById(targetId);
-    }
-    if (!targetShape && lastInteractedShapeId) {
-      targetId = lastInteractedShapeId;
-      targetShape = activeChart.getShapeById(targetId);
-    }
-    if (!targetShape && typeof activeChart.getAllShapes === 'function') {
-      const all = activeChart.getAllShapes();
-      const rects = all.filter(s => s.name === 'rectangle' || s.name === 'LineToolRectangle');
-      if (rects.length > 0) {
-        targetId = rects[rects.length - 1].id;
-        targetShape = activeChart.getShapeById(targetId);
-      }
+      } catch (e) {}
     }
 
-    if (targetShape) {
-      return applyTemplateToShape(targetShape, tpl, targetId);
+    if (targetShape && targetId) {
+      const meta = getShapeMetadataById(targetId);
+      // Only apply to the selected shape if its drawingType matches the template's drawingType (or if explicitly targeted)
+      const tplType = canonicalizeDrawingType(tpl.drawingType || 'rectangle');
+      if (explicitTargetId || meta.drawingType === tplType) {
+        return applyTemplateToShape(targetShape, tpl, targetId, meta.drawingType);
+      }
     }
 
     return true;
@@ -1176,7 +1223,7 @@
         bottom: 100%;
         left: 0;
         margin-bottom: 6px;
-        min-width: 190px;
+        min-width: 210px;
         background: #181d28;
         border: 1px solid #2d3748;
         border-radius: 6px;
@@ -1187,7 +1234,21 @@
 
       function renderMenu() {
         menu.innerHTML = '';
-        currentTemplates.forEach(t => {
+        const selectedInfo = getRightClickedOrSelectedShapeInfo();
+        const activeDrawingType = selectedInfo ? selectedInfo.drawingType : 'rectangle';
+        const activeTypeLabel = getDrawingTypeLabel(activeDrawingType);
+        const matchingTemplates = currentTemplates.filter(
+          t => canonicalizeDrawingType(t.drawingType || 'rectangle') === activeDrawingType
+        );
+
+        if (matchingTemplates.length === 0) {
+          const emptyEl = doc.createElement('div');
+          emptyEl.style.cssText = 'padding: 6px 8px; font-size: 11px; color: #64748b; font-style: italic;';
+          emptyEl.textContent = `No saved ${activeTypeLabel} templates yet`;
+          menu.appendChild(emptyEl);
+        }
+
+        matchingTemplates.forEach(t => {
           const item = doc.createElement('div');
           item.style.cssText = `
             display: flex;
@@ -1208,13 +1269,12 @@
           item.innerHTML = `
             <div style="display:flex; align-items:center; flex:1; overflow:hidden; margin-right:6px;">
               <span style="width:10px; height:10px; border-radius:2px; background:${t.color}; margin-right:8px; border:1px solid rgba(255,255,255,0.2); flex-shrink:0;"></span>
-              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${t.name}</span>
+              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(t.name)}</span>
               ${hasMid}${hasExtL}${hasExt}
             </div>
             <div style="display:flex; align-items:center; gap:4px;">
-              <button class="vest-override-btn" title="Override '${t.name}' with current box" style="background:transparent; border:none; color:#94a3b8; cursor:pointer; padding:2px; font-size:11px;">⟳</button>
-              <button class="vest-delete-btn" title="Delete '${t.name}'" style="background:transparent; border:none; color:#ef4444; cursor:pointer; padding:2px; font-size:13px; line-height:1;">×</button>
-              ${t.id === currentSettings.activeTemplateId ? '<span style="font-size:10px; color:#10b981;">✓</span>' : ''}
+              <button class="vest-override-btn" title="Overwrite '${escapeHtml(t.name)}' with selected ${activeTypeLabel}" style="background:transparent; border:none; color:#94a3b8; cursor:pointer; padding:2px; font-size:11px;">⟳</button>
+              <button class="vest-delete-btn" title="Delete '${escapeHtml(t.name)}'" style="background:transparent; border:none; color:#ef4444; cursor:pointer; padding:2px; font-size:13px; line-height:1;">×</button>
             </div>
           `;
 
@@ -1225,21 +1285,21 @@
             item.style.background = 'transparent';
           });
 
-          // Click item to apply template
+          // Click item to apply template to selected shape
           item.addEventListener('click', (e) => {
             if (e.target.closest('.vest-override-btn') || e.target.closest('.vest-delete-btn')) return;
             e.stopPropagation();
             menu.style.display = 'none';
             currentSettings.activeTemplateId = t.id;
-            applyTemplateToSelectedOrLast(t);
+            applyTemplateToSelectedOrLast(t, selectedInfo ? selectedInfo.id : null);
 
             const dot = dropdownContainer.querySelector('span:first-child');
             if (dot) dot.style.background = t.color;
 
-            window.postMessage({
+            postToIsolated({
               type: 'VEST_TV_ACTIVE_TEMPLATE_CHANGED',
               templateId: t.id
-            }, '*');
+            });
           });
 
           // Override button
@@ -1248,7 +1308,7 @@
             overrideBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               menu.style.display = 'none';
-              overrideTemplateById(t.id);
+              overrideTemplateById(t.id, selectedInfo ? selectedInfo.id : null);
             });
           }
 
@@ -1258,12 +1318,11 @@
             deleteBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               menu.style.display = 'none';
-              if (confirm(`Delete template "${t.name}"?`)) {
-                window.postMessage({
-                  type: 'VEST_TV_DELETE_TEMPLATE_REQUEST',
-                  templateId: t.id
-                }, '*');
-              }
+              postToIsolated({
+                type: 'VEST_TV_DELETE_TEMPLATE_REQUEST',
+                templateId: t.id,
+                templateName: t.name
+              });
             });
           }
 
@@ -1275,7 +1334,7 @@
         divider.style.cssText = 'height:1px; background:rgba(255,255,255,0.1); margin:4px 0;';
         menu.appendChild(divider);
 
-        // Save Box as New Template
+        // Save Drawing as New Template
         const saveItem = doc.createElement('div');
         saveItem.style.cssText = `
           display: flex;
@@ -1292,7 +1351,7 @@
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
-          <span>Save Box as New Template...</span>
+          <span>Save ${escapeHtml(activeTypeLabel)} as Template...</span>
         `;
         saveItem.addEventListener('mouseenter', () => {
           saveItem.style.background = 'rgba(255, 255, 255, 0.08)';
@@ -1305,12 +1364,49 @@
         saveItem.addEventListener('click', (e) => {
           e.stopPropagation();
           menu.style.display = 'none';
-          const name = prompt('Name for this template:', 'Custom Box');
+          const name = prompt(`Template name (${activeTypeLabel}):`, `Custom ${activeTypeLabel}`);
           if (name && name.trim()) {
-            saveCurrentSelectionAsTemplate(name.trim());
+            saveCurrentSelectionAsTemplate(name.trim(), selectedInfo ? selectedInfo.id : null);
           }
         });
         menu.appendChild(saveItem);
+
+        // Open Template Manager
+        const mgrItem = doc.createElement('div');
+        mgrItem.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 8px;
+          font-size: 11px;
+          color: #38bdf8;
+          border-radius: 4px;
+          cursor: pointer;
+        `;
+        mgrItem.innerHTML = `
+          <svg style="width:12px; height:12px; color:#38bdf8;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          <span>Template Manager...</span>
+        `;
+        mgrItem.addEventListener('mouseenter', () => {
+          mgrItem.style.background = 'rgba(56, 189, 248, 0.12)';
+        });
+        mgrItem.addEventListener('mouseleave', () => {
+          mgrItem.style.background = 'transparent';
+        });
+        mgrItem.addEventListener('click', (e) => {
+          e.stopPropagation();
+          menu.style.display = 'none';
+          postToIsolated({
+            type: 'VEST_TV_OPEN_TEMPLATE_MANAGER',
+            drawingType: activeDrawingType
+          });
+        });
+        menu.appendChild(mgrItem);
       }
 
       dropdownContainer.appendChild(menu);
@@ -1398,35 +1494,53 @@
   }
 
   /**
-   * Strictly checks if a rectangle drawing is currently selected on the chart.
+   * Detects the exact selected/right-clicked drawing on the chart and returns its { id, shape, drawingType, rawName }.
    */
-  function isSelectedShapeRectangle() {
-    if (!activeChart) return true; // Allow if chart API ref not bound yet, since menu itself has "Visual order"
+  function getRightClickedOrSelectedShapeInfo() {
+    if (!activeChart) {
+      if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
+        try { activeChart = activeChartApi.activeChart(); } catch (e) {}
+      }
+    }
+    if (!activeChart) return null;
+
+    // 1. Check TradingView's active selection first (when right-clicking any drawing, TradingView selects it)
     try {
       if (typeof activeChart.selection === 'function') {
         const sel = activeChart.selection();
         if (sel && typeof sel.all === 'function') {
           const all = sel.all();
           if (all && all.length > 0) {
-            for (const id of all) {
-              try {
-                const shape = activeChart.getShapeById(id);
-                if (shape && typeof shape.getProperties === 'function') {
-                  const p = shape.getProperties();
-                  if (p && (p.fillBackground !== undefined || p.backgroundColor !== undefined || p.extendRight !== undefined || p.middleLine !== undefined)) {
-                    lastRectangleId = id;
-                    lastInteractedShapeId = id;
-                    return true;
-                  }
-                }
-              } catch (e) {}
+            const id = all[0];
+            const shape = activeChart.getShapeById(id);
+            if (shape) {
+              const meta = getShapeMetadataById(id);
+              rightClickedShapeId = id;
+              rightClickedDrawingType = meta.drawingType;
+              lastInteractedShapeId = id;
+              if (meta.drawingType === 'rectangle' || meta.drawingType === 'rotated_rectangle') {
+                lastRectangleId = id;
+              }
+              return { id, shape, drawingType: meta.drawingType, rawName: meta.rawName };
             }
-            return false;
           }
         }
       }
     } catch (e) {}
-    return true;
+
+    // 2. Fallback to rightClickedShapeId or lastInteractedShapeId if still valid on chart
+    const fallbackId = rightClickedShapeId || lastInteractedShapeId;
+    if (fallbackId) {
+      try {
+        const shape = activeChart.getShapeById(fallbackId);
+        if (shape) {
+          const meta = getShapeMetadataById(fallbackId);
+          return { id: fallbackId, shape, drawingType: meta.drawingType, rawName: meta.rawName };
+        }
+      } catch (e) {}
+    }
+
+    return null;
   }
 
   function ensureContextStylesInjected(doc) {
@@ -1441,8 +1555,8 @@
       .vest-tv-floating-submenu {
         position: fixed !important;
         z-index: 2147483647 !important;
-        min-width: 200px !important;
-        max-width: 280px !important;
+        min-width: 220px !important;
+        max-width: 300px !important;
         max-height: 75vh !important;
         overflow-y: auto !important;
         overflow-x: hidden !important;
@@ -1463,6 +1577,17 @@
       .vest-tv-floating-submenu::-webkit-scrollbar-thumb {
         background: rgba(255, 255, 255, 0.2) !important;
         border-radius: 2px !important;
+      }
+      .vest-tv-sub-header {
+        padding: 4px 16px 6px 16px !important;
+        font-size: 10.5px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.6px !important;
+        text-transform: uppercase !important;
+        color: #38bdf8 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
       }
       .vest-tv-sub-row {
         display: flex !important;
@@ -1493,6 +1618,16 @@
         overflow: hidden !important;
         text-overflow: ellipsis !important;
         font-weight: 400 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+      }
+      .vest-tv-sub-swatch {
+        width: 10px !important;
+        height: 10px !important;
+        border-radius: 2px !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        flex-shrink: 0 !important;
       }
       .vest-tv-sub-actions {
         display: flex !important;
@@ -1533,7 +1668,7 @@
   }
 
   /**
-   * Finds the exact "Visual order" row inside an open TradingView drawing context menu.
+   * Finds the exact "Visual order" row inside an open TradingView drawing context menu for ANY drawing type.
    * Returns null if this is the general chart background menu ("Reset chart view", etc.).
    */
   function findVisualOrderRowInMenu(rootDoc = document) {
@@ -1591,9 +1726,8 @@
           continue;
         }
 
-        if (!isSelectedShapeRectangle()) {
-          continue;
-        }
+        // Capture the right-clicked drawing shape & type immediately when the context menu is detected
+        getRightClickedOrSelectedShapeInfo();
 
         return { visualOrderRow: targetRow, rowParent, doc };
       }
@@ -1618,6 +1752,12 @@
     closeAllContextMenus();
     activeTemplateRowEl = templateRow;
     templateRow.classList.add('vest-tv-row-active');
+
+    // Lock in the exact shape that was right-clicked
+    const shapeInfo = getRightClickedOrSelectedShapeInfo();
+    const targetShapeId = shapeInfo ? shapeInfo.id : rightClickedShapeId;
+    const targetDrawingType = shapeInfo ? shapeInfo.drawingType : (rightClickedDrawingType || 'rectangle');
+    const drawingTypeLabel = getDrawingTypeLabel(targetDrawingType);
 
     const submenu = doc.createElement('div');
     submenu.className = 'vest-tv-floating-submenu';
@@ -1657,7 +1797,13 @@
     const renderSubmenuContents = () => {
       submenu.innerHTML = '';
 
-      // 1. "Save as..."
+      // 0. Header showing detected Drawing Type
+      const headerEl = doc.createElement('div');
+      headerEl.className = 'vest-tv-sub-header';
+      headerEl.innerHTML = `<span>${escapeHtml(drawingTypeLabel)}</span>`;
+      submenu.appendChild(headerEl);
+
+      // 1. "Save Drawing Template As..."
       const saveAsRow = doc.createElement('div');
       saveAsRow.className = 'vest-tv-sub-row';
       saveAsRow.innerHTML = `<span class="vest-tv-sub-label">Save as...</span>`;
@@ -1665,61 +1811,69 @@
         e.stopPropagation();
         e.preventDefault();
         closeTradingViewPopupMenu(templateRow);
-        const name = prompt('Template name:', 'Custom FVG');
+        const defaultName = `Custom ${drawingTypeLabel}`;
+        const name = prompt(`Save ${drawingTypeLabel} Template As:`, defaultName);
         if (name && name.trim()) {
-          saveCurrentSelectionAsTemplate(name.trim());
+          saveCurrentSelectionAsTemplate(name.trim(), targetShapeId);
         }
       });
       submenu.appendChild(saveAsRow);
 
-      // 2. "Apply default"
-      const applyDefaultRow = doc.createElement('div');
-      applyDefaultRow.className = 'vest-tv-sub-row';
-      applyDefaultRow.innerHTML = `<span class="vest-tv-sub-label">Apply default</span>`;
-      applyDefaultRow.addEventListener('click', (e) => {
+      // 2. "Template Manager..."
+      const mgrRow = doc.createElement('div');
+      mgrRow.className = 'vest-tv-sub-row';
+      mgrRow.innerHTML = `<span class="vest-tv-sub-label" style="color:#38bdf8;">Template Manager...</span>`;
+      mgrRow.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        const defaultTpl = currentTemplates.find(t => t.id === currentSettings.defaultTemplateId) || currentTemplates[0];
-        if (defaultTpl) {
-          applyTemplateToSelectedOrLast(defaultTpl);
-          currentSettings.activeTemplateId = defaultTpl.id;
-          postToIsolated({
-            type: 'VEST_TV_ACTIVE_TEMPLATE_CHANGED',
-            templateId: defaultTpl.id
-          });
-          postToIsolated({
-            type: 'VEST_TV_SHOW_TOAST',
-            message: `Applied default template "${defaultTpl.name}"`
-          });
-        }
         closeTradingViewPopupMenu(templateRow);
+        postToIsolated({
+          type: 'VEST_TV_OPEN_TEMPLATE_MANAGER',
+          drawingType: targetDrawingType
+        });
       });
-      submenu.appendChild(applyDefaultRow);
+      submenu.appendChild(mgrRow);
+
+      // Filter templates matching this drawing's type
+      const matchingTemplates = currentTemplates.filter(
+        t => canonicalizeDrawingType(t.drawingType || 'rectangle') === targetDrawingType
+      );
 
       // 3. Divider
       const divider = doc.createElement('div');
       divider.className = 'vest-tv-sub-divider';
       submenu.appendChild(divider);
 
-      // 4. Template items
-      currentTemplates.forEach(t => {
+      if (matchingTemplates.length === 0) {
+        const emptyRow = doc.createElement('div');
+        emptyRow.style.cssText = 'padding: 6px 16px; font-size: 12px; color: #787b86; font-style: italic;';
+        emptyRow.textContent = `No saved ${drawingTypeLabel} templates`;
+        submenu.appendChild(emptyRow);
+      }
+
+      // 4. Template items for this drawing type
+      matchingTemplates.forEach(t => {
         const row = doc.createElement('div');
         row.className = 'vest-tv-sub-row';
+        const swatchColor = t.color || '#22c55e';
         row.innerHTML = `
-          <span class="vest-tv-sub-label">${escapeHtml(t.name)}</span>
+          <span class="vest-tv-sub-label">
+            <span class="vest-tv-sub-swatch" style="background:${escapeHtml(swatchColor)};"></span>
+            <span>${escapeHtml(t.name)}</span>
+          </span>
           <div class="vest-tv-sub-actions">
-            <button type="button" class="vest-tv-sub-icon-btn edit-btn" title="Edit '${escapeHtml(t.name)}'">✎</button>
+            <button type="button" class="vest-tv-sub-icon-btn edit-btn" title="Edit '${escapeHtml(t.name)}' in Template Manager">✎</button>
             <button type="button" class="vest-tv-sub-icon-btn delete-btn" title="Remove '${escapeHtml(t.name)}'">×</button>
           </div>
         `;
 
-        // Click row to apply template
+        // Click row to apply template ONLY to the right-clicked shape
         row.addEventListener('click', (e) => {
           if (e.target.closest('.vest-tv-sub-icon-btn')) return;
           e.stopPropagation();
           e.preventDefault();
 
-          applyTemplateToSelectedOrLast(t);
+          applyTemplateToSelectedOrLast(t, targetShapeId);
           currentSettings.activeTemplateId = t.id;
           postToIsolated({
             type: 'VEST_TV_ACTIVE_TEMPLATE_CHANGED',
@@ -1727,12 +1881,12 @@
           });
           postToIsolated({
             type: 'VEST_TV_SHOW_TOAST',
-            message: `Applied "${t.name}"`
+            message: `Applied "${t.name}" to ${drawingTypeLabel}`
           });
           closeTradingViewPopupMenu(templateRow);
         });
 
-        // Pencil (Edit) button
+        // Pencil (Edit) button -> opens Template Manager directly on this template
         const editBtn = row.querySelector('.edit-btn');
         if (editBtn) {
           editBtn.addEventListener('click', (e) => {
@@ -1741,7 +1895,8 @@
             closeTradingViewPopupMenu(templateRow);
             postToIsolated({
               type: 'VEST_TV_EDIT_TEMPLATE_REQUEST',
-              templateId: t.id
+              templateId: t.id,
+              drawingType: targetDrawingType
             });
           });
         }
@@ -1752,16 +1907,9 @@
           deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             e.preventDefault();
-            if (currentTemplates.length <= 1) {
-              postToIsolated({
-                type: 'VEST_TV_SHOW_TOAST',
-                message: 'Cannot remove the last remaining template'
-              });
-              return;
-            }
             currentTemplates = currentTemplates.filter(item => item.id !== t.id);
-            if (currentSettings.activeTemplateId === t.id && currentTemplates.length > 0) {
-              currentSettings.activeTemplateId = currentTemplates[0].id;
+            if (currentSettings.activeTemplateId === t.id) {
+              currentSettings.activeTemplateId = currentTemplates[0]?.id || null;
             }
             renderSubmenuContents();
             postToIsolated({
@@ -1900,6 +2048,8 @@
     const handleContextMenuEvent = () => {
       lastRightClickTime = Date.now();
       closeAllContextMenus();
+      // Immediately record which drawing is selected when right-click happens
+      getRightClickedOrSelectedShapeInfo();
 
       if (tryInjectTemplatesMenu(doc)) return;
 
@@ -1977,7 +2127,6 @@
       case 'VEST_TV_CONFIG_UPDATE': {
         const wasRemembering = currentSettings.rememberSidebarTools !== false;
         const wasRememberingChart = currentSettings.rememberLastChartSettings !== false;
-        const prevSidebarJson = JSON.stringify(currentSettings.sidebarState || {});
         if (payload.templates && Array.isArray(payload.templates)) {
           currentTemplates = payload.templates;
         }
@@ -2009,7 +2158,6 @@
             }
           } catch (e) {}
         }
-        const firstConfigArrival = !hasReceivedConfigUpdate;
         hasReceivedConfigUpdate = true;
 
         const activeTpl = getActiveTemplate();
@@ -2051,7 +2199,11 @@
         const tpl = currentTemplates.find(t => t.id === payload.templateId);
         if (tpl) {
           currentSettings.activeTemplateId = tpl.id;
-          applyTemplateToSelectedOrLast(tpl);
+          if (payload.applyToSelectedOnly) {
+            applyTemplateToSelectedOrLast(tpl, payload.targetShapeId || null);
+          } else {
+            applyTemplateOverrides(tpl);
+          }
           if (payload.activateTool) {
             activateRectangleDrawingTool();
           }
@@ -2069,7 +2221,7 @@
       }
 
       case 'VEST_TV_SAVE_SELECTION_AS_TEMPLATE': {
-        saveCurrentSelectionAsTemplate(payload.name);
+        saveCurrentSelectionAsTemplate(payload.name, payload.targetShapeId || null);
         break;
       }
 
@@ -2079,20 +2231,22 @@
       }
 
       case 'VEST_TV_OVERRIDE_TEMPLATE': {
-        overrideTemplateById(payload.templateId);
+        overrideTemplateById(payload.templateId, payload.targetShapeId || null);
         break;
       }
 
       case 'VEST_TV_REQUEST_SHAPE_PROPERTIES_FOR_EDITOR': {
-        const targetShape = getTargetShape();
-        if (!targetShape) {
-          postToIsolated({
-            type: 'VEST_TV_SHOW_TOAST',
-            message: 'Select a rectangle on the chart first to copy its properties'
-          });
+        const targetInfo = getTargetShapeInfo();
+        if (!targetInfo || !targetInfo.shape) {
+          if (window === window.top || activeChart) {
+            postToIsolated({
+              type: 'VEST_TV_SHOW_TOAST',
+              message: 'Select a drawing on the chart first to copy its properties'
+            });
+          }
           break;
         }
-        const extracted = extractPropertiesFromShape(targetShape);
+        const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
         if (extracted) {
           postToIsolated({
             type: 'VEST_TV_SHAPE_PROPERTIES_FOR_EDITOR',
@@ -2105,95 +2259,119 @@
   });
 
   /**
-   * Reads ALL properties from currently selected box and extracts them cleanly
+   * Reads ALL properties from a drawing shape (any TradingView drawing type) and extracts both normalized fields and rawProperties
    */
-  function extractPropertiesFromShape(shape) {
+  function extractPropertiesFromShape(shape, drawingTypeHint = null) {
     if (!shape || typeof shape.getProperties !== 'function') return null;
-    const p = shape.getProperties();
+    const p = shape.getProperties() || {};
+    const drawingType = canonicalizeDrawingType(drawingTypeHint || 'rectangle');
+
+    // Deep clone rawProperties so tool-specific settings (Fib levels, channel lines, risk/reward parameters, etc.) are preserved
+    let rawProperties = {};
+    try {
+      rawProperties = JSON.parse(JSON.stringify(p));
+      delete rawProperties.points;
+      delete rawProperties.intervalsVisibilities;
+    } catch (e) {}
 
     const transparency = typeof p.transparency === 'number' ? p.transparency : 80;
     const opacity = Math.max(0, Math.min(100, 100 - transparency));
 
-    // Detect center / middle line
+    // Primary color across different TradingView tools (color, linecolor, borderColor, textcolor)
+    const primaryColor = p.color || p.linecolor || p.borderColor || p.textcolor || p.textColor || '#22c55e';
+    const bgColor = p.backgroundColor || p.fillColor || primaryColor;
+
+    // Detect center / middle line (Rectangles use middleLine / showMiddleLine; Parallel Channels use showMidline / midlinecolor)
     const showMiddleLine = Boolean(
       (p.middleLine && p.middleLine.showLine) ||
       p.showMiddleLine ||
-      p['middleLine.showLine']
+      p['middleLine.showLine'] ||
+      p.showMidline
     );
 
     const middleLineColor = (p.middleLine && p.middleLine.lineColor) ||
       p.middleLineColor ||
       p['middleLine.lineColor'] ||
-      p.color || '#22c55e';
+      p.midlinecolor ||
+      primaryColor;
 
     const middleLineWidth = Number(
       (p.middleLine && p.middleLine.lineWidth) ||
       p.middleLineWidth ||
-      p['middleLine.lineWidth'] || 1
+      p['middleLine.lineWidth'] ||
+      p.midlinewidth || 1
     );
 
     const middleLineStyle = (p.middleLine && p.middleLine.lineStyle !== undefined)
       ? Number(p.middleLine.lineStyle)
-      : (p.middleLineStyle !== undefined ? Number(p.middleLineStyle) : 2);
+      : (p.middleLineStyle !== undefined
+          ? Number(p.middleLineStyle)
+          : (p.midlinestyle !== undefined ? Number(p.midlinestyle) : 2));
+
+    const textStr = p.text !== undefined ? String(p.text || '') : '';
+    const hasLabel = Boolean(p.showLabel || p.showText || textStr.trim().length > 0);
 
     return {
-      color: p.color || '#22c55e',
-      backgroundColor: p.backgroundColor || p.color || '#22c55e',
+      drawingType,
+      color: primaryColor,
+      backgroundColor: bgColor,
       opacity: opacity,
       linewidth: Number(p.linewidth) || 1,
-      linestyle: Number(p.linestyle) || 0,
-      extendRight: Boolean(p.extendRight),
+      linestyle: Number(p.linestyle ?? 0),
+      extendRight: Boolean(p.extendRight || p.extendLines),
       extendLeft: Boolean(p.extendLeft),
       showMiddleLine: showMiddleLine,
       middleLineColor: middleLineColor,
       middleLineWidth: middleLineWidth,
       middleLineStyle: middleLineStyle,
-      showLabel: Boolean(p.showLabel || p.text),
-      text: p.text || '',
-      textColor: p.textColor || p.color || '#22c55e',
-      fontSize: Number(p.fontSize) || 12,
+      showLabel: hasLabel,
+      text: textStr,
+      textColor: p.textColor || p.textcolor || primaryColor,
+      fontSize: Number(p.fontSize || p.fontsize) || 12,
       horzLabelsAlign: p.horzLabelsAlign || 'right',
-      vertLabelsAlign: p.vertLabelsAlign || 'middle'
+      vertLabelsAlign: p.vertLabelsAlign || 'middle',
+      rawProperties
     };
   }
 
-  function getTargetShape() {
-    if (!activeChart) return null;
-    let targetShape = null;
-
-    try {
-      if (typeof activeChart.selection === 'function') {
-        const sel = activeChart.selection();
-        if (sel && typeof sel.all === 'function') {
-          const all = sel.all();
-          if (all && all.length > 0) {
-            targetShape = activeChart.getShapeById(all[0]);
-          }
-        }
+  function getTargetShapeInfo(explicitTargetId = null) {
+    if (!activeChart) {
+      if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
+        try { activeChart = activeChartApi.activeChart(); } catch (e) {}
       }
-    } catch (e) {}
-
-    if (!targetShape && lastRectangleId) {
-      targetShape = activeChart.getShapeById(lastRectangleId);
     }
-    if (!targetShape && lastInteractedShapeId) {
-      targetShape = activeChart.getShapeById(lastInteractedShapeId);
+    if (!activeChart) return null;
+
+    if (explicitTargetId) {
+      try {
+        const shape = activeChart.getShapeById(explicitTargetId);
+        if (shape) {
+          const meta = getShapeMetadataById(explicitTargetId);
+          return { id: explicitTargetId, shape, drawingType: meta.drawingType, rawName: meta.rawName };
+        }
+      } catch (e) {}
     }
 
-    return targetShape;
+    return getRightClickedOrSelectedShapeInfo();
   }
 
-  function saveCurrentSelectionAsTemplate(name) {
-    const targetShape = getTargetShape();
-    if (!targetShape) return;
+  function getTargetShape(explicitTargetId = null) {
+    const info = getTargetShapeInfo(explicitTargetId);
+    return info ? info.shape : null;
+  }
+
+  function saveCurrentSelectionAsTemplate(name, explicitTargetId = null) {
+    const targetInfo = getTargetShapeInfo(explicitTargetId);
+    if (!targetInfo || !targetInfo.shape) return;
 
     try {
-      const extracted = extractPropertiesFromShape(targetShape);
+      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
       if (!extracted) return;
 
+      const typeLabel = getDrawingTypeLabel(targetInfo.drawingType);
       const newTemplate = {
         id: `custom_${Date.now()}`,
-        name: name || 'Custom Box',
+        name: name || `Custom ${typeLabel}`,
         ...extracted
       };
 
@@ -2206,12 +2384,12 @@
     }
   }
 
-  function updateActiveTemplateFromSelection() {
-    const targetShape = getTargetShape();
-    if (!targetShape) return;
+  function updateActiveTemplateFromSelection(explicitTargetId = null) {
+    const targetInfo = getTargetShapeInfo(explicitTargetId);
+    if (!targetInfo || !targetInfo.shape) return;
 
     try {
-      const extracted = extractPropertiesFromShape(targetShape);
+      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
       if (!extracted) return;
 
       postToIsolated({
@@ -2223,15 +2401,20 @@
     }
   }
 
-  function overrideTemplateById(templateId) {
-    const targetShape = getTargetShape();
-    if (!targetShape) {
-      alert('Please select or draw a box on the chart first to copy its settings.');
+  function overrideTemplateById(templateId, explicitTargetId = null) {
+    const targetInfo = getTargetShapeInfo(explicitTargetId);
+    if (!targetInfo || !targetInfo.shape) {
+      if (activeChart) {
+        postToIsolated({
+          type: 'VEST_TV_SHOW_TOAST',
+          message: 'Please select a drawing on the chart first to copy its settings.'
+        });
+      }
       return;
     }
 
     try {
-      const extracted = extractPropertiesFromShape(targetShape);
+      const extracted = extractPropertiesFromShape(targetInfo.shape, targetInfo.drawingType);
       if (!extracted) return;
 
       postToIsolated({

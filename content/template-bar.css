@@ -1800,7 +1800,9 @@ body.vest-popout-body #vest-action-log-box {
 /* TradingView-Style Multi-Tab "Settings" Dialog Box             */
 /* ============================================================= */
 
-#vest-studio-settings-dialog.vest-tvs-overlay {
+.vest-tvs-overlay,
+#vest-studio-settings-dialog.vest-tvs-overlay,
+#vest-template-manager-dialog.vest-tvs-overlay {
   position: fixed !important;
   inset: 0 !important;
   z-index: 2147483647 !important;
@@ -1813,7 +1815,9 @@ body.vest-popout-body #vest-action-log-box {
   user-select: none;
 }
 
-#vest-studio-settings-dialog * {
+.vest-tvs-overlay *,
+#vest-studio-settings-dialog *,
+#vest-template-manager-dialog * {
   box-sizing: border-box;
 }
 

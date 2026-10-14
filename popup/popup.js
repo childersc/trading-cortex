@@ -5,11 +5,11 @@
 document.addEventListener('DOMContentLoaded', async () => {
   let templates = [];
   let settings = {
-    activeTemplateId: 'bullish_ob',
-    defaultTemplateId: 'bullish_ob',
+    activeTemplateId: null,
+    defaultTemplateId: null,
     showFloatingBar: true,
     floatingBarPosition: { top: 80, left: 16 },
-    autoApplyToNew: true,
+    autoApplyToNew: false,
     hotkeysEnabled: true
   };
 
@@ -139,14 +139,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     templateCountEl.textContent = `${templates.length} ${templates.length === 1 ? 'Template' : 'Templates'}`;
     templateListEl.innerHTML = '';
 
+    if (templates.length === 0) {
+      const emptyEl = document.createElement('div');
+      emptyEl.style.cssText = 'padding:20px 14px;text-align:center;color:#94a3b8;font-size:12px;border:1px dashed rgba(148,163,184,0.25);border-radius:8px;';
+      emptyEl.textContent = 'No custom templates saved yet. Right-click any drawing on the chart → Template → Save as... or use the Template Manager in the CORTEX menu.';
+      templateListEl.appendChild(emptyEl);
+      return;
+    }
+
     templates.forEach((tpl) => {
       const isActive = tpl.id === settings.activeTemplateId;
       const isDefault = tpl.id === settings.defaultTemplateId;
       const opacity = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
       const fillRgba = hexToRgba(tpl.backgroundColor || tpl.color, opacity / 100);
+      const dtype = (tpl.drawingType || 'rectangle').replace(/_/g, ' ');
 
       // Feature tags
       const tags = [];
+      tags.push(dtype.toUpperCase());
       tags.push(`${opacity}% Fill`);
       tags.push(`${tpl.linewidth || 1}px ${getLineStyleName(tpl.linestyle)}`);
       if (tpl.showMiddleLine) tags.push('50% Line');
@@ -617,21 +627,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Delete
   async function deleteTemplate(id) {
-    if (templates.length <= 1) {
-      alert('You must keep at least one template.');
-      return;
-    }
-
     const tpl = templates.find(t => t.id === id);
     if (!confirm(`Are you sure you want to delete "${tpl?.name}"?`)) return;
 
     templates = templates.filter(t => t.id !== id);
 
     if (settings.activeTemplateId === id) {
-      settings.activeTemplateId = templates[0].id;
+      settings.activeTemplateId = templates[0] ? templates[0].id : null;
     }
     if (settings.defaultTemplateId === id) {
-      settings.defaultTemplateId = templates[0].id;
+      settings.defaultTemplateId = templates[0] ? templates[0].id : null;
     }
 
     await saveData();
