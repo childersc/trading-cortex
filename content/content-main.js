@@ -4961,10 +4961,20 @@
     console.log('[TradingCortex:Sessions]', msg, extra !== undefined ? extra : '');
   }
 
+  let cachedSessionsChartModel = null;
+
   function findChartModelForSessions() {
+    if (
+      cachedSessionsChartModel &&
+      (typeof cachedSessionsChartModel.mainSeries === 'function' || cachedSessionsChartModel._mainSeries)
+    ) {
+      return cachedSessionsChartModel;
+    }
+
     // 1. Check direct helpers first
     const direct = getInternalChartModel() || getChartModel();
     if (direct && (typeof direct.mainSeries === 'function' || direct._mainSeries)) {
+      cachedSessionsChartModel = direct;
       return direct;
     }
 
@@ -4977,6 +4987,7 @@
           const sh = activeChart.getShapeById(s.id);
           const src = extractInternalSourceFromShape(sh, s.id);
           if (src && src._model && (typeof src._model.mainSeries === 'function' || src._model._mainSeries)) {
+            cachedSessionsChartModel = src._model;
             return src._model;
           }
         }
@@ -5044,16 +5055,23 @@
 
       try {
         if (isChartModelLike(obj)) {
+          cachedSessionsChartModel = obj;
           return obj;
         }
         if (typeof obj.model === 'function') {
           try {
             const m = obj.model();
             if (m && typeof m === 'object') {
-              if (isChartModelLike(m)) return m;
+              if (isChartModelLike(m)) {
+                cachedSessionsChartModel = m;
+                return m;
+              }
               if (typeof m.model === 'function') {
                 const mm = m.model();
-                if (isChartModelLike(mm)) return mm;
+                if (isChartModelLike(mm)) {
+                  cachedSessionsChartModel = mm;
+                  return mm;
+                }
               }
               queue.push({ obj: m, depth: depth + 1 });
             }
@@ -5090,6 +5108,7 @@
             const val = obj[k];
             if (val && typeof val === 'object') {
               if (isChartModelLike(val)) {
+                cachedSessionsChartModel = val;
                 return val;
               }
               if (depth < 4) {
@@ -5144,12 +5163,17 @@
     return null;
   }
 
-  function extractSeriesBarsFromModel() {
+  let cachedExtractedBarsObj = null;
+  let cachedQuickPlotSig = '';
+
+  function extractSeriesBarsFromModel(forceFullExtract = false) {
     const model = findChartModelForSessions();
     if (!model) return null;
 
     const mainSeries = findMainSeriesFromModel(model);
     if (!mainSeries) return null;
+
+    const timeScale = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
 
     let plotList = null;
     try {
@@ -5184,6 +5208,38 @@
     } catch (e) {}
 
     if (!plotList) return null;
+
+    // Fast path during pan/zoom: check if firstIndex, lastIndex, and the last 2 bars are identical to our cached extraction!
+    if (!forceFullExtract && !ictSessionsNeedsFullRecompute && cachedExtractedBarsObj && cachedExtractedBarsObj.bars.length > 0) {
+      try {
+        if (typeof plotList.firstIndex === 'function' && typeof plotList.lastIndex === 'function' && typeof plotList.valueAt === 'function') {
+          const fIdx = plotList.firstIndex();
+          const lIdx = plotList.lastIndex();
+          const lVal = typeof lIdx === 'number' ? plotList.valueAt(lIdx) : null;
+          const pVal = typeof lIdx === 'number' ? plotList.valueAt(lIdx - 1) : null;
+          const quickSig = `${fIdx}_${lIdx}_${lVal ? JSON.stringify(lVal) : ''}_${pVal ? JSON.stringify(pVal) : ''}`;
+          if (quickSig === cachedQuickPlotSig) {
+            cachedExtractedBarsObj.model = model;
+            cachedExtractedBarsObj.mainSeries = mainSeries;
+            cachedExtractedBarsObj.timeScale = timeScale;
+            return cachedExtractedBarsObj;
+          }
+          cachedQuickPlotSig = quickSig;
+        } else if (Array.isArray(plotList._items) && plotList._items.length > 0) {
+          const len = plotList._items.length;
+          const lItem = plotList._items[len - 1];
+          const pItem = len > 1 ? plotList._items[len - 2] : lItem;
+          const quickSig = `${len}_${JSON.stringify(lItem)}_${JSON.stringify(pItem)}`;
+          if (quickSig === cachedQuickPlotSig) {
+            cachedExtractedBarsObj.model = model;
+            cachedExtractedBarsObj.mainSeries = mainSeries;
+            cachedExtractedBarsObj.timeScale = timeScale;
+            return cachedExtractedBarsObj;
+          }
+          cachedQuickPlotSig = quickSig;
+        }
+      } catch (e) {}
+    }
 
     const rawItems = [];
     try {
@@ -5238,8 +5294,6 @@
     } catch (e) {}
 
     if (rawItems.length === 0) return null;
-
-    const timeScale = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
 
     // Also locate timeScale's internal _points / m_points array (which maps barIndex -> unixSeconds in TradingView)
     let tsPointsArray = null;
@@ -5376,12 +5430,13 @@
       }
     }
 
-    return {
+    cachedExtractedBarsObj = {
       model,
       mainSeries,
       timeScale,
       bars: normalizedBars
     };
+    return cachedExtractedBarsObj;
   }
 
   function computeIctSessionsFromBars(bars, config) {
@@ -5754,6 +5809,10 @@
       return;
     }
 
+    if (extracted.model) {
+      attachDirectScaleListeners(extracted.model);
+    }
+
     const { mainSeries, timeScale, bars } = extracted;
 
     const lastBar = bars[bars.length - 1];
@@ -5796,6 +5855,24 @@
       return;
     }
 
+    const tsApi = (activeChart && typeof activeChart.getTimeScale === 'function') ? activeChart.getTimeScale() : null;
+    let barSpacing = 6;
+    let rightOffset = null;
+    try {
+      if (timeScale && typeof timeScale.barSpacing === 'function') {
+        barSpacing = Number(timeScale.barSpacing()) || 6;
+      } else if (tsApi && typeof tsApi.barSpacing === 'function') {
+        barSpacing = Number(tsApi.barSpacing()) || 6;
+      }
+      if (timeScale && typeof timeScale.rightOffset === 'function') {
+        const ro = timeScale.rightOffset();
+        if (typeof ro === 'number' && isFinite(ro)) rightOffset = ro;
+      } else if (tsApi && typeof tsApi.rightOffset === 'function') {
+        const ro = tsApi.rightOffset();
+        if (typeof ro === 'number' && isFinite(ro)) rightOffset = ro;
+      }
+    } catch (e) {}
+
     let visibleRange = null;
     try {
       if (activeChart && typeof activeChart.getVisibleRange === 'function') {
@@ -5803,29 +5880,30 @@
       }
     } catch (e) {}
 
-    const tsApi = (activeChart && typeof activeChart.getTimeScale === 'function') ? activeChart.getTimeScale() : null;
-    let barSpacing = 6;
-    try {
-      if (timeScale && typeof timeScale.barSpacing === 'function') {
-        barSpacing = Number(timeScale.barSpacing()) || 6;
-      } else if (tsApi && typeof tsApi.barSpacing === 'function') {
-        barSpacing = Number(tsApi.barSpacing()) || 6;
-      }
-    } catch (e) {}
+    const baseIndex = lastBar.barIndex;
+    const hasIndexToCoord = Boolean(timeScale && typeof timeScale.indexToCoordinate === 'function');
+    const hasTimeToCoord = Boolean(tsApi && typeof tsApi.timeToCoordinate === 'function');
 
+    // Note: During an active mouse drag, activeChart.getVisibleRange() in TradingView only updates on mouseup,
+    // WHEREAS timeScale.indexToCoordinate(), timeScale.rightOffset(), and timeScale.barSpacing() update on every single pixel of drag!
     const barToX = (barIndex, timeSec) => {
-      try {
-        if (timeScale && typeof timeScale.indexToCoordinate === 'function' && typeof barIndex === 'number') {
+      if (hasIndexToCoord && typeof barIndex === 'number') {
+        try {
           const x = timeScale.indexToCoordinate(barIndex);
           if (typeof x === 'number' && isFinite(x)) return x;
-        }
-      } catch (e) {}
-      try {
-        if (tsApi && typeof tsApi.timeToCoordinate === 'function' && typeof timeSec === 'number') {
+        } catch (e) {}
+      }
+      if (hasTimeToCoord && typeof timeSec === 'number') {
+        try {
           const x = tsApi.timeToCoordinate(timeSec);
           if (typeof x === 'number' && isFinite(x)) return x;
-        }
-      } catch (e) {}
+        } catch (e) {}
+      }
+      if (rightOffset !== null && typeof barIndex === 'number' && typeof baseIndex === 'number') {
+        // TradingView exact formula: coordinate of barIndex given baseIndex, rightOffset, and barSpacing
+        const deltaFromRight = baseIndex + rightOffset - barIndex;
+        return cssWidth - (deltaFromRight + 0.5) * barSpacing - 1;
+      }
       if (visibleRange && visibleRange.to > visibleRange.from && typeof timeSec === 'number') {
         return ((timeSec - visibleRange.from) / (visibleRange.to - visibleRange.from)) * cssWidth;
       }
@@ -6215,28 +6293,86 @@
     ictSessionsRafId = window.requestAnimationFrame(renderIctSessionIndicators);
   }
 
+  let isChartPointerDragging = false;
+  let chartDragSyncRafId = null;
+
+  function runChartDragSyncLoop() {
+    if (!isChartPointerDragging) {
+      chartDragSyncRafId = null;
+      return;
+    }
+    renderIctSessionIndicators();
+    chartDragSyncRafId = window.requestAnimationFrame(runChartDragSyncLoop);
+  }
+
+  function startChartDragSyncLoop() {
+    isChartPointerDragging = true;
+    renderIctSessionIndicators();
+    if (chartDragSyncRafId === null) {
+      chartDragSyncRafId = window.requestAnimationFrame(runChartDragSyncLoop);
+    }
+  }
+
+  function stopChartDragSyncLoop() {
+    if (!isChartPointerDragging) return;
+    isChartPointerDragging = false;
+    if (chartDragSyncRafId !== null) {
+      window.cancelAnimationFrame(chartDragSyncRafId);
+      chartDragSyncRafId = null;
+    }
+    renderIctSessionIndicators();
+    setTimeout(() => renderIctSessionIndicators(), 32);
+  }
+
+  const hookedTimeScaleInstances = new WeakSet();
+  const hookedPriceScaleInstances = new WeakSet();
+
+  function attachDirectScaleListeners(model) {
+    if (!model) return;
+    try {
+      const ts = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
+      if (ts && !hookedTimeScaleInstances.has(ts)) {
+        hookedTimeScaleInstances.add(ts);
+        const tsEvents = ['barSpacingChanged', 'rightOffsetChanged', 'visibleBarsStrictRangeChanged', 'scrollCoordsChanged'];
+        tsEvents.forEach(evName => {
+          try {
+            if (typeof ts[evName] === 'function') {
+              const sub = ts[evName]();
+              if (sub && typeof sub.subscribe === 'function') {
+                sub.subscribe(null, () => renderIctSessionIndicators());
+              }
+            }
+          } catch (e) {}
+        });
+      }
+      const ms = findMainSeriesFromModel(model);
+      const ps = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+      if (ps && !hookedPriceScaleInstances.has(ps)) {
+        hookedPriceScaleInstances.add(ps);
+        const psEvents = ['marksChanged', 'priceRangeChanged'];
+        psEvents.forEach(evName => {
+          try {
+            if (typeof ps[evName] === 'function') {
+              const sub = ps[evName]();
+              if (sub && typeof sub.subscribe === 'function') {
+                sub.subscribe(null, () => renderIctSessionIndicators());
+              }
+            }
+          } catch (e) {}
+        });
+      }
+    } catch (e) {}
+  }
+
   function setupIctSessionIndicators() {
+    const model = findChartModelForSessions();
+    if (model) {
+      attachDirectScaleListeners(model);
+    }
     scheduleIctSessionsRender(true);
     if (ictSessionsObserverInitialized) return;
 
     try {
-      const model = findChartModelForSessions();
-      if (model) {
-        const ts = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
-        if (ts) {
-          const tsEvents = ['barSpacingChanged', 'rightOffsetChanged', 'visibleBarsStrictRangeChanged', 'scrollCoordsChanged'];
-          tsEvents.forEach(evName => {
-            try {
-              if (typeof ts[evName] === 'function') {
-                const sub = ts[evName]();
-                if (sub && typeof sub.subscribe === 'function') {
-                  sub.subscribe(null, () => renderIctSessionIndicators());
-                }
-              }
-            } catch (e) {}
-          });
-        }
-      }
       if (activeChart) {
         if (typeof activeChart.onVisibleRangeChanged === 'function') {
           const sub = activeChart.onVisibleRangeChanged();
@@ -6247,13 +6383,23 @@
         if (typeof activeChart.onIntervalChanged === 'function') {
           const sub = activeChart.onIntervalChanged();
           if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => scheduleIctSessionsRender(true));
+            sub.subscribe(null, () => {
+              cachedSessionsChartModel = null;
+              cachedExtractedBarsObj = null;
+              cachedQuickPlotSig = '';
+              scheduleIctSessionsRender(true);
+            });
           }
         }
         if (typeof activeChart.onSymbolChanged === 'function') {
           const sub = activeChart.onSymbolChanged();
           if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => scheduleIctSessionsRender(true));
+            sub.subscribe(null, () => {
+              cachedSessionsChartModel = null;
+              cachedExtractedBarsObj = null;
+              cachedQuickPlotSig = '';
+              scheduleIctSessionsRender(true);
+            });
           }
         }
       }
@@ -6262,17 +6408,42 @@
     const docs = [document];
     document.querySelectorAll('iframe').forEach(ifr => {
       try {
-        if (ifr.contentDocument) docs.push(ifr.contentDocument);
+        if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument);
       } catch (e) {}
     });
 
     docs.forEach(doc => {
       try {
+        // Use capture phase (true) because TradingView calls e.stopPropagation() on canvas mousedown/pointerdown/mousemove during chart panning!
+        doc.addEventListener('pointerdown', (e) => {
+          if (e.target && e.target.tagName === 'CANVAS') {
+            startChartDragSyncLoop();
+          }
+        }, { capture: true, passive: true });
+        doc.addEventListener('mousedown', (e) => {
+          if (e.target && e.target.tagName === 'CANVAS') {
+            startChartDragSyncLoop();
+          }
+        }, { capture: true, passive: true });
+        doc.addEventListener('pointermove', (e) => {
+          if (isChartPointerDragging || e.buttons > 0) {
+            renderIctSessionIndicators();
+          }
+        }, { capture: true, passive: true });
         doc.addEventListener('mousemove', (e) => {
-          if (e.buttons > 0) renderIctSessionIndicators();
-        }, { passive: true });
-        doc.addEventListener('wheel', () => renderIctSessionIndicators(), { passive: true });
-        doc.addEventListener('touchmove', () => renderIctSessionIndicators(), { passive: true });
+          if (isChartPointerDragging || e.buttons > 0) {
+            renderIctSessionIndicators();
+          }
+        }, { capture: true, passive: true });
+        doc.addEventListener('pointerup', () => stopChartDragSyncLoop(), { capture: true, passive: true });
+        doc.addEventListener('mouseup', () => stopChartDragSyncLoop(), { capture: true, passive: true });
+        doc.addEventListener('wheel', () => {
+          renderIctSessionIndicators();
+          requestAnimationFrame(renderIctSessionIndicators);
+        }, { capture: true, passive: true });
+        doc.addEventListener('touchstart', () => startChartDragSyncLoop(), { capture: true, passive: true });
+        doc.addEventListener('touchmove', () => renderIctSessionIndicators(), { capture: true, passive: true });
+        doc.addEventListener('touchend', () => stopChartDragSyncLoop(), { capture: true, passive: true });
       } catch (e) {}
     });
 
