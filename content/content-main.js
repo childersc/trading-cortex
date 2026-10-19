@@ -5414,8 +5414,14 @@
       }
     }
 
-    const maxDaysBack = Math.max(1, Math.min(30, Number(config.maxDaysBack) || 5));
-    const allowedDates = new Set(uniqueDateKeys.slice(-maxDaysBack));
+    const maxDaysBack = Math.max(1, Math.min(30, Number(config.maxDaysBack) || 7));
+    const permDaysBack = config.showPermanentDottedHighLow !== false ? Math.max(maxDaysBack, Number(config.permanentLinesDays) || 7) : maxDaysBack;
+    const boxAllowedDates = new Set(uniqueDateKeys.slice(-maxDaysBack));
+    const permAllowedDates = new Set(uniqueDateKeys.slice(-permDaysBack));
+
+    // Also compute 7-calendar-day cutoff from the latest bar's timestamp so lines never disappear unless > 7 days old
+    const latestBarOverall = annotated[annotated.length - 1];
+    const sevenDaysCutoffSec = latestBarOverall ? (latestBarOverall.timeSec - 7 * 86400) : 0;
 
     // Group bars into session instances keyed by `${sessionDef.id}__${sessionAnchorDateKey}`
     const sessionInstancesMap = new Map();
@@ -5444,7 +5450,8 @@
           }
         }
 
-        if (!inWindow || !allowedDates.has(anchorDate)) continue;
+        const withinSevenDays = b.timeSec >= sevenDaysCutoffSec || permAllowedDates.has(anchorDate);
+        if (!inWindow || !withinSevenDays) continue;
 
         const instanceKey = `${def.id}__${anchorDate}`;
         let inst = sessionInstancesMap.get(instanceKey);
@@ -5453,6 +5460,8 @@
             key: instanceKey,
             def,
             anchorDate,
+            withinBoxLookback: boxAllowedDates.has(anchorDate),
+            withinSevenDays: b.timeSec >= sevenDaysCutoffSec || permAllowedDates.has(anchorDate),
             firstArrayIdx: i,
             lastArrayIdx: i,
             startBarIndex: b.barIndex,
@@ -5462,7 +5471,9 @@
             high: b.high,
             low: b.low,
             highBarIndex: b.barIndex,
-            lowBarIndex: b.barIndex
+            lowBarIndex: b.barIndex,
+            highTimeSec: b.timeSec,
+            lowTimeSec: b.timeSec
           };
           sessionInstancesMap.set(instanceKey, inst);
         } else {
@@ -5472,10 +5483,12 @@
           if (b.high > inst.high) {
             inst.high = b.high;
             inst.highBarIndex = b.barIndex;
+            inst.highTimeSec = b.timeSec;
           }
           if (b.low < inst.low) {
             inst.low = b.low;
             inst.lowBarIndex = b.barIndex;
+            inst.lowTimeSec = b.timeSec;
           }
         }
       }
@@ -5535,6 +5548,152 @@
     return results;
   }
 
+  let ictPriceScaleBadgeContainer = null;
+
+  function formatSessionShortDate(anchorDateKey) {
+    if (!anchorDateKey || typeof anchorDateKey !== 'string') return '';
+    const parts = anchorDateKey.split('-');
+    if (parts.length !== 3) return anchorDateKey;
+    const m = parseInt(parts[1], 10);
+    const d = parseInt(parts[2], 10);
+    if (!isFinite(m) || !isFinite(d)) return anchorDateKey;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[m - 1] || m}/${d}`;
+  }
+
+  function formatSessionDisplayTitle(def) {
+    if (!def) return 'Session';
+    const wm = String(def.watermarkText || '').trim();
+    if (wm) {
+      // e.g. "NY AM" -> "AM" or keep "NY AM", "London", "Asia", "NY Lunch", "NY PM"
+      return wm;
+    }
+    return String(def.name || 'Session').replace(/\s*Killzone/i, '').trim();
+  }
+
+  function formatChartPriceValue(price, refLastPriceStr) {
+    if (typeof price !== 'number' || !isFinite(price)) return '';
+    let decimals = 2;
+    if (refLastPriceStr && typeof refLastPriceStr === 'string') {
+      const cleaned = refLastPriceStr.replace(/,/g, '').trim();
+      const dotIdx = cleaned.indexOf('.');
+      if (dotIdx !== -1) {
+        decimals = Math.max(2, Math.min(6, cleaned.length - dotIdx - 1));
+      }
+    } else if (Math.abs(price) < 1) {
+      decimals = 4;
+    } else if (Math.abs(price) < 10) {
+      decimals = 3;
+    }
+    return price.toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+  }
+
+  function getContrastTextColorForHex(hex) {
+    const parsed = parseColorAndAlpha(hex, '#26a69a');
+    const c = parsed.hex.replace('#', '');
+    const num = parseInt(c, 16);
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+    return yiq >= 155 ? '#0f172a' : '#ffffff';
+  }
+
+  function clearIctPriceScaleBadges() {
+    try {
+      if (ictPriceScaleBadgeContainer) {
+        ictPriceScaleBadgeContainer.innerHTML = '';
+        ictPriceScaleBadgeContainer.style.display = 'none';
+      }
+      const docs = [document];
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try { if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument); } catch (e) {}
+      });
+      docs.forEach(d => {
+        try {
+          d.querySelectorAll('.vest-ict-price-axis-badges').forEach(el => {
+            if (el !== ictPriceScaleBadgeContainer) el.remove();
+          });
+        } catch (e) {}
+      });
+    } catch (e) {}
+  }
+
+  function renderIctPriceScaleBadges(targetChartCanvas, badgeItems, cssHeight) {
+    if (!targetChartCanvas || !badgeItems || badgeItems.length === 0) {
+      clearIctPriceScaleBadges();
+      return;
+    }
+
+    const ownerDoc = targetChartCanvas.ownerDocument || document;
+    const chartRect = targetChartCanvas.getBoundingClientRect();
+
+    // Locate the right-hand price axis container (usually the next sibling TD in .chart-markup-table or canvas to the right of targetChartCanvas)
+    let axisHost = null;
+    try {
+      const parentTd = targetChartCanvas.closest('td');
+      if (parentTd && parentTd.nextElementSibling) {
+        axisHost = parentTd.nextElementSibling.querySelector('div') || parentTd.nextElementSibling;
+      }
+      if (!axisHost) {
+        const allCanvases = ownerDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+        for (const c of allCanvases) {
+          if (c === targetChartCanvas) continue;
+          const r = c.getBoundingClientRect();
+          if (
+            Math.abs(r.top - chartRect.top) < 20 &&
+            Math.abs(r.height - chartRect.height) < 30 &&
+            r.left >= chartRect.right - 8 &&
+            r.width >= 35 &&
+            r.width <= 140
+          ) {
+            axisHost = c.parentElement;
+            break;
+          }
+        }
+      }
+    } catch (e) {}
+
+    const mountParent = axisHost || targetChartCanvas.parentElement;
+    if (!mountParent) return;
+
+    if (
+      !ictPriceScaleBadgeContainer ||
+      !ictPriceScaleBadgeContainer.isConnected ||
+      ictPriceScaleBadgeContainer.parentElement !== mountParent
+    ) {
+      if (ictPriceScaleBadgeContainer) {
+        try { ictPriceScaleBadgeContainer.remove(); } catch (e) {}
+      }
+      ictPriceScaleBadgeContainer = ownerDoc.createElement('div');
+      ictPriceScaleBadgeContainer.className = 'vest-ict-price-axis-badges';
+      const cs = ownerDoc.defaultView ? ownerDoc.defaultView.getComputedStyle(mountParent) : null;
+      if (cs && cs.position === 'static') {
+        mountParent.style.position = 'relative';
+      }
+      mountParent.appendChild(ictPriceScaleBadgeContainer);
+    }
+
+    const isInsideAxis = Boolean(axisHost);
+    ictPriceScaleBadgeContainer.style.cssText = isInsideAxis
+      ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;'
+      : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;';
+    ictPriceScaleBadgeContainer.style.display = 'block';
+
+    let html = '';
+    for (let i = 0; i < badgeItems.length; i++) {
+      const b = badgeItems[i];
+      if (b.y < 8 || b.y > cssHeight - 8) continue;
+      const priceText = formatChartPriceValue(b.price, lastTrackedPrice);
+      const fg = getContrastTextColorForHex(b.color);
+      html += `<div style="position:absolute;left:${isInsideAxis ? '1px' : 'auto'};right:${isInsideAxis ? '2px' : '0px'};top:${Math.round(b.y)}px;transform:translateY(-50%);background:${b.color};color:${fg};font-family:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,sans-serif;font-size:10.5px;font-weight:700;line-height:15px;height:16px;padding:0 5px;border-radius:2px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:flex-start;letter-spacing:0.1px;">${priceText}</div>`;
+    }
+    ictPriceScaleBadgeContainer.innerHTML = html;
+  }
+
   function renderIctSessionIndicators() {
     ictSessionsRafId = null;
 
@@ -5545,6 +5704,7 @@
         if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
         ictSessionsCanvas.style.display = 'none';
       }
+      clearIctPriceScaleBadges();
       return;
     }
 
@@ -5603,6 +5763,7 @@
     ctx.scale(dpr, dpr);
 
     if (cachedIctComputedSessions.length === 0) {
+      clearIctPriceScaleBadges();
       ctx.restore();
       return;
     }
@@ -5700,10 +5861,16 @@
     const showWatermark = config.showWatermark !== false;
     const showBorder = Boolean(config.showBoxBorder || config.showSessionBorder);
     const extendHighLow = (config.extendHighLowLines ?? config.extendHighLow) !== false;
+    const showPermDotted = config.showPermanentDottedHighLow !== false;
     const showHighLowLabels = config.showHighLowLabels !== false;
-    const hlLineStyle = Number(config.highLowLineStyle) || 0;
     const showMidPoint = Boolean(config.showMidPoint);
     const extendMidPoint = Boolean(config.extendMidPoint);
+
+    // 7-day cutoff in seconds relative to latest bar on chart
+    const latestBarTimeSec = bars[bars.length - 1].timeSec;
+    const sevenDaysSecCutoff = latestBarTimeSec - 7 * 86400;
+
+    const priceScaleBadges = [];
 
     for (let i = 0; i < cachedIctComputedSessions.length; i++) {
       const sess = cachedIctComputedSessions[i];
@@ -5747,13 +5914,16 @@
         }
       }
 
-      const maxRightReach = Math.max(boxRight, highEndX, lowEndX, midEndX);
+      const isWithin7Days = sess.endTimeSec >= sevenDaysSecCutoff;
+      const maxRightReach = (showPermDotted && isWithin7Days) ? cssWidth : Math.max(boxRight, highEndX, lowEndX, midEndX);
       if (maxRightReach < -50 || boxLeft > cssWidth + 50) continue;
 
       const colorHex = def.color || '#3b82f6';
+      const sessionDisplayName = formatSessionDisplayTitle(def);
+      const dateStr = formatSessionShortDate(sess.anchorDate);
 
-      // 1. Draw shaded Session Box
-      if (boxRight >= 0 && boxLeft <= cssWidth) {
+      // 1. Draw shaded Session Box (if within configured box lookback days)
+      if (sess.withinBoxLookback !== false && boxRight >= 0 && boxLeft <= cssWidth) {
         ctx.fillStyle = hexToRgbaString(colorHex, boxAlpha * 100);
         ctx.fillRect(boxLeft, boxTop, boxW, boxH);
 
@@ -5765,55 +5935,108 @@
         }
       }
 
-      // 2. Draw Top/Bottom Session High & Low Lines extending from boxLeft (top/bottom of box) out to the sweep bar
-      ctx.save();
-      ctx.strokeStyle = hexToRgbaString(colorHex, 85);
-      ctx.lineWidth = 1.25;
-      if (hlLineStyle === 1) {
-        ctx.setLineDash([2, 3]);
-      } else if (hlLineStyle === 2) {
-        ctx.setLineDash([6, 4]);
-      } else {
-        ctx.setLineDash([]);
-      }
+      // 2A. LINE 1: Solid Session High & Low Lines (Cut Off at Sweep Bar)
+      if (sess.withinBoxLookback !== false) {
+        ctx.save();
+        ctx.strokeStyle = hexToRgbaString(colorHex, 92);
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([]); // Always solid for the swept line!
 
-      const hLineStart = Math.max(-10, boxLeft);
-      const hLineEnd = Math.min(cssWidth + 10, extendHighLow ? highEndX : boxRight);
-      if (hLineEnd > hLineStart && highY >= -20 && highY <= cssHeight + 20) {
-        ctx.beginPath();
-        ctx.moveTo(hLineStart, Math.round(highY) + 0.5);
-        ctx.lineTo(hLineEnd, Math.round(highY) + 0.5);
-        ctx.stroke();
-      }
-
-      const lLineStart = Math.max(-10, boxLeft);
-      const lLineEnd = Math.min(cssWidth + 10, extendHighLow ? lowEndX : boxRight);
-      if (lLineEnd > lLineStart && lowY >= -20 && lowY <= cssHeight + 20) {
-        ctx.beginPath();
-        ctx.moveTo(lLineStart, Math.round(lowY) + 0.5);
-        ctx.lineTo(lLineEnd, Math.round(lowY) + 0.5);
-        ctx.stroke();
-      }
-
-      // 2b. Draw Session Mid-Point (50% Equilibrium) line if enabled
-      if (showMidPoint && midY !== null && midY >= -20 && midY <= cssHeight + 20) {
-        const mLineStart = Math.max(-10, boxLeft);
-        const mLineEnd = Math.min(cssWidth + 10, extendMidPoint ? midEndX : boxRight);
-        if (mLineEnd > mLineStart) {
-          ctx.strokeStyle = hexToRgbaString(colorHex, 75);
-          ctx.lineWidth = 1;
-          ctx.setLineDash([5, 4]);
+        const hLineStart = Math.max(-10, boxLeft);
+        const hLineEnd = Math.min(cssWidth + 10, extendHighLow ? highEndX : boxRight);
+        if (hLineEnd > hLineStart && highY >= -20 && highY <= cssHeight + 20) {
           ctx.beginPath();
-          ctx.moveTo(mLineStart, Math.round(midY) + 0.5);
-          ctx.lineTo(mLineEnd, Math.round(midY) + 0.5);
+          ctx.moveTo(hLineStart, Math.round(highY) + 0.5);
+          ctx.lineTo(hLineEnd, Math.round(highY) + 0.5);
           ctx.stroke();
         }
+
+        const lLineStart = Math.max(-10, boxLeft);
+        const lLineEnd = Math.min(cssWidth + 10, extendHighLow ? lowEndX : boxRight);
+        if (lLineEnd > lLineStart && lowY >= -20 && lowY <= cssHeight + 20) {
+          ctx.beginPath();
+          ctx.moveTo(lLineStart, Math.round(lowY) + 0.5);
+          ctx.lineTo(lLineEnd, Math.round(lowY) + 0.5);
+          ctx.stroke();
+        }
+
+        // Session Mid-Point (50% Equilibrium) line if enabled
+        if (showMidPoint && midY !== null && midY >= -20 && midY <= cssHeight + 20) {
+          const mLineStart = Math.max(-10, boxLeft);
+          const mLineEnd = Math.min(cssWidth + 10, extendMidPoint ? midEndX : boxRight);
+          if (mLineEnd > mLineStart) {
+            ctx.strokeStyle = hexToRgbaString(colorHex, 75);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(mLineStart, Math.round(midY) + 0.5);
+            ctx.lineTo(mLineEnd, Math.round(midY) + 0.5);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
       }
-      ctx.restore();
+
+      // 2B. LINE 2: 7-Day Permanent Dotted High & Low Lines Extending All the Way to the Far Right (Price Scale)
+      // + Date & Session High/Low Label + Price Bar on the Price List!
+      if (showPermDotted && isWithin7Days) {
+        ctx.save();
+        ctx.strokeStyle = hexToRgbaString(colorHex, 80);
+        ctx.lineWidth = 1.15;
+        ctx.setLineDash([2, 4]); // Dotted line extending to far right
+
+        const hPermStart = Math.max(0, extendHighLow ? Math.min(highEndX, cssWidth) : Math.max(0, boxLeft));
+        if (highY >= 0 && highY <= cssHeight && cssWidth > hPermStart) {
+          ctx.beginPath();
+          ctx.moveTo(hPermStart, Math.round(highY) + 0.5);
+          ctx.lineTo(cssWidth, Math.round(highY) + 0.5);
+          ctx.stroke();
+
+          // Identify Date & Session High on the far right of the line (e.g. "Oct/19 NY AM High")
+          const highLabelText = `${dateStr} ${sessionDisplayName} High`;
+          ctx.font = `600 10.5px ${fontFamily}`;
+          ctx.fillStyle = hexToRgbaString(colorHex, 95);
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(highLabelText, cssWidth - 6, Math.round(highY) - 3);
+
+          priceScaleBadges.push({
+            y: highY,
+            price: sess.high,
+            color: colorHex,
+            label: highLabelText
+          });
+        }
+
+        const lPermStart = Math.max(0, extendHighLow ? Math.min(lowEndX, cssWidth) : Math.max(0, boxLeft));
+        if (lowY >= 0 && lowY <= cssHeight && cssWidth > lPermStart) {
+          ctx.beginPath();
+          ctx.moveTo(lPermStart, Math.round(lowY) + 0.5);
+          ctx.lineTo(cssWidth, Math.round(lowY) + 0.5);
+          ctx.stroke();
+
+          // Identify Date & Session Low on the far right of the line (e.g. "Oct/19 NY AM Low")
+          const lowLabelText = `${dateStr} ${sessionDisplayName} Low`;
+          ctx.font = `600 10.5px ${fontFamily}`;
+          ctx.fillStyle = hexToRgbaString(colorHex, 95);
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'top';
+          ctx.fillText(lowLabelText, cssWidth - 6, Math.round(lowY) + 3);
+
+          priceScaleBadges.push({
+            y: lowY,
+            price: sess.low,
+            color: colorHex,
+            label: lowLabelText
+          });
+        }
+
+        ctx.restore();
+      }
 
       // 3. Draw Centered Watermark Text inside Session Box
       const watermarkLabel = def.watermarkText !== undefined ? def.watermarkText : def.name;
-      if (showWatermark && watermarkLabel && boxW > 24 && boxH > 16 && boxRight > 0 && boxLeft < cssWidth) {
+      if (sess.withinBoxLookback !== false && showWatermark && watermarkLabel && boxW > 24 && boxH > 16 && boxRight > 0 && boxLeft < cssWidth) {
         ctx.save();
         ctx.beginPath();
         ctx.rect(boxLeft + 2, boxTop + 2, Math.max(1, boxW - 4), Math.max(1, boxH - 4));
@@ -5839,7 +6062,7 @@
       }
 
       // 4. Draw High / Low Labels above & below the session box (e.g. "NYAM.H" / "NYAM.L")
-      if (showHighLowLabels && boxW > 18 && boxRight > 0 && boxLeft < cssWidth) {
+      if (sess.withinBoxLookback !== false && showHighLowLabels && boxW > 18 && boxRight > 0 && boxLeft < cssWidth) {
         const shortTag = def.shortTag || def.shortLabel || String(watermarkLabel || def.name || '').replace(/\s+/g, '').toUpperCase().slice(0, 5);
         if (shortTag) {
           ctx.save();
@@ -5862,6 +6085,13 @@
     }
 
     ctx.restore();
+
+    // Render the price tags on the right-hand price scale axis!
+    if (showPermDotted && priceScaleBadges.length > 0) {
+      renderIctPriceScaleBadges(targetCanvas, priceScaleBadges, cssHeight);
+    } else {
+      clearIctPriceScaleBadges();
+    }
   }
 
   function scheduleIctSessionsRender(forceRecompute = false) {

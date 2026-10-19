@@ -111,7 +111,7 @@
   const DEFAULT_SESSION_INDICATORS = {
     enabled: false,
     timezone: 'America/New_York',
-    maxDaysBack: 5,
+    maxDaysBack: 7,
     maxIntradayMinutes: 30,
     boxOpacity: 18,
     showBoxBorder: false,
@@ -121,6 +121,8 @@
     fontSize: 40,
     fontBold: false,
     extendHighLowLines: true,
+    showPermanentDottedHighLow: true,
+    permanentLinesDays: 7,
     stopAtMitigation: true,
     showHighLowLabels: true,
     highLowLineWidth: 1,
@@ -1956,11 +1958,15 @@
               </label>
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-extend-hl" ${sc.extendHighLowLines !== false ? 'checked' : ''} />
-                <span>Extend High/Low Until Swept by Bar</span>
+                <span>Solid H/L Line (Cut Off When Swept)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-show-perm-dotted" ${sc.showPermanentDottedHighLow !== false ? 'checked' : ''} />
+                <span>Dotted 7-Day H/L Line to Far Right + Price Tag & Date</span>
               </label>
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-show-hl-labels" ${sc.showHighLowLabels !== false ? 'checked' : ''} />
-                <span>Show H/L Labels (e.g. NYAM.H / NYAM.L)</span>
+                <span>Show Box H/L Labels (e.g. NYAM.H / NYAM.L)</span>
               </label>
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-show-midpoint" ${sc.showMidPoint ? 'checked' : ''} />
@@ -2116,6 +2122,7 @@
         if (q('#vest-si-show-watermark')) sc.showWatermark = Boolean(q('#vest-si-show-watermark').checked);
         if (q('#vest-si-font-bold')) sc.fontBold = Boolean(q('#vest-si-font-bold').checked);
         if (q('#vest-si-extend-hl')) sc.extendHighLowLines = Boolean(q('#vest-si-extend-hl').checked);
+        if (q('#vest-si-show-perm-dotted')) sc.showPermanentDottedHighLow = Boolean(q('#vest-si-show-perm-dotted').checked);
         if (q('#vest-si-show-hl-labels')) sc.showHighLowLabels = Boolean(q('#vest-si-show-hl-labels').checked);
         if (q('#vest-si-show-midpoint')) sc.showMidPoint = Boolean(q('#vest-si-show-midpoint').checked);
         if (q('#vest-si-extend-midpoint')) sc.extendMidPoint = Boolean(q('#vest-si-extend-midpoint').checked);
