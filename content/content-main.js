@@ -1150,11 +1150,13 @@
     restoreSidebarSelections();
     restoreLastChartSettings();
     syncExtendedRectangleTextHooks();
+    setupIctSessionIndicators();
 
     if (!rectTextPollTimer) {
       rectTextPollTimer = setInterval(() => {
         syncExtendedRectangleTextHooks();
         setupContextMenuHandler();
+        scheduleIctSessionsRender();
       }, 400);
     }
     return true;
@@ -2613,6 +2615,7 @@
           restoreLastChartSettings();
         }
         syncExtendedRectangleTextHooks();
+        scheduleIctSessionsRender(true);
         break;
       }
 
@@ -4758,6 +4761,826 @@
         isRestoringChartSettings = false;
       }, 1450);
     }
+  }
+
+  // -------------------------------------------------------------
+  // ICT Session Indicators ("Killzones") Canvas Overlay Engine
+  // -------------------------------------------------------------
+  let ictSessionsCanvas = null;
+  let ictSessionsRafId = null;
+  let ictSessionsNeedsFullRecompute = true;
+  let ictSessionsObserverInitialized = false;
+  let cachedIctComputedSessions = [];
+  let cachedIctBarsSignature = '';
+  let cachedIctConfigSignature = '';
+
+  const nyDateFormatter = (() => {
+    try {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+    } catch (e) {
+      return null;
+    }
+  })();
+
+  function getNyDateParts(unixSec) {
+    const ms = unixSec > 1e11 ? unixSec : unixSec * 1000;
+    const d = new Date(ms);
+    if (!nyDateFormatter) {
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      return {
+        dateKey: `${y}-${m}-${day}`,
+        minutesOfDay: d.getUTCHours() * 60 + d.getUTCMinutes()
+      };
+    }
+    const parts = nyDateFormatter.formatToParts(d);
+    let year = '1970';
+    let month = '01';
+    let day = '01';
+    let hour = 0;
+    let minute = 0;
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      if (p.type === 'year') year = p.value;
+      else if (p.type === 'month') month = p.value;
+      else if (p.type === 'day') day = p.value;
+      else if (p.type === 'hour') {
+        hour = parseInt(p.value, 10);
+        if (hour === 24) hour = 0;
+      } else if (p.type === 'minute') {
+        minute = parseInt(p.value, 10);
+      }
+    }
+    return {
+      dateKey: `${year}-${month}-${day}`,
+      minutesOfDay: hour * 60 + minute
+    };
+  }
+
+  function getPreviousDateKey(dateKey) {
+    try {
+      const [y, m, d] = dateKey.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+      dt.setUTCDate(dt.getUTCDate() - 1);
+      const py = dt.getUTCFullYear();
+      const pm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      const pd = String(dt.getUTCDate()).padStart(2, '0');
+      return `${py}-${pm}-${pd}`;
+    } catch (e) {
+      return dateKey;
+    }
+  }
+
+  function parseHhMmToMinutes(str) {
+    if (!str || typeof str !== 'string') return 0;
+    const m = str.trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return 0;
+    return Math.min(23, Math.max(0, parseInt(m[1], 10))) * 60 + Math.min(59, Math.max(0, parseInt(m[2], 10)));
+  }
+
+  function isIntradayChartResolution() {
+    try {
+      if (activeChart && typeof activeChart.resolution === 'function') {
+        const res = String(activeChart.resolution() || '').trim().toUpperCase();
+        if (!res) return true;
+        if (res.includes('D') || res.includes('W') || res.includes('M') || res.includes('Y')) {
+          return false;
+        }
+        const mins = parseInt(res, 10);
+        if (isFinite(mins) && mins >= 240) return false;
+      }
+    } catch (e) {}
+    return true;
+  }
+
+  function findMainChartPaneCanvas() {
+    const docs = [document];
+    document.querySelectorAll('iframe').forEach(ifr => {
+      try {
+        if (ifr.contentDocument) docs.push(ifr.contentDocument);
+      } catch (e) {}
+    });
+
+    let bestCanvas = null;
+    let bestArea = 0;
+
+    for (const doc of docs) {
+      try {
+        const canvases = doc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+        for (const c of canvases) {
+          const rect = c.getBoundingClientRect();
+          if (rect.width < 240 || rect.height < 140) continue;
+          // Exclude price axis or time axis strip canvases (which are narrow or short)
+          const area = rect.width * rect.height;
+          if (area > bestArea) {
+            bestArea = area;
+            bestCanvas = c;
+          }
+        }
+      } catch (e) {}
+    }
+    return bestCanvas;
+  }
+
+  function ensureIctSessionsOverlayCanvas(targetChartCanvas) {
+    if (!targetChartCanvas || !targetChartCanvas.parentElement) return null;
+    const parent = targetChartCanvas.parentElement;
+    const ownerDoc = targetChartCanvas.ownerDocument || document;
+
+    if (!ictSessionsCanvas || !ictSessionsCanvas.isConnected || ictSessionsCanvas.parentElement !== parent) {
+      if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
+        try { ictSessionsCanvas.remove(); } catch (e) {}
+      }
+      ictSessionsCanvas = ownerDoc.createElement('canvas');
+      ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
+      ictSessionsCanvas.style.cssText =
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:1;user-select:none;';
+      // Insert as the first canvas inside the pane container so candles & drawings render on top, or right before the top interaction canvas
+      if (parent.firstChild) {
+        parent.insertBefore(ictSessionsCanvas, parent.firstChild);
+      } else {
+        parent.appendChild(ictSessionsCanvas);
+      }
+    }
+
+    const cssW = targetChartCanvas.clientWidth || Math.round(targetChartCanvas.getBoundingClientRect().width);
+    const cssH = targetChartCanvas.clientHeight || Math.round(targetChartCanvas.getBoundingClientRect().height);
+    const bmpW = targetChartCanvas.width || cssW;
+    const bmpH = targetChartCanvas.height || cssH;
+
+    if (ictSessionsCanvas.width !== bmpW) ictSessionsCanvas.width = bmpW;
+    if (ictSessionsCanvas.height !== bmpH) ictSessionsCanvas.height = bmpH;
+    const targetStyleW = `${cssW}px`;
+    const targetStyleH = `${cssH}px`;
+    if (ictSessionsCanvas.style.width !== targetStyleW) ictSessionsCanvas.style.width = targetStyleW;
+    if (ictSessionsCanvas.style.height !== targetStyleH) ictSessionsCanvas.style.height = targetStyleH;
+
+    return ictSessionsCanvas;
+  }
+
+  function extractSeriesBarsFromModel() {
+    const model = getInternalChartModel() || getChartModel();
+    if (!model) return null;
+
+    let mainSeries = null;
+    try {
+      if (typeof model.mainSeries === 'function') {
+        mainSeries = model.mainSeries();
+      } else if (model._mainSeries) {
+        mainSeries = model._mainSeries;
+      }
+    } catch (e) {}
+    if (!mainSeries) return null;
+
+    let plotList = null;
+    try {
+      if (typeof mainSeries.bars === 'function') {
+        plotList = mainSeries.bars();
+      } else if (typeof mainSeries.data === 'function' && mainSeries.data() && typeof mainSeries.data().bars === 'function') {
+        plotList = mainSeries.data().bars();
+      } else if (mainSeries._data && typeof mainSeries._data.bars === 'function') {
+        plotList = mainSeries._data.bars();
+      } else if (mainSeries._bars) {
+        plotList = mainSeries._bars;
+      }
+    } catch (e) {}
+    if (!plotList) return null;
+
+    const rawItems = [];
+    try {
+      if (Array.isArray(plotList._items) && plotList._items.length > 0) {
+        for (let i = 0; i < plotList._items.length; i++) {
+          rawItems.push(plotList._items[i]);
+        }
+      } else if (typeof plotList.items === 'function') {
+        const items = plotList.items();
+        if (Array.isArray(items)) {
+          for (let i = 0; i < items.length; i++) rawItems.push(items[i]);
+        }
+      } else if (typeof plotList.each === 'function') {
+        plotList.each((index, value) => {
+          rawItems.push({ index, value });
+          return false;
+        });
+      } else if (typeof plotList.firstIndex === 'function' && typeof plotList.lastIndex === 'function' && typeof plotList.valueAt === 'function') {
+        const firstIdx = plotList.firstIndex();
+        const lastIdx = plotList.lastIndex();
+        if (typeof firstIdx === 'number' && typeof lastIdx === 'number' && lastIdx >= firstIdx) {
+          const startIdx = Math.max(firstIdx, lastIdx - 5000);
+          for (let idx = startIdx; idx <= lastIdx; idx++) {
+            const val = plotList.valueAt(idx);
+            if (val) rawItems.push({ index: idx, value: val });
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (rawItems.length === 0) return null;
+
+    const timeScale = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
+    const normalizedBars = [];
+    // Limit to last 4500 bars for fast real-time computation
+    const sliceStart = Math.max(0, rawItems.length - 4500);
+
+    for (let i = sliceStart; i < rawItems.length; i++) {
+      const item = rawItems[i];
+      if (!item) continue;
+
+      let barIndex = typeof item.index === 'number' ? item.index : i;
+      const v = item.value || item;
+
+      let timeSec = null;
+      let open = null;
+      let high = null;
+      let low = null;
+      let close = null;
+
+      if (Array.isArray(v)) {
+        // TradingView PlotList bar value is typically [timeOrIndex, open, high, low, close, volume]
+        const v0 = Number(v[0]);
+        if (v0 > 1e8) {
+          timeSec = v0 > 1e11 ? Math.floor(v0 / 1000) : v0;
+        }
+        open = Number(v[1]);
+        high = Number(v[2]);
+        low = Number(v[3]);
+        close = Number(v[4]);
+      } else if (v && typeof v === 'object') {
+        const rawT = v.time ?? v.timestamp ?? v.t;
+        if (typeof rawT === 'number' && rawT > 1e8) {
+          timeSec = rawT > 1e11 ? Math.floor(rawT / 1000) : rawT;
+        }
+        open = Number(v.open ?? v.o);
+        high = Number(v.high ?? v.h);
+        low = Number(v.low ?? v.l);
+        close = Number(v.close ?? v.c);
+      }
+
+      if (!timeSec && typeof item.time === 'number' && item.time > 1e8) {
+        timeSec = item.time > 1e11 ? Math.floor(item.time / 1000) : item.time;
+      }
+
+      if (!timeSec && timeScale && typeof barIndex === 'number') {
+        try {
+          if (typeof timeScale.indexToTimePoint === 'function') {
+            const tp = timeScale.indexToTimePoint(barIndex);
+            if (typeof tp === 'number' && tp > 1e8) {
+              timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
+            }
+          } else if (typeof timeScale.indexToUserTime === 'function') {
+            const ut = timeScale.indexToUserTime(barIndex);
+            if (ut) {
+              const ms = ut instanceof Date ? ut.getTime() : Number(ut);
+              if (ms > 1e8) timeSec = ms > 1e11 ? Math.floor(ms / 1000) : ms;
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (
+        typeof timeSec === 'number' &&
+        isFinite(timeSec) &&
+        isFinite(high) &&
+        isFinite(low) &&
+        high >= low
+      ) {
+        normalizedBars.push({
+          barIndex,
+          timeSec,
+          open,
+          high,
+          low,
+          close
+        });
+      }
+    }
+
+    return {
+      model,
+      mainSeries,
+      timeScale,
+      bars: normalizedBars
+    };
+  }
+
+  function computeIctSessionsFromBars(bars, config) {
+    if (!bars || bars.length === 0 || !config || !config.enabled || !Array.isArray(config.sessions)) {
+      return [];
+    }
+
+    const enabledDefs = config.sessions
+      .filter(s => s && s.enabled)
+      .map(s => ({
+        ...s,
+        startMins: parseHhMmToMinutes(s.start),
+        endMins: parseHhMmToMinutes(s.end),
+        isOvernight: parseHhMmToMinutes(s.start) > parseHhMmToMinutes(s.end)
+      }));
+
+    if (enabledDefs.length === 0) return [];
+
+    // Pre-compute NY dateKey & minutesOfDay for each bar
+    const annotated = new Array(bars.length);
+    const uniqueDateKeys = [];
+    let lastSeenDate = null;
+
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i];
+      const ny = getNyDateParts(b.timeSec);
+      annotated[i] = {
+        ...b,
+        barIdxInArray: i,
+        dateKey: ny.dateKey,
+        minutesOfDay: ny.minutesOfDay
+      };
+      if (ny.dateKey !== lastSeenDate) {
+        if (!uniqueDateKeys.includes(ny.dateKey)) {
+          uniqueDateKeys.push(ny.dateKey);
+        }
+        lastSeenDate = ny.dateKey;
+      }
+    }
+
+    const maxDaysBack = Math.max(1, Math.min(30, Number(config.maxDaysBack) || 5));
+    const allowedDates = new Set(uniqueDateKeys.slice(-maxDaysBack));
+
+    // Group bars into session instances keyed by `${sessionDef.id}__${sessionAnchorDateKey}`
+    const sessionInstancesMap = new Map();
+
+    for (let i = 0; i < annotated.length; i++) {
+      const b = annotated[i];
+      const mins = b.minutesOfDay;
+
+      for (let sIdx = 0; sIdx < enabledDefs.length; sIdx++) {
+        const def = enabledDefs[sIdx];
+        let inWindow = false;
+        let anchorDate = b.dateKey;
+
+        if (!def.isOvernight) {
+          // Normal intraday window: [startMins, endMins)
+          if (mins >= def.startMins && mins < def.endMins) {
+            inWindow = true;
+            anchorDate = b.dateKey;
+          }
+        } else {
+          // Overnight window (e.g. Asian Killzone 20:00 -> 00:00 or 20:00 -> 02:00)
+          if (mins >= def.startMins) {
+            inWindow = true;
+            anchorDate = b.dateKey;
+          } else if (mins < def.endMins) {
+            inWindow = true;
+            anchorDate = getPreviousDateKey(b.dateKey);
+          }
+        }
+
+        if (!inWindow || !allowedDates.has(anchorDate)) continue;
+
+        const instanceKey = `${def.id}__${anchorDate}`;
+        let inst = sessionInstancesMap.get(instanceKey);
+        if (!inst) {
+          inst = {
+            key: instanceKey,
+            def,
+            anchorDate,
+            firstArrayIdx: i,
+            lastArrayIdx: i,
+            startBarIndex: b.barIndex,
+            endBarIndex: b.barIndex,
+            startTimeSec: b.timeSec,
+            endTimeSec: b.timeSec,
+            high: b.high,
+            low: b.low,
+            highBarIndex: b.barIndex,
+            lowBarIndex: b.barIndex
+          };
+          sessionInstancesMap.set(instanceKey, inst);
+        } else {
+          inst.lastArrayIdx = i;
+          inst.endBarIndex = b.barIndex;
+          inst.endTimeSec = b.timeSec;
+          if (b.high > inst.high) {
+            inst.high = b.high;
+            inst.highBarIndex = b.barIndex;
+          }
+          if (b.low < inst.low) {
+            inst.low = b.low;
+            inst.lowBarIndex = b.barIndex;
+          }
+        }
+      }
+    }
+
+    // For each session instance, scan bars AFTER the session ends to find the exact bar that sweeps/mitigates High or Low
+    const latestBar = annotated[annotated.length - 1];
+    const results = [];
+
+    sessionInstancesMap.forEach((inst) => {
+      let highSweptBarIndex = null;
+      let highSweptTimeSec = null;
+      let lowSweptBarIndex = null;
+      let lowSweptTimeSec = null;
+
+      // Determine whether this session is still actively forming on the latest bar
+      const isStillInSession = inst.lastArrayIdx === annotated.length - 1;
+
+      if (!isStillInSession) {
+        for (let j = inst.lastArrayIdx + 1; j < annotated.length; j++) {
+          const postBar = annotated[j];
+          if (highSweptBarIndex === null && postBar.high > inst.high) {
+            highSweptBarIndex = postBar.barIndex;
+            highSweptTimeSec = postBar.timeSec;
+          }
+          if (lowSweptBarIndex === null && postBar.low < inst.low) {
+            lowSweptBarIndex = postBar.barIndex;
+            lowSweptTimeSec = postBar.timeSec;
+          }
+          if (highSweptBarIndex !== null && lowSweptBarIndex !== null) {
+            break;
+          }
+        }
+      }
+
+      results.push({
+        ...inst,
+        isStillInSession,
+        highSweptBarIndex,
+        highSweptTimeSec,
+        lowSweptBarIndex,
+        lowSweptTimeSec,
+        latestBarIndex: latestBar.barIndex,
+        latestTimeSec: latestBar.timeSec
+      });
+    });
+
+    return results;
+  }
+
+  function renderIctSessionIndicators() {
+    ictSessionsRafId = null;
+
+    const config = currentSettings && currentSettings.sessionIndicators;
+    const targetCanvas = findMainChartPaneCanvas();
+
+    if (!config || !config.enabled || !isIntradayChartResolution()) {
+      if (ictSessionsCanvas) {
+        const ctx = ictSessionsCanvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
+      }
+      return;
+    }
+
+    if (!targetCanvas) return;
+    const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
+    if (!overlay) return;
+
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+
+    const extracted = extractSeriesBarsFromModel();
+    if (!extracted || !extracted.bars || extracted.bars.length === 0) {
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      return;
+    }
+
+    const { mainSeries, timeScale, bars } = extracted;
+    const lastBar = bars[bars.length - 1];
+    const barsSig = `${bars.length}_${ bars[0].timeSec }_${lastBar.timeSec}_${lastBar.high}_${lastBar.low}_${lastBar.close}`;
+    const configSig = JSON.stringify(config);
+
+    if (
+      ictSessionsNeedsFullRecompute ||
+      barsSig !== cachedIctBarsSignature ||
+      configSig !== cachedIctConfigSignature
+    ) {
+      cachedIctComputedSessions = computeIctSessionsFromBars(bars, config);
+      cachedIctBarsSignature = barsSig;
+      cachedIctConfigSignature = configSig;
+      ictSessionsNeedsFullRecompute = false;
+    }
+
+    const cssWidth = overlay.clientWidth || targetCanvas.clientWidth || overlay.width;
+    const cssHeight = overlay.clientHeight || targetCanvas.clientHeight || overlay.height;
+    const dpr = cssWidth > 0 ? overlay.width / cssWidth : (window.devicePixelRatio || 1);
+
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    if (cachedIctComputedSessions.length === 0) return;
+
+    // Coordinate conversion helpers: barIndex / timeSec -> X (CSS px), price -> Y (CSS px)
+    let visibleRange = null;
+    try {
+      if (activeChart && typeof activeChart.getVisibleRange === 'function') {
+        visibleRange = activeChart.getVisibleRange();
+      }
+    } catch (e) {}
+
+    const tsApi = (activeChart && typeof activeChart.getTimeScale === 'function') ? activeChart.getTimeScale() : null;
+    let barSpacing = 6;
+    try {
+      if (timeScale && typeof timeScale.barSpacing === 'function') {
+        barSpacing = Number(timeScale.barSpacing()) || 6;
+      } else if (tsApi && typeof tsApi.barSpacing === 'function') {
+        barSpacing = Number(tsApi.barSpacing()) || 6;
+      }
+    } catch (e) {}
+
+    const barToX = (barIndex, timeSec) => {
+      try {
+        if (timeScale && typeof timeScale.indexToCoordinate === 'function' && typeof barIndex === 'number') {
+          const x = timeScale.indexToCoordinate(barIndex);
+          if (typeof x === 'number' && isFinite(x)) return x;
+        }
+      } catch (e) {}
+      try {
+        if (tsApi && typeof tsApi.timeToCoordinate === 'function' && typeof timeSec === 'number') {
+          const x = tsApi.timeToCoordinate(timeSec);
+          if (typeof x === 'number' && isFinite(x)) return x;
+        }
+      } catch (e) {}
+      if (visibleRange && visibleRange.to > visibleRange.from && typeof timeSec === 'number') {
+        return ((timeSec - visibleRange.from) / (visibleRange.to - visibleRange.from)) * cssWidth;
+      }
+      return null;
+    };
+
+    const internalPs = (mainSeries && typeof mainSeries.priceScale === 'function') ? mainSeries.priceScale() : null;
+    const psApi = getPrimaryPriceScaleApi();
+    let firstValue = null;
+    try {
+      if (mainSeries && typeof mainSeries.firstValue === 'function') {
+        firstValue = mainSeries.firstValue();
+      } else if (internalPs && typeof internalPs.firstValue === 'function') {
+        firstValue = internalPs.firstValue();
+      }
+    } catch (e) {}
+
+    let visiblePriceRange = null;
+    try {
+      if (psApi && typeof psApi.getVisiblePriceRange === 'function') {
+        visiblePriceRange = psApi.getVisiblePriceRange();
+      } else if (internalPs && typeof internalPs.priceRange === 'function') {
+        const pr = internalPs.priceRange();
+        if (pr) {
+          const minV = typeof pr.minValue === 'function' ? pr.minValue() : pr.from;
+          const maxV = typeof pr.maxValue === 'function' ? pr.maxValue() : pr.to;
+          if (typeof minV === 'number' && typeof maxV === 'number') {
+            visiblePriceRange = { from: minV, to: maxV };
+          }
+        }
+      }
+    } catch (e) {}
+
+    const priceToY = (price) => {
+      try {
+        if (internalPs && typeof internalPs.priceToCoordinate === 'function') {
+          const y = internalPs.priceToCoordinate(price, firstValue);
+          if (typeof y === 'number' && isFinite(y)) return y;
+        }
+      } catch (e) {}
+      try {
+        if (psApi && typeof psApi.priceToCoordinate === 'function') {
+          const y = psApi.priceToCoordinate(price);
+          if (typeof y === 'number' && isFinite(y)) return y;
+        }
+      } catch (e) {}
+      if (visiblePriceRange && visiblePriceRange.to !== visiblePriceRange.from) {
+        return cssHeight - ((price - visiblePriceRange.from) / (visiblePriceRange.to - visiblePriceRange.from)) * cssHeight;
+      }
+      return null;
+    };
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    const halfBarW = Math.max(1, barSpacing * 0.5);
+    const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(config.boxOpacity) || 12) / 100));
+    const watermarkAlpha = Math.max(0.05, Math.min(1, (Number(config.watermarkOpacity) || 28) / 100));
+    const fontFamily = config.fontFamily || 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+    const baseFontSize = Math.max(12, Math.min(76, Number(config.fontSize) || 40));
+    const fontWeight = config.fontBold !== false ? '700' : '500';
+    const showWatermark = config.showWatermark !== false;
+    const showBorder = Boolean(config.showSessionBorder);
+    const extendHighLow = config.extendHighLow !== false;
+    const showHighLowLabels = config.showHighLowLabels !== false;
+    const hlLineStyle = Number(config.highLowLineStyle) || 0;
+
+    for (let i = 0; i < cachedIctComputedSessions.length; i++) {
+      const sess = cachedIctComputedSessions[i];
+      const def = sess.def;
+
+      const rawStartX = barToX(sess.startBarIndex, sess.startTimeSec);
+      const rawEndX = barToX(sess.endBarIndex, sess.endTimeSec);
+      const highY = priceToY(sess.high);
+      const lowY = priceToY(sess.low);
+
+      if (rawStartX === null || rawEndX === null || highY === null || lowY === null) continue;
+
+      const boxLeft = Math.min(rawStartX, rawEndX) - halfBarW;
+      const boxRight = Math.max(rawStartX, rawEndX) + halfBarW;
+      const boxTop = Math.min(highY, lowY);
+      const boxBottom = Math.max(highY, lowY);
+      const boxW = Math.max(2, boxRight - boxLeft);
+      const boxH = Math.max(2, boxBottom - boxTop);
+
+      // Compute High/Low line end X coordinates so we know if a session's extended lines are still visible even when its box is off-screen left
+      let highEndX = boxRight;
+      let lowEndX = boxRight;
+      if (extendHighLow && !sess.isStillInSession) {
+        const hTargetBar = sess.highSweptBarIndex !== null ? sess.highSweptBarIndex : sess.latestBarIndex;
+        const hTargetTime = sess.highSweptTimeSec !== null ? sess.highSweptTimeSec : sess.latestTimeSec;
+        const hx = barToX(hTargetBar, hTargetTime);
+        if (hx !== null) highEndX = Math.max(boxRight, hx);
+
+        const lTargetBar = sess.lowSweptBarIndex !== null ? sess.lowSweptBarIndex : sess.latestBarIndex;
+        const lTargetTime = sess.lowSweptTimeSec !== null ? sess.lowSweptTimeSec : sess.latestTimeSec;
+        const lx = barToX(lTargetBar, lTargetTime);
+        if (lx !== null) lowEndX = Math.max(boxRight, lx);
+      }
+
+      const maxRightReach = Math.max(boxRight, highEndX, lowEndX);
+      if (maxRightReach < -50 || boxLeft > cssWidth + 50) continue;
+
+      const colorHex = def.color || '#3b82f6';
+
+      // 1. Draw shaded Session Box
+      if (boxRight >= 0 && boxLeft <= cssWidth) {
+        ctx.fillStyle = hexToRgbaString(colorHex, boxAlpha * 100);
+        ctx.fillRect(boxLeft, boxTop, boxW, boxH);
+
+        if (showBorder) {
+          ctx.strokeStyle = hexToRgbaString(colorHex, Math.min(90, boxAlpha * 100 + 28));
+          ctx.lineWidth = 1;
+          ctx.setLineDash([]);
+          ctx.strokeRect(boxLeft + 0.5, boxTop + 0.5, Math.max(1, boxW - 1), Math.max(1, boxH - 1));
+        }
+      }
+
+      // 2. Draw Top/Bottom Session High & Low Lines extending from boxLeft (top/bottom of box) out to the sweep bar
+      ctx.save();
+      ctx.strokeStyle = hexToRgbaString(colorHex, 85);
+      ctx.lineWidth = 1.25;
+      if (hlLineStyle === 1) {
+        ctx.setLineDash([6, 4]);
+      } else if (hlLineStyle === 2) {
+        ctx.setLineDash([2, 3]);
+      } else {
+        ctx.setLineDash([]);
+      }
+
+      // Top Session High line (spans across top of session box + extends right until swept)
+      const hLineStart = Math.max(-10, boxLeft);
+      const hLineEnd = Math.min(cssWidth + 10, extendHighLow ? highEndX : boxRight);
+      if (hLineEnd > hLineStart && highY >= -20 && highY <= cssHeight + 20) {
+        ctx.beginPath();
+        ctx.moveTo(hLineStart, Math.round(highY) + 0.5);
+        ctx.lineTo(hLineEnd, Math.round(highY) + 0.5);
+        ctx.stroke();
+      }
+
+      // Bottom Session Low line (spans across bottom of session box + extends right until swept)
+      const lLineStart = Math.max(-10, boxLeft);
+      const lLineEnd = Math.min(cssWidth + 10, extendHighLow ? lowEndX : boxRight);
+      if (lLineEnd > lLineStart && lowY >= -20 && lowY <= cssHeight + 20) {
+        ctx.beginPath();
+        ctx.moveTo(lLineStart, Math.round(lowY) + 0.5);
+        ctx.lineTo(lLineEnd, Math.round(lowY) + 0.5);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 3. Draw Centered Watermark Text inside Session Box (matching user's screenshot: "NY AM", "NY Lunch", "London", "Asia")
+      if (showWatermark && def.name && boxW > 24 && boxH > 16 && boxRight > 0 && boxLeft < cssWidth) {
+        ctx.save();
+        // Clip watermark to the session box so it stays clean on narrow zoom levels
+        ctx.beginPath();
+        ctx.rect(boxLeft + 2, boxTop + 2, Math.max(1, boxW - 4), Math.max(1, boxH - 4));
+        ctx.clip();
+
+        ctx.fillStyle = hexToRgbaString(colorHex, watermarkAlpha * 100);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Automatically scale down font if box is narrower than text width at current zoom level
+        let fittedSize = baseFontSize;
+        ctx.font = `${fontWeight} ${fittedSize}px ${fontFamily}`;
+        const measuredW = ctx.measureText(def.name).width;
+        if (measuredW > boxW * 0.88 && measuredW > 0) {
+          fittedSize = Math.max(11, Math.floor(fittedSize * ((boxW * 0.88) / measuredW)));
+        }
+        if (fittedSize > boxH * 0.75) {
+          fittedSize = Math.max(11, Math.floor(boxH * 0.75));
+        }
+
+        ctx.font = `${fontWeight} ${fittedSize}px ${fontFamily}`;
+        ctx.fillText(def.name, boxLeft + boxW / 2, boxTop + boxH / 2);
+        ctx.restore();
+      }
+
+      // 4. Draw High / Low Labels above & below the session box (e.g. "NYAM.H" / "NYAM.L")
+      if (showHighLowLabels && boxW > 18 && boxRight > 0 && boxLeft < cssWidth) {
+        const shortTag = def.shortLabel || String(def.name || '').replace(/\s+/g, '').toUpperCase().slice(0, 5);
+        if (shortTag) {
+          ctx.save();
+          ctx.fillStyle = hexToRgbaString(colorHex, 88);
+          ctx.font = `600 10px ${fontFamily}`;
+          ctx.textAlign = 'center';
+          const centerX = boxLeft + boxW / 2;
+
+          if (boxTop > 12 && boxTop < cssHeight) {
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(`${shortTag}.H`, centerX, boxTop - 3);
+          }
+          if (boxBottom > 0 && boxBottom < cssHeight - 12) {
+            ctx.textBaseline = 'top';
+            ctx.fillText(`${shortTag}.L`, centerX, boxBottom + 3);
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function scheduleIctSessionsRender(forceRecompute = false) {
+    if (forceRecompute) {
+      ictSessionsNeedsFullRecompute = true;
+    }
+    if (ictSessionsRafId !== null) return;
+    ictSessionsRafId = window.requestAnimationFrame(renderIctSessionIndicators);
+  }
+
+  function setupIctSessionIndicators() {
+    scheduleIctSessionsRender(true);
+    if (ictSessionsObserverInitialized) return;
+
+    try {
+      const model = getInternalChartModel() || getChartModel();
+      if (model) {
+        const ts = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
+        if (ts) {
+          const tsEvents = ['barSpacingChanged', 'rightOffsetChanged', 'visibleBarsStrictRangeChanged', 'scrollCoordsChanged'];
+          tsEvents.forEach(evName => {
+            try {
+              if (typeof ts[evName] === 'function') {
+                const sub = ts[evName]();
+                if (sub && typeof sub.subscribe === 'function') {
+                  sub.subscribe(null, () => scheduleIctSessionsRender(false));
+                }
+              }
+            } catch (e) {}
+          });
+        }
+      }
+      if (activeChart) {
+        if (typeof activeChart.onVisibleRangeChanged === 'function') {
+          const sub = activeChart.onVisibleRangeChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => scheduleIctSessionsRender(false));
+          }
+        }
+        if (typeof activeChart.onIntervalChanged === 'function') {
+          const sub = activeChart.onIntervalChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => scheduleIctSessionsRender(true));
+          }
+        }
+        if (typeof activeChart.onSymbolChanged === 'function') {
+          const sub = activeChart.onSymbolChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => scheduleIctSessionsRender(true));
+          }
+        }
+      }
+    } catch (e) {}
+
+    const docs = [document];
+    document.querySelectorAll('iframe').forEach(ifr => {
+      try {
+        if (ifr.contentDocument) docs.push(ifr.contentDocument);
+      } catch (e) {}
+    });
+
+    docs.forEach(doc => {
+      try {
+        doc.addEventListener('mousemove', (e) => {
+          if (e.buttons > 0) scheduleIctSessionsRender(false);
+        }, { passive: true });
+        doc.addEventListener('wheel', () => scheduleIctSessionsRender(false), { passive: true });
+        doc.addEventListener('touchmove', () => scheduleIctSessionsRender(false), { passive: true });
+      } catch (e) {}
+    });
+
+    window.addEventListener('resize', () => scheduleIctSessionsRender(false), { passive: true });
+    ictSessionsObserverInitialized = true;
   }
 
   // -------------------------------------------------------------

@@ -98,6 +98,150 @@
   }
 
   let templates = [];
+
+  const SESSION_FONT_FAMILIES = [
+    { id: '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif', label: 'Trebuchet MS / Default' },
+    { id: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', label: 'Inter / Modern Sans' },
+    { id: '"JetBrains Mono", Consolas, "Liberation Mono", monospace', label: 'JetBrains Mono' },
+    { id: 'Roboto, "Helvetica Neue", Arial, sans-serif', label: 'Roboto' },
+    { id: 'Impact, "Arial Black", sans-serif', label: 'Impact / Heavy' },
+    { id: 'Georgia, "Times New Roman", serif', label: 'Georgia / Serif' }
+  ];
+
+  const DEFAULT_SESSION_INDICATORS = {
+    enabled: false,
+    timezone: 'America/New_York',
+    maxDaysBack: 5,
+    maxIntradayMinutes: 30,
+    boxOpacity: 18,
+    showBoxBorder: false,
+    showWatermark: true,
+    watermarkOpacity: 32,
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif',
+    fontSize: 40,
+    fontBold: false,
+    extendHighLowLines: true,
+    stopAtMitigation: true,
+    showHighLowLabels: true,
+    highLowLineWidth: 1,
+    highLowLineStyle: 0,
+    sessions: [
+      {
+        id: 'asia',
+        name: 'Asian Killzone',
+        watermarkText: 'Asia',
+        shortTag: 'AS',
+        enabled: true,
+        startTime: '20:00',
+        endTime: '00:00',
+        color: '#3b82f6'
+      },
+      {
+        id: 'london',
+        name: 'London Killzone',
+        watermarkText: 'London',
+        shortTag: 'LOKZ',
+        enabled: true,
+        startTime: '02:00',
+        endTime: '05:00',
+        color: '#ef4444'
+      },
+      {
+        id: 'ny_am',
+        name: 'NY AM Killzone',
+        watermarkText: 'NY AM',
+        shortTag: 'NYAM',
+        enabled: true,
+        startTime: '09:30',
+        endTime: '11:00',
+        color: '#26a69a'
+      },
+      {
+        id: 'ny_lunch',
+        name: 'NY Lunch',
+        watermarkText: 'NY Lunch',
+        shortTag: 'NYL',
+        enabled: true,
+        startTime: '12:00',
+        endTime: '13:00',
+        color: '#eab308'
+      },
+      {
+        id: 'ny_pm',
+        name: 'NY PM Killzone',
+        watermarkText: 'NY PM',
+        shortTag: 'NYPM',
+        enabled: true,
+        startTime: '13:30',
+        endTime: '16:00',
+        color: '#a855f7'
+      },
+      {
+        id: 'sb_london',
+        name: 'London Silver Bullet',
+        watermarkText: 'LDN SB',
+        shortTag: 'LSB',
+        enabled: false,
+        startTime: '03:00',
+        endTime: '04:00',
+        color: '#38bdf8'
+      },
+      {
+        id: 'sb_ny_am',
+        name: 'NY AM Silver Bullet',
+        watermarkText: 'AM SB',
+        shortTag: 'AMSB',
+        enabled: false,
+        startTime: '10:00',
+        endTime: '11:00',
+        color: '#10b981'
+      },
+      {
+        id: 'sb_ny_pm',
+        name: 'NY PM Silver Bullet',
+        watermarkText: 'PM SB',
+        shortTag: 'PMSB',
+        enabled: false,
+        startTime: '14:00',
+        endTime: '15:00',
+        color: '#f97316'
+      }
+    ]
+  };
+
+  function normalizeSessionIndicatorsConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_SESSION_INDICATORS));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+
+    const merged = {
+      ...base,
+      ...rawCfg
+    };
+
+    const incomingSessions = Array.isArray(rawCfg.sessions) ? rawCfg.sessions : [];
+    const byId = new Map();
+    incomingSessions.forEach(s => {
+      if (s && s.id) byId.set(s.id, s);
+    });
+
+    merged.sessions = base.sessions.map(defSess => {
+      const saved = byId.get(defSess.id);
+      if (!saved) return defSess;
+      return {
+        ...defSess,
+        ...saved,
+        enabled: typeof saved.enabled === 'boolean' ? saved.enabled : defSess.enabled,
+        color: normalizeHexColor(saved.color || defSess.color, defSess.color),
+        startTime: saved.startTime || defSess.startTime,
+        endTime: saved.endTime || defSess.endTime,
+        watermarkText: saved.watermarkText !== undefined ? saved.watermarkText : defSess.watermarkText,
+        shortTag: saved.shortTag !== undefined ? saved.shortTag : defSess.shortTag
+      };
+    });
+
+    return merged;
+  }
+
   let settings = {
     activeTemplateId: null,
     defaultTemplateId: null,
@@ -108,6 +252,7 @@
     rememberSidebarTools: true,
     rememberLastChartSettings: true,
     lastChartSettings: {},
+    sessionIndicators: JSON.parse(JSON.stringify(DEFAULT_SESSION_INDICATORS)),
     enablePanelManagement: true,
     panelLayout: {},
     sidebarState: {
@@ -1358,6 +1503,18 @@
           </div>
           <span class="vest-sdm-hotkey">${templates.length}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-sessions-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#26a69a;">
+              <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+              <line x1="8" y1="4" x2="8" y2="20"></line>
+              <line x1="16" y1="4" x2="16" y2="20"></line>
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Session Indicators...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.sessionIndicators && settings.sessionIndicators.enabled ? 'on' : ''}">${settings.sessionIndicators && settings.sessionIndicators.enabled ? 'ON' : 'OFF'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
@@ -1419,6 +1576,12 @@
     menuEl.querySelector('#vest-sdm-open-templates-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openTemplateManagerModal('all');
+    });
+
+    // Session Indicators Button -> opens Settings Dialog directly on Session Indicators tab
+    menuEl.querySelector('#vest-sdm-open-sessions-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('sessions');
     });
 
     // Top Settings Button -> opens Settings Dialog on About tab
@@ -1571,7 +1734,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    let activeTab = (initialTab === 'memory' || initialTab === 'about') ? initialTab : 'about';
+    let activeTab = ['about', 'memory', 'sessions'].includes(initialTab) ? initialTab : 'about';
 
     // Working draft so "Cancel" discards or "Save Settings" commits
     const draftSettings = JSON.parse(JSON.stringify(settings || {}));
@@ -1581,6 +1744,7 @@
     if (typeof draftSettings.rememberLastChartSettings !== 'boolean') {
       draftSettings.rememberLastChartSettings = true;
     }
+    draftSettings.sessionIndicators = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
     if (!draftSettings.sidebarState) {
       draftSettings.sidebarState = {
         magnet: false,
@@ -1608,8 +1772,26 @@
         id: 'memory',
         label: 'Chart Memory Features',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`
+      },
+      {
+        id: 'sessions',
+        label: 'Session Indicators',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="20"/><line x1="16" y1="4" x2="16" y2="20"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`
       }
     ];
+
+    function broadcastLiveSessionDraft() {
+      postToMainWorlds({
+        type: 'VEST_TV_CONFIG_UPDATE',
+        payload: {
+          templates,
+          settings: {
+            ...settings,
+            ...draftSettings
+          }
+        }
+      });
+    }
 
     function renderRightPaneContent() {
       if (activeTab === 'about') {
@@ -1627,7 +1809,7 @@
               A smart chart memory and workspace enhancement suite engineered for web trading terminals powered by the TradingView Charting Library.
             </p>
             <p class="vest-tvs-about-desc" style="color:#94a3b8;">
-              Provides persistent left-sidebar drawing tool memory, one-click ICT/SMC rectangle templates, extended box far-right canvas text alignment, dockable workspace controls, and real-time market telemetry.
+              Provides persistent left-sidebar drawing tool memory, one-click ICT/SMC rectangle templates, ICT Killzone session overlays with unmitigated High/Low rays, extended box far-right canvas text alignment, dockable workspace controls, and real-time market telemetry.
             </p>
             <div class="vest-tvs-about-meta">
               <div class="vest-tvs-about-meta-row">
@@ -1684,6 +1866,134 @@
         `;
       }
 
+      if (activeTab === 'sessions') {
+        const sc = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
+        draftSettings.sessionIndicators = sc;
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div class="vest-tvs-section-title" style="margin:0;">ICT KILLZONES & SESSION INDICATORS</div>
+            <button type="button" class="vest-tvs-action-btn" id="vest-si-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Enable ICT Session Boxes & High/Low Liquidity Lines</div>
+              <div class="vest-tvs-toggle-desc">
+                Draws shaded ICT session killzone boxes with centered watermarks (e.g. NY AM, NY Lunch, London, Asia) and extends Session High/Low lines until price sweeps them.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Session Indicators on Chart">
+              <input type="checkbox" id="vest-si-master-enabled" ${sc.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Session Box & Watermark Font Styling
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Watermark Font Family</label>
+                <select class="vest-ed-select" id="vest-si-font-family">
+                  ${SESSION_FONT_FAMILIES.map(f => `
+                    <option value="${escapeHtml(f.id)}" ${f.id === sc.fontFamily ? 'selected' : ''}>${escapeHtml(f.label)}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Watermark Font Size: <span id="vest-si-fontsize-val">${sc.fontSize}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-font-size" min="14" max="76" value="${sc.fontSize}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Watermark Opacity: <span id="vest-si-wm-opacity-val">${sc.watermarkOpacity}%</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-wm-opacity" min="5" max="90" value="${sc.watermarkOpacity}" />
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-3" style="margin-bottom:8px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Fill Opacity: <span id="vest-si-box-opacity-val">${sc.boxOpacity}%</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-box-opacity" min="5" max="65" value="${sc.boxOpacity}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Days Lookback</label>
+                <select class="vest-ed-select" id="vest-si-days-back">
+                  ${[1, 2, 3, 5, 7, 10, 14, 21].map(d => `
+                    <option value="${d}" ${Number(sc.maxDaysBack) === d ? 'selected' : ''}>${d} ${d === 1 ? 'Day' : 'Days'}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">H/L Line Style</label>
+                <select class="vest-ed-select" id="vest-si-hl-style">
+                  <option value="0" ${Number(sc.highLowLineStyle) === 0 ? 'selected' : ''}>Solid (───)</option>
+                  <option value="1" ${Number(sc.highLowLineStyle) === 1 ? 'selected' : ''}>Dotted (···)</option>
+                  <option value="2" ${Number(sc.highLowLineStyle) === 2 ? 'selected' : ''}>Dashed (- - -)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin-top:6px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-show-watermark" ${sc.showWatermark !== false ? 'checked' : ''} />
+                <span>Show Centered Session Watermark</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-font-bold" ${sc.fontBold ? 'checked' : ''} />
+                <span>Bold Watermark Text</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-extend-hl" ${sc.extendHighLowLines !== false ? 'checked' : ''} />
+                <span>Extend High/Low Until Swept by Bar</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-show-hl-labels" ${sc.showHighLowLabels !== false ? 'checked' : ''} />
+                <span>Show H/L Labels (e.g. NYAM.H / NYAM.L)</span>
+              </label>
+            </div>
+          </div>
+
+          <div style="font-size:11px; font-weight:700; color:#93c5fd; text-transform:uppercase; letter-spacing:0.6px; margin:4px 0 8px 0;">
+            Individual ICT Sessions (New York Time · EST/EDT)
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            ${sc.sessions.map((sess, idx) => `
+              <div class="vest-tvs-toggle-box" data-sess-id="${escapeHtml(sess.id)}" style="padding:10px 14px; margin-bottom:0; gap:12px;">
+                <div style="display:flex; align-items:center; gap:10px; min-width:165px;">
+                  <input type="color" class="vest-ed-color vest-si-sess-color" data-idx="${idx}" value="${normalizeHexColor(sess.color, '#26a69a')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;" title="Session Box & High/Low Line Color" />
+                  <div style="display:flex; flex-direction:column; min-width:0;">
+                    <span style="font-size:13px; font-weight:600; color:#f8fafc; white-space:nowrap;">${escapeHtml(sess.name)}</span>
+                    <span style="font-size:10.5px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${escapeHtml(sess.shortTag)}.H / ${escapeHtml(sess.shortTag)}.L</span>
+                  </div>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:6px; flex:1; justify-content:flex-end; flex-wrap:wrap;">
+                  <div style="display:flex; align-items:center; gap:4px;">
+                    <span style="font-size:11px; color:#94a3b8;">Label:</span>
+                    <input type="text" class="vest-ed-input vest-si-sess-watermark" data-idx="${idx}" value="${escapeHtml(sess.watermarkText)}" style="width:82px; height:26px; padding:2px 6px; font-size:11.5px;" title="Watermark label inside session box" />
+                  </div>
+                  <div style="display:flex; align-items:center; gap:4px;">
+                    <input type="time" class="vest-ed-input vest-si-sess-start" data-idx="${idx}" value="${escapeHtml(sess.startTime)}" style="width:88px; height:26px; padding:2px 5px; font-size:11.5px; font-family:'JetBrains Mono', monospace;" title="Session Start (NY Time)" />
+                    <span style="color:#64748b; font-size:11px;">–</span>
+                    <input type="time" class="vest-ed-input vest-si-sess-end" data-idx="${idx}" value="${escapeHtml(sess.endTime)}" style="width:88px; height:26px; padding:2px 5px; font-size:11.5px; font-family:'JetBrains Mono', monospace;" title="Session End (NY Time)" />
+                  </div>
+                </div>
+
+                <label class="vest-tvs-switch" title="Enable ${escapeHtml(sess.name)}">
+                  <input type="checkbox" class="vest-si-sess-enabled" data-idx="${idx}" ${sess.enabled ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
       return '';
     }
 
@@ -1697,6 +2007,8 @@
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
       overlay.remove();
+      // Restore committed settings to main world in case user cancelled after previewing
+      notifyMainWorldConfig();
     }
 
     function onModalMouseMove(e) {
@@ -1725,7 +2037,7 @@
 
     function renderDialog() {
       overlay.innerHTML = `
-        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: 820px; height: 580px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
           <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move">
             <div class="vest-tvs-title">Settings</div>
             <button type="button" class="vest-tvs-close-btn" id="vest-tvs-close" title="Close">
@@ -1772,6 +2084,45 @@
       if (remChartToggle) {
         draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
       }
+
+      // Sync Session Indicators tab if mounted
+      const masterSi = overlay.querySelector('#vest-si-master-enabled');
+      if (masterSi && draftSettings.sessionIndicators) {
+        const sc = draftSettings.sessionIndicators;
+        sc.enabled = Boolean(masterSi.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-si-font-family')) sc.fontFamily = q('#vest-si-font-family').value;
+        if (q('#vest-si-font-size')) sc.fontSize = Number(q('#vest-si-font-size').value) || 40;
+        if (q('#vest-si-wm-opacity')) sc.watermarkOpacity = Number(q('#vest-si-wm-opacity').value) || 32;
+        if (q('#vest-si-box-opacity')) sc.boxOpacity = Number(q('#vest-si-box-opacity').value) || 18;
+        if (q('#vest-si-days-back')) sc.maxDaysBack = Number(q('#vest-si-days-back').value) || 5;
+        if (q('#vest-si-hl-style')) sc.highLowLineStyle = Number(q('#vest-si-hl-style').value ?? 0);
+        if (q('#vest-si-show-watermark')) sc.showWatermark = Boolean(q('#vest-si-show-watermark').checked);
+        if (q('#vest-si-font-bold')) sc.fontBold = Boolean(q('#vest-si-font-bold').checked);
+        if (q('#vest-si-extend-hl')) sc.extendHighLowLines = Boolean(q('#vest-si-extend-hl').checked);
+        if (q('#vest-si-show-hl-labels')) sc.showHighLowLabels = Boolean(q('#vest-si-show-hl-labels').checked);
+
+        overlay.querySelectorAll('.vest-si-sess-enabled').forEach(el => {
+          const idx = Number(el.dataset.idx);
+          if (sc.sessions[idx]) sc.sessions[idx].enabled = Boolean(el.checked);
+        });
+        overlay.querySelectorAll('.vest-si-sess-color').forEach(el => {
+          const idx = Number(el.dataset.idx);
+          if (sc.sessions[idx]) sc.sessions[idx].color = normalizeHexColor(el.value, sc.sessions[idx].color);
+        });
+        overlay.querySelectorAll('.vest-si-sess-watermark').forEach(el => {
+          const idx = Number(el.dataset.idx);
+          if (sc.sessions[idx]) sc.sessions[idx].watermarkText = el.value;
+        });
+        overlay.querySelectorAll('.vest-si-sess-start').forEach(el => {
+          const idx = Number(el.dataset.idx);
+          if (sc.sessions[idx] && el.value) sc.sessions[idx].startTime = el.value;
+        });
+        overlay.querySelectorAll('.vest-si-sess-end').forEach(el => {
+          const idx = Number(el.dataset.idx);
+          if (sc.sessions[idx] && el.value) sc.sessions[idx].endTime = el.value;
+        });
+      }
     }
 
     function commitDraftAndClose() {
@@ -1799,7 +2150,9 @@
       }
       renderStudioHeaderPill();
       showToast('Settings saved');
-      closeSettingsOverlay();
+      overlay.remove();
+      window.removeEventListener('mousemove', onModalMouseMove, true);
+      window.removeEventListener('mouseup', onModalMouseUp, true);
     }
 
     function wireDialogEvents() {
@@ -1837,6 +2190,61 @@
       if (remChartToggle) {
         remChartToggle.addEventListener('change', () => {
           draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
+        });
+      }
+
+      // Live preview & range label updates on Session Indicators tab
+      if (activeTab === 'sessions') {
+        const fontSizeRange = overlay.querySelector('#vest-si-font-size');
+        const fontSizeVal = overlay.querySelector('#vest-si-fontsize-val');
+        if (fontSizeRange && fontSizeVal) {
+          fontSizeRange.addEventListener('input', () => {
+            fontSizeVal.textContent = `${fontSizeRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const wmOpRange = overlay.querySelector('#vest-si-wm-opacity');
+        const wmOpVal = overlay.querySelector('#vest-si-wm-opacity-val');
+        if (wmOpRange && wmOpVal) {
+          wmOpRange.addEventListener('input', () => {
+            wmOpVal.textContent = `${wmOpRange.value}%`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const boxOpRange = overlay.querySelector('#vest-si-box-opacity');
+        const boxOpVal = overlay.querySelector('#vest-si-box-opacity-val');
+        if (boxOpRange && boxOpVal) {
+          boxOpRange.addEventListener('input', () => {
+            boxOpVal.textContent = `${boxOpRange.value}%`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+          rightPane.addEventListener('input', (e) => {
+            if (e.target && (e.target.type === 'color' || e.target.type === 'text' || e.target.type === 'time')) {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+
+        overlay.querySelector('#vest-si-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.sessionIndicators = JSON.parse(JSON.stringify(DEFAULT_SESSION_INDICATORS));
+          draftSettings.sessionIndicators.enabled = true;
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Session Indicators to ICT defaults');
         });
       }
 
@@ -4126,7 +4534,8 @@
         settings = {
           ...settings,
           ...data.settings,
-          autoApplyToNew: false
+          autoApplyToNew: false,
+          sessionIndicators: normalizeSessionIndicatorsConfig(data.settings.sessionIndicators)
         };
         if (settings.activeTemplateId && LEGACY_PRESET_IDS.has(String(settings.activeTemplateId))) {
           settings.activeTemplateId = templates[0]?.id || null;
@@ -4134,6 +4543,8 @@
         if (settings.defaultTemplateId && LEGACY_PRESET_IDS.has(String(settings.defaultTemplateId))) {
           settings.defaultTemplateId = templates[0]?.id || null;
         }
+      } else {
+        settings.sessionIndicators = normalizeSessionIndicatorsConfig(settings.sessionIndicators);
       }
       // Persist cleaned templates & settings so legacy defaults are permanently removed
       safeStorageSet({ templates, settings });
