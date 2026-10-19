@@ -4866,6 +4866,8 @@
     return true;
   }
 
+  let cachedTargetChartCanvas = null;
+
   function findMainChartPaneCanvas() {
     // Only render from the top window (which has access to both document and same-origin/blob iframe.contentDocument).
     // If we are inside a child iframe and window.top also initialized content-main.js, let window.top handle it so we NEVER double-render!
@@ -4874,6 +4876,15 @@
         return null;
       }
     } catch (e) {}
+
+    // Fast path: reuse cached target canvas if it is still connected and sized!
+    if (cachedTargetChartCanvas && cachedTargetChartCanvas.isConnected) {
+      const cw = cachedTargetChartCanvas.clientWidth;
+      const ch = cachedTargetChartCanvas.clientHeight;
+      if (cw >= 240 && ch >= 140) {
+        return cachedTargetChartCanvas;
+      }
+    }
 
     const docs = [document];
     document.querySelectorAll('iframe').forEach(ifr => {
@@ -4902,6 +4913,16 @@
       } catch (e) {}
     }
 
+    // If bestCanvas is inside a pane that has multiple stacked canvases (base chart canvas + top crosshair canvas),
+    // always pick the first non-vest canvas in that parent container for deterministic stability.
+    if (bestCanvas && bestCanvas.parentElement) {
+      const siblingCanvases = bestCanvas.parentElement.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+      if (siblingCanvases.length > 0) {
+        bestCanvas = siblingCanvases[0];
+      }
+    }
+
+    cachedTargetChartCanvas = bestCanvas;
     return bestCanvas;
   }
 
@@ -4910,32 +4931,36 @@
     const parent = targetChartCanvas.parentElement;
     const ownerDoc = targetChartCanvas.ownerDocument || document;
 
-    // Clean up any stale or duplicate .vest-ict-sessions-canvas elements across all documents
-    const docs = [document];
-    document.querySelectorAll('iframe').forEach(ifr => {
-      try {
-        if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument);
-      } catch (e) {}
-    });
-    docs.forEach(d => {
-      try {
-        d.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
-          if (el !== ictSessionsCanvas) {
-            try { el.remove(); } catch (e) {}
-          }
-        });
-      } catch (e) {}
-    });
-
     if (!ictSessionsCanvas || !ictSessionsCanvas.isConnected || ictSessionsCanvas.parentElement !== parent) {
+      // Only scan & clean up stale .vest-ict-sessions-canvas elements when actually mounting/remounting
+      const docs = [document];
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try {
+          if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument);
+        } catch (e) {}
+      });
+      docs.forEach(d => {
+        try {
+          d.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
+            if (el !== ictSessionsCanvas) {
+              try { el.remove(); } catch (e) {}
+            }
+          });
+        } catch (e) {}
+      });
+
       if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
         try { ictSessionsCanvas.remove(); } catch (e) {}
       }
       ictSessionsCanvas = ownerDoc.createElement('canvas');
       ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
-      // mix-blend-mode: screen illuminates the dark chart background while keeping all candles, wicks, FVG boxes, and drawings 100% crisp and unblocked on top!
+      // Put the parent container into an isolated stacking context and GPU layer so mix-blend-mode: screen never flickers during canvas repaints!
+      const parentCs = ownerDoc.defaultView ? ownerDoc.defaultView.getComputedStyle(parent) : null;
+      if (parentCs && parentCs.isolation !== 'isolate') {
+        parent.style.isolation = 'isolate';
+      }
       ictSessionsCanvas.style.cssText =
-        'position:absolute;top:0;left:0;pointer-events:none;z-index:1;mix-blend-mode:screen;user-select:none;';
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:1;mix-blend-mode:screen;user-select:none;will-change:contents;transform:translateZ(0);backface-visibility:hidden;';
       parent.appendChild(ictSessionsCanvas);
     }
 
@@ -5715,44 +5740,57 @@
     } catch (e) {}
   }
 
+  let cachedPriceAxisHost = null;
+  let cachedPriceAxisTargetCanvas = null;
+  let lastPriceAxisBadgesHtml = '';
+
   function renderIctPriceScaleBadges(targetChartCanvas, badgeItems, cssHeight) {
     if (!targetChartCanvas || !badgeItems || badgeItems.length === 0) {
       clearIctPriceScaleBadges();
+      lastPriceAxisBadgesHtml = '';
       return;
     }
 
     const ownerDoc = targetChartCanvas.ownerDocument || document;
-    const chartRect = targetChartCanvas.getBoundingClientRect();
 
-    // Locate the right-hand price axis container (usually the next sibling TD in .chart-markup-table or canvas to the right of targetChartCanvas)
-    let axisHost = null;
-    try {
-      const parentTd = targetChartCanvas.closest('td');
-      if (parentTd && parentTd.nextElementSibling) {
-        axisHost = parentTd.nextElementSibling.querySelector('div') || parentTd.nextElementSibling;
-      }
-      if (!axisHost) {
-        const allCanvases = ownerDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
-        for (const c of allCanvases) {
-          if (c === targetChartCanvas) continue;
-          const r = c.getBoundingClientRect();
-          if (
-            Math.abs(r.top - chartRect.top) < 20 &&
-            Math.abs(r.height - chartRect.height) < 30 &&
-            r.left >= chartRect.right - 8 &&
-            r.width >= 35 &&
-            r.width <= 140
-          ) {
-            axisHost = c.parentElement;
-            break;
+    // Locate and cache the right-hand price axis container
+    let axisHost = (cachedPriceAxisTargetCanvas === targetChartCanvas && cachedPriceAxisHost && cachedPriceAxisHost.isConnected)
+      ? cachedPriceAxisHost
+      : null;
+
+    if (!axisHost) {
+      try {
+        const chartRect = targetChartCanvas.getBoundingClientRect();
+        const parentTd = targetChartCanvas.closest('td');
+        if (parentTd && parentTd.nextElementSibling) {
+          axisHost = parentTd.nextElementSibling.querySelector('div') || parentTd.nextElementSibling;
+        }
+        if (!axisHost) {
+          const allCanvases = ownerDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+          for (const c of allCanvases) {
+            if (c === targetChartCanvas) continue;
+            const r = c.getBoundingClientRect();
+            if (
+              Math.abs(r.top - chartRect.top) < 20 &&
+              Math.abs(r.height - chartRect.height) < 30 &&
+              r.left >= chartRect.right - 8 &&
+              r.width >= 35 &&
+              r.width <= 140
+            ) {
+              axisHost = c.parentElement;
+              break;
+            }
           }
         }
-      }
-    } catch (e) {}
+      } catch (e) {}
+      cachedPriceAxisHost = axisHost;
+      cachedPriceAxisTargetCanvas = targetChartCanvas;
+    }
 
     const mountParent = axisHost || targetChartCanvas.parentElement;
     if (!mountParent) return;
 
+    const isInsideAxis = Boolean(axisHost);
     if (
       !ictPriceScaleBadgeContainer ||
       !ictPriceScaleBadgeContainer.isConnected ||
@@ -5767,14 +5805,16 @@
       if (cs && cs.position === 'static') {
         mountParent.style.position = 'relative';
       }
+      ictPriceScaleBadgeContainer.style.cssText = isInsideAxis
+        ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;'
+        : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;';
       mountParent.appendChild(ictPriceScaleBadgeContainer);
+      lastPriceAxisBadgesHtml = '';
     }
 
-    const isInsideAxis = Boolean(axisHost);
-    ictPriceScaleBadgeContainer.style.cssText = isInsideAxis
-      ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;'
-      : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;';
-    ictPriceScaleBadgeContainer.style.display = 'block';
+    if (ictPriceScaleBadgeContainer.style.display !== 'block') {
+      ictPriceScaleBadgeContainer.style.display = 'block';
+    }
 
     let html = '';
     for (let i = 0; i < badgeItems.length; i++) {
@@ -5784,7 +5824,10 @@
       const fg = getContrastTextColorForHex(b.color);
       html += `<div style="position:absolute;left:${isInsideAxis ? '1px' : 'auto'};right:${isInsideAxis ? '2px' : '0px'};top:${Math.round(b.y)}px;transform:translateY(-50%);background:${b.color};color:${fg};font-family:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,sans-serif;font-size:10.5px;font-weight:700;line-height:15px;height:16px;padding:0 5px;border-radius:2px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:flex-start;letter-spacing:0.1px;">${priceText}</div>`;
     }
-    ictPriceScaleBadgeContainer.innerHTML = html;
+    if (html !== lastPriceAxisBadgesHtml) {
+      ictPriceScaleBadgeContainer.innerHTML = html;
+      lastPriceAxisBadgesHtml = html;
+    }
   }
 
   function renderIctSessionIndicators() {
@@ -5833,9 +5876,9 @@
 
     const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
     if (!overlay) return;
-    overlay.style.display = 'block';
-    overlay.style.zIndex = '1';
-    overlay.style.mixBlendMode = 'screen';
+    if (overlay.style.display !== 'block') {
+      overlay.style.display = 'block';
+    }
 
     const ctx = overlay.getContext('2d');
     if (!ctx) return;
@@ -6301,13 +6344,17 @@
       chartDragSyncRafId = null;
       return;
     }
+    // If a scheduled RAF is already queued for this frame, cancel it so we only clear & draw the canvas ONCE per vsync!
+    if (ictSessionsRafId !== null) {
+      window.cancelAnimationFrame(ictSessionsRafId);
+      ictSessionsRafId = null;
+    }
     renderIctSessionIndicators();
     chartDragSyncRafId = window.requestAnimationFrame(runChartDragSyncLoop);
   }
 
   function startChartDragSyncLoop() {
     isChartPointerDragging = true;
-    renderIctSessionIndicators();
     if (chartDragSyncRafId === null) {
       chartDragSyncRafId = window.requestAnimationFrame(runChartDragSyncLoop);
     }
@@ -6320,8 +6367,8 @@
       window.cancelAnimationFrame(chartDragSyncRafId);
       chartDragSyncRafId = null;
     }
-    renderIctSessionIndicators();
-    setTimeout(() => renderIctSessionIndicators(), 32);
+    scheduleIctSessionsRender(false);
+    setTimeout(() => scheduleIctSessionsRender(false), 32);
   }
 
   const hookedTimeScaleInstances = new WeakSet();
@@ -6339,7 +6386,7 @@
             if (typeof ts[evName] === 'function') {
               const sub = ts[evName]();
               if (sub && typeof sub.subscribe === 'function') {
-                sub.subscribe(null, () => renderIctSessionIndicators());
+                sub.subscribe(null, () => scheduleIctSessionsRender(false));
               }
             }
           } catch (e) {}
@@ -6355,7 +6402,7 @@
             if (typeof ps[evName] === 'function') {
               const sub = ps[evName]();
               if (sub && typeof sub.subscribe === 'function') {
-                sub.subscribe(null, () => renderIctSessionIndicators());
+                sub.subscribe(null, () => scheduleIctSessionsRender(false));
               }
             }
           } catch (e) {}
@@ -6377,7 +6424,7 @@
         if (typeof activeChart.onVisibleRangeChanged === 'function') {
           const sub = activeChart.onVisibleRangeChanged();
           if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => renderIctSessionIndicators());
+            sub.subscribe(null, () => scheduleIctSessionsRender(false));
           }
         }
         if (typeof activeChart.onIntervalChanged === 'function') {
@@ -6427,22 +6474,23 @@
         }, { capture: true, passive: true });
         doc.addEventListener('pointermove', (e) => {
           if (isChartPointerDragging || e.buttons > 0) {
-            renderIctSessionIndicators();
+            if (!isChartPointerDragging) startChartDragSyncLoop();
+            else scheduleIctSessionsRender(false);
           }
         }, { capture: true, passive: true });
         doc.addEventListener('mousemove', (e) => {
           if (isChartPointerDragging || e.buttons > 0) {
-            renderIctSessionIndicators();
+            if (!isChartPointerDragging) startChartDragSyncLoop();
+            else scheduleIctSessionsRender(false);
           }
         }, { capture: true, passive: true });
         doc.addEventListener('pointerup', () => stopChartDragSyncLoop(), { capture: true, passive: true });
         doc.addEventListener('mouseup', () => stopChartDragSyncLoop(), { capture: true, passive: true });
         doc.addEventListener('wheel', () => {
-          renderIctSessionIndicators();
-          requestAnimationFrame(renderIctSessionIndicators);
+          scheduleIctSessionsRender(false);
         }, { capture: true, passive: true });
         doc.addEventListener('touchstart', () => startChartDragSyncLoop(), { capture: true, passive: true });
-        doc.addEventListener('touchmove', () => renderIctSessionIndicators(), { capture: true, passive: true });
+        doc.addEventListener('touchmove', () => scheduleIctSessionsRender(false), { capture: true, passive: true });
         doc.addEventListener('touchend', () => stopChartDragSyncLoop(), { capture: true, passive: true });
       } catch (e) {}
     });
