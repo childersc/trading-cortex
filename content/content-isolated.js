@@ -125,6 +125,9 @@
     showHighLowLabels: true,
     highLowLineWidth: 1,
     highLowLineStyle: 0,
+    showMidPoint: false,
+    extendMidPoint: false,
+    midPointLineStyle: 2,
     sessions: [
       {
         id: 'asia',
@@ -1959,6 +1962,14 @@
                 <input type="checkbox" id="vest-si-show-hl-labels" ${sc.showHighLowLabels !== false ? 'checked' : ''} />
                 <span>Show H/L Labels (e.g. NYAM.H / NYAM.L)</span>
               </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-show-midpoint" ${sc.showMidPoint ? 'checked' : ''} />
+                <span>Show Session Mid-Point (50% EQ)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-extend-midpoint" ${sc.extendMidPoint ? 'checked' : ''} />
+                <span>Extend Mid-Point Until Touched</span>
+              </label>
             </div>
           </div>
 
@@ -2106,6 +2117,8 @@
         if (q('#vest-si-font-bold')) sc.fontBold = Boolean(q('#vest-si-font-bold').checked);
         if (q('#vest-si-extend-hl')) sc.extendHighLowLines = Boolean(q('#vest-si-extend-hl').checked);
         if (q('#vest-si-show-hl-labels')) sc.showHighLowLabels = Boolean(q('#vest-si-show-hl-labels').checked);
+        if (q('#vest-si-show-midpoint')) sc.showMidPoint = Boolean(q('#vest-si-show-midpoint').checked);
+        if (q('#vest-si-extend-midpoint')) sc.extendMidPoint = Boolean(q('#vest-si-extend-midpoint').checked);
 
         overlay.querySelectorAll('.vest-si-sess-enabled').forEach(el => {
           const idx = Number(el.dataset.idx);

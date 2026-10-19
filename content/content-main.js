@@ -5479,6 +5479,10 @@
       let highSweptTimeSec = null;
       let lowSweptBarIndex = null;
       let lowSweptTimeSec = null;
+      let midSweptBarIndex = null;
+      let midSweptTimeSec = null;
+
+      const midPrice = (inst.high + inst.low) / 2;
 
       // Determine whether this session is still actively forming on the latest bar
       const isStillInSession = inst.lastArrayIdx === annotated.length - 1;
@@ -5494,7 +5498,11 @@
             lowSweptBarIndex = postBar.barIndex;
             lowSweptTimeSec = postBar.timeSec;
           }
-          if (highSweptBarIndex !== null && lowSweptBarIndex !== null) {
+          if (midSweptBarIndex === null && postBar.low <= midPrice && postBar.high >= midPrice) {
+            midSweptBarIndex = postBar.barIndex;
+            midSweptTimeSec = postBar.timeSec;
+          }
+          if (highSweptBarIndex !== null && lowSweptBarIndex !== null && midSweptBarIndex !== null) {
             break;
           }
         }
@@ -5502,11 +5510,14 @@
 
       results.push({
         ...inst,
+        mid: midPrice,
         isStillInSession,
         highSweptBarIndex,
         highSweptTimeSec,
         lowSweptBarIndex,
         lowSweptTimeSec,
+        midSweptBarIndex,
+        midSweptTimeSec,
         latestBarIndex: latestBar.barIndex,
         latestTimeSec: latestBar.timeSec
       });
@@ -5679,6 +5690,8 @@
     const extendHighLow = (config.extendHighLowLines ?? config.extendHighLow) !== false;
     const showHighLowLabels = config.showHighLowLabels !== false;
     const hlLineStyle = Number(config.highLowLineStyle) || 0;
+    const showMidPoint = Boolean(config.showMidPoint);
+    const extendMidPoint = Boolean(config.extendMidPoint);
 
     for (let i = 0; i < cachedIctComputedSessions.length; i++) {
       const sess = cachedIctComputedSessions[i];
@@ -5688,6 +5701,7 @@
       const rawEndX = barToX(sess.endBarIndex, sess.endTimeSec);
       const highY = priceToY(sess.high);
       const lowY = priceToY(sess.low);
+      const midY = priceToY(sess.mid ?? (sess.high + sess.low) / 2);
 
       if (rawStartX === null || rawEndX === null || highY === null || lowY === null) continue;
 
@@ -5698,22 +5712,31 @@
       const boxW = Math.max(2, boxRight - boxLeft);
       const boxH = Math.max(2, boxBottom - boxTop);
 
-      // Compute High/Low line end X coordinates so we know if a session's extended lines are still visible even when its box is off-screen left
+      // Compute High/Low/Mid line end X coordinates so we know if a session's extended lines are still visible even when its box is off-screen left
       let highEndX = boxRight;
       let lowEndX = boxRight;
-      if (extendHighLow && !sess.isStillInSession) {
-        const hTargetBar = sess.highSweptBarIndex !== null ? sess.highSweptBarIndex : sess.latestBarIndex;
-        const hTargetTime = sess.highSweptTimeSec !== null ? sess.highSweptTimeSec : sess.latestTimeSec;
-        const hx = barToX(hTargetBar, hTargetTime);
-        if (hx !== null) highEndX = Math.max(boxRight, hx);
+      let midEndX = boxRight;
+      if (!sess.isStillInSession) {
+        if (extendHighLow) {
+          const hTargetBar = sess.highSweptBarIndex !== null ? sess.highSweptBarIndex : sess.latestBarIndex;
+          const hTargetTime = sess.highSweptTimeSec !== null ? sess.highSweptTimeSec : sess.latestTimeSec;
+          const hx = barToX(hTargetBar, hTargetTime);
+          if (hx !== null) highEndX = Math.max(boxRight, hx);
 
-        const lTargetBar = sess.lowSweptBarIndex !== null ? sess.lowSweptBarIndex : sess.latestBarIndex;
-        const lTargetTime = sess.lowSweptTimeSec !== null ? sess.lowSweptTimeSec : sess.latestTimeSec;
-        const lx = barToX(lTargetBar, lTargetTime);
-        if (lx !== null) lowEndX = Math.max(boxRight, lx);
+          const lTargetBar = sess.lowSweptBarIndex !== null ? sess.lowSweptBarIndex : sess.latestBarIndex;
+          const lTargetTime = sess.lowSweptTimeSec !== null ? sess.lowSweptTimeSec : sess.latestTimeSec;
+          const lx = barToX(lTargetBar, lTargetTime);
+          if (lx !== null) lowEndX = Math.max(boxRight, lx);
+        }
+        if (showMidPoint && extendMidPoint) {
+          const mTargetBar = sess.midSweptBarIndex !== null ? sess.midSweptBarIndex : sess.latestBarIndex;
+          const mTargetTime = sess.midSweptTimeSec !== null ? sess.midSweptTimeSec : sess.latestTimeSec;
+          const mx = barToX(mTargetBar, mTargetTime);
+          if (mx !== null) midEndX = Math.max(boxRight, mx);
+        }
       }
 
-      const maxRightReach = Math.max(boxRight, highEndX, lowEndX);
+      const maxRightReach = Math.max(boxRight, highEndX, lowEndX, midEndX);
       if (maxRightReach < -50 || boxLeft > cssWidth + 50) continue;
 
       const colorHex = def.color || '#3b82f6';
@@ -5761,6 +5784,21 @@
         ctx.moveTo(lLineStart, Math.round(lowY) + 0.5);
         ctx.lineTo(lLineEnd, Math.round(lowY) + 0.5);
         ctx.stroke();
+      }
+
+      // 2b. Draw Session Mid-Point (50% Equilibrium) line if enabled
+      if (showMidPoint && midY !== null && midY >= -20 && midY <= cssHeight + 20) {
+        const mLineStart = Math.max(-10, boxLeft);
+        const mLineEnd = Math.min(cssWidth + 10, extendMidPoint ? midEndX : boxRight);
+        if (mLineEnd > mLineStart) {
+          ctx.strokeStyle = hexToRgbaString(colorHex, 75);
+          ctx.lineWidth = 1;
+          ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          ctx.moveTo(mLineStart, Math.round(midY) + 0.5);
+          ctx.lineTo(mLineEnd, Math.round(midY) + 0.5);
+          ctx.stroke();
+        }
       }
       ctx.restore();
 
