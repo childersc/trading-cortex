@@ -123,6 +123,13 @@
     extendHighLowLines: true,
     showPermanentDottedHighLow: true,
     permanentLinesDays: 7,
+    permanentLineStyle: 1, // 0=solid, 1=dotted, 2=dashed
+    permLabelVertAlign: 'outside', // 'outside' (High=top, Low=bottom), 'top' (above line), 'inline' (centered on line), 'bottom' (below line)
+    permLabelHorzAlign: 'right', // 'right' (far right), 'center' (mid-line), 'left' (start of line)
+    permLabelFontSize: 11,
+    permLabelFontStyle: 'bold', // 'normal', 'bold', 'italic', 'bold_italic'
+    permLabelColorMode: 'session', // 'session' (match session color) or 'custom'
+    permLabelCustomColor: '#e2e8f0',
     stopAtMitigation: true,
     showHighLowLabels: true,
     highLowLineWidth: 1,
@@ -1962,7 +1969,7 @@
               </label>
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-show-perm-dotted" ${sc.showPermanentDottedHighLow !== false ? 'checked' : ''} />
-                <span>Dotted 7-Day H/L Line to Far Right + Price Tag & Date</span>
+                <span>7-Day H/L Line to Far Right + Price Tag & Date</span>
               </label>
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-show-hl-labels" ${sc.showHighLowLabels !== false ? 'checked' : ''} />
@@ -1976,6 +1983,65 @@
                 <input type="checkbox" id="vest-si-extend-midpoint" ${sc.extendMidPoint ? 'checked' : ''} />
                 <span>Extend Mid-Point Until Touched</span>
               </label>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              7-Day Extended Line & Date Label Styling (e.g. Oct/19 NY AM High)
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Vertical Position</label>
+                <select class="vest-ed-select" id="vest-si-perm-vert-align">
+                  <option value="outside" ${(sc.permLabelVertAlign || 'outside') === 'outside' ? 'selected' : ''}>Auto (High = Top, Low = Bottom)</option>
+                  <option value="top" ${sc.permLabelVertAlign === 'top' ? 'selected' : ''}>Top (Above Line)</option>
+                  <option value="inline" ${sc.permLabelVertAlign === 'inline' ? 'selected' : ''}>Inline (On Line)</option>
+                  <option value="bottom" ${sc.permLabelVertAlign === 'bottom' ? 'selected' : ''}>Bottom (Below Line)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Horizontal Placement</label>
+                <select class="vest-ed-select" id="vest-si-perm-horz-align">
+                  <option value="right" ${(sc.permLabelHorzAlign || 'right') === 'right' ? 'selected' : ''}>Far Right (Near Price Axis)</option>
+                  <option value="center" ${sc.permLabelHorzAlign === 'center' ? 'selected' : ''}>Center (Middle of Line)</option>
+                  <option value="left" ${sc.permLabelHorzAlign === 'left' ? 'selected' : ''}>Left (Start of Dotted Line)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">7-Day Line Style</label>
+                <select class="vest-ed-select" id="vest-si-perm-line-style">
+                  <option value="1" ${Number(sc.permanentLineStyle ?? 1) === 1 ? 'selected' : ''}>Dotted (· · · ·)</option>
+                  <option value="2" ${Number(sc.permanentLineStyle ?? 1) === 2 ? 'selected' : ''}>Dashed (- - - -)</option>
+                  <option value="0" ${Number(sc.permanentLineStyle ?? 1) === 0 ? 'selected' : ''}>Solid (─────)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Date Label Font Size: <span id="vest-si-perm-fontsize-val">${sc.permLabelFontSize || 11}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-perm-font-size" min="8" max="24" value="${sc.permLabelFontSize || 11}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Date Label Font Style</label>
+                <select class="vest-ed-select" id="vest-si-perm-font-style">
+                  <option value="normal" ${sc.permLabelFontStyle === 'normal' ? 'selected' : ''}>Normal</option>
+                  <option value="bold" ${(sc.permLabelFontStyle || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
+                  <option value="italic" ${sc.permLabelFontStyle === 'italic' ? 'selected' : ''}>Italic</option>
+                  <option value="bold_italic" ${sc.permLabelFontStyle === 'bold_italic' ? 'selected' : ''}>Bold Italic</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Date Label Color</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <select class="vest-ed-select" id="vest-si-perm-color-mode" style="flex:1;">
+                    <option value="session" ${(sc.permLabelColorMode || 'session') === 'session' ? 'selected' : ''}>Match Session Color</option>
+                    <option value="custom" ${sc.permLabelColorMode === 'custom' ? 'selected' : ''}>Custom Color</option>
+                  </select>
+                  <input type="color" class="vest-ed-color" id="vest-si-perm-custom-color" value="${normalizeHexColor(sc.permLabelCustomColor, '#e2e8f0')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0; ${(sc.permLabelColorMode || 'session') === 'custom' ? '' : 'opacity:0.45;'}" title="Custom Date Label Text Color" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2126,6 +2192,16 @@
         if (q('#vest-si-show-hl-labels')) sc.showHighLowLabels = Boolean(q('#vest-si-show-hl-labels').checked);
         if (q('#vest-si-show-midpoint')) sc.showMidPoint = Boolean(q('#vest-si-show-midpoint').checked);
         if (q('#vest-si-extend-midpoint')) sc.extendMidPoint = Boolean(q('#vest-si-extend-midpoint').checked);
+        if (q('#vest-si-perm-vert-align')) sc.permLabelVertAlign = q('#vest-si-perm-vert-align').value || 'outside';
+        if (q('#vest-si-perm-horz-align')) sc.permLabelHorzAlign = q('#vest-si-perm-horz-align').value || 'right';
+        if (q('#vest-si-perm-line-style')) sc.permanentLineStyle = Number(q('#vest-si-perm-line-style').value ?? 1);
+        if (q('#vest-si-perm-font-size')) sc.permLabelFontSize = Number(q('#vest-si-perm-font-size').value) || 11;
+        if (q('#vest-si-perm-font-style')) sc.permLabelFontStyle = q('#vest-si-perm-font-style').value || 'bold';
+        if (q('#vest-si-perm-color-mode')) sc.permLabelColorMode = q('#vest-si-perm-color-mode').value || 'session';
+        if (q('#vest-si-perm-custom-color')) {
+          sc.permLabelCustomColor = normalizeHexColor(q('#vest-si-perm-custom-color').value, sc.permLabelCustomColor || '#e2e8f0');
+          q('#vest-si-perm-custom-color').style.opacity = sc.permLabelColorMode === 'custom' ? '1' : '0.45';
+        }
 
         overlay.querySelectorAll('.vest-si-sess-enabled').forEach(el => {
           const idx = Number(el.dataset.idx);
@@ -2225,6 +2301,26 @@
         if (fontSizeRange && fontSizeVal) {
           fontSizeRange.addEventListener('input', () => {
             fontSizeVal.textContent = `${fontSizeRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const permFontSizeRange = overlay.querySelector('#vest-si-perm-font-size');
+        const permFontSizeVal = overlay.querySelector('#vest-si-perm-fontsize-val');
+        if (permFontSizeRange && permFontSizeVal) {
+          permFontSizeRange.addEventListener('input', () => {
+            permFontSizeVal.textContent = `${permFontSizeRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const permCustomColorInput = overlay.querySelector('#vest-si-perm-custom-color');
+        const permColorModeSelect = overlay.querySelector('#vest-si-perm-color-mode');
+        if (permCustomColorInput && permColorModeSelect) {
+          permCustomColorInput.addEventListener('input', () => {
+            permColorModeSelect.value = 'custom';
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
           });

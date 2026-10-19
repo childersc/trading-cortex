@@ -6088,28 +6088,107 @@
         ctx.restore();
       }
 
-      // 2B. LINE 2: 7-Day Permanent Dotted High & Low Lines Extending All the Way to the Far Right (Price Scale)
-      // + Date & Session High/Low Label + Price Bar on the Price List!
+      // 2B. LINE 2: 7-Day Permanent Dotted/Dashed High & Low Lines Extending All the Way to the Far Right (Price Scale)
+      // + Configurable Date & Session High/Low Label (Top, Bottom, Inline, Auto Outside; Font Size, Color, Style) + Price Bar on the Price List!
       if (showPermDotted && isWithin7Days) {
         ctx.save();
         ctx.strokeStyle = hexToRgbaString(colorHex, 80);
         ctx.lineWidth = 1.15;
-        ctx.setLineDash([2, 4]); // Dotted line extending to far right
+
+        const permLineStyle = Number(config.permanentLineStyle ?? 1);
+        if (permLineStyle === 0) {
+          ctx.setLineDash([]);
+        } else if (permLineStyle === 2) {
+          ctx.setLineDash([6, 4]);
+        } else {
+          ctx.setLineDash([2, 4]); // Default dotted
+        }
+
+        const permVertAlign = config.permLabelVertAlign || 'outside'; // 'outside' | 'top' | 'inline' | 'bottom'
+        const permHorzAlign = config.permLabelHorzAlign || 'right';   // 'right' | 'center' | 'left'
+        const permFontSize = Math.max(8, Math.min(28, Number(config.permLabelFontSize) || 11));
+        const permStyleKey = config.permLabelFontStyle || 'bold';
+        const permFontItalic = (permStyleKey === 'italic' || permStyleKey === 'bold_italic') ? 'italic ' : '';
+        const permFontWeight = (permStyleKey === 'bold' || permStyleKey === 'bold_italic') ? '700' : '400';
+        const permFontSpec = `${permFontItalic}${permFontWeight} ${permFontSize}px ${fontFamily}`;
+        const permTextColorHex = (config.permLabelColorMode === 'custom' && config.permLabelCustomColor)
+          ? config.permLabelCustomColor
+          : colorHex;
+
+        const drawPermLineWithLabel = (lineY, lineStartX, labelText, isHighLine) => {
+          if (lineY < 0 || lineY > cssHeight || cssWidth <= lineStartX) return;
+          const yCoord = Math.round(lineY) + 0.5;
+
+          ctx.font = permFontSpec;
+          const textW = ctx.measureText(labelText).width;
+          const padX = 6;
+
+          // Determine vertical mode for this specific line ('top', 'bottom', or 'inline')
+          let vMode = permVertAlign;
+          if (vMode === 'outside') {
+            vMode = isHighLine ? 'top' : 'bottom';
+          }
+
+          // Determine label X anchor and gap bounds [gapStart, gapEnd] when inline
+          let textX = cssWidth - 6;
+          let textAlign = 'right';
+          let gapStart = cssWidth;
+          let gapEnd = cssWidth;
+
+          if (permHorzAlign === 'left') {
+            textAlign = 'left';
+            textX = Math.min(cssWidth - textW - 6, lineStartX + 6);
+            gapStart = Math.max(lineStartX, textX - padX);
+            gapEnd = Math.min(cssWidth, textX + textW + padX);
+          } else if (permHorzAlign === 'center') {
+            textAlign = 'center';
+            textX = (lineStartX + cssWidth) / 2;
+            gapStart = Math.max(lineStartX, textX - textW / 2 - padX);
+            gapEnd = Math.min(cssWidth, textX + textW / 2 + padX);
+          } else {
+            textAlign = 'right';
+            textX = cssWidth - 6;
+            gapStart = Math.max(lineStartX, cssWidth - 6 - textW - padX);
+            gapEnd = cssWidth;
+          }
+
+          // Draw line (breaking around the label if vMode === 'inline' so the line never strikes through the text!)
+          ctx.beginPath();
+          if (vMode === 'inline' && cssWidth - lineStartX > textW + 16) {
+            if (gapStart > lineStartX) {
+              ctx.moveTo(lineStartX, yCoord);
+              ctx.lineTo(gapStart, yCoord);
+            }
+            if (cssWidth > gapEnd) {
+              ctx.moveTo(gapEnd, yCoord);
+              ctx.lineTo(cssWidth, yCoord);
+            }
+          } else {
+            ctx.moveTo(lineStartX, yCoord);
+            ctx.lineTo(cssWidth, yCoord);
+          }
+          ctx.stroke();
+
+          // Draw Date & Session High/Low text
+          ctx.fillStyle = hexToRgbaString(permTextColorHex, 96);
+          ctx.textAlign = textAlign;
+          if (vMode === 'inline') {
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, textX, Math.round(lineY));
+          } else if (vMode === 'bottom') {
+            ctx.textBaseline = 'top';
+            ctx.fillText(labelText, textX, Math.round(lineY) + 3);
+          } else {
+            // 'top'
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(labelText, textX, Math.round(lineY) - 3);
+          }
+        };
 
         const hPermStart = Math.max(0, extendHighLow ? Math.min(highEndX, cssWidth) : Math.max(0, boxLeft));
         if (highY >= 0 && highY <= cssHeight && cssWidth > hPermStart) {
-          ctx.beginPath();
-          ctx.moveTo(hPermStart, Math.round(highY) + 0.5);
-          ctx.lineTo(cssWidth, Math.round(highY) + 0.5);
-          ctx.stroke();
-
-          // Identify Date & Session High on the far right of the line (e.g. "Oct/19 NY AM High")
           const highLabelText = `${dateStr} ${sessionDisplayName} High`;
-          ctx.font = `600 10.5px ${fontFamily}`;
-          ctx.fillStyle = hexToRgbaString(colorHex, 95);
-          ctx.textAlign = 'right';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(highLabelText, cssWidth - 6, Math.round(highY) - 3);
+          drawPermLineWithLabel(highY, hPermStart, highLabelText, true);
 
           priceScaleBadges.push({
             y: highY,
@@ -6121,18 +6200,8 @@
 
         const lPermStart = Math.max(0, extendHighLow ? Math.min(lowEndX, cssWidth) : Math.max(0, boxLeft));
         if (lowY >= 0 && lowY <= cssHeight && cssWidth > lPermStart) {
-          ctx.beginPath();
-          ctx.moveTo(lPermStart, Math.round(lowY) + 0.5);
-          ctx.lineTo(cssWidth, Math.round(lowY) + 0.5);
-          ctx.stroke();
-
-          // Identify Date & Session Low on the far right of the line (e.g. "Oct/19 NY AM Low")
           const lowLabelText = `${dateStr} ${sessionDisplayName} Low`;
-          ctx.font = `600 10.5px ${fontFamily}`;
-          ctx.fillStyle = hexToRgbaString(colorHex, 95);
-          ctx.textAlign = 'right';
-          ctx.textBaseline = 'top';
-          ctx.fillText(lowLabelText, cssWidth - 6, Math.round(lowY) + 3);
+          drawPermLineWithLabel(lowY, lPermStart, lowLabelText, false);
 
           priceScaleBadges.push({
             y: lowY,
