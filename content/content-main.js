@@ -4903,13 +4903,9 @@
       ictSessionsCanvas = ownerDoc.createElement('canvas');
       ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
       ictSessionsCanvas.style.cssText =
-        'position:absolute;top:0;left:0;pointer-events:none;z-index:1;user-select:none;';
-      // Insert as the first canvas inside the pane container so candles & drawings render on top, or right before the top interaction canvas
-      if (parent.firstChild) {
-        parent.insertBefore(ictSessionsCanvas, parent.firstChild);
-      } else {
-        parent.appendChild(ictSessionsCanvas);
-      }
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:2;user-select:none;';
+      // Append inside the pane container so it renders above TradingView's opaque background canvas
+      parent.appendChild(ictSessionsCanvas);
     }
 
     const cssW = targetChartCanvas.clientWidth || Math.round(targetChartCanvas.getBoundingClientRect().width);
@@ -4927,8 +4923,91 @@
     return ictSessionsCanvas;
   }
 
+  function findChartModelForSessions() {
+    const direct = getInternalChartModel() || getChartModel();
+    if (direct && (typeof direct.mainSeries === 'function' || direct._mainSeries)) {
+      return direct;
+    }
+
+    // Deep search activeChart, activeChartApi, activeWidget, and window.tradingview_* for an object with .mainSeries() and .timeScale()
+    const roots = [activeChart, activeChartApi, activeWidget];
+    try {
+      for (const k of Object.keys(window)) {
+        if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget') {
+          roots.push(window[k]);
+        }
+      }
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try {
+          if (ifr.contentWindow) {
+            for (const k of Object.keys(ifr.contentWindow)) {
+              if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget' || k === 'tradingViewApi') {
+                roots.push(ifr.contentWindow[k]);
+              }
+            }
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
+
+    const visited = new Set();
+    const queue = [];
+    roots.forEach(r => {
+      if (r && typeof r === 'object') queue.push({ obj: r, depth: 0 });
+    });
+
+    while (queue.length > 0) {
+      const { obj, depth } = queue.shift();
+      if (!obj || typeof obj !== 'object' || visited.has(obj) || depth > 4) continue;
+      visited.add(obj);
+
+      try {
+        if (typeof obj.mainSeries === 'function' && typeof obj.timeScale === 'function') {
+          return obj;
+        }
+        if (typeof obj.model === 'function') {
+          const m = obj.model();
+          if (m && typeof m === 'object') {
+            if (typeof m.mainSeries === 'function') return m;
+            if (typeof m.model === 'function') {
+              const mm = m.model();
+              if (mm && typeof mm.mainSeries === 'function') return mm;
+            }
+            queue.push({ obj: m, depth: depth + 1 });
+          }
+        }
+        if (typeof obj._chartWidget === 'function') {
+          const cw = obj._chartWidget();
+          if (cw) queue.push({ obj: cw, depth: depth + 1 });
+        }
+        if (typeof obj.activeChart === 'function' && depth === 0) {
+          const ac = obj.activeChart();
+          if (ac) queue.push({ obj: ac, depth: depth + 1 });
+        }
+
+        const keys = [...Object.keys(obj), ...Object.getOwnPropertyNames(obj)];
+        for (const k of keys) {
+          if (k === 'parent' || k === 'window' || k === 'document' || k.startsWith('__')) continue;
+          try {
+            const val = obj[k];
+            if (val && typeof val === 'object') {
+              if (typeof val.mainSeries === 'function' && typeof val.timeScale === 'function') {
+                return val;
+              }
+              if (depth < 3 && (k.includes('model') || k.includes('Model') || k.includes('chart') || k.includes('Chart') || k.includes('widget') || k.includes('Widget') || k.startsWith('_'))) {
+                queue.push({ obj: val, depth: depth + 1 });
+              }
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    return direct || null;
+  }
+
   function extractSeriesBarsFromModel() {
-    const model = getInternalChartModel() || getChartModel();
+    const model = findChartModelForSessions();
     if (!model) return null;
 
     let mainSeries = null;
@@ -4951,35 +5030,70 @@
         plotList = mainSeries._data.bars();
       } else if (mainSeries._bars) {
         plotList = mainSeries._bars;
+      } else {
+        // Scan mainSeries keys for a PlotList-like object (has firstIndex/lastIndex/valueAt or _items)
+        for (const k of Object.getOwnPropertyNames(mainSeries)) {
+          try {
+            const candidate = mainSeries[k];
+            if (candidate && typeof candidate === 'object') {
+              if (typeof candidate.firstIndex === 'function' && typeof candidate.lastIndex === 'function') {
+                plotList = candidate;
+                break;
+              }
+              if (typeof candidate.bars === 'function') {
+                const b = candidate.bars();
+                if (b && (typeof b.firstIndex === 'function' || Array.isArray(b._items))) {
+                  plotList = b;
+                  break;
+                }
+              }
+            }
+          } catch (e) {}
+        }
       }
     } catch (e) {}
     if (!plotList) return null;
 
     const rawItems = [];
     try {
-      if (Array.isArray(plotList._items) && plotList._items.length > 0) {
-        for (let i = 0; i < plotList._items.length; i++) {
-          rawItems.push(plotList._items[i]);
-        }
-      } else if (typeof plotList.items === 'function') {
-        const items = plotList.items();
-        if (Array.isArray(items)) {
-          for (let i = 0; i < items.length; i++) rawItems.push(items[i]);
-        }
-      } else if (typeof plotList.each === 'function') {
-        plotList.each((index, value) => {
-          rawItems.push({ index, value });
-          return false;
-        });
-      } else if (typeof plotList.firstIndex === 'function' && typeof plotList.lastIndex === 'function' && typeof plotList.valueAt === 'function') {
+      if (typeof plotList.firstIndex === 'function' && typeof plotList.lastIndex === 'function' && typeof plotList.valueAt === 'function') {
         const firstIdx = plotList.firstIndex();
         const lastIdx = plotList.lastIndex();
         if (typeof firstIdx === 'number' && typeof lastIdx === 'number' && lastIdx >= firstIdx) {
-          const startIdx = Math.max(firstIdx, lastIdx - 5000);
+          const startIdx = Math.max(firstIdx, lastIdx - 4500);
           for (let idx = startIdx; idx <= lastIdx; idx++) {
             const val = plotList.valueAt(idx);
             if (val) rawItems.push({ index: idx, value: val });
           }
+        }
+      }
+      if (rawItems.length === 0 && typeof plotList.each === 'function') {
+        plotList.each((index, value) => {
+          rawItems.push({ index, value });
+          return false;
+        });
+      }
+      if (rawItems.length === 0 && Array.isArray(plotList._items) && plotList._items.length > 0) {
+        for (let i = 0; i < plotList._items.length; i++) {
+          rawItems.push(plotList._items[i]);
+        }
+      }
+      if (rawItems.length === 0 && typeof plotList.items === 'function') {
+        const items = plotList.items();
+        if (Array.isArray(items)) {
+          for (let i = 0; i < items.length; i++) rawItems.push(items[i]);
+        }
+      }
+      if (rawItems.length === 0) {
+        // Scan plotList own properties for an array of bar chunks or rows
+        for (const pk of Object.getOwnPropertyNames(plotList)) {
+          try {
+            const arr = plotList[pk];
+            if (Array.isArray(arr) && arr.length > 0) {
+              for (let i = 0; i < arr.length; i++) rawItems.push(arr[i]);
+              break;
+            }
+          } catch (e) {}
         }
       }
     } catch (e) {}
@@ -4991,12 +5105,22 @@
     // Limit to last 4500 bars for fast real-time computation
     const sliceStart = Math.max(0, rawItems.length - 4500);
 
+    // Determine resolution seconds as fallback for estimating bar timestamps if timeScale only maps visible range
+    let resolutionSeconds = 300;
+    try {
+      if (activeChart && typeof activeChart.resolution === 'function') {
+        const r = String(activeChart.resolution() || '5').trim();
+        const mins = parseInt(r, 10);
+        if (isFinite(mins) && mins > 0) resolutionSeconds = mins * 60;
+      }
+    } catch (e) {}
+
     for (let i = sliceStart; i < rawItems.length; i++) {
       const item = rawItems[i];
       if (!item) continue;
 
       let barIndex = typeof item.index === 'number' ? item.index : i;
-      const v = item.value || item;
+      const v = item.value !== undefined ? item.value : item;
 
       let timeSec = null;
       let open = null;
@@ -5015,18 +5139,21 @@
         low = Number(v[3]);
         close = Number(v[4]);
       } else if (v && typeof v === 'object') {
-        const rawT = v.time ?? v.timestamp ?? v.t;
+        const rawT = v.time ?? v.timestamp ?? v.t ?? v[0];
         if (typeof rawT === 'number' && rawT > 1e8) {
           timeSec = rawT > 1e11 ? Math.floor(rawT / 1000) : rawT;
         }
-        open = Number(v.open ?? v.o);
-        high = Number(v.high ?? v.h);
-        low = Number(v.low ?? v.l);
-        close = Number(v.close ?? v.c);
+        open = Number(v.open ?? v.o ?? v[1]);
+        high = Number(v.high ?? v.h ?? v[2]);
+        low = Number(v.low ?? v.l ?? v[3]);
+        close = Number(v.close ?? v.c ?? v[4]);
       }
 
       if (!timeSec && typeof item.time === 'number' && item.time > 1e8) {
         timeSec = item.time > 1e11 ? Math.floor(item.time / 1000) : item.time;
+      }
+      if (!timeSec && item.timePoint && typeof item.timePoint === 'number' && item.timePoint > 1e8) {
+        timeSec = item.timePoint > 1e11 ? Math.floor(item.timePoint / 1000) : item.timePoint;
       }
 
       if (!timeSec && timeScale && typeof barIndex === 'number') {
@@ -5036,11 +5163,18 @@
             if (typeof tp === 'number' && tp > 1e8) {
               timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
             }
-          } else if (typeof timeScale.indexToUserTime === 'function') {
+          }
+          if (!timeSec && typeof timeScale.indexToUserTime === 'function') {
             const ut = timeScale.indexToUserTime(barIndex);
             if (ut) {
               const ms = ut instanceof Date ? ut.getTime() : Number(ut);
               if (ms > 1e8) timeSec = ms > 1e11 ? Math.floor(ms / 1000) : ms;
+            }
+          }
+          if (!timeSec && typeof timeScale.timePointFromIndex === 'function') {
+            const tp = timeScale.timePointFromIndex(barIndex);
+            if (typeof tp === 'number' && tp > 1e8) {
+              timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
             }
           }
         } catch (e) {}
@@ -5061,14 +5195,41 @@
           low,
           close
         });
+      } else if (isFinite(high) && isFinite(low) && high >= low && typeof barIndex === 'number') {
+        // Keep bar with null timeSec temporarily so we can backfill from known anchor timestamps if needed
+        normalizedBars.push({
+          barIndex,
+          timeSec: null,
+          open,
+          high,
+          low,
+          close
+        });
       }
     }
+
+    // If any bars lacked direct timestamps, backfill using activeChart.getVisibleRange() + timeScale.coordinateToIndex / baseIndex
+    const hasValidTimes = normalizedBars.some(b => typeof b.timeSec === 'number' && b.timeSec > 1e8);
+    if (!hasValidTimes && normalizedBars.length > 0 && activeChart && typeof activeChart.getVisibleRange === 'function') {
+      try {
+        const vr = activeChart.getVisibleRange();
+        if (vr && typeof vr.to === 'number' && vr.to > 1e8) {
+          const lastIdx = normalizedBars[normalizedBars.length - 1].barIndex;
+          for (let i = 0; i < normalizedBars.length; i++) {
+            const b = normalizedBars[i];
+            b.timeSec = vr.to - (lastIdx - b.barIndex) * resolutionSeconds;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const validBars = normalizedBars.filter(b => typeof b.timeSec === 'number' && isFinite(b.timeSec) && b.timeSec > 1e8);
 
     return {
       model,
       mainSeries,
       timeScale,
-      bars: normalizedBars
+      bars: validBars
     };
   }
 
@@ -5952,6 +6113,9 @@
     setupContextMenuHandler();
     if (!activeChart) {
       hookChart();
+    }
+    if (currentSettings && currentSettings.sessionIndicators && currentSettings.sessionIndicators.enabled) {
+      setupIctSessionIndicators();
     }
   }, 1500);
 
