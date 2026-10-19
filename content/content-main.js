@@ -4869,7 +4869,7 @@
   function findMainChartPaneCanvas() {
     // IMPORTANT: content-main.js runs in BOTH the top window and the TradingView chart iframe!
     // If we are in the top window and there is a child iframe that contains the TradingView chart canvas,
-    // let ONLY the child iframe instance render the ICT Sessions overlay so we NEVER mount two overlapping canvases!
+    // let ONLY the child iframe instance render the ICT Sessions so we NEVER double-render!
     const iframes = document.querySelectorAll('iframe');
     for (let i = 0; i < iframes.length; i++) {
       try {
@@ -4880,7 +4880,6 @@
           for (let j = 0; j < childCanvases.length; j++) {
             const r = childCanvases[j].getBoundingClientRect();
             if (r.width >= 240 && r.height >= 140) {
-              // The child iframe has its own initialized content-main.js and owns the chart canvas!
               return null;
             }
           }
@@ -4896,9 +4895,9 @@
       for (const c of canvases) {
         const rect = c.getBoundingClientRect();
         if (rect.width < 240 || rect.height < 140) continue;
-        // Exclude price axis or time axis strip canvases (which are narrow or short)
         const area = rect.width * rect.height;
-        if (area > bestArea) {
+        // Prefer the FIRST (bottom-most) main pane canvas in DOM order, which is TradingView's main series & drawings canvas!
+        if (area > bestArea + 1000) {
           bestArea = area;
           bestCanvas = c;
         }
@@ -4908,51 +4907,16 @@
     return bestCanvas;
   }
 
-  function ensureIctSessionsOverlayCanvas(targetChartCanvas) {
-    if (!targetChartCanvas || !targetChartCanvas.parentElement) return null;
-    const parent = targetChartCanvas.parentElement;
-    const ownerDoc = targetChartCanvas.ownerDocument || document;
-
-    // Remove any stale duplicate .vest-ict-sessions-canvas elements in this document or child iframes
+  function removeLegacyIctSessionsOverlayCanvases() {
     try {
-      const allExisting = parent.querySelectorAll('.vest-ict-sessions-canvas');
-      if (allExisting.length > 1) {
-        allExisting.forEach((el, idx) => {
-          if (idx > 0) {
-            try { el.remove(); } catch (e) {}
-          }
-        });
-        ictSessionsCanvas = allExisting[0];
-      } else if (allExisting.length === 1 && !ictSessionsCanvas) {
-        ictSessionsCanvas = allExisting[0];
-      }
-    } catch (e) {}
-
-    if (!ictSessionsCanvas || !ictSessionsCanvas.isConnected || ictSessionsCanvas.parentElement !== parent) {
-      if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
+      if (ictSessionsCanvas) {
         try { ictSessionsCanvas.remove(); } catch (e) {}
+        ictSessionsCanvas = null;
       }
-      ictSessionsCanvas = ownerDoc.createElement('canvas');
-      ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
-      ictSessionsCanvas.style.cssText =
-        'position:absolute;top:0;left:0;pointer-events:none;z-index:2;user-select:none;';
-      // Append inside the pane container so it renders above TradingView's opaque background canvas
-      parent.appendChild(ictSessionsCanvas);
-    }
-
-    const cssW = targetChartCanvas.clientWidth || Math.round(targetChartCanvas.getBoundingClientRect().width);
-    const cssH = targetChartCanvas.clientHeight || Math.round(targetChartCanvas.getBoundingClientRect().height);
-    const bmpW = targetChartCanvas.width || cssW;
-    const bmpH = targetChartCanvas.height || cssH;
-
-    if (ictSessionsCanvas.width !== bmpW) ictSessionsCanvas.width = bmpW;
-    if (ictSessionsCanvas.height !== bmpH) ictSessionsCanvas.height = bmpH;
-    const targetStyleW = `${cssW}px`;
-    const targetStyleH = `${cssH}px`;
-    if (ictSessionsCanvas.style.width !== targetStyleW) ictSessionsCanvas.style.width = targetStyleW;
-    if (ictSessionsCanvas.style.height !== targetStyleH) ictSessionsCanvas.style.height = targetStyleH;
-
-    return ictSessionsCanvas;
+      document.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
+        try { el.remove(); } catch (e) {}
+      });
+    } catch (e) {}
   }
 
   let lastIctDiagMsg = '';
@@ -5233,9 +5197,7 @@
           const tv = timeScale[tk];
           if (tv && typeof tv === 'object') {
             if (typeof tv.indexToTimePoint === 'function') {
-              // Internal TimePoints / TimeScalePoints object
-              const ptsFn = tv;
-              if (!timeScale.__vestTimePointsObj) timeScale.__vestTimePointsObj = ptsFn;
+              if (!timeScale.__vestTimePointsObj) timeScale.__vestTimePointsObj = tv;
             }
             for (const sk of Object.getOwnPropertyNames(tv)) {
               const sv = tv[sk];
@@ -5269,7 +5231,6 @@
       let close = null;
 
       if (Array.isArray(v)) {
-        // TradingView PlotList bar value is [timeOrIndex, open, high, low, close, volume]
         const v0 = Number(v[0]);
         if (v0 > 1e8) {
           timeSec = v0 > 1e11 ? Math.floor(v0 / 1000) : v0;
@@ -5417,13 +5378,11 @@
         let anchorDate = b.dateKey;
 
         if (!def.isOvernight) {
-          // Normal intraday window: [startMins, endMins)
           if (mins >= def.startMins && mins < def.endMins) {
             inWindow = true;
             anchorDate = b.dateKey;
           }
         } else {
-          // Overnight window (e.g. Asian Killzone 20:00 -> 00:00 or 20:00 -> 02:00)
           if (mins >= def.startMins) {
             inWindow = true;
             anchorDate = b.dateKey;
@@ -5470,7 +5429,7 @@
       }
     }
 
-    // For each session instance, scan bars AFTER the session ends to find the exact bar that sweeps/mitigates High or Low
+    // For each session instance, scan bars AFTER the session ends to find the exact bar that sweeps/mitigates High, Low, or Mid
     const latestBar = annotated[annotated.length - 1];
     const results = [];
 
@@ -5483,8 +5442,6 @@
       let midSweptTimeSec = null;
 
       const midPrice = (inst.high + inst.low) / 2;
-
-      // Determine whether this session is still actively forming on the latest bar
       const isStillInSession = inst.lastArrayIdx === annotated.length - 1;
 
       if (!isStillInSession) {
@@ -5526,39 +5483,29 @@
     return results;
   }
 
-  function renderIctSessionIndicators() {
-    ictSessionsRafId = null;
+  /**
+   * Draws the ICT Session boxes, watermarks, H/L/Mid lines directly onto TradingView's native bottom chart canvas
+   * right after TradingView clears/fills the chart background and BEFORE TradingView draws gridlines, candles, and user drawings!
+   * This guarantees:
+   *  1. Zero lag or "ghosting/shadow" when panning or zooming (it is part of TradingView's own canvas paint pass)
+   *  2. Session boxes are 100% at the very back behind all candles, wicks, FVG rectangles, and drawings!
+   */
+  function drawIctSessionsOntoNativeChartCtx(ctx, targetCanvas) {
+    if (!ctx || !targetCanvas) return;
 
     const config = currentSettings && currentSettings.sessionIndicators;
-    const targetCanvas = findMainChartPaneCanvas();
-
-    if (!config || !config.enabled || !isIntradayChartResolution() || !targetCanvas) {
-      if (ictSessionsCanvas) {
-        const ctx = ictSessionsCanvas.getContext('2d');
-        if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
-      }
+    if (!config || !config.enabled || !isIntradayChartResolution()) {
       return;
     }
 
-    // Hook TradingView's main chart canvas clearRect so whenever TradingView repaints a frame during pan/zoom/tick,
-    // our session indicator overlay repaints in the exact same frame with zero lag!
-    hookTargetChartCanvasRepaint(targetCanvas);
-
-    const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
-    if (!overlay) return;
-
-    const ctx = overlay.getContext('2d');
-    if (!ctx) return;
-
     const extracted = extractSeriesBarsFromModel();
     if (!extracted || !extracted.bars || extracted.bars.length === 0) {
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
       return;
     }
 
     const { mainSeries, timeScale, bars } = extracted;
 
-    // Also incorporate live ticker price into the current forming bar if price just made a new intrabar high or low!
+    // Incorporate live ticker price into the current forming bar if price just made a new intrabar high or low
     const lastBar = bars[bars.length - 1];
     if (lastBar && lastTrackedPrice) {
       const liveNum = parseFloat(String(lastTrackedPrice).replace(/,/g, ''));
@@ -5584,14 +5531,12 @@
       ictSessionsNeedsFullRecompute = false;
     }
 
-    const cssWidth = overlay.clientWidth || targetCanvas.clientWidth || overlay.width;
-    const cssHeight = overlay.clientHeight || targetCanvas.clientHeight || overlay.height;
-    const dpr = cssWidth > 0 ? overlay.width / cssWidth : (window.devicePixelRatio || 1);
-
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
     if (cachedIctComputedSessions.length === 0) return;
 
-    // Coordinate conversion helpers: barIndex / timeSec -> X (CSS px), price -> Y (CSS px)
+    const cssWidth = targetCanvas.clientWidth || Math.round(targetCanvas.getBoundingClientRect().width) || targetCanvas.width;
+    const cssHeight = targetCanvas.clientHeight || Math.round(targetCanvas.getBoundingClientRect().height) || targetCanvas.height;
+    const dpr = cssWidth > 0 ? targetCanvas.width / cssWidth : (window.devicePixelRatio || 1);
+
     let visibleRange = null;
     try {
       if (activeChart && typeof activeChart.getVisibleRange === 'function') {
@@ -5677,7 +5622,11 @@
     };
 
     ctx.save();
-    ctx.scale(dpr, dpr);
+    if (typeof ctx.setTransform === 'function') {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    } else {
+      ctx.scale(dpr, dpr);
+    }
 
     const halfBarW = Math.max(1, barSpacing * 0.5);
     const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(config.boxOpacity) || 18) / 100));
@@ -5712,7 +5661,6 @@
       const boxW = Math.max(2, boxRight - boxLeft);
       const boxH = Math.max(2, boxBottom - boxTop);
 
-      // Compute High/Low/Mid line end X coordinates so we know if a session's extended lines are still visible even when its box is off-screen left
       let highEndX = boxRight;
       let lowEndX = boxRight;
       let midEndX = boxRight;
@@ -5766,7 +5714,6 @@
         ctx.setLineDash([]);
       }
 
-      // Top Session High line (spans across top of session box + extends right until swept)
       const hLineStart = Math.max(-10, boxLeft);
       const hLineEnd = Math.min(cssWidth + 10, extendHighLow ? highEndX : boxRight);
       if (hLineEnd > hLineStart && highY >= -20 && highY <= cssHeight + 20) {
@@ -5776,7 +5723,6 @@
         ctx.stroke();
       }
 
-      // Bottom Session Low line (spans across bottom of session box + extends right until swept)
       const lLineStart = Math.max(-10, boxLeft);
       const lLineEnd = Math.min(cssWidth + 10, extendHighLow ? lowEndX : boxRight);
       if (lLineEnd > lLineStart && lowY >= -20 && lowY <= cssHeight + 20) {
@@ -5802,11 +5748,10 @@
       }
       ctx.restore();
 
-      // 3. Draw Centered Watermark Text inside Session Box (matching user's screenshot: "NY AM", "NY Lunch", "London", "Asia")
+      // 3. Draw Centered Watermark Text inside Session Box
       const watermarkLabel = def.watermarkText !== undefined ? def.watermarkText : def.name;
       if (showWatermark && watermarkLabel && boxW > 24 && boxH > 16 && boxRight > 0 && boxLeft < cssWidth) {
         ctx.save();
-        // Clip watermark to the session box so it stays clean on narrow zoom levels
         ctx.beginPath();
         ctx.rect(boxLeft + 2, boxTop + 2, Math.max(1, boxW - 4), Math.max(1, boxH - 4));
         ctx.clip();
@@ -5815,7 +5760,6 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Automatically scale down font if box is narrower than text width at current zoom level
         let fittedSize = baseFontSize;
         ctx.font = `${fontWeight} ${fittedSize}px ${fontFamily}`;
         const measuredW = ctx.measureText(watermarkLabel).width;
@@ -5866,21 +5810,63 @@
     if (!ctx) return;
     hookedRepaintCanvases.add(targetCanvas);
 
-    // Whenever TradingView clears its main chart canvas to draw a new frame (on pan, zoom, price scale drag, or live tick),
-    // immediately synchronize our session indicator canvas on the exact same animation frame!
     const origClearRect = ctx.clearRect;
-    ctx.clearRect = function () {
+    const origFillRect = ctx.fillRect;
+
+    // TradingView starts each pane repaint by calling clearRect(0, 0, width, height) and/or fillRect(0, 0, width, height) for the background.
+    // By drawing the ICT Sessions immediately after that full-canvas clear/fill, our session boxes are painted onto TradingView's
+    // own bottom canvas BEFORE TradingView paints gridlines, candles, wicks, FVG boxes, and user drawings!
+    ctx.clearRect = function (x, y, w, h) {
       const res = origClearRect.apply(this, arguments);
-      if (!isInsideSyncedRepaint) {
+      if (!isInsideSyncedRepaint && x === 0 && y === 0 && w >= targetCanvas.width * 0.8 && h >= targetCanvas.height * 0.8) {
         isInsideSyncedRepaint = true;
         try {
-          renderIctSessionIndicators();
+          drawIctSessionsOntoNativeChartCtx(ctx, targetCanvas);
         } catch (e) {} finally {
           isInsideSyncedRepaint = false;
         }
       }
       return res;
     };
+
+    ctx.fillRect = function (x, y, w, h) {
+      const res = origFillRect.apply(this, arguments);
+      if (!isInsideSyncedRepaint && x === 0 && y === 0 && w >= targetCanvas.width * 0.8 && h >= targetCanvas.height * 0.8) {
+        isInsideSyncedRepaint = true;
+        try {
+          drawIctSessionsOntoNativeChartCtx(ctx, targetCanvas);
+        } catch (e) {} finally {
+          isInsideSyncedRepaint = false;
+        }
+      }
+      return res;
+    };
+  }
+
+  function renderIctSessionIndicators() {
+    ictSessionsRafId = null;
+    removeLegacyIctSessionsOverlayCanvases();
+
+    const targetCanvas = findMainChartPaneCanvas();
+    if (!targetCanvas) return;
+
+    hookTargetChartCanvasRepaint(targetCanvas);
+
+    // Ask TradingView's ChartModel to perform a lightUpdate() so its native canvas repaints immediately
+    // (which triggers our hooked clearRect/fillRect and paints the sessions behind candles & drawings!)
+    const model = findChartModelForSessions();
+    if (model) {
+      try {
+        if (typeof model.lightUpdate === 'function') {
+          model.lightUpdate();
+          return;
+        }
+        if (typeof model.fullUpdate === 'function') {
+          model.fullUpdate();
+          return;
+        }
+      } catch (e) {}
+    }
   }
 
   function scheduleIctSessionsRender(forceRecompute = false) {
@@ -5894,46 +5880,6 @@
   function setupIctSessionIndicators() {
     scheduleIctSessionsRender(true);
     if (ictSessionsObserverInitialized) return;
-
-    try {
-      const model = findChartModelForSessions();
-      if (model) {
-        const ts = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
-        if (ts) {
-          const tsEvents = ['barSpacingChanged', 'rightOffsetChanged', 'visibleBarsStrictRangeChanged', 'scrollCoordsChanged'];
-          tsEvents.forEach(evName => {
-            try {
-              if (typeof ts[evName] === 'function') {
-                const sub = ts[evName]();
-                if (sub && typeof sub.subscribe === 'function') {
-                  sub.subscribe(null, () => renderIctSessionIndicators());
-                }
-              }
-            } catch (e) {}
-          });
-        }
-      }
-      if (activeChart) {
-        if (typeof activeChart.onVisibleRangeChanged === 'function') {
-          const sub = activeChart.onVisibleRangeChanged();
-          if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => renderIctSessionIndicators());
-          }
-        }
-        if (typeof activeChart.onIntervalChanged === 'function') {
-          const sub = activeChart.onIntervalChanged();
-          if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => scheduleIctSessionsRender(true));
-          }
-        }
-        if (typeof activeChart.onSymbolChanged === 'function') {
-          const sub = activeChart.onSymbolChanged();
-          if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => scheduleIctSessionsRender(true));
-          }
-        }
-      }
-    } catch (e) {}
 
     window.addEventListener('resize', () => scheduleIctSessionsRender(false), { passive: true });
     ictSessionsObserverInitialized = true;
