@@ -4867,56 +4867,91 @@
   }
 
   function findMainChartPaneCanvas() {
-    // IMPORTANT: content-main.js runs in BOTH the top window and the TradingView chart iframe!
-    // If we are in the top window and there is a child iframe that contains the TradingView chart canvas,
-    // let ONLY the child iframe instance render the ICT Sessions so we NEVER double-render!
-    const iframes = document.querySelectorAll('iframe');
-    for (let i = 0; i < iframes.length; i++) {
+    // Only render from the top window (which has access to both document and same-origin/blob iframe.contentDocument).
+    // If we are inside a child iframe and window.top also initialized content-main.js, let window.top handle it so we NEVER double-render!
+    try {
+      if (window.top && window.top !== window && window.top.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) {
+        return null;
+      }
+    } catch (e) {}
+
+    const docs = [document];
+    document.querySelectorAll('iframe').forEach(ifr => {
       try {
-        const ifrDoc = iframes[i].contentDocument;
-        const ifrWin = iframes[i].contentWindow;
-        if (ifrDoc && ifrWin && ifrWin.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) {
-          const childCanvases = ifrDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
-          for (let j = 0; j < childCanvases.length; j++) {
-            const r = childCanvases[j].getBoundingClientRect();
-            if (r.width >= 240 && r.height >= 140) {
-              return null;
-            }
+        if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) {
+          docs.push(ifr.contentDocument);
+        }
+      } catch (e) {}
+    });
+
+    let bestCanvas = null;
+    let bestArea = 0;
+
+    for (const doc of docs) {
+      try {
+        const canvases = doc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+        for (const c of canvases) {
+          const rect = c.getBoundingClientRect();
+          if (rect.width < 240 || rect.height < 140) continue;
+          const area = rect.width * rect.height;
+          if (area > bestArea + 1000) {
+            bestArea = area;
+            bestCanvas = c;
           }
         }
       } catch (e) {}
     }
 
-    let bestCanvas = null;
-    let bestArea = 0;
-
-    try {
-      const canvases = document.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
-      for (const c of canvases) {
-        const rect = c.getBoundingClientRect();
-        if (rect.width < 240 || rect.height < 140) continue;
-        const area = rect.width * rect.height;
-        // Prefer the FIRST (bottom-most) main pane canvas in DOM order, which is TradingView's main series & drawings canvas!
-        if (area > bestArea + 1000) {
-          bestArea = area;
-          bestCanvas = c;
-        }
-      }
-    } catch (e) {}
-
     return bestCanvas;
   }
 
-  function removeLegacyIctSessionsOverlayCanvases() {
-    try {
-      if (ictSessionsCanvas) {
+  function ensureIctSessionsOverlayCanvas(targetChartCanvas) {
+    if (!targetChartCanvas || !targetChartCanvas.parentElement) return null;
+    const parent = targetChartCanvas.parentElement;
+    const ownerDoc = targetChartCanvas.ownerDocument || document;
+
+    // Clean up any stale or duplicate .vest-ict-sessions-canvas elements across all documents
+    const docs = [document];
+    document.querySelectorAll('iframe').forEach(ifr => {
+      try {
+        if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument);
+      } catch (e) {}
+    });
+    docs.forEach(d => {
+      try {
+        d.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
+          if (el !== ictSessionsCanvas) {
+            try { el.remove(); } catch (e) {}
+          }
+        });
+      } catch (e) {}
+    });
+
+    if (!ictSessionsCanvas || !ictSessionsCanvas.isConnected || ictSessionsCanvas.parentElement !== parent) {
+      if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
         try { ictSessionsCanvas.remove(); } catch (e) {}
-        ictSessionsCanvas = null;
       }
-      document.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
-        try { el.remove(); } catch (e) {}
-      });
-    } catch (e) {}
+      ictSessionsCanvas = ownerDoc.createElement('canvas');
+      ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
+      // mix-blend-mode: screen illuminates the dark chart background while keeping all candles, wicks, FVG boxes, and drawings 100% crisp and unblocked on top!
+      ictSessionsCanvas.style.cssText =
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:1;mix-blend-mode:screen;user-select:none;';
+      parent.appendChild(ictSessionsCanvas);
+    }
+
+    const cssW = targetChartCanvas.clientWidth || Math.round(targetChartCanvas.getBoundingClientRect().width);
+    const cssH = targetChartCanvas.clientHeight || Math.round(targetChartCanvas.getBoundingClientRect().height);
+    const bmpW = targetChartCanvas.width || cssW;
+    const bmpH = targetChartCanvas.height || cssH;
+
+    if (ictSessionsCanvas.width !== bmpW) ictSessionsCanvas.width = bmpW;
+    if (ictSessionsCanvas.height !== bmpH) ictSessionsCanvas.height = bmpH;
+    const targetStyleW = `${cssW}px`;
+    const targetStyleH = `${cssH}px`;
+    if (ictSessionsCanvas.style.width !== targetStyleW) ictSessionsCanvas.style.width = targetStyleW;
+    if (ictSessionsCanvas.style.height !== targetStyleH) ictSessionsCanvas.style.height = targetStyleH;
+
+    return ictSessionsCanvas;
   }
 
   let lastIctDiagMsg = '';
@@ -4948,7 +4983,7 @@
       }
     } catch (e) {}
 
-    // 3. Deep search activeChart, activeChartApi, activeWidget, and window.tradingview_* (including Symbols & prototypes)
+    // 3. Deep search activeChart, activeChartApi, activeWidget, window.tradingview_*, and iframe windows!
     const roots = [activeChart, activeChartApi, activeWidget];
     try {
       for (const k of Object.keys(window)) {
@@ -4956,17 +4991,34 @@
           roots.push(window[k]);
         }
       }
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try {
+          if (ifr.contentWindow) {
+            for (const k of Object.keys(ifr.contentWindow)) {
+              if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget' || k === 'tradingViewApi') {
+                roots.push(ifr.contentWindow[k]);
+              }
+            }
+          }
+        } catch (e) {}
+      });
     } catch (e) {}
 
-    // Also inspect React Fiber / DOM props on the chart container elements in case ChartWidget is attached to DOM
+    // Also inspect React Fiber / DOM props on the chart container elements (in both document and iframes)
     try {
-      const els = document.querySelectorAll('[class*="chart-markup-table"], [class*="chart-gui-wrapper"], [class*="chart-container"]');
-      els.forEach(el => {
-        for (const k of Object.keys(el)) {
-          if (k.startsWith('__react') || k.startsWith('_')) {
-            roots.push(el[k]);
+      const docs = [document];
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try { if (ifr.contentDocument) docs.push(ifr.contentDocument); } catch (e) {}
+      });
+      docs.forEach(d => {
+        const els = d.querySelectorAll('[class*="chart-markup-table"], [class*="chart-gui-wrapper"], [class*="chart-container"]');
+        els.forEach(el => {
+          for (const k of Object.keys(el)) {
+            if (k.startsWith('__react') || k.startsWith('_')) {
+              roots.push(el[k]);
+            }
           }
-        }
+        });
       });
     } catch (e) {}
 
@@ -5483,20 +5535,21 @@
     return results;
   }
 
-  /**
-   * Draws the ICT Session boxes, watermarks, H/L/Mid lines directly onto TradingView's native bottom chart canvas
-   * right after TradingView clears/fills the chart background and BEFORE TradingView draws gridlines, candles, and user drawings!
-   * This guarantees:
-   *  1. Zero lag or "ghosting/shadow" when panning or zooming (it is part of TradingView's own canvas paint pass)
-   *  2. Session boxes are 100% at the very back behind all candles, wicks, FVG rectangles, and drawings!
-   */
-  function drawIctSessionsOntoNativeChartCtx(ctx, targetCanvas) {
-    if (!ctx || !targetCanvas) return;
+  function renderIctSessionIndicators() {
+    ictSessionsRafId = null;
 
     const config = currentSettings && currentSettings.sessionIndicators;
     if (!config || !config.enabled || !isIntradayChartResolution()) {
+      if (ictSessionsCanvas) {
+        const ctx = ictSessionsCanvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
+        ictSessionsCanvas.style.display = 'none';
+      }
       return;
     }
+
+    const targetCanvas = findMainChartPaneCanvas();
+    if (!targetCanvas) return;
 
     const extracted = extractSeriesBarsFromModel();
     if (!extracted || !extracted.bars || extracted.bars.length === 0) {
@@ -5531,11 +5584,28 @@
       ictSessionsNeedsFullRecompute = false;
     }
 
-    if (cachedIctComputedSessions.length === 0) return;
+    const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
+    if (!overlay) return;
+    overlay.style.display = 'block';
+    overlay.style.zIndex = '1';
+    overlay.style.mixBlendMode = 'screen';
 
-    const cssWidth = targetCanvas.clientWidth || Math.round(targetCanvas.getBoundingClientRect().width) || targetCanvas.width;
-    const cssHeight = targetCanvas.clientHeight || Math.round(targetCanvas.getBoundingClientRect().height) || targetCanvas.height;
-    const dpr = cssWidth > 0 ? targetCanvas.width / cssWidth : (window.devicePixelRatio || 1);
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+
+    const cssWidth = targetCanvas.clientWidth || Math.round(targetCanvas.getBoundingClientRect().width) || overlay.width;
+    const cssHeight = targetCanvas.clientHeight || Math.round(targetCanvas.getBoundingClientRect().height) || overlay.height;
+    const dpr = cssWidth > 0 ? overlay.width / cssWidth : (window.devicePixelRatio || 1);
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.scale(dpr, dpr);
+
+    if (cachedIctComputedSessions.length === 0) {
+      ctx.restore();
+      return;
+    }
 
     let visibleRange = null;
     try {
@@ -5620,13 +5690,6 @@
       }
       return null;
     };
-
-    ctx.save();
-    if (typeof ctx.setTransform === 'function') {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    } else {
-      ctx.scale(dpr, dpr);
-    }
 
     const halfBarW = Math.max(1, barSpacing * 0.5);
     const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(config.boxOpacity) || 18) / 100));
@@ -5801,74 +5864,6 @@
     ctx.restore();
   }
 
-  let hookedRepaintCanvases = new WeakSet();
-  let isInsideSyncedRepaint = false;
-
-  function hookTargetChartCanvasRepaint(targetCanvas) {
-    if (!targetCanvas || hookedRepaintCanvases.has(targetCanvas)) return;
-    const ctx = targetCanvas.getContext('2d');
-    if (!ctx) return;
-    hookedRepaintCanvases.add(targetCanvas);
-
-    const origClearRect = ctx.clearRect;
-    const origFillRect = ctx.fillRect;
-
-    // TradingView starts each pane repaint by calling clearRect(0, 0, width, height) and/or fillRect(0, 0, width, height) for the background.
-    // By drawing the ICT Sessions immediately after that full-canvas clear/fill, our session boxes are painted onto TradingView's
-    // own bottom canvas BEFORE TradingView paints gridlines, candles, wicks, FVG boxes, and user drawings!
-    ctx.clearRect = function (x, y, w, h) {
-      const res = origClearRect.apply(this, arguments);
-      if (!isInsideSyncedRepaint && x === 0 && y === 0 && w >= targetCanvas.width * 0.8 && h >= targetCanvas.height * 0.8) {
-        isInsideSyncedRepaint = true;
-        try {
-          drawIctSessionsOntoNativeChartCtx(ctx, targetCanvas);
-        } catch (e) {} finally {
-          isInsideSyncedRepaint = false;
-        }
-      }
-      return res;
-    };
-
-    ctx.fillRect = function (x, y, w, h) {
-      const res = origFillRect.apply(this, arguments);
-      if (!isInsideSyncedRepaint && x === 0 && y === 0 && w >= targetCanvas.width * 0.8 && h >= targetCanvas.height * 0.8) {
-        isInsideSyncedRepaint = true;
-        try {
-          drawIctSessionsOntoNativeChartCtx(ctx, targetCanvas);
-        } catch (e) {} finally {
-          isInsideSyncedRepaint = false;
-        }
-      }
-      return res;
-    };
-  }
-
-  function renderIctSessionIndicators() {
-    ictSessionsRafId = null;
-    removeLegacyIctSessionsOverlayCanvases();
-
-    const targetCanvas = findMainChartPaneCanvas();
-    if (!targetCanvas) return;
-
-    hookTargetChartCanvasRepaint(targetCanvas);
-
-    // Ask TradingView's ChartModel to perform a lightUpdate() so its native canvas repaints immediately
-    // (which triggers our hooked clearRect/fillRect and paints the sessions behind candles & drawings!)
-    const model = findChartModelForSessions();
-    if (model) {
-      try {
-        if (typeof model.lightUpdate === 'function') {
-          model.lightUpdate();
-          return;
-        }
-        if (typeof model.fullUpdate === 'function') {
-          model.fullUpdate();
-          return;
-        }
-      } catch (e) {}
-    }
-  }
-
   function scheduleIctSessionsRender(forceRecompute = false) {
     if (forceRecompute) {
       ictSessionsNeedsFullRecompute = true;
@@ -5880,6 +5875,63 @@
   function setupIctSessionIndicators() {
     scheduleIctSessionsRender(true);
     if (ictSessionsObserverInitialized) return;
+
+    try {
+      const model = findChartModelForSessions();
+      if (model) {
+        const ts = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
+        if (ts) {
+          const tsEvents = ['barSpacingChanged', 'rightOffsetChanged', 'visibleBarsStrictRangeChanged', 'scrollCoordsChanged'];
+          tsEvents.forEach(evName => {
+            try {
+              if (typeof ts[evName] === 'function') {
+                const sub = ts[evName]();
+                if (sub && typeof sub.subscribe === 'function') {
+                  sub.subscribe(null, () => renderIctSessionIndicators());
+                }
+              }
+            } catch (e) {}
+          });
+        }
+      }
+      if (activeChart) {
+        if (typeof activeChart.onVisibleRangeChanged === 'function') {
+          const sub = activeChart.onVisibleRangeChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => renderIctSessionIndicators());
+          }
+        }
+        if (typeof activeChart.onIntervalChanged === 'function') {
+          const sub = activeChart.onIntervalChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => scheduleIctSessionsRender(true));
+          }
+        }
+        if (typeof activeChart.onSymbolChanged === 'function') {
+          const sub = activeChart.onSymbolChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => scheduleIctSessionsRender(true));
+          }
+        }
+      }
+    } catch (e) {}
+
+    const docs = [document];
+    document.querySelectorAll('iframe').forEach(ifr => {
+      try {
+        if (ifr.contentDocument) docs.push(ifr.contentDocument);
+      } catch (e) {}
+    });
+
+    docs.forEach(doc => {
+      try {
+        doc.addEventListener('mousemove', (e) => {
+          if (e.buttons > 0) renderIctSessionIndicators();
+        }, { passive: true });
+        doc.addEventListener('wheel', () => renderIctSessionIndicators(), { passive: true });
+        doc.addEventListener('touchmove', () => renderIctSessionIndicators(), { passive: true });
+      } catch (e) {}
+    });
 
     window.addEventListener('resize', () => scheduleIctSessionsRender(false), { passive: true });
     ictSessionsObserverInitialized = true;
