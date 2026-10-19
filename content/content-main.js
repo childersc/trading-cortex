@@ -4794,10 +4794,104 @@
     }
   })();
 
-  function getNyDateParts(unixSec) {
+  let cachedChartTz = null;
+  let cachedChartTzFormatter = null;
+  let lastChartTzCheckMs = 0;
+
+  function getActiveChartDisplayTimeZone() {
+    const now = Date.now();
+    if (cachedChartTz && now - lastChartTzCheckMs < 3000) {
+      return cachedChartTz;
+    }
+    lastChartTzCheckMs = now;
+
+    // 1. Check TradingView ChartModel / Widget timezone API
+    try {
+      const model = getInternalChartModel() || getChartModel();
+      if (model) {
+        if (typeof model.timezone === 'function') {
+          const tz = model.timezone();
+          const tzVal = (tz && typeof tz === 'object' && typeof tz.value === 'function') ? tz.value() : tz;
+          if (typeof tzVal === 'string' && tzVal && tzVal !== 'exchange') {
+            cachedChartTz = tzVal;
+            return cachedChartTz;
+          }
+        }
+        if (model._timezone) {
+          const tzVal = typeof model._timezone.value === 'function' ? model._timezone.value() : model._timezone;
+          if (typeof tzVal === 'string' && tzVal && tzVal !== 'exchange') {
+            cachedChartTz = tzVal;
+            return cachedChartTz;
+          }
+        }
+      }
+      if (activeChart && typeof activeChart.getTimezoneApi === 'function') {
+        const tzApi = activeChart.getTimezoneApi();
+        if (tzApi && typeof tzApi.getTimezone === 'function') {
+          const tzObj = tzApi.getTimezone();
+          if (tzObj && typeof tzObj.id === 'string' && tzObj.id !== 'exchange') {
+            cachedChartTz = tzObj.id;
+            return cachedChartTz;
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 2. Check localStorage tradingview.chartproperties timezone
+    try {
+      const rawProps = window.localStorage.getItem('tradingview.chartproperties');
+      if (rawProps) {
+        const parsed = JSON.parse(rawProps);
+        if (parsed && typeof parsed.timezone === 'string' && parsed.timezone !== 'exchange') {
+          cachedChartTz = parsed.timezone;
+          return cachedChartTz;
+        }
+      }
+    } catch (e) {}
+
+    // 3. Fallback to browser's local timezone (which TradingView defaults to when not overridden) or America/New_York
+    try {
+      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (browserTz) {
+        cachedChartTz = browserTz;
+        return cachedChartTz;
+      }
+    } catch (e) {}
+
+    return 'America/New_York';
+  }
+
+  function getFormatterForTimeZone(tz) {
+    const targetTz = tz || 'America/New_York';
+    if (cachedChartTzFormatter && cachedChartTzFormatter.__tz === targetTz) {
+      return cachedChartTzFormatter;
+    }
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: targetTz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      fmt.__tz = targetTz;
+      cachedChartTzFormatter = fmt;
+      return fmt;
+    } catch (e) {
+      return nyDateFormatter;
+    }
+  }
+
+  function getNyDateParts(unixSec, tzOverride) {
     const ms = unixSec > 1e11 ? unixSec : unixSec * 1000;
     const d = new Date(ms);
-    if (!nyDateFormatter) {
+    const resolvedTz = (!tzOverride || tzOverride === 'chart' || tzOverride === 'local')
+      ? getActiveChartDisplayTimeZone()
+      : tzOverride;
+    const fmt = getFormatterForTimeZone(resolvedTz) || nyDateFormatter;
+    if (!fmt) {
       const y = d.getUTCFullYear();
       const m = String(d.getUTCMonth() + 1).padStart(2, '0');
       const day = String(d.getUTCDate()).padStart(2, '0');
@@ -4806,7 +4900,7 @@
         minutesOfDay: d.getUTCHours() * 60 + d.getUTCMinutes()
       };
     }
-    const parts = nyDateFormatter.formatToParts(d);
+    const parts = fmt.formatToParts(d);
     let year = '1970';
     let month = '01';
     let day = '01';
@@ -5287,6 +5381,8 @@
         if (v0 > 1e8) {
           timeSec = v0 > 1e11 ? Math.floor(v0 / 1000) : v0;
         }
+        // In TradingView PlotList items, value is ALWAYS [timePoint, open, high, low, close, volume]:
+        // v[1] = open, v[2] = high, v[3] = low, v[4] = close
         open = Number(v[1]);
         high = Number(v[2]);
         low = Number(v[3]);
@@ -5300,6 +5396,14 @@
         high = Number(v.high ?? v.h ?? v[2]);
         low = Number(v.low ?? v.l ?? v[3]);
         close = Number(v.close ?? v.c ?? v[4]);
+      }
+
+      // Guard against any non-standard ordering by taking the true geometric envelope of O/H/L/C
+      if (isFinite(open) && isFinite(high) && isFinite(low) && isFinite(close)) {
+        const trueHigh = Math.max(open, high, low, close);
+        const trueLow = Math.min(open, high, low, close);
+        high = trueHigh;
+        low = trueLow;
       }
 
       if (!timeSec && typeof item.time === 'number' && item.time > 1e8) {
@@ -5392,14 +5496,15 @@
 
     if (enabledDefs.length === 0) return [];
 
-    // Pre-compute NY dateKey & minutesOfDay for each bar
+    // Pre-compute dateKey & minutesOfDay for each bar aligned with the chart's displayed clock
     const annotated = new Array(bars.length);
     const uniqueDateKeys = [];
     let lastSeenDate = null;
+    const tzMode = (config.timezone && config.timezone !== 'America/New_York') ? config.timezone : 'chart';
 
     for (let i = 0; i < bars.length; i++) {
       const b = bars[i];
-      const ny = getNyDateParts(b.timeSec);
+      const ny = getNyDateParts(b.timeSec, tzMode);
       annotated[i] = {
         ...b,
         barIdxInArray: i,
@@ -5718,17 +5823,7 @@
 
     const { mainSeries, timeScale, bars } = extracted;
 
-    // Incorporate live ticker price into the current forming bar if price just made a new intrabar high or low
     const lastBar = bars[bars.length - 1];
-    if (lastBar && lastTrackedPrice) {
-      const liveNum = parseFloat(String(lastTrackedPrice).replace(/,/g, ''));
-      if (isFinite(liveNum) && liveNum > 0) {
-        if (liveNum > lastBar.high) lastBar.high = liveNum;
-        if (liveNum < lastBar.low) lastBar.low = liveNum;
-        lastBar.close = liveNum;
-      }
-    }
-
     const prevBar = bars.length > 1 ? bars[bars.length - 2] : lastBar;
     const barsSig = `${bars.length}_${bars[0].timeSec}_${prevBar.high}_${prevBar.low}_${lastBar.timeSec}_${lastBar.high}_${lastBar.low}_${lastBar.close}`;
     const configSig = JSON.stringify(config);
@@ -5811,25 +5906,40 @@
       if (mainSeries && typeof mainSeries.firstValue === 'function') {
         const fv = mainSeries.firstValue();
         firstValue = (fv && typeof fv === 'object' && 'value' in fv) ? fv.value : fv;
-      } else if (internalPs && typeof internalPs.firstValue === 'function') {
+      }
+      if ((firstValue === null || firstValue === undefined) && internalPs && typeof internalPs.firstValue === 'function') {
         const fv = internalPs.firstValue();
         firstValue = (fv && typeof fv === 'object' && 'value' in fv) ? fv.value : fv;
+      }
+      if ((firstValue === null || firstValue === undefined) && bars.length > 0) {
+        firstValue = bars[0].close;
       }
     } catch (e) {}
 
     let visiblePriceRange = null;
     try {
-      if (psApi && typeof psApi.getVisiblePriceRange === 'function') {
-        visiblePriceRange = psApi.getVisiblePriceRange();
-      } else if (internalPs && typeof internalPs.priceRange === 'function') {
+      // Prefer internalPs.priceRange() first because psApi.getVisiblePriceRange() is unpadded while internalPs.priceRange() or priceToCoordinate includes top/bottom margins!
+      if (internalPs && typeof internalPs.priceRange === 'function') {
         const pr = internalPs.priceRange();
         if (pr) {
           const minV = typeof pr.minValue === 'function' ? pr.minValue() : pr.from;
           const maxV = typeof pr.maxValue === 'function' ? pr.maxValue() : pr.to;
-          if (typeof minV === 'number' && typeof maxV === 'number') {
+          if (typeof minV === 'number' && typeof maxV === 'number' && maxV > minV) {
             visiblePriceRange = { from: minV, to: maxV };
           }
         }
+      }
+      if (!visiblePriceRange && psApi && typeof psApi.getVisiblePriceRange === 'function') {
+        visiblePriceRange = psApi.getVisiblePriceRange();
+      }
+    } catch (e) {}
+
+    let psTopMargin = 0;
+    let psBottomMargin = 0;
+    try {
+      if (internalPs) {
+        if (typeof internalPs.topMarginPx === 'function') psTopMargin = Number(internalPs.topMarginPx()) || 0;
+        if (typeof internalPs.bottomMarginPx === 'function') psBottomMargin = Number(internalPs.bottomMarginPx()) || 0;
       }
     } catch (e) {}
 
@@ -5847,7 +5957,8 @@
         }
       } catch (e) {}
       if (visiblePriceRange && visiblePriceRange.to !== visiblePriceRange.from) {
-        return cssHeight - ((price - visiblePriceRange.from) / (visiblePriceRange.to - visiblePriceRange.from)) * cssHeight;
+        const usableH = Math.max(1, cssHeight - psTopMargin - psBottomMargin);
+        return psTopMargin + usableH - ((price - visiblePriceRange.from) / (visiblePriceRange.to - visiblePriceRange.from)) * usableH;
       }
       return null;
     };
@@ -6359,11 +6470,19 @@
       });
 
       for (const labelEl of labelEls) {
-        // Value is usually next sibling or inside parent / adjacent container
+        // Check immediate nextElementSibling first so we don't accidentally match "1h Funding" or "24h Change" in a shared ancestor container
+        const sib = labelEl.nextElementSibling;
+        if (sib) {
+          const sibText = (sib.innerText || sib.textContent || '').trim();
+          const sibMatch = sibText.match(/^\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)$/);
+          if (sibMatch && sibMatch[1] && sibMatch[1] !== '0') {
+            return sibMatch[1].trim();
+          }
+        }
         const parent = labelEl.parentElement;
-        if (parent) {
-          const parentText = parent.innerText || parent.textContent || '';
-          const match = parentText.match(/\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)/);
+        if (parent && parent.children.length <= 3) {
+          const parentText = (parent.innerText || parent.textContent || '').replace(/Mid Price|Last Price|Mark Price|Index Price/gi, '').trim();
+          const match = parentText.match(/^\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)$/);
           if (match && match[1] && match[1] !== '0') {
             return match[1].trim();
           }
