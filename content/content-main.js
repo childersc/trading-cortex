@@ -5564,15 +5564,39 @@
 
   let ictPriceScaleBadgeContainer = null;
 
-  function formatSessionShortDate(anchorDateKey) {
+  function formatSessionShortDate(anchorDateKey, patternStr) {
     if (!anchorDateKey || typeof anchorDateKey !== 'string') return '';
     const parts = anchorDateKey.split('-');
     if (parts.length !== 3) return anchorDateKey;
+    const yyyy = parseInt(parts[0], 10);
     const m = parseInt(parts[1], 10);
     const d = parseInt(parts[2], 10);
-    if (!isFinite(m) || !isFinite(d)) return anchorDateKey;
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${months[m - 1] || m}/${d}`;
+    if (!isFinite(yyyy) || !isFinite(m) || !isFinite(d)) return anchorDateKey;
+
+    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthsFull = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const fmt = (typeof patternStr === 'string' && patternStr.trim()) ? patternStr.trim() : 'M-d-y';
+    const tokenMap = {
+      MMMM: monthsFull[m - 1] || String(m),
+      MMM: monthsShort[m - 1] || String(m),
+      MM: String(m).padStart(2, '0'),
+      M: String(m),
+      dd: String(d).padStart(2, '0'),
+      DD: String(d).padStart(2, '0'),
+      d: String(d),
+      D: String(d),
+      yyyy: String(yyyy),
+      YYYY: String(yyyy),
+      yy: String(yyyy).slice(-2),
+      YY: String(yyyy).slice(-2),
+      y: String(yyyy).slice(-2),
+      Y: String(yyyy).slice(-2)
+    };
+
+    return fmt.replace(/MMMM|MMM|MM|M|dd|DD|d|D|yyyy|YYYY|yy|YY|y|Y/g, (match) => {
+      return tokenMap[match] !== undefined ? tokenMap[match] : match;
+    });
   }
 
   function formatSessionDisplayTitle(def) {
@@ -5940,7 +5964,7 @@
 
       const colorHex = def.color || '#3b82f6';
       const sessionDisplayName = formatSessionDisplayTitle(def);
-      const dateStr = formatSessionShortDate(sess.anchorDate);
+      const dateStr = formatSessionShortDate(sess.anchorDate, config.permDateFormat || 'M-d-y');
 
       // 1. Draw shaded Session Box (if within configured box lookback days)
       if (sess.withinBoxLookback !== false && boxRight >= 0 && boxLeft <= cssWidth) {

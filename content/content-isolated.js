@@ -124,6 +124,7 @@
     showPermanentDottedHighLow: true,
     permanentLinesDays: 7,
     permanentLineStyle: 1, // 0=solid, 1=dotted, 2=dashed
+    permDateFormat: 'M-d-y', // Customizable date stamp format (default: M-d-y -> 10-19-26)
     permLabelVertAlign: 'outside', // 'outside' (High=top, Low=bottom), 'top' (above line), 'inline' (centered on line), 'bottom' (below line)
     permLabelHorzAlign: 'right', // 'right' (far right), 'center' (mid-line), 'left' (start of line)
     permLabelFontSize: 11,
@@ -1988,9 +1989,36 @@
 
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
             <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              7-Day Extended Line & Date Label Styling (e.g. Oct/19 NY AM High)
+              7-Day Extended Line & Date Label Styling (e.g. 10-19-26 NY AM High)
             </div>
             <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label" title="Tokens: M (1-12), MM (01-12), MMM (Oct), MMMM (October), d (1-31), dd (01-31), y/yy (26), yyyy (2026)">
+                  Date Stamp Format
+                </label>
+                <div style="display:flex; align-items:center; gap:5px;">
+                  <input
+                    type="text"
+                    class="vest-ed-input"
+                    id="vest-si-perm-date-format"
+                    value="${escapeHtml(sc.permDateFormat !== undefined ? sc.permDateFormat : 'M-d-y')}"
+                    placeholder="M-d-y"
+                    style="flex:1; min-width:74px; font-family:'JetBrains Mono', monospace; font-size:11.5px;"
+                    title="Custom date stamp format — e.g. M-d-y (10-19-26), MM/dd/yyyy (10/19/2026), MMM/d (Oct/19), yyyy-MM-dd"
+                  />
+                  <select class="vest-ed-select" id="vest-si-perm-date-preset" style="width:96px; padding:0 4px; font-size:11px;" title="Quick Date Format Presets">
+                    <option value="">Presets…</option>
+                    <option value="M-d-y" ${(sc.permDateFormat || 'M-d-y') === 'M-d-y' ? 'selected' : ''}>M-d-y (10-19-26)</option>
+                    <option value="MM-dd-yy" ${sc.permDateFormat === 'MM-dd-yy' ? 'selected' : ''}>MM-dd-yy (10-19-26)</option>
+                    <option value="M/d/y" ${sc.permDateFormat === 'M/d/y' ? 'selected' : ''}>M/d/y (10/19/26)</option>
+                    <option value="M-d-yyyy" ${sc.permDateFormat === 'M-d-yyyy' ? 'selected' : ''}>M-d-yyyy (10-19-2026)</option>
+                    <option value="MMM/d" ${sc.permDateFormat === 'MMM/d' ? 'selected' : ''}>MMM/d (Oct/19)</option>
+                    <option value="MMM d, y" ${sc.permDateFormat === 'MMM d, y' ? 'selected' : ''}>MMM d, y (Oct 19, 26)</option>
+                    <option value="yyyy-MM-dd" ${sc.permDateFormat === 'yyyy-MM-dd' ? 'selected' : ''}>yyyy-MM-dd</option>
+                    <option value="d-M-y" ${sc.permDateFormat === 'd-M-y' ? 'selected' : ''}>d-M-y (19-10-26)</option>
+                  </select>
+                </div>
+              </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Vertical Position</label>
                 <select class="vest-ed-select" id="vest-si-perm-vert-align">
@@ -2008,6 +2036,9 @@
                   <option value="left" ${sc.permLabelHorzAlign === 'left' ? 'selected' : ''}>Left (Start of Dotted Line)</option>
                 </select>
               </div>
+            </div>
+
+            <div class="vest-ed-grid-4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1.2fr; gap:10px;">
               <div class="vest-ed-field">
                 <label class="vest-ed-label">7-Day Line Style</label>
                 <select class="vest-ed-select" id="vest-si-perm-line-style">
@@ -2016,15 +2047,12 @@
                   <option value="0" ${Number(sc.permanentLineStyle ?? 1) === 0 ? 'selected' : ''}>Solid (─────)</option>
                 </select>
               </div>
-            </div>
-
-            <div class="vest-ed-grid-3">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Date Label Font Size: <span id="vest-si-perm-fontsize-val">${sc.permLabelFontSize || 11}px</span></label>
+                <label class="vest-ed-label">Font Size: <span id="vest-si-perm-fontsize-val">${sc.permLabelFontSize || 11}px</span></label>
                 <input type="range" class="vest-ed-range" id="vest-si-perm-font-size" min="8" max="24" value="${sc.permLabelFontSize || 11}" />
               </div>
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Date Label Font Style</label>
+                <label class="vest-ed-label">Font Style</label>
                 <select class="vest-ed-select" id="vest-si-perm-font-style">
                   <option value="normal" ${sc.permLabelFontStyle === 'normal' ? 'selected' : ''}>Normal</option>
                   <option value="bold" ${(sc.permLabelFontStyle || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
@@ -2036,7 +2064,7 @@
                 <label class="vest-ed-label">Date Label Color</label>
                 <div style="display:flex; align-items:center; gap:6px;">
                   <select class="vest-ed-select" id="vest-si-perm-color-mode" style="flex:1;">
-                    <option value="session" ${(sc.permLabelColorMode || 'session') === 'session' ? 'selected' : ''}>Match Session Color</option>
+                    <option value="session" ${(sc.permLabelColorMode || 'session') === 'session' ? 'selected' : ''}>Match Session</option>
                     <option value="custom" ${sc.permLabelColorMode === 'custom' ? 'selected' : ''}>Custom Color</option>
                   </select>
                   <input type="color" class="vest-ed-color" id="vest-si-perm-custom-color" value="${normalizeHexColor(sc.permLabelCustomColor, '#e2e8f0')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0; ${(sc.permLabelColorMode || 'session') === 'custom' ? '' : 'opacity:0.45;'}" title="Custom Date Label Text Color" />
@@ -2192,6 +2220,7 @@
         if (q('#vest-si-show-hl-labels')) sc.showHighLowLabels = Boolean(q('#vest-si-show-hl-labels').checked);
         if (q('#vest-si-show-midpoint')) sc.showMidPoint = Boolean(q('#vest-si-show-midpoint').checked);
         if (q('#vest-si-extend-midpoint')) sc.extendMidPoint = Boolean(q('#vest-si-extend-midpoint').checked);
+        if (q('#vest-si-perm-date-format')) sc.permDateFormat = q('#vest-si-perm-date-format').value || 'M-d-y';
         if (q('#vest-si-perm-vert-align')) sc.permLabelVertAlign = q('#vest-si-perm-vert-align').value || 'outside';
         if (q('#vest-si-perm-horz-align')) sc.permLabelHorzAlign = q('#vest-si-perm-horz-align').value || 'right';
         if (q('#vest-si-perm-line-style')) sc.permanentLineStyle = Number(q('#vest-si-perm-line-style').value ?? 1);
@@ -2296,6 +2325,18 @@
 
       // Live preview & range label updates on Session Indicators tab
       if (activeTab === 'sessions') {
+        const dateFmtInput = overlay.querySelector('#vest-si-perm-date-format');
+        const datePresetSelect = overlay.querySelector('#vest-si-perm-date-preset');
+        if (datePresetSelect && dateFmtInput) {
+          datePresetSelect.addEventListener('change', () => {
+            if (datePresetSelect.value) {
+              dateFmtInput.value = datePresetSelect.value;
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+
         const fontSizeRange = overlay.querySelector('#vest-si-font-size');
         const fontSizeVal = overlay.querySelector('#vest-si-fontsize-val');
         if (fontSizeRange && fontSizeVal) {
