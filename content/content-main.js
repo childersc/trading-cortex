@@ -2584,6 +2584,10 @@
           };
           try {
             window.localStorage.setItem(
+              '__trading_cortex_isolated_settings__',
+              JSON.stringify(currentSettings)
+            );
+            window.localStorage.setItem(
               '__trading_cortex_sidebar_state__',
               JSON.stringify(currentSettings.sidebarState)
             );
@@ -5373,12 +5377,18 @@
 
     const enabledDefs = config.sessions
       .filter(s => s && s.enabled)
-      .map(s => ({
-        ...s,
-        startMins: parseHhMmToMinutes(s.start),
-        endMins: parseHhMmToMinutes(s.end),
-        isOvernight: parseHhMmToMinutes(s.start) > parseHhMmToMinutes(s.end)
-      }));
+      .map(s => {
+        const rawStart = s.startTime || s.start || '09:30';
+        const rawEnd = s.endTime || s.end || '11:00';
+        const sMins = parseHhMmToMinutes(rawStart);
+        const eMins = parseHhMmToMinutes(rawEnd);
+        return {
+          ...s,
+          startMins: sMins,
+          endMins: eMins,
+          isOvernight: sMins > eMins
+        };
+      });
 
     if (enabledDefs.length === 0) return [];
 
@@ -5559,6 +5569,7 @@
       cachedIctBarsSignature = barsSig;
       cachedIctConfigSignature = configSig;
       ictSessionsNeedsFullRecompute = false;
+      logIctDiag(`Computed ${cachedIctComputedSessions.length} ICT session boxes across ${bars.length} bars`);
     }
 
     const cssWidth = overlay.clientWidth || targetCanvas.clientWidth || overlay.width;
@@ -5655,14 +5666,14 @@
     ctx.scale(dpr, dpr);
 
     const halfBarW = Math.max(1, barSpacing * 0.5);
-    const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(config.boxOpacity) || 12) / 100));
-    const watermarkAlpha = Math.max(0.05, Math.min(1, (Number(config.watermarkOpacity) || 28) / 100));
-    const fontFamily = config.fontFamily || 'Inter, -apple-system, BlinkMacSystemFont, sans-serif';
+    const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(config.boxOpacity) || 18) / 100));
+    const watermarkAlpha = Math.max(0.05, Math.min(1, (Number(config.watermarkOpacity) || 32) / 100));
+    const fontFamily = config.fontFamily || '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
     const baseFontSize = Math.max(12, Math.min(76, Number(config.fontSize) || 40));
-    const fontWeight = config.fontBold !== false ? '700' : '500';
+    const fontWeight = config.fontBold ? '700' : '500';
     const showWatermark = config.showWatermark !== false;
-    const showBorder = Boolean(config.showSessionBorder);
-    const extendHighLow = config.extendHighLow !== false;
+    const showBorder = Boolean(config.showBoxBorder || config.showSessionBorder);
+    const extendHighLow = (config.extendHighLowLines ?? config.extendHighLow) !== false;
     const showHighLowLabels = config.showHighLowLabels !== false;
     const hlLineStyle = Number(config.highLowLineStyle) || 0;
 
@@ -5722,9 +5733,9 @@
       ctx.strokeStyle = hexToRgbaString(colorHex, 85);
       ctx.lineWidth = 1.25;
       if (hlLineStyle === 1) {
-        ctx.setLineDash([6, 4]);
-      } else if (hlLineStyle === 2) {
         ctx.setLineDash([2, 3]);
+      } else if (hlLineStyle === 2) {
+        ctx.setLineDash([6, 4]);
       } else {
         ctx.setLineDash([]);
       }
@@ -5751,7 +5762,8 @@
       ctx.restore();
 
       // 3. Draw Centered Watermark Text inside Session Box (matching user's screenshot: "NY AM", "NY Lunch", "London", "Asia")
-      if (showWatermark && def.name && boxW > 24 && boxH > 16 && boxRight > 0 && boxLeft < cssWidth) {
+      const watermarkLabel = def.watermarkText !== undefined ? def.watermarkText : def.name;
+      if (showWatermark && watermarkLabel && boxW > 24 && boxH > 16 && boxRight > 0 && boxLeft < cssWidth) {
         ctx.save();
         // Clip watermark to the session box so it stays clean on narrow zoom levels
         ctx.beginPath();
@@ -5765,7 +5777,7 @@
         // Automatically scale down font if box is narrower than text width at current zoom level
         let fittedSize = baseFontSize;
         ctx.font = `${fontWeight} ${fittedSize}px ${fontFamily}`;
-        const measuredW = ctx.measureText(def.name).width;
+        const measuredW = ctx.measureText(watermarkLabel).width;
         if (measuredW > boxW * 0.88 && measuredW > 0) {
           fittedSize = Math.max(11, Math.floor(fittedSize * ((boxW * 0.88) / measuredW)));
         }
@@ -5774,13 +5786,13 @@
         }
 
         ctx.font = `${fontWeight} ${fittedSize}px ${fontFamily}`;
-        ctx.fillText(def.name, boxLeft + boxW / 2, boxTop + boxH / 2);
+        ctx.fillText(watermarkLabel, boxLeft + boxW / 2, boxTop + boxH / 2);
         ctx.restore();
       }
 
       // 4. Draw High / Low Labels above & below the session box (e.g. "NYAM.H" / "NYAM.L")
       if (showHighLowLabels && boxW > 18 && boxRight > 0 && boxLeft < cssWidth) {
-        const shortTag = def.shortLabel || String(def.name || '').replace(/\s+/g, '').toUpperCase().slice(0, 5);
+        const shortTag = def.shortTag || def.shortLabel || String(watermarkLabel || def.name || '').replace(/\s+/g, '').toUpperCase().slice(0, 5);
         if (shortTag) {
           ctx.save();
           ctx.fillStyle = hexToRgbaString(colorHex, 88);

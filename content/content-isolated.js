@@ -1781,6 +1781,11 @@
     ];
 
     function broadcastLiveSessionDraft() {
+      if (draftSettings.sessionIndicators) {
+        settings.sessionIndicators = JSON.parse(JSON.stringify(draftSettings.sessionIndicators));
+        queueSettingsSave({ sessionIndicators: settings.sessionIndicators });
+        renderStudioHeaderPill();
+      }
       postToMainWorlds({
         type: 'VEST_TV_CONFIG_UPDATE',
         payload: {
