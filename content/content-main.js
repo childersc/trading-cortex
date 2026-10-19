@@ -4867,31 +4867,44 @@
   }
 
   function findMainChartPaneCanvas() {
-    const docs = [document];
-    document.querySelectorAll('iframe').forEach(ifr => {
+    // IMPORTANT: content-main.js runs in BOTH the top window and the TradingView chart iframe!
+    // If we are in the top window and there is a child iframe that contains the TradingView chart canvas,
+    // let ONLY the child iframe instance render the ICT Sessions overlay so we NEVER mount two overlapping canvases!
+    const iframes = document.querySelectorAll('iframe');
+    for (let i = 0; i < iframes.length; i++) {
       try {
-        if (ifr.contentDocument) docs.push(ifr.contentDocument);
-      } catch (e) {}
-    });
-
-    let bestCanvas = null;
-    let bestArea = 0;
-
-    for (const doc of docs) {
-      try {
-        const canvases = doc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
-        for (const c of canvases) {
-          const rect = c.getBoundingClientRect();
-          if (rect.width < 240 || rect.height < 140) continue;
-          // Exclude price axis or time axis strip canvases (which are narrow or short)
-          const area = rect.width * rect.height;
-          if (area > bestArea) {
-            bestArea = area;
-            bestCanvas = c;
+        const ifrDoc = iframes[i].contentDocument;
+        const ifrWin = iframes[i].contentWindow;
+        if (ifrDoc && ifrWin && ifrWin.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) {
+          const childCanvases = ifrDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+          for (let j = 0; j < childCanvases.length; j++) {
+            const r = childCanvases[j].getBoundingClientRect();
+            if (r.width >= 240 && r.height >= 140) {
+              // The child iframe has its own initialized content-main.js and owns the chart canvas!
+              return null;
+            }
           }
         }
       } catch (e) {}
     }
+
+    let bestCanvas = null;
+    let bestArea = 0;
+
+    try {
+      const canvases = document.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+      for (const c of canvases) {
+        const rect = c.getBoundingClientRect();
+        if (rect.width < 240 || rect.height < 140) continue;
+        // Exclude price axis or time axis strip canvases (which are narrow or short)
+        const area = rect.width * rect.height;
+        if (area > bestArea) {
+          bestArea = area;
+          bestCanvas = c;
+        }
+      }
+    } catch (e) {}
+
     return bestCanvas;
   }
 
@@ -4899,6 +4912,21 @@
     if (!targetChartCanvas || !targetChartCanvas.parentElement) return null;
     const parent = targetChartCanvas.parentElement;
     const ownerDoc = targetChartCanvas.ownerDocument || document;
+
+    // Remove any stale duplicate .vest-ict-sessions-canvas elements in this document or child iframes
+    try {
+      const allExisting = parent.querySelectorAll('.vest-ict-sessions-canvas');
+      if (allExisting.length > 1) {
+        allExisting.forEach((el, idx) => {
+          if (idx > 0) {
+            try { el.remove(); } catch (e) {}
+          }
+        });
+        ictSessionsCanvas = allExisting[0];
+      } else if (allExisting.length === 1 && !ictSessionsCanvas) {
+        ictSessionsCanvas = allExisting[0];
+      }
+    } catch (e) {}
 
     if (!ictSessionsCanvas || !ictSessionsCanvas.isConnected || ictSessionsCanvas.parentElement !== parent) {
       if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
@@ -4964,35 +4992,18 @@
           roots.push(window[k]);
         }
       }
-      document.querySelectorAll('iframe').forEach(ifr => {
-        try {
-          if (ifr.contentWindow) {
-            for (const k of Object.keys(ifr.contentWindow)) {
-              if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget' || k === 'tradingViewApi') {
-                roots.push(ifr.contentWindow[k]);
-              }
-            }
-          }
-        } catch (e) {}
-      });
     } catch (e) {}
 
     // Also inspect React Fiber / DOM props on the chart container elements in case ChartWidget is attached to DOM
     try {
-      const docs = [document];
-      document.querySelectorAll('iframe').forEach(ifr => {
-        try { if (ifr.contentDocument) docs.push(ifr.contentDocument); } catch (e) {}
-      });
-      for (const doc of docs) {
-        const els = doc.querySelectorAll('[class*="chart-markup-table"], [class*="chart-gui-wrapper"], [class*="chart-container"]');
-        els.forEach(el => {
-          for (const k of Object.keys(el)) {
-            if (k.startsWith('__react') || k.startsWith('_')) {
-              roots.push(el[k]);
-            }
+      const els = document.querySelectorAll('[class*="chart-markup-table"], [class*="chart-gui-wrapper"], [class*="chart-container"]');
+      els.forEach(el => {
+        for (const k of Object.keys(el)) {
+          if (k.startsWith('__react') || k.startsWith('_')) {
+            roots.push(el[k]);
           }
-        });
-      }
+        }
+      });
     } catch (e) {}
 
     const visited = new Set();
@@ -5119,16 +5130,10 @@
 
   function extractSeriesBarsFromModel() {
     const model = findChartModelForSessions();
-    if (!model) {
-      logIctDiag('Could not locate TradingView ChartModel yet', { hasActiveChart: Boolean(activeChart), hasActiveChartApi: Boolean(activeChartApi) });
-      return null;
-    }
+    if (!model) return null;
 
     const mainSeries = findMainSeriesFromModel(model);
-    if (!mainSeries) {
-      logIctDiag('Found ChartModel, but could not locate mainSeries', Object.getOwnPropertyNames(model).slice(0, 20));
-      return null;
-    }
+    if (!mainSeries) return null;
 
     let plotList = null;
     try {
@@ -5141,7 +5146,6 @@
       } else if (mainSeries._bars) {
         plotList = mainSeries._bars;
       } else {
-        // Scan mainSeries keys for a PlotList-like object (has firstIndex/lastIndex/valueAt or _items or m_bars)
         for (const k of Object.getOwnPropertyNames(mainSeries)) {
           try {
             const candidate = mainSeries[k];
@@ -5163,10 +5167,7 @@
       }
     } catch (e) {}
 
-    if (!plotList) {
-      logIctDiag('Found mainSeries, but could not locate plotList/bars', Object.getOwnPropertyNames(mainSeries).slice(0, 20));
-      return null;
-    }
+    if (!plotList) return null;
 
     const rawItems = [];
     try {
@@ -5199,7 +5200,6 @@
         }
       }
       if (rawItems.length === 0) {
-        // Scan plotList own properties (and 1 level deep) for an array of bar items or chunks
         for (const pk of Object.getOwnPropertyNames(plotList)) {
           try {
             const arr = plotList[pk];
@@ -5221,28 +5221,39 @@
       }
     } catch (e) {}
 
-    if (rawItems.length === 0) {
-      logIctDiag('Found plotList, but extracted 0 rawItems', {
-        ownKeys: Object.getOwnPropertyNames(plotList),
-        protoKeys: Object.getOwnPropertyNames(Object.getPrototypeOf(plotList) || {})
-      });
-      return null;
-    }
+    if (rawItems.length === 0) return null;
 
     const timeScale = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
-    const normalizedBars = [];
-    // Limit to last 4500 bars for fast real-time computation
-    const sliceStart = Math.max(0, rawItems.length - 4500);
 
-    // Determine resolution seconds as fallback for estimating bar timestamps if timeScale only maps visible range
-    let resolutionSeconds = 300;
-    try {
-      if (activeChart && typeof activeChart.resolution === 'function') {
-        const r = String(activeChart.resolution() || '5').trim();
-        const mins = parseInt(r, 10);
-        if (isFinite(mins) && mins > 0) resolutionSeconds = mins * 60;
-      }
-    } catch (e) {}
+    // Also locate timeScale's internal _points / m_points array (which maps barIndex -> unixSeconds in TradingView)
+    let tsPointsArray = null;
+    if (timeScale) {
+      try {
+        for (const tk of Object.getOwnPropertyNames(timeScale)) {
+          const tv = timeScale[tk];
+          if (tv && typeof tv === 'object') {
+            if (typeof tv.indexToTimePoint === 'function') {
+              // Internal TimePoints / TimeScalePoints object
+              const ptsFn = tv;
+              if (!timeScale.__vestTimePointsObj) timeScale.__vestTimePointsObj = ptsFn;
+            }
+            for (const sk of Object.getOwnPropertyNames(tv)) {
+              const sv = tv[sk];
+              if (Array.isArray(sv) && sv.length > 0 && typeof sv[sv.length - 1] === 'number' && sv[sv.length - 1] > 1e8) {
+                tsPointsArray = sv;
+                break;
+              }
+            }
+          }
+          if (Array.isArray(tv) && tv.length > 0 && typeof tv[tv.length - 1] === 'number' && tv[tv.length - 1] > 1e8) {
+            tsPointsArray = tv;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const normalizedBars = [];
+    const sliceStart = Math.max(0, rawItems.length - 4500);
 
     for (let i = sliceStart; i < rawItems.length; i++) {
       const item = rawItems[i];
@@ -5258,7 +5269,7 @@
       let close = null;
 
       if (Array.isArray(v)) {
-        // TradingView PlotList bar value is typically [timeOrIndex, open, high, low, close, volume]
+        // TradingView PlotList bar value is [timeOrIndex, open, high, low, close, volume]
         const v0 = Number(v[0]);
         if (v0 > 1e8) {
           timeSec = v0 > 1e11 ? Math.floor(v0 / 1000) : v0;
@@ -5268,7 +5279,7 @@
         low = Number(v[3]);
         close = Number(v[4]);
       } else if (v && typeof v === 'object') {
-        const rawT = v.time ?? v.timestamp ?? v.t ?? v[0];
+        const rawT = v.time ?? v.timestamp ?? v.t ?? v.timePoint ?? v[0];
         if (typeof rawT === 'number' && rawT > 1e8) {
           timeSec = rawT > 1e11 ? Math.floor(rawT / 1000) : rawT;
         }
@@ -5281,7 +5292,7 @@
       if (!timeSec && typeof item.time === 'number' && item.time > 1e8) {
         timeSec = item.time > 1e11 ? Math.floor(item.time / 1000) : item.time;
       }
-      if (!timeSec && item.timePoint && typeof item.timePoint === 'number' && item.timePoint > 1e8) {
+      if (!timeSec && typeof item.timePoint === 'number' && item.timePoint > 1e8) {
         timeSec = item.timePoint > 1e11 ? Math.floor(item.timePoint / 1000) : item.timePoint;
       }
 
@@ -5289,6 +5300,12 @@
         try {
           if (typeof timeScale.indexToTimePoint === 'function') {
             const tp = timeScale.indexToTimePoint(barIndex);
+            if (typeof tp === 'number' && tp > 1e8) {
+              timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
+            }
+          }
+          if (!timeSec && timeScale.__vestTimePointsObj && typeof timeScale.__vestTimePointsObj.indexToTimePoint === 'function') {
+            const tp = timeScale.__vestTimePointsObj.indexToTimePoint(barIndex);
             if (typeof tp === 'number' && tp > 1e8) {
               timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
             }
@@ -5306,12 +5323,17 @@
               timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
             }
           }
+          if (!timeSec && tsPointsArray && tsPointsArray[barIndex] > 1e8) {
+            const tp = tsPointsArray[barIndex];
+            timeSec = tp > 1e11 ? Math.floor(tp / 1000) : tp;
+          }
         } catch (e) {}
       }
 
       if (
         typeof timeSec === 'number' &&
         isFinite(timeSec) &&
+        timeSec > 1e8 &&
         isFinite(high) &&
         isFinite(low) &&
         high >= low
@@ -5324,49 +5346,14 @@
           low,
           close
         });
-      } else if (isFinite(high) && isFinite(low) && high >= low && typeof barIndex === 'number') {
-        // Keep bar with null timeSec temporarily so we can backfill from known anchor timestamps if needed
-        normalizedBars.push({
-          barIndex,
-          timeSec: null,
-          open,
-          high,
-          low,
-          close
-        });
       }
-    }
-
-    // If any bars lacked direct timestamps, backfill using activeChart.getVisibleRange() + timeScale.coordinateToIndex / baseIndex
-    const hasValidTimes = normalizedBars.some(b => typeof b.timeSec === 'number' && b.timeSec > 1e8);
-    if (!hasValidTimes && normalizedBars.length > 0 && activeChart && typeof activeChart.getVisibleRange === 'function') {
-      try {
-        const vr = activeChart.getVisibleRange();
-        if (vr && typeof vr.to === 'number' && vr.to > 1e8) {
-          const lastIdx = normalizedBars[normalizedBars.length - 1].barIndex;
-          for (let i = 0; i < normalizedBars.length; i++) {
-            const b = normalizedBars[i];
-            b.timeSec = vr.to - (lastIdx - b.barIndex) * resolutionSeconds;
-          }
-        }
-      } catch (e) {}
-    }
-
-    const validBars = normalizedBars.filter(b => typeof b.timeSec === 'number' && isFinite(b.timeSec) && b.timeSec > 1e8);
-    if (validBars.length === 0) {
-      logIctDiag('Extracted rawItems, but 0 validBars with timestamps', {
-        rawCount: rawItems.length,
-        sampleItem: rawItems[rawItems.length - 1]
-      });
-    } else {
-      logIctDiag(`Ready: ${validBars.length} bars extracted from TradingView mainSeries`);
     }
 
     return {
       model,
       mainSeries,
       timeScale,
-      bars: validBars
+      bars: normalizedBars
     };
   }
 
@@ -5534,7 +5521,7 @@
     const config = currentSettings && currentSettings.sessionIndicators;
     const targetCanvas = findMainChartPaneCanvas();
 
-    if (!config || !config.enabled || !isIntradayChartResolution()) {
+    if (!config || !config.enabled || !isIntradayChartResolution() || !targetCanvas) {
       if (ictSessionsCanvas) {
         const ctx = ictSessionsCanvas.getContext('2d');
         if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
@@ -5542,7 +5529,10 @@
       return;
     }
 
-    if (!targetCanvas) return;
+    // Hook TradingView's main chart canvas clearRect so whenever TradingView repaints a frame during pan/zoom/tick,
+    // our session indicator overlay repaints in the exact same frame with zero lag!
+    hookTargetChartCanvasRepaint(targetCanvas);
+
     const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
     if (!overlay) return;
 
@@ -5556,8 +5546,20 @@
     }
 
     const { mainSeries, timeScale, bars } = extracted;
+
+    // Also incorporate live ticker price into the current forming bar if price just made a new intrabar high or low!
     const lastBar = bars[bars.length - 1];
-    const barsSig = `${bars.length}_${ bars[0].timeSec }_${lastBar.timeSec}_${lastBar.high}_${lastBar.low}_${lastBar.close}`;
+    if (lastBar && lastTrackedPrice) {
+      const liveNum = parseFloat(String(lastTrackedPrice).replace(/,/g, ''));
+      if (isFinite(liveNum) && liveNum > 0) {
+        if (liveNum > lastBar.high) lastBar.high = liveNum;
+        if (liveNum < lastBar.low) lastBar.low = liveNum;
+        lastBar.close = liveNum;
+      }
+    }
+
+    const prevBar = bars.length > 1 ? bars[bars.length - 2] : lastBar;
+    const barsSig = `${bars.length}_${bars[0].timeSec}_${prevBar.high}_${prevBar.low}_${lastBar.timeSec}_${lastBar.high}_${lastBar.low}_${lastBar.close}`;
     const configSig = JSON.stringify(config);
 
     if (
@@ -5569,7 +5571,6 @@
       cachedIctBarsSignature = barsSig;
       cachedIctConfigSignature = configSig;
       ictSessionsNeedsFullRecompute = false;
-      logIctDiag(`Computed ${cachedIctComputedSessions.length} ICT session boxes across ${bars.length} bars`);
     }
 
     const cssWidth = overlay.clientWidth || targetCanvas.clientWidth || overlay.width;
@@ -5621,9 +5622,11 @@
     let firstValue = null;
     try {
       if (mainSeries && typeof mainSeries.firstValue === 'function') {
-        firstValue = mainSeries.firstValue();
+        const fv = mainSeries.firstValue();
+        firstValue = (fv && typeof fv === 'object' && 'value' in fv) ? fv.value : fv;
       } else if (internalPs && typeof internalPs.firstValue === 'function') {
-        firstValue = internalPs.firstValue();
+        const fv = internalPs.firstValue();
+        firstValue = (fv && typeof fv === 'object' && 'value' in fv) ? fv.value : fv;
       }
     } catch (e) {}
 
@@ -5816,6 +5819,32 @@
     ctx.restore();
   }
 
+  let hookedRepaintCanvases = new WeakSet();
+  let isInsideSyncedRepaint = false;
+
+  function hookTargetChartCanvasRepaint(targetCanvas) {
+    if (!targetCanvas || hookedRepaintCanvases.has(targetCanvas)) return;
+    const ctx = targetCanvas.getContext('2d');
+    if (!ctx) return;
+    hookedRepaintCanvases.add(targetCanvas);
+
+    // Whenever TradingView clears its main chart canvas to draw a new frame (on pan, zoom, price scale drag, or live tick),
+    // immediately synchronize our session indicator canvas on the exact same animation frame!
+    const origClearRect = ctx.clearRect;
+    ctx.clearRect = function () {
+      const res = origClearRect.apply(this, arguments);
+      if (!isInsideSyncedRepaint) {
+        isInsideSyncedRepaint = true;
+        try {
+          renderIctSessionIndicators();
+        } catch (e) {} finally {
+          isInsideSyncedRepaint = false;
+        }
+      }
+      return res;
+    };
+  }
+
   function scheduleIctSessionsRender(forceRecompute = false) {
     if (forceRecompute) {
       ictSessionsNeedsFullRecompute = true;
@@ -5829,7 +5858,7 @@
     if (ictSessionsObserverInitialized) return;
 
     try {
-      const model = getInternalChartModel() || getChartModel();
+      const model = findChartModelForSessions();
       if (model) {
         const ts = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
         if (ts) {
@@ -5839,7 +5868,7 @@
               if (typeof ts[evName] === 'function') {
                 const sub = ts[evName]();
                 if (sub && typeof sub.subscribe === 'function') {
-                  sub.subscribe(null, () => scheduleIctSessionsRender(false));
+                  sub.subscribe(null, () => renderIctSessionIndicators());
                 }
               }
             } catch (e) {}
@@ -5850,7 +5879,7 @@
         if (typeof activeChart.onVisibleRangeChanged === 'function') {
           const sub = activeChart.onVisibleRangeChanged();
           if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => scheduleIctSessionsRender(false));
+            sub.subscribe(null, () => renderIctSessionIndicators());
           }
         }
         if (typeof activeChart.onIntervalChanged === 'function') {
@@ -5867,23 +5896,6 @@
         }
       }
     } catch (e) {}
-
-    const docs = [document];
-    document.querySelectorAll('iframe').forEach(ifr => {
-      try {
-        if (ifr.contentDocument) docs.push(ifr.contentDocument);
-      } catch (e) {}
-    });
-
-    docs.forEach(doc => {
-      try {
-        doc.addEventListener('mousemove', (e) => {
-          if (e.buttons > 0) scheduleIctSessionsRender(false);
-        }, { passive: true });
-        doc.addEventListener('wheel', () => scheduleIctSessionsRender(false), { passive: true });
-        doc.addEventListener('touchmove', () => scheduleIctSessionsRender(false), { passive: true });
-      } catch (e) {}
-    });
 
     window.addEventListener('resize', () => scheduleIctSessionsRender(false), { passive: true });
     ictSessionsObserverInitialized = true;
