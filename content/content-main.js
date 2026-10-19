@@ -4794,104 +4794,10 @@
     }
   })();
 
-  let cachedChartTz = null;
-  let cachedChartTzFormatter = null;
-  let lastChartTzCheckMs = 0;
-
-  function getActiveChartDisplayTimeZone() {
-    const now = Date.now();
-    if (cachedChartTz && now - lastChartTzCheckMs < 3000) {
-      return cachedChartTz;
-    }
-    lastChartTzCheckMs = now;
-
-    // 1. Check TradingView ChartModel / Widget timezone API
-    try {
-      const model = getInternalChartModel() || getChartModel();
-      if (model) {
-        if (typeof model.timezone === 'function') {
-          const tz = model.timezone();
-          const tzVal = (tz && typeof tz === 'object' && typeof tz.value === 'function') ? tz.value() : tz;
-          if (typeof tzVal === 'string' && tzVal && tzVal !== 'exchange') {
-            cachedChartTz = tzVal;
-            return cachedChartTz;
-          }
-        }
-        if (model._timezone) {
-          const tzVal = typeof model._timezone.value === 'function' ? model._timezone.value() : model._timezone;
-          if (typeof tzVal === 'string' && tzVal && tzVal !== 'exchange') {
-            cachedChartTz = tzVal;
-            return cachedChartTz;
-          }
-        }
-      }
-      if (activeChart && typeof activeChart.getTimezoneApi === 'function') {
-        const tzApi = activeChart.getTimezoneApi();
-        if (tzApi && typeof tzApi.getTimezone === 'function') {
-          const tzObj = tzApi.getTimezone();
-          if (tzObj && typeof tzObj.id === 'string' && tzObj.id !== 'exchange') {
-            cachedChartTz = tzObj.id;
-            return cachedChartTz;
-          }
-        }
-      }
-    } catch (e) {}
-
-    // 2. Check localStorage tradingview.chartproperties timezone
-    try {
-      const rawProps = window.localStorage.getItem('tradingview.chartproperties');
-      if (rawProps) {
-        const parsed = JSON.parse(rawProps);
-        if (parsed && typeof parsed.timezone === 'string' && parsed.timezone !== 'exchange') {
-          cachedChartTz = parsed.timezone;
-          return cachedChartTz;
-        }
-      }
-    } catch (e) {}
-
-    // 3. Fallback to browser's local timezone (which TradingView defaults to when not overridden) or America/New_York
-    try {
-      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (browserTz) {
-        cachedChartTz = browserTz;
-        return cachedChartTz;
-      }
-    } catch (e) {}
-
-    return 'America/New_York';
-  }
-
-  function getFormatterForTimeZone(tz) {
-    const targetTz = tz || 'America/New_York';
-    if (cachedChartTzFormatter && cachedChartTzFormatter.__tz === targetTz) {
-      return cachedChartTzFormatter;
-    }
-    try {
-      const fmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: targetTz,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      fmt.__tz = targetTz;
-      cachedChartTzFormatter = fmt;
-      return fmt;
-    } catch (e) {
-      return nyDateFormatter;
-    }
-  }
-
-  function getNyDateParts(unixSec, tzOverride) {
+  function getNyDateParts(unixSec) {
     const ms = unixSec > 1e11 ? unixSec : unixSec * 1000;
     const d = new Date(ms);
-    const resolvedTz = (!tzOverride || tzOverride === 'chart' || tzOverride === 'local')
-      ? getActiveChartDisplayTimeZone()
-      : tzOverride;
-    const fmt = getFormatterForTimeZone(resolvedTz) || nyDateFormatter;
-    if (!fmt) {
+    if (!nyDateFormatter) {
       const y = d.getUTCFullYear();
       const m = String(d.getUTCMonth() + 1).padStart(2, '0');
       const day = String(d.getUTCDate()).padStart(2, '0');
@@ -4900,7 +4806,7 @@
         minutesOfDay: d.getUTCHours() * 60 + d.getUTCMinutes()
       };
     }
-    const parts = fmt.formatToParts(d);
+    const parts = nyDateFormatter.formatToParts(d);
     let year = '1970';
     let month = '01';
     let day = '01';
@@ -5367,7 +5273,9 @@
       const item = rawItems[i];
       if (!item) continue;
 
-      let barIndex = typeof item.index === 'number' ? item.index : i;
+      let barIndex = typeof item.index === 'number'
+        ? item.index
+        : (typeof item.timePointIndex === 'number' ? item.timePointIndex : i);
       const v = item.value !== undefined ? item.value : item;
 
       let timeSec = null;
@@ -5380,9 +5288,10 @@
         const v0 = Number(v[0]);
         if (v0 > 1e8) {
           timeSec = v0 > 1e11 ? Math.floor(v0 / 1000) : v0;
+        } else if (typeof item.index !== 'number' && Number.isInteger(v0) && v0 >= 0 && v0 < 1e7) {
+          // In some TradingView PlotList versions, v[0] is the timePointIndex!
+          barIndex = v0;
         }
-        // In TradingView PlotList items, value is ALWAYS [timePoint, open, high, low, close, volume]:
-        // v[1] = open, v[2] = high, v[3] = low, v[4] = close
         open = Number(v[1]);
         high = Number(v[2]);
         low = Number(v[3]);
@@ -5413,6 +5322,7 @@
         timeSec = item.timePoint > 1e11 ? Math.floor(item.timePoint / 1000) : item.timePoint;
       }
 
+      // Always prefer timeScale.indexToTimePoint(barIndex) or tsPointsArray[barIndex] when timeSec wasn't embedded in v[0]
       if (!timeSec && timeScale && typeof barIndex === 'number') {
         try {
           if (typeof timeScale.indexToTimePoint === 'function') {
@@ -5496,15 +5406,14 @@
 
     if (enabledDefs.length === 0) return [];
 
-    // Pre-compute dateKey & minutesOfDay for each bar aligned with the chart's displayed clock
+    // Pre-compute NY dateKey & minutesOfDay for each bar (ICT sessions always use New York time EST/EDT)
     const annotated = new Array(bars.length);
     const uniqueDateKeys = [];
     let lastSeenDate = null;
-    const tzMode = (config.timezone && config.timezone !== 'America/New_York') ? config.timezone : 'chart';
 
     for (let i = 0; i < bars.length; i++) {
       const b = bars[i];
-      const ny = getNyDateParts(b.timeSec, tzMode);
+      const ny = getNyDateParts(b.timeSec);
       annotated[i] = {
         ...b,
         barIdxInArray: i,
