@@ -4923,17 +4923,40 @@
     return ictSessionsCanvas;
   }
 
+  let lastIctDiagMsg = '';
+  function logIctDiag(msg, extra) {
+    if (msg === lastIctDiagMsg) return;
+    lastIctDiagMsg = msg;
+    console.log('[TradingCortex:Sessions]', msg, extra !== undefined ? extra : '');
+  }
+
   function findChartModelForSessions() {
+    // 1. Check direct helpers first
     const direct = getInternalChartModel() || getChartModel();
     if (direct && (typeof direct.mainSeries === 'function' || direct._mainSeries)) {
       return direct;
     }
 
-    // Deep search activeChart, activeChartApi, activeWidget, and window.tradingview_* for an object with .mainSeries() and .timeScale()
+    // 2. If there is any drawing shape on the chart, its internal source._model is ALWAYS the exact ChartModel!
+    try {
+      if (activeChart && typeof activeChart.getAllShapes === 'function') {
+        const all = activeChart.getAllShapes() || [];
+        for (const s of all) {
+          if (!s || !s.id) continue;
+          const sh = activeChart.getShapeById(s.id);
+          const src = extractInternalSourceFromShape(sh, s.id);
+          if (src && src._model && (typeof src._model.mainSeries === 'function' || src._model._mainSeries)) {
+            return src._model;
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 3. Deep search activeChart, activeChartApi, activeWidget, and window.tradingview_* (including Symbols & prototypes)
     const roots = [activeChart, activeChartApi, activeWidget];
     try {
       for (const k of Object.keys(window)) {
-        if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget') {
+        if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget' || k === 'tradingViewApi') {
           roots.push(window[k]);
         }
       }
@@ -4950,51 +4973,95 @@
       });
     } catch (e) {}
 
+    // Also inspect React Fiber / DOM props on the chart container elements in case ChartWidget is attached to DOM
+    try {
+      const docs = [document];
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try { if (ifr.contentDocument) docs.push(ifr.contentDocument); } catch (e) {}
+      });
+      for (const doc of docs) {
+        const els = doc.querySelectorAll('[class*="chart-markup-table"], [class*="chart-gui-wrapper"], [class*="chart-container"]');
+        els.forEach(el => {
+          for (const k of Object.keys(el)) {
+            if (k.startsWith('__react') || k.startsWith('_')) {
+              roots.push(el[k]);
+            }
+          }
+        });
+      }
+    } catch (e) {}
+
     const visited = new Set();
     const queue = [];
     roots.forEach(r => {
       if (r && typeof r === 'object') queue.push({ obj: r, depth: 0 });
     });
 
+    const isChartModelLike = (o) => {
+      if (!o || typeof o !== 'object') return false;
+      try {
+        if (typeof o.mainSeries === 'function' || o._mainSeries) return true;
+        if (typeof o.timeScale === 'function' && (typeof o.panes === 'function' || Array.isArray(o._panes))) return true;
+      } catch (e) {}
+      return false;
+    };
+
     while (queue.length > 0) {
       const { obj, depth } = queue.shift();
-      if (!obj || typeof obj !== 'object' || visited.has(obj) || depth > 4) continue;
+      if (!obj || typeof obj !== 'object' || visited.has(obj) || depth > 5) continue;
       visited.add(obj);
 
       try {
-        if (typeof obj.mainSeries === 'function' && typeof obj.timeScale === 'function') {
+        if (isChartModelLike(obj)) {
           return obj;
         }
         if (typeof obj.model === 'function') {
-          const m = obj.model();
-          if (m && typeof m === 'object') {
-            if (typeof m.mainSeries === 'function') return m;
-            if (typeof m.model === 'function') {
-              const mm = m.model();
-              if (mm && typeof mm.mainSeries === 'function') return mm;
+          try {
+            const m = obj.model();
+            if (m && typeof m === 'object') {
+              if (isChartModelLike(m)) return m;
+              if (typeof m.model === 'function') {
+                const mm = m.model();
+                if (isChartModelLike(mm)) return mm;
+              }
+              queue.push({ obj: m, depth: depth + 1 });
             }
-            queue.push({ obj: m, depth: depth + 1 });
-          }
+          } catch (e) {}
         }
         if (typeof obj._chartWidget === 'function') {
-          const cw = obj._chartWidget();
-          if (cw) queue.push({ obj: cw, depth: depth + 1 });
+          try {
+            const cw = obj._chartWidget();
+            if (cw) queue.push({ obj: cw, depth: depth + 1 });
+          } catch (e) {}
         }
-        if (typeof obj.activeChart === 'function' && depth === 0) {
-          const ac = obj.activeChart();
-          if (ac) queue.push({ obj: ac, depth: depth + 1 });
+        if (typeof obj.activeChart === 'function' && depth <= 1) {
+          try {
+            const ac = obj.activeChart();
+            if (ac) queue.push({ obj: ac, depth: depth + 1 });
+          } catch (e) {}
+        }
+        if (typeof obj.chartWidget === 'function') {
+          try {
+            const cw = obj.chartWidget();
+            if (cw) queue.push({ obj: cw, depth: depth + 1 });
+          } catch (e) {}
         }
 
-        const keys = [...Object.keys(obj), ...Object.getOwnPropertyNames(obj)];
+        const keys = [
+          ...Object.keys(obj),
+          ...Object.getOwnPropertyNames(obj),
+          ...(typeof Object.getOwnPropertySymbols === 'function' ? Object.getOwnPropertySymbols(obj) : [])
+        ];
         for (const k of keys) {
-          if (k === 'parent' || k === 'window' || k === 'document' || k.startsWith('__')) continue;
+          const kStr = String(k);
+          if (kStr === 'parent' || kStr === 'window' || kStr === 'document' || kStr === 'ownerDocument' || kStr.startsWith('__vest')) continue;
           try {
             const val = obj[k];
             if (val && typeof val === 'object') {
-              if (typeof val.mainSeries === 'function' && typeof val.timeScale === 'function') {
+              if (isChartModelLike(val)) {
                 return val;
               }
-              if (depth < 3 && (k.includes('model') || k.includes('Model') || k.includes('chart') || k.includes('Chart') || k.includes('widget') || k.includes('Widget') || k.startsWith('_'))) {
+              if (depth < 4) {
                 queue.push({ obj: val, depth: depth + 1 });
               }
             }
@@ -5006,19 +5073,58 @@
     return direct || null;
   }
 
-  function extractSeriesBarsFromModel() {
-    const model = findChartModelForSessions();
+  function findMainSeriesFromModel(model) {
     if (!model) return null;
-
-    let mainSeries = null;
     try {
       if (typeof model.mainSeries === 'function') {
-        mainSeries = model.mainSeries();
-      } else if (model._mainSeries) {
-        mainSeries = model._mainSeries;
+        const ms = model.mainSeries();
+        if (ms) return ms;
+      }
+      if (model._mainSeries) return model._mainSeries;
+
+      // Scan panes()[0].mainDataSource() or dataSources()
+      const panes = typeof model.panes === 'function' ? model.panes() : model._panes;
+      if (Array.isArray(panes) && panes.length > 0) {
+        const p0 = panes[0];
+        if (p0) {
+          if (typeof p0.mainDataSource === 'function') {
+            const mds = p0.mainDataSource();
+            if (mds) return mds;
+          }
+          const dss = typeof p0.dataSources === 'function' ? p0.dataSources() : p0._dataSources;
+          if (Array.isArray(dss)) {
+            for (const ds of dss) {
+              if (ds && (typeof ds.bars === 'function' || ds._bars || ds._data)) return ds;
+            }
+          }
+        }
+      }
+
+      // Scan own keys on model for an object with .bars() or .priceScale() + .symbol()
+      for (const k of Object.getOwnPropertyNames(model)) {
+        try {
+          const v = model[k];
+          if (v && typeof v === 'object' && (typeof v.bars === 'function' || v._bars)) {
+            return v;
+          }
+        } catch (e) {}
       }
     } catch (e) {}
-    if (!mainSeries) return null;
+    return null;
+  }
+
+  function extractSeriesBarsFromModel() {
+    const model = findChartModelForSessions();
+    if (!model) {
+      logIctDiag('Could not locate TradingView ChartModel yet', { hasActiveChart: Boolean(activeChart), hasActiveChartApi: Boolean(activeChartApi) });
+      return null;
+    }
+
+    const mainSeries = findMainSeriesFromModel(model);
+    if (!mainSeries) {
+      logIctDiag('Found ChartModel, but could not locate mainSeries', Object.getOwnPropertyNames(model).slice(0, 20));
+      return null;
+    }
 
     let plotList = null;
     try {
@@ -5031,18 +5137,18 @@
       } else if (mainSeries._bars) {
         plotList = mainSeries._bars;
       } else {
-        // Scan mainSeries keys for a PlotList-like object (has firstIndex/lastIndex/valueAt or _items)
+        // Scan mainSeries keys for a PlotList-like object (has firstIndex/lastIndex/valueAt or _items or m_bars)
         for (const k of Object.getOwnPropertyNames(mainSeries)) {
           try {
             const candidate = mainSeries[k];
             if (candidate && typeof candidate === 'object') {
-              if (typeof candidate.firstIndex === 'function' && typeof candidate.lastIndex === 'function') {
+              if (typeof candidate.firstIndex === 'function' || typeof candidate.lastIndex === 'function' || Array.isArray(candidate._items)) {
                 plotList = candidate;
                 break;
               }
               if (typeof candidate.bars === 'function') {
                 const b = candidate.bars();
-                if (b && (typeof b.firstIndex === 'function' || Array.isArray(b._items))) {
+                if (b && typeof b === 'object') {
                   plotList = b;
                   break;
                 }
@@ -5052,7 +5158,11 @@
         }
       }
     } catch (e) {}
-    if (!plotList) return null;
+
+    if (!plotList) {
+      logIctDiag('Found mainSeries, but could not locate plotList/bars', Object.getOwnPropertyNames(mainSeries).slice(0, 20));
+      return null;
+    }
 
     const rawItems = [];
     try {
@@ -5085,20 +5195,35 @@
         }
       }
       if (rawItems.length === 0) {
-        // Scan plotList own properties for an array of bar chunks or rows
+        // Scan plotList own properties (and 1 level deep) for an array of bar items or chunks
         for (const pk of Object.getOwnPropertyNames(plotList)) {
           try {
             const arr = plotList[pk];
             if (Array.isArray(arr) && arr.length > 0) {
               for (let i = 0; i < arr.length; i++) rawItems.push(arr[i]);
-              break;
+              if (rawItems.length > 0) break;
+            } else if (arr && typeof arr === 'object') {
+              for (const sk of Object.getOwnPropertyNames(arr)) {
+                const subArr = arr[sk];
+                if (Array.isArray(subArr) && subArr.length > 0) {
+                  for (let i = 0; i < subArr.length; i++) rawItems.push(subArr[i]);
+                  if (rawItems.length > 0) break;
+                }
+              }
+              if (rawItems.length > 0) break;
             }
           } catch (e) {}
         }
       }
     } catch (e) {}
 
-    if (rawItems.length === 0) return null;
+    if (rawItems.length === 0) {
+      logIctDiag('Found plotList, but extracted 0 rawItems', {
+        ownKeys: Object.getOwnPropertyNames(plotList),
+        protoKeys: Object.getOwnPropertyNames(Object.getPrototypeOf(plotList) || {})
+      });
+      return null;
+    }
 
     const timeScale = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
     const normalizedBars = [];
@@ -5224,6 +5349,14 @@
     }
 
     const validBars = normalizedBars.filter(b => typeof b.timeSec === 'number' && isFinite(b.timeSec) && b.timeSec > 1e8);
+    if (validBars.length === 0) {
+      logIctDiag('Extracted rawItems, but 0 validBars with timestamps', {
+        rawCount: rawItems.length,
+        sampleItem: rawItems[rawItems.length - 1]
+      });
+    } else {
+      logIctDiag(`Ready: ${validBars.length} bars extracted from TradingView mainSeries`);
+    }
 
     return {
       model,
