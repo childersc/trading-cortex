@@ -98,6 +98,7 @@
   }
 
   let templates = [];
+  let globalDrawings = [];
 
   const SESSION_FONT_FAMILIES = [
     { id: '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif', label: 'Trebuchet MS / Default' },
@@ -121,6 +122,7 @@
     fontSize: 40,
     fontBold: false,
     extendHighLowLines: true,
+    highLowLineExtensionMode: 'uncleared', // 'uncleared' | 'all'
     showPermanentDottedHighLow: true,
     permanentLinesDays: 7,
     permanentLineStyle: 1, // 0=solid, 1=dotted, 2=dashed
@@ -230,6 +232,8 @@
       ...base,
       ...rawCfg
     };
+    const rawLineExtensionMode = String(rawCfg.highLowLineExtensionMode || 'uncleared').toLowerCase();
+    merged.highLowLineExtensionMode = rawLineExtensionMode === 'all' || rawLineExtensionMode === 'right' ? 'all' : 'uncleared';
 
     const incomingSessions = Array.isArray(rawCfg.sessions) ? rawCfg.sessions : [];
     const byId = new Map();
@@ -255,6 +259,966 @@
     return merged;
   }
 
+  const DEFAULT_AUTO_FVG = {
+    enabled: false,
+    reclaimMode: 'close', // 'close' (Candle Body Close through FVG) | 'wick' (Full Wick Mitigation through FVG)
+    extendMode: 'right', // 'right' (Extend Far Right until Reclaimed) | 'current' (Extend to Current Bar + Extra Bars until Reclaimed) | 'template' (Follow Matched Template's Extend Right setting)
+    extendFutureBars: 0, // Number of bars to extend past the current time bar when not extending to the far right (e.g. 0 = current bar, 5 = 5 bars past current bar)
+    hideReclaimed: false, // If true, hides FVGs once they are reclaimed; if false, freezes them at the reclaim candle
+    showReclaimed: true, // Inverse of hideReclaimed — toggled via the dedicated Reclaimed FVG's settings box
+    reclaimedColorMode: 'custom', // 'custom' (Automatically recolor reclaimed FVGs to custom colors) | 'dim' (Keep original template color dimmed)
+    reclaimedColor: '#787b86', // Legacy/fallback base reclaimed color
+    reclaimedOpacity: 18, // Legacy/fallback base reclaimed fill opacity %
+    reclaimedBoxColor: '#787b86', // Reclaimed Box Fill Color
+    reclaimedBoxOpacity: 18, // Reclaimed Box Fill Opacity (0–100%)
+    reclaimedBorderColor: '#787b86', // Reclaimed Border Color
+    reclaimedBorderOpacity: 65, // Reclaimed Border Opacity (0–100%)
+    reclaimedMidlineColor: '#787b86', // Reclaimed 50% Middle Line Color
+    reclaimedMidlineOpacity: 60, // Reclaimed 50% Middle Line Opacity (0–100%)
+    maxBarsLookback: 600,
+    maxActiveFvgs: 25,
+    showReclaimedHistoryCount: 15,
+    minGapPercent: 0, // Minimum gap size % (0 = all valid 3-candle FVGs)
+    bullishTemplateId: 'auto', // 'auto' (match "<TF> Bullish FVG" / "<TF> FVG" / "FVG") or explicit template ID
+    bearishTemplateId: 'auto', // 'auto' (match "<TF> Bearish FVG" / "<TF> FVG" / "FVG") or explicit template ID
+    defaultBullishColor: '#26a69a',
+    defaultBearishColor: '#ef4444',
+    defaultOpacity: 22,
+    defaultShowMidline: true,
+    defaultShowLabel: true,
+    labelFormat: '{tf} FVG', // Supports {tf}, {dir}, {template}
+    syncNativeDrawings: false // Optional: also create/update real TradingView rectangle shapes on chart
+  };
+
+  function normalizeAutoFvgConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_AUTO_FVG));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    const rawExtend = String(rawCfg.extendMode || 'right').toLowerCase();
+    const extendMode = (rawExtend === 'current' || rawExtend === 'template') ? rawExtend : 'right';
+    const rawFutureBars = Number(rawCfg.extendFutureBars);
+    const extendFutureBars = isFinite(rawFutureBars) ? Math.max(0, Math.min(200, Math.round(rawFutureBars))) : 0;
+    const showReclaimed = rawCfg.showReclaimed !== undefined
+      ? Boolean(rawCfg.showReclaimed)
+      : !Boolean(rawCfg.hideReclaimed);
+    const hideReclaimed = !showReclaimed;
+    const reclaimedColorMode = rawCfg.reclaimedColorMode === 'dim' ? 'dim' : 'custom';
+    const reclaimedColor = normalizeHexColor(rawCfg.reclaimedColor || base.reclaimedColor, base.reclaimedColor);
+    const reclaimedOpacity = Math.max(0, Math.min(100, Number(rawCfg.reclaimedOpacity ?? 18)));
+    const reclaimedBoxColor = normalizeHexColor(rawCfg.reclaimedBoxColor || reclaimedColor, base.reclaimedBoxColor);
+    const reclaimedBoxOpacity = Math.max(0, Math.min(100, Number(rawCfg.reclaimedBoxOpacity ?? reclaimedOpacity)));
+    const reclaimedBorderColor = normalizeHexColor(rawCfg.reclaimedBorderColor || reclaimedColor, base.reclaimedBorderColor);
+    const reclaimedBorderOpacity = Math.max(0, Math.min(100, Number(rawCfg.reclaimedBorderOpacity ?? 65)));
+    const reclaimedMidlineColor = normalizeHexColor(rawCfg.reclaimedMidlineColor || reclaimedBorderColor || reclaimedColor, base.reclaimedMidlineColor);
+    const reclaimedMidlineOpacity = Math.max(0, Math.min(100, Number(rawCfg.reclaimedMidlineOpacity ?? 60)));
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: Boolean(rawCfg.enabled),
+      reclaimMode: rawCfg.reclaimMode === 'wick' ? 'wick' : 'close',
+      extendMode,
+      extendFutureBars,
+      shrinkOnPartialFill: false,
+      showReclaimed,
+      hideReclaimed,
+      reclaimedColorMode,
+      reclaimedColor: reclaimedBoxColor,
+      reclaimedOpacity: reclaimedBoxOpacity,
+      reclaimedBoxColor,
+      reclaimedBoxOpacity,
+      reclaimedBorderColor,
+      reclaimedBorderOpacity,
+      reclaimedMidlineColor,
+      reclaimedMidlineOpacity,
+      maxBarsLookback: Math.max(50, Math.min(3000, Number(rawCfg.maxBarsLookback) || 600)),
+      maxActiveFvgs: Math.max(1, Math.min(100, Number(rawCfg.maxActiveFvgs) || 25)),
+      showReclaimedHistoryCount: Math.max(0, Math.min(100, Number(rawCfg.showReclaimedHistoryCount ?? 15))),
+      minGapPercent: Math.max(0, Number(rawCfg.minGapPercent) || 0),
+      bullishTemplateId: rawCfg.bullishTemplateId || 'auto',
+      bearishTemplateId: rawCfg.bearishTemplateId || 'auto',
+      defaultBullishColor: normalizeHexColor(rawCfg.defaultBullishColor || base.defaultBullishColor, base.defaultBullishColor),
+      defaultBearishColor: normalizeHexColor(rawCfg.defaultBearishColor || base.defaultBearishColor, base.defaultBearishColor),
+      defaultOpacity: Math.max(5, Math.min(85, Number(rawCfg.defaultOpacity ?? 22))),
+      defaultShowMidline: rawCfg.defaultShowMidline !== false,
+      defaultShowLabel: rawCfg.defaultShowLabel !== false,
+      labelFormat: typeof rawCfg.labelFormat === 'string' ? rawCfg.labelFormat : '{tf} FVG',
+      syncNativeDrawings: Boolean(rawCfg.syncNativeDrawings)
+    };
+  }
+
+  const NEWS_ALL_COUNTRIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'NZD', 'CNY'];
+
+  const DEFAULT_NEWS_BOX = {
+    enabled: false,
+    collapsed: false,
+    pinned: false,
+    pinnedLeft: null,
+    pinnedTop: null,
+    // Relative anchor in the usable screen area (0.0 to 1.0), above the Cortex bottom bar.
+    relX: 0.02,
+    relY: 0.08,
+    boxTitle: 'Upcoming News',
+    boxWidth: 325,
+    maxEvents: 6,
+    bgColor: '#131722',
+    bgOpacity: 88,
+    borderColor: '#38bdf8',
+    fontSize: 11,
+    showRedFolder: true, // High Impact (Red Folder)
+    showYellowFolder: true, // Medium Impact (Yellow/Orange Folder)
+    showGreenFolder: true, // Low Impact (Green Folder)
+    redFolderColor: '#f23645',
+    yellowFolderColor: '#ff9800',
+    greenFolderColor: '#26a69a',
+    countries: ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'NZD', 'CNY'],
+    timeZoneMode: 'ny', // 'ny' (America/New_York EST/EDT) | 'local' (Browser Local Time) | 'utc' (UTC)
+    timeFormat: '12h', // '12h' (8:30am) | '24h' (08:30)
+    showCountdown: true,
+    showCountryFlag: true,
+    showPastTodayMinutes: 15, // Keep just-released events visible for N minutes
+    customEvents: [] // Optional user-added custom news events: [{ id, time: '08:30', country: 'USD', folder: 'red'|'yellow'|'green', title: 'CPI m/m' }]
+  };
+
+  function normalizeNewsBoxConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    const relX = isFinite(Number(rawCfg.relX)) ? Math.max(0, Math.min(1, Number(rawCfg.relX))) : base.relX;
+    const relY = isFinite(Number(rawCfg.relY)) ? Math.max(0, Math.min(1, Number(rawCfg.relY))) : base.relY;
+    const pinnedLeft = rawCfg.pinnedLeft !== null && rawCfg.pinnedLeft !== undefined && isFinite(Number(rawCfg.pinnedLeft)) ? Math.round(Number(rawCfg.pinnedLeft)) : null;
+    const pinnedTop = rawCfg.pinnedTop !== null && rawCfg.pinnedTop !== undefined && isFinite(Number(rawCfg.pinnedTop)) ? Math.round(Number(rawCfg.pinnedTop)) : null;
+    const countries = Array.isArray(rawCfg.countries) && rawCfg.countries.length > 0
+      ? rawCfg.countries.filter(c => NEWS_ALL_COUNTRIES.includes(String(c).toUpperCase())).map(c => String(c).toUpperCase())
+      : base.countries;
+    const customEvents = Array.isArray(rawCfg.customEvents)
+      ? rawCfg.customEvents.filter(ev => ev && typeof ev === 'object' && ev.title).map(ev => ({
+          id: String(ev.id || `cust_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`),
+          time: String(ev.time || '08:30'),
+          country: String(ev.country || 'USD').toUpperCase(),
+          folder: ['red', 'yellow', 'green'].includes(ev.folder) ? ev.folder : 'red',
+          title: String(ev.title || 'Custom Event').trim()
+        }))
+      : [];
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: Boolean(rawCfg.enabled),
+      collapsed: Boolean(rawCfg.collapsed),
+      pinned: Boolean(rawCfg.pinned),
+      pinnedLeft,
+      pinnedTop,
+      relX,
+      relY,
+      boxTitle: typeof rawCfg.boxTitle === 'string' && rawCfg.boxTitle.trim() ? rawCfg.boxTitle.trim() : base.boxTitle,
+      boxWidth: Math.max(240, Math.min(520, Number(rawCfg.boxWidth) || 325)),
+      maxEvents: Math.max(1, Math.min(25, Number(rawCfg.maxEvents) || 6)),
+      bgColor: normalizeHexColor(rawCfg.bgColor || base.bgColor, base.bgColor),
+      bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 88))),
+      borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor),
+      fontSize: Math.max(9, Math.min(16, Number(rawCfg.fontSize) || 11)),
+      showRedFolder: rawCfg.showRedFolder !== false,
+      showYellowFolder: rawCfg.showYellowFolder !== false,
+      showGreenFolder: rawCfg.showGreenFolder !== false,
+      redFolderColor: normalizeHexColor(rawCfg.redFolderColor || base.redFolderColor, base.redFolderColor),
+      yellowFolderColor: normalizeHexColor(rawCfg.yellowFolderColor || base.yellowFolderColor, base.yellowFolderColor),
+      greenFolderColor: normalizeHexColor(rawCfg.greenFolderColor || base.greenFolderColor, base.greenFolderColor),
+      countries: countries.length > 0 ? countries : base.countries,
+      timeZoneMode: ['ny', 'local', 'utc'].includes(rawCfg.timeZoneMode) ? rawCfg.timeZoneMode : 'ny',
+      timeFormat: rawCfg.timeFormat === '24h' ? '24h' : '12h',
+      showCountdown: rawCfg.showCountdown !== false,
+      showCountryFlag: rawCfg.showCountryFlag !== false,
+      showPastTodayMinutes: Math.max(0, Math.min(240, Number(rawCfg.showPastTodayMinutes ?? 15))),
+      customEvents
+    };
+  }
+
+  const DEFAULT_TRADES_BOX = {
+    enabled: false,
+    collapsed: false,
+    pinned: false,
+    pinnedLeft: null,
+    pinnedTop: null,
+    // Relative anchor in the usable screen area (0.0 to 1.0), above the Cortex bottom bar.
+    relX: 0.02,
+    relY: 0.42,
+    boxTitle: 'Instrument Trades',
+    boxWidth: 465,
+    maxTrades: 15,
+    bgColor: '#131722',
+    bgOpacity: 88,
+    borderColor: '#38bdf8',
+    winRowColor: '#10b981',
+    winRowOpacity: 24,
+    lossRowColor: '#f23645',
+    lossRowOpacity: 24,
+    longBadgeTextColor: '#38bdf8',
+    longBadgeBgColor: '#0f172a',
+    longBadgeBgOpacity: 85,
+    longBadgeBorderColor: '#38bdf8',
+    shortBadgeTextColor: '#fbbf24',
+    shortBadgeBgColor: '#0f172a',
+    shortBadgeBgOpacity: 85,
+    shortBadgeBorderColor: '#fbbf24',
+    sideBadgeFontFamily: '"JetBrains Mono", Consolas, "Liberation Mono", monospace',
+    sideBadgeFontSize: 9.5,
+    sideBadgeFontStyle: 'bold', // 'normal' | 'bold' | 'italic' | 'bold_italic'
+    filterCurrentInstrument: true,
+    filterCurrentSessionOnly: true, // 6:00 PM ET previous night to 4:59 PM ET current day
+    showSideBadge: true,
+    showSummaryFooter: true,
+    autoCaptureTrades: true,
+    timeZoneMode: 'ny', // 'ny' | 'local' | 'utc'
+    timeFormat: '12h', // '12h' | '24h'
+    trades: [] // [{ id, symbol, side, pnl, entryTime, exitTime, durationMs, entryPrice, exitPrice, size, source }]
+  };
+
+  const DEFAULT_CANDLE_OHLC = {
+    enabled: false, // When true, shows O/H/L/C values on EVERY visible candle on the chart
+    clickCandleToToggle: true, // When true, clicking any individual candle toggles that candle's O/H/L/C values ON or OFF
+    showCandleNumbers: false, // When true, labels candles #1 (current forming candle) backward up to candleNumbersMax (default 100) in a small glow box below each candle
+    candleNumbersMax: 100, // Number of candles backward from #1 to label (default 100)
+    candleNumberGlowColor: '#38bdf8',
+    candleNumberTextColor: '#f8fafc',
+    candleNumberBgColor: '#0f172a',
+    candleNumberBgOpacity: 90,
+    candleNumberFontSize: 9.5,
+    customCandleWidthEnabled: false, // When true, scales individual candle body/wick width in place without zooming the chart
+    candleWidthPx: 140, // Candle body width scale % (40%..260%, where 100% = normal candle width, 140% = 1.4x wider candles)
+    displayMode: 'badge', // 'badge' (compact OHLC card above/below candle) | 'levels' (price tags at O, H, L, C levels on the candle)
+    showOpen: true,
+    showHigh: true,
+    showLow: true,
+    showClose: true,
+    fontSize: 10,
+    decimals: 'auto', // 'auto' | '0' | '1' | '2' | '3' | '4' | '5'
+    bgColor: '#0f172a',
+    bgOpacity: 88,
+    textColor: '#f8fafc',
+    bullColor: '#10b981',
+    bearColor: '#f23645'
+  };
+
+  function normalizeCandleOhlcConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_CANDLE_OHLC));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    let rawWidthScale = Number(rawCfg.candleWidthPx);
+    // Migrate legacy 3..55 barSpacing value to percentage scale (140% default)
+    if (!isFinite(rawWidthScale) || rawWidthScale <= 55) {
+      rawWidthScale = 140;
+    }
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: Boolean(rawCfg.enabled),
+      clickCandleToToggle: rawCfg.clickCandleToToggle !== false,
+      showCandleNumbers: Boolean(rawCfg.showCandleNumbers),
+      candleNumbersMax: Math.max(10, Math.min(300, Math.round(Number(rawCfg.candleNumbersMax) || 100))),
+      candleNumberGlowColor: normalizeHexColor(rawCfg.candleNumberGlowColor || base.candleNumberGlowColor, base.candleNumberGlowColor),
+      candleNumberTextColor: normalizeHexColor(rawCfg.candleNumberTextColor || base.candleNumberTextColor, base.candleNumberTextColor),
+      candleNumberBgColor: normalizeHexColor(rawCfg.candleNumberBgColor || base.candleNumberBgColor, base.candleNumberBgColor),
+      candleNumberBgOpacity: Math.max(20, Math.min(100, Number(rawCfg.candleNumberBgOpacity ?? 90))),
+      candleNumberFontSize: Math.max(7.5, Math.min(14, Number(rawCfg.candleNumberFontSize) || 9.5)),
+      customCandleWidthEnabled: Boolean(rawCfg.customCandleWidthEnabled),
+      candleWidthPx: Math.max(40, Math.min(260, Math.round(rawWidthScale / 5) * 5)),
+      displayMode: rawCfg.displayMode === 'levels' ? 'levels' : 'badge',
+      showOpen: rawCfg.showOpen !== false,
+      showHigh: rawCfg.showHigh !== false,
+      showLow: rawCfg.showLow !== false,
+      showClose: rawCfg.showClose !== false,
+      fontSize: Math.max(8, Math.min(16, Number(rawCfg.fontSize) || 10)),
+      decimals: ['auto', '0', '1', '2', '3', '4', '5'].includes(String(rawCfg.decimals)) ? String(rawCfg.decimals) : 'auto',
+      bgColor: normalizeHexColor(rawCfg.bgColor || base.bgColor, base.bgColor),
+      bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 88))),
+      textColor: normalizeHexColor(rawCfg.textColor || base.textColor, base.textColor),
+      bullColor: normalizeHexColor(rawCfg.bullColor || base.bullColor, base.bullColor),
+      bearColor: normalizeHexColor(rawCfg.bearColor || base.bearColor, base.bearColor)
+    };
+  }
+
+  const DEFAULT_POSITION_HUD = {
+    enabled: true,           // Master toggle: enable active position overlay HUD
+    showPriceLineHud: true,  // Rectangle box on current yellow price line displaying live PnL
+    showFlattenBtn: true,    // Interactive [ ✕ ] button next to price line PnL to flatten position
+    showEntryBadge: true,    // PnL badge immediately to left of chart's entry box
+    showPnlPercent: true,    // Show percentage alongside dollar PnL (e.g. +$0.14 (+0.05%))
+    autoConfirmFlatten: true // Auto-confirm modal if Vest platform requires a confirmation step
+  };
+
+  const DEFAULT_FAIL_LINES = { enabled: false, labelSize: 100, fontSize: 11 };
+
+  const DEFAULT_CORTEX_INDICATOR = {
+    enabled: false,
+    emaLength: 34,
+    atrLength: 14,
+    trendMultiplier: 2.6,
+    showSignals: true,
+    showTargets: true,
+    levelDistanceMode: 'points',
+    stopLossPoints: 8,
+    targetSpacingPoints: 4,
+    levelFontSize: 11,
+    levelBoxScale: 100,
+    targetRiskMultipliers: [1, 2, 3],
+    showTrendTable: true,
+    formingSignalVoiceAlert: true,
+    confirmedSignalVoiceAlert: true,
+    signalAlertVoiceURI: '',
+    executionEnabled: false,
+    executionMode: 'paper',
+    liveArmed: false,
+    reversalIgnoreBars: 5
+  };
+
+  function normalizeCortexIndicatorConfig(rawCfg) {
+    const cfg = { ...DEFAULT_CORTEX_INDICATOR, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    const targetMultipliers = Array.isArray(cfg.targetRiskMultipliers) ? cfg.targetRiskMultipliers : DEFAULT_CORTEX_INDICATOR.targetRiskMultipliers;
+    return {
+      enabled: Boolean(cfg.enabled),
+      emaLength: Math.max(5, Math.min(200, Math.round(Number(cfg.emaLength) || DEFAULT_CORTEX_INDICATOR.emaLength))),
+      atrLength: Math.max(3, Math.min(100, Math.round(Number(cfg.atrLength) || DEFAULT_CORTEX_INDICATOR.atrLength))),
+      trendMultiplier: Math.max(1, Math.min(6, Number(cfg.trendMultiplier) || DEFAULT_CORTEX_INDICATOR.trendMultiplier)),
+      showSignals: cfg.showSignals !== false,
+      showTargets: cfg.showTargets !== false,
+      levelDistanceMode: cfg.levelDistanceMode === 'atr' ? 'atr' : 'points',
+      stopLossPoints: Math.max(1, Math.min(20, Number(cfg.stopLossPoints) || DEFAULT_CORTEX_INDICATOR.stopLossPoints)),
+      targetSpacingPoints: Math.max(0.25, Math.min(20, Number(cfg.targetSpacingPoints) || DEFAULT_CORTEX_INDICATOR.targetSpacingPoints)),
+      levelFontSize: Math.max(8, Math.min(24, Number(cfg.levelFontSize) || DEFAULT_CORTEX_INDICATOR.levelFontSize)),
+      levelBoxScale: Math.max(75, Math.min(200, Number(cfg.levelBoxScale) || DEFAULT_CORTEX_INDICATOR.levelBoxScale)),
+      targetRiskMultipliers: [0, 1, 2].map(i => Math.max(0.5, Math.min(10, Number(targetMultipliers[i]) || i + 1))),
+      showTrendTable: cfg.showTrendTable !== false,
+      formingSignalVoiceAlert: cfg.formingSignalVoiceAlert !== false,
+      confirmedSignalVoiceAlert: cfg.confirmedSignalVoiceAlert !== false,
+      signalAlertVoiceURI: String(cfg.signalAlertVoiceURI || '').slice(0, 300),
+      executionEnabled: cfg.executionEnabled === true,
+      executionMode: cfg.executionMode === 'live' ? 'live' : 'paper',
+      liveArmed: cfg.liveArmed === true,
+      reversalIgnoreBars: Math.max(0, Math.min(100, Math.round(Number.isFinite(Number(cfg.reversalIgnoreBars)) ? Number(cfg.reversalIgnoreBars) : 5)))
+    };
+  }
+
+  function normalizeFailLinesConfig(rawCfg) {
+    const cfg = { ...DEFAULT_FAIL_LINES, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    return {
+      enabled: Boolean(cfg.enabled),
+      labelSize: Math.max(75, Math.min(150, Number(cfg.labelSize) || DEFAULT_FAIL_LINES.labelSize)),
+      fontSize: Math.max(8, Math.min(18, Number(cfg.fontSize) || DEFAULT_FAIL_LINES.fontSize))
+    };
+  }
+
+  let lastSentFailPrices = '';
+  const ORDER_AMOUNT_MEMORY_PREFIX = '__trading_cortex_order_amount__:';
+  function getOrderTicketPanel() {
+    return findPanelElement(PANEL_DEFINITIONS.find(def => def.key === 'order_ticket'));
+  }
+
+  function getOrderAmountMemoryKey() {
+    let market = 'default';
+    const marketSelector = typeof findMarketSelectorElement === 'function' ? findMarketSelectorElement() : null;
+    if (marketSelector && marketSelector.marketPillEl) {
+      const text = (marketSelector.marketPillEl.innerText || marketSelector.marketPillEl.textContent || '').trim();
+      const match = text.match(/\b([A-Z0-9]{1,8})\b/);
+      if (match) market = match[1];
+    }
+    return `${ORDER_AMOUNT_MEMORY_PREFIX}${location.hostname}:${market}`;
+  }
+
+  function findOrderAmountControls(panel) {
+    if (!panel) return null;
+    const inputs = Array.from(panel.querySelectorAll('input')).filter(input => {
+      const rect = input.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !['checkbox', 'radio', 'range', 'hidden'].includes(input.type);
+    });
+    const amountInput = inputs.find(input => {
+      let node = input;
+      for (let depth = 0; node && node !== panel && depth < 5; depth++, node = node.parentElement) {
+        const text = (node.innerText || node.textContent || '').toLowerCase();
+        if (text.includes('amount') && !text.includes('take profit') && !text.includes('stop loss')) return true;
+      }
+      return /amount/i.test(`${input.getAttribute('aria-label') || ''} ${input.placeholder || ''}`);
+    });
+    if (!amountInput) return null;
+
+    let unitControl = null;
+    let node = amountInput.parentElement;
+    for (let depth = 0; node && node !== panel && depth < 5 && !unitControl; depth++, node = node.parentElement) {
+      const candidates = node.querySelectorAll('button, [role="button"], select');
+      for (const candidate of candidates) {
+        if (candidate === amountInput || candidate.contains(amountInput)) continue;
+        const text = (candidate.innerText || candidate.textContent || candidate.value || '').replace(/[↕▼⌄▾]/g, '').trim();
+        if (/^(USD|[A-Z]{2,8})$/i.test(text)) {
+          unitControl = candidate;
+          break;
+        }
+      }
+    }
+    return { amountInput, unitControl };
+  }
+
+  function dispatchOrderInputEvents(input) {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  const restoredAmountInputs = new WeakSet();
+  const watchedAmountInputs = new WeakSet();
+  function rememberOrderAmount() {
+    const panel = getOrderTicketPanel();
+    const controls = findOrderAmountControls(panel);
+    if (!controls) return;
+    const key = getOrderAmountMemoryKey();
+    const readUnit = control => control ? (control.tagName === 'SELECT' ? control.selectedOptions[0]?.textContent : control.innerText || control.textContent || '').replace(/[↕▼⌄▾]/g, '').trim() : '';
+    const save = () => {
+      const value = controls.amountInput.value;
+      if (!value) return;
+      const record = { amount: value, unit: readUnit(controls.unitControl) };
+      try { localStorage.setItem(key, JSON.stringify(record)); } catch (e) {}
+    };
+    if (!restoredAmountInputs.has(controls.amountInput)) {
+      restoredAmountInputs.add(controls.amountInput);
+      try {
+        const saved = JSON.parse(localStorage.getItem(key) || 'null');
+        if (saved && typeof saved.amount === 'string' && saved.amount) {
+          const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(controls.amountInput), 'value')?.set;
+          if (setter) setter.call(controls.amountInput, saved.amount);
+          else controls.amountInput.value = saved.amount;
+          dispatchOrderInputEvents(controls.amountInput);
+        }
+        if (saved && saved.unit && controls.unitControl) {
+          if (controls.unitControl.tagName === 'SELECT') {
+            const option = Array.from(controls.unitControl.options).find(item => item.textContent.trim() === saved.unit || item.value === saved.unit);
+            if (option) {
+              controls.unitControl.value = option.value;
+              controls.unitControl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          } else if (readUnit(controls.unitControl) !== saved.unit) {
+            controls.unitControl.click();
+            setTimeout(() => {
+              const options = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], button'));
+              const option = options.find(item => item.isConnected && (item.innerText || item.textContent || '').trim() === saved.unit);
+              if (option) option.click();
+            }, 100);
+          }
+        }
+      } catch (e) {}
+    }
+    if (!watchedAmountInputs.has(controls.amountInput)) {
+      watchedAmountInputs.add(controls.amountInput);
+      controls.amountInput.addEventListener('input', save);
+      controls.amountInput.addEventListener('change', save);
+      controls.unitControl?.addEventListener('click', () => setTimeout(save, 200));
+    }
+  }
+
+  setInterval(rememberOrderAmount, 700);
+
+  let latestFailPrices = { long: null, short: null };
+  let lastSentEstimatedPnl = '';
+  let pendingStopLoss = null;
+  let lastBroadcastStopLoss = '';
+
+  function broadcastStopLossEstimate(side, price) {
+    const payload = { side: ['long', 'short'].includes(side) ? side : null, price: Number.isFinite(price) && price > 0 ? price : null };
+    const signature = JSON.stringify(payload);
+    if (signature === lastBroadcastStopLoss) return;
+    lastBroadcastStopLoss = signature;
+    postToMainWorlds({ type: 'VEST_TV_STOP_LOSS_UPDATE', payload });
+  }
+
+  function getCurrentMarketPrice() {
+    const labels = Array.from(document.querySelectorAll('span, div, p')).filter(el => (el.textContent || '').trim() === 'Mid Price');
+    for (const label of labels) {
+      let node = label.parentElement;
+      for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+        const text = (node.innerText || node.textContent || '').replace(/\s+/g, ' ');
+        const match = text.match(/Mid Price\s*\$?\s*([\d,]+(?:\.\d+)?)/i);
+        if (match) {
+          const price = Number(match[1].replace(/,/g, ''));
+          if (Number.isFinite(price) && price > 0) return price;
+        }
+      }
+    }
+    return null;
+  }
+
+  function findStopLossInput(panel) {
+    if (!panel) return null;
+    const inputs = Array.from(panel.querySelectorAll('input')).filter(input => {
+      const rect = input.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !['checkbox', 'radio', 'range', 'hidden'].includes(input.type);
+    });
+    return inputs.find(input => /stop\s*loss/i.test(`${input.getAttribute('aria-label') || ''} ${input.placeholder || ''} ${input.name || ''}`)) ||
+      inputs.find(input => {
+        let node = input.parentElement;
+        for (let depth = 0; node && node !== panel && depth < 4; depth++, node = node.parentElement) {
+          const text = (node.innerText || node.textContent || '').toLowerCase();
+          if (text.includes('stop loss') && !text.includes('take profit')) return true;
+        }
+        return false;
+      }) || null;
+  }
+
+  function roundStopPrice(price, panel) {
+    const symbol = getOrderAmountMemoryKey().split(':').pop();
+    const knownTicks = { ES: 0.25, MES: 0.25, NQ: 0.25, MNQ: 0.25, RTY: 0.1, M2K: 0.1, YM: 1, MYM: 1, CL: 0.01, MCL: 0.01, GC: 0.1, MGC: 0.1 };
+    let tick = knownTicks[symbol] || null;
+    if (!tick && panel) {
+      const stopInput = findStopLossInput(panel);
+      const inputStep = Number(stopInput && stopInput.step);
+      if (Number.isFinite(inputStep) && inputStep > 0 && inputStep !== 1) tick = inputStep;
+    }
+    if (tick) return Number((Math.round(price / tick) * tick).toFixed(8));
+    return Number(price.toFixed(8));
+  }
+
+  function setStopLossValue(price) {
+    const panel = getOrderTicketPanel();
+    const input = findStopLossInput(panel);
+    if (!input || !Number.isFinite(price)) return false;
+    const formatted = String(roundStopPrice(price, panel));
+    if (input.value !== formatted) {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+      if (setter) setter.call(input, formatted);
+      else input.value = formatted;
+      dispatchOrderInputEvents(input);
+    }
+    return true;
+  }
+
+  function syncPendingStopLoss() {
+    const panel = getOrderTicketPanel();
+    if (!panel) return;
+    const stopInput = findStopLossInput(panel);
+    if (stopInput && !watchedStopLossInputs.has(stopInput)) {
+      watchedStopLossInputs.add(stopInput);
+      const clearEstimateIfInputCleared = () => {
+        if (stopInput.value.trim() !== '') return;
+        pendingStopLoss = null;
+        broadcastStopLossEstimate(null, null);
+      };
+      stopInput.addEventListener('input', clearEstimateIfInputCleared);
+      stopInput.addEventListener('change', clearEstimateIfInputCleared);
+    }
+    if (pendingStopLoss) {
+      if (pendingStopLoss.orderClickedAt && Date.now() - pendingStopLoss.orderClickedAt > 1200) {
+        const notices = Array.from(document.querySelectorAll('[role="alert"], [role="status"], [class*="toast"], [class*="Toast"], [class*="notification"]'));
+        const hasOrderError = notices.some(el => /order|position|margin|balance/i.test(el.textContent || '') && /failed|reject|error|insufficient|unable/i.test(el.textContent || ''));
+        if (hasOrderError) pendingStopLoss.orderClickedAt = 0;
+        else {
+          if (stopInput) {
+            const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(stopInput), 'value')?.set;
+            if (setter) setter.call(stopInput, '');
+            else stopInput.value = '';
+            dispatchOrderInputEvents(stopInput);
+          }
+          pendingStopLoss = null;
+          broadcastStopLossEstimate(null, null);
+        }
+      }
+    }
+  }
+
+  const watchedStopLossInputs = new WeakSet();
+  document.addEventListener('click', event => {
+    if (!pendingStopLoss) return;
+    const panel = getOrderTicketPanel();
+    const button = event.target && event.target.closest && event.target.closest('button, [role="button"]');
+    if (!panel || !button || !panel.contains(button)) return;
+    if (/^(buy\/long|sell\/short|long|short)(\b|\s)/i.test((button.innerText || button.textContent || '').trim())) {
+      pendingStopLoss.orderClickedAt = Date.now();
+    }
+  }, true);
+
+  setInterval(syncPendingStopLoss, 500);
+
+  function readAndBroadcastFailPrices() {
+    const pageText = (document.body && document.body.innerText) || '';
+    const lowerText = pageText.toLowerCase();
+    let searchFrom = 0;
+    let bestPrices = null;
+    while (searchFrom < lowerText.length) {
+      const failIndex = lowerText.indexOf('fail price', searchFrom);
+      if (failIndex < 0) break;
+      searchFrom = failIndex + 'fail price'.length;
+      const nextFailIndex = lowerText.indexOf('fail price', searchFrom);
+      const block = pageText.slice(searchFrom, nextFailIndex < 0 ? searchFrom + 260 : Math.min(nextFailIndex, searchFrom + 260));
+      const parse = side => {
+        const match = block.match(new RegExp(`${side}\\s*\\$\\s*([\\d,]+(?:\\.\\d+)?)`, 'i'));
+        if (!match) return null;
+        const value = Number(match[1].replace(/,/g, ''));
+        return Number.isFinite(value) && value > 0 ? value : null;
+      };
+      const prices = { long: parse('Long'), short: parse('Short') };
+      if (prices.long !== null || prices.short !== null) {
+        bestPrices = prices;
+        if (prices.long !== null && prices.short !== null) break;
+      }
+    }
+    if (!bestPrices) return;
+    latestFailPrices = bestPrices;
+    if (!settings || !normalizeFailLinesConfig(settings.failLines).enabled) return;
+    const signature = JSON.stringify(bestPrices);
+    if (signature === lastSentFailPrices) return;
+    lastSentFailPrices = signature;
+    postToMainWorlds({ type: 'VEST_TV_FAIL_PRICES_UPDATE', payload: bestPrices });
+  }
+  setInterval(readAndBroadcastFailPrices, 500);
+
+  function readAndBroadcastEstimatedPnl() {
+    if (!isTopWindow) return;
+    const pageText = (document.body && document.body.innerText) || '';
+    const matches = Array.from(pageText.matchAll(/Est\.?\s*P(?:n|&)\s*L\s*[:\s]*([+-]?\s*\$?\s*[\d,]+(?:\.\d+)?)/gi));
+    if (!matches.length) return;
+    const rawValue = matches[matches.length - 1][1].replace(/[,$\s]/g, '');
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    if (String(value) === lastSentEstimatedPnl) return;
+    lastSentEstimatedPnl = String(value);
+    postToMainWorlds({ type: 'VEST_TV_ESTIMATED_PNL_UPDATE', payload: { value } });
+  }
+  setInterval(readAndBroadcastEstimatedPnl, 500);
+
+  function normalizePositionHudConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: rawCfg.enabled !== false,
+      showPriceLineHud: rawCfg.showPriceLineHud !== false,
+      showFlattenBtn: rawCfg.showFlattenBtn !== false,
+      showEntryBadge: rawCfg.showEntryBadge !== false,
+      showPnlPercent: rawCfg.showPnlPercent !== false,
+      autoConfirmFlatten: rawCfg.autoConfirmFlatten !== false
+    };
+  }
+
+  /**
+   * Computes the current Trading Session window in America/New_York (ET):
+   * Starts at 6:00 PM ET (18:00:00) the previous night and runs to 4:59:59 PM ET (16:59:59) of the session day.
+   */
+  function getCurrentEtTradingSessionBounds(nowEpochMs = Date.now()) {
+    try {
+      const d = new Date(nowEpochMs);
+      const nyFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+      const parts = nyFmt.formatToParts(d);
+      const map = {};
+      for (const p of parts) {
+        if (p.type !== 'literal') map[p.type] = parseInt(p.value, 10);
+      }
+      const nyHour = map.hour === 24 ? 0 : (map.hour || 0);
+      const nyMin = map.minute || 0;
+      const nySec = map.second || 0;
+
+      // Determine ET offset by comparing UTC representation of these components with d.getTime()
+      const asUtcMs = Date.UTC(map.year, (map.month || 1) - 1, map.day || 1, nyHour, nyMin, nySec);
+      const etOffsetMs = asUtcMs - Math.floor(nowEpochMs / 1000) * 1000;
+
+      // Midnight (00:00:00 ET) of the current NY calendar date in real epoch ms:
+      const todayMidnightEtMs = Date.UTC(map.year, (map.month || 1) - 1, map.day || 1, 0, 0, 0) - etOffsetMs;
+
+      // If current NY time is >= 18:00 ET (6:00 PM ET), the new session started today at 6:00 PM ET
+      // and ends tomorrow at 4:59:59 PM ET.
+      // Otherwise (before 6:00 PM ET), the active session started yesterday at 6:00 PM ET (18:00)
+      // and ends today at 4:59:59 PM ET (16:59:59.999).
+      let startMs;
+      let endMs;
+      if (nyHour >= 18) {
+        startMs = todayMidnightEtMs + 18 * 3600 * 1000;
+        endMs = todayMidnightEtMs + (24 + 16) * 3600 * 1000 + 59 * 60 * 1000 + 59 * 1000 + 999;
+      } else {
+        startMs = todayMidnightEtMs - 6 * 3600 * 1000; // Yesterday 18:00 ET (24 - 18 = 6h before midnight)
+        endMs = todayMidnightEtMs + 16 * 3600 * 1000 + 59 * 60 * 1000 + 59 * 1000 + 999; // Today 16:59:59.999 ET
+      }
+      return { startMs, endMs, etOffsetMs, todayMidnightEtMs, nyYear: map.year, nyMonth: map.month, nyDay: map.day };
+    } catch (e) {
+      const fallbackStart = nowEpochMs - 24 * 3600 * 1000;
+      return { startMs: fallbackStart, endMs: nowEpochMs + 12 * 3600 * 1000, etOffsetMs: -14400000 };
+    }
+  }
+
+  function isTradeWithinCurrentEtSession(trade, sessionBounds = null) {
+    if (!trade) return false;
+    const bounds = sessionBounds || getCurrentEtTradingSessionBounds();
+    const exitMs = Number(trade.exitTime || trade.entryTime || 0);
+    const entryMs = Number(trade.entryTime || exitMs || 0);
+    // Include trade if its exit time (or entry time) falls within [6:00 PM ET prev night .. 4:59:59 PM ET current day]
+    return (exitMs >= bounds.startMs && exitMs <= bounds.endMs) || (entryMs >= bounds.startMs && entryMs <= bounds.endMs);
+  }
+
+  function parseDurationStringMs(rawStr) {
+    if (!rawStr || typeof rawStr !== 'string') return null;
+    const s = rawStr.trim().toLowerCase();
+    let totalMs = 0;
+    let matched = false;
+    const dMatch = s.match(/(\d+(?:\.\d+)?)\s*d/);
+    if (dMatch) { totalMs += parseFloat(dMatch[1]) * 86400000; matched = true; }
+    const hMatch = s.match(/(\d+(?:\.\d+)?)\s*h/);
+    if (hMatch) { totalMs += parseFloat(hMatch[1]) * 3600000; matched = true; }
+    const mMatch = s.match(/(\d+(?:\.\d+)?)\s*m(?!s)/);
+    if (mMatch) { totalMs += parseFloat(mMatch[1]) * 60000; matched = true; }
+    const sMatch = s.match(/(\d+(?:\.\d+)?)\s*s/);
+    if (sMatch) { totalMs += parseFloat(sMatch[1]) * 1000; matched = true; }
+    if (!matched && /^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
+      const parts = s.split(':').map(Number);
+      if (parts.length === 3) {
+        totalMs = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+        matched = true;
+      } else if (parts.length === 2) {
+        totalMs = (parts[0] * 60 + parts[1]) * 1000;
+        matched = true;
+      }
+    }
+    return matched ? Math.round(totalMs) : null;
+  }
+
+  function parseFlexibleTimestampMs(val, fallbackMs = Date.now()) {
+    if (typeof val === 'number' && isFinite(val) && val > 0) {
+      return val < 1e11 ? Math.round(val * 1000) : Math.round(val);
+    }
+    if (typeof val !== 'string' || !val.trim()) return fallbackMs;
+    const s = val.trim().replace(/\s+/g, ' ');
+
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const n = Number(s);
+      return n < 1e11 ? Math.round(n * 1000) : Math.round(n);
+    }
+
+    // Check relative time strings like "12m ago", "2h ago", "45s ago"
+    const agoMatch = s.match(/^(\d+(?:\.\d+)?)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days)\s*ago$/i);
+    if (agoMatch) {
+      const num = parseFloat(agoMatch[1]);
+      const unit = agoMatch[2].toLowerCase();
+      if (unit.startsWith('s')) return Date.now() - Math.round(num * 1000);
+      if (unit.startsWith('m')) return Date.now() - Math.round(num * 60000);
+      if (unit.startsWith('h')) return Date.now() - Math.round(num * 3600000);
+      if (unit.startsWith('d')) return Date.now() - Math.round(num * 86400000);
+    }
+
+    // Check MM/DD HH:mm(:ss) or MM-DD HH:mm(:ss) without year (assume current year)
+    const mdTimeMatch = s.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (mdTimeMatch) {
+      const now = new Date();
+      const mon = parseInt(mdTimeMatch[1], 10) - 1;
+      const day = parseInt(mdTimeMatch[2], 10);
+      let yr = mdTimeMatch[3] ? parseInt(mdTimeMatch[3], 10) : now.getFullYear();
+      if (yr < 100) yr += 2000;
+      let hh = parseInt(mdTimeMatch[4], 10);
+      const mm = parseInt(mdTimeMatch[5], 10) || 0;
+      const ss = parseInt(mdTimeMatch[6], 10) || 0;
+      const ampm = (mdTimeMatch[7] || '').toLowerCase();
+      if (ampm === 'pm' && hh < 12) hh += 12;
+      if (ampm === 'am' && hh === 12) hh = 0;
+      const dt = new Date(yr, mon, day, hh, mm, ss);
+      if (!isNaN(dt.getTime())) return dt.getTime();
+    }
+
+    // Check time-only string HH:mm or HH:mm:ss (with optional am/pm)
+    // Place it inside the active 6pm ET -> 4:59pm ET trading session!
+    const hmMatch = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (hmMatch) {
+      const now = new Date();
+      let hh = parseInt(hmMatch[1], 10);
+      const mm = parseInt(hmMatch[2], 10) || 0;
+      const ss = parseInt(hmMatch[3], 10) || 0;
+      const ampm = (hmMatch[4] || '').toLowerCase();
+      if (ampm === 'pm' && hh < 12) hh += 12;
+      if (ampm === 'am' && hh === 12) hh = 0;
+      let candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, ss).getTime();
+      // If candidate is in the future by > 10 minutes (e.g., 20:15 from last night's 6pm+ session), shift back 1 day
+      if (candidate > Date.now() + 10 * 60 * 1000) {
+        candidate -= 24 * 3600 * 1000;
+      }
+      return candidate;
+    }
+
+    const parsed = Date.parse(s);
+    if (!isNaN(parsed)) return parsed;
+    return fallbackMs;
+  }
+
+  function normalizeInstrumentKey(rawSymbol) {
+    if (!rawSymbol) return '';
+    let s = String(rawSymbol).trim().toUpperCase();
+    // Strip TradingView exchange prefix e.g. "VEST:BTC-PERP" -> "BTC-PERP"
+    if (s.includes(':')) s = s.split(':').pop().trim();
+    // Strip leverage badges or extra tokens from header e.g. "★ SOL Solana 5x" -> "SOL"
+    s = s.replace(/^[★☆\s]+/, '').trim();
+    const firstToken = s.split(/\s+/)[0] || s;
+    // Normalize common suffixes (-PERP, -USD, -USDT, -USDC, /USD, PERP) to canonical base ticker for matching
+    const base = firstToken
+      .replace(/[-_/](PERP|USD|USDT|USDC|SPOT|SWAP|FUT)$/i, '')
+      .replace(/(PERP|USDT|USDC|USD)$/i, '');
+    return base || firstToken;
+  }
+
+  function formatInstrumentDisplayLabel(rawSymbol) {
+    if (!rawSymbol) return 'ACTIVE';
+    let s = String(rawSymbol).trim().toUpperCase();
+    if (s.includes(':')) s = s.split(':').pop().trim();
+    s = s.replace(/^[★☆\s]+/, '').trim();
+    const firstToken = s.split(/\s+/)[0] || s;
+    return firstToken.slice(0, 14);
+  }
+
+  function normalizeTradeEntry(rawTrade) {
+    if (!rawTrade || typeof rawTrade !== 'object') return null;
+    const rawSym = String(rawTrade.symbol || rawTrade.instrument || rawTrade.market || currentInstrument || 'BTC-PERP').trim();
+    const rawPnl = Number(String(rawTrade.pnl ?? rawTrade.realizedPnl ?? 0).replace(/[^0-9.-]/g, ''));
+    const pnl = isFinite(rawPnl) ? Math.round(rawPnl * 100) / 100 : 0;
+
+    const nowMs = Date.now();
+    const rawEntryVal = rawTrade.entryTime ?? rawTrade.openedAt ?? rawTrade.openTime ?? rawTrade.createdAt ?? null;
+    const rawExitVal = rawTrade.exitTime ?? rawTrade.closedAt ?? rawTrade.closeTime ?? rawTrade.updatedAt ?? null;
+    const rawDurVal = rawTrade.durationMs !== undefined && rawTrade.durationMs !== null
+      ? (typeof rawTrade.durationMs === 'string' ? parseDurationStringMs(rawTrade.durationMs) ?? Number(rawTrade.durationMs) : Number(rawTrade.durationMs))
+      : (typeof rawTrade.duration === 'string' ? parseDurationStringMs(rawTrade.duration) : null);
+
+    let exitTimeMs = rawExitVal !== null && rawExitVal !== undefined && rawExitVal !== ''
+      ? parseFlexibleTimestampMs(rawExitVal, nowMs)
+      : null;
+    let entryTimeMs = rawEntryVal !== null && rawEntryVal !== undefined && rawEntryVal !== ''
+      ? parseFlexibleTimestampMs(rawEntryVal, exitTimeMs ? exitTimeMs - 15 * 60 * 1000 : nowMs - 15 * 60 * 1000)
+      : null;
+
+    if (exitTimeMs !== null && entryTimeMs === null) {
+      entryTimeMs = (rawDurVal !== null && isFinite(rawDurVal) && rawDurVal > 0)
+        ? exitTimeMs - rawDurVal
+        : exitTimeMs;
+    } else if (entryTimeMs !== null && exitTimeMs === null) {
+      exitTimeMs = (rawDurVal !== null && isFinite(rawDurVal) && rawDurVal > 0)
+        ? entryTimeMs + rawDurVal
+        : entryTimeMs;
+    } else if (entryTimeMs === null && exitTimeMs === null) {
+      exitTimeMs = nowMs;
+      entryTimeMs = (rawDurVal !== null && isFinite(rawDurVal) && rawDurVal > 0) ? nowMs - rawDurVal : nowMs;
+    }
+
+    if (entryTimeMs > exitTimeMs) {
+      // If entry time was a time-only string from yesterday evening (e.g. 21:30) and exit was today morning (e.g. 09:15)
+      if (entryTimeMs - exitTimeMs > 4 * 3600 * 1000 && typeof rawEntryVal === 'string' && /^\d{1,2}:\d{2}/.test(rawEntryVal.trim())) {
+        entryTimeMs -= 24 * 3600 * 1000;
+      } else {
+        const tmp = entryTimeMs;
+        entryTimeMs = exitTimeMs;
+        exitTimeMs = tmp;
+      }
+    }
+
+    const durationMs = (rawDurVal !== null && isFinite(rawDurVal) && rawDurVal >= 0)
+      ? Math.round(rawDurVal)
+      : Math.max(0, exitTimeMs - entryTimeMs);
+
+    if (exitTimeMs === entryTimeMs && durationMs > 0) {
+      entryTimeMs = exitTimeMs - durationMs;
+    }
+
+    const sideRaw = String(rawTrade.side || rawTrade.direction || 'LONG').toUpperCase();
+    const side = sideRaw.includes('SHORT') || sideRaw.includes('SELL') ? 'SHORT' : 'LONG';
+    const symKey = normalizeInstrumentKey(rawSym);
+    const deterministicId = `trd_${symKey}_${side}_${Math.round(entryTimeMs / 1000)}_${Math.round(exitTimeMs / 1000)}_${Math.round(pnl * 100)}`;
+
+    return {
+      id: String(rawTrade.id || deterministicId),
+      symbol: formatInstrumentDisplayLabel(rawSym),
+      symbolKey: symKey,
+      side,
+      pnl,
+      entryTime: entryTimeMs,
+      exitTime: exitTimeMs,
+      durationMs,
+      entryPrice: rawTrade.entryPrice !== undefined && rawTrade.entryPrice !== null && rawTrade.entryPrice !== '' ? Number(rawTrade.entryPrice) : null,
+      exitPrice: rawTrade.exitPrice !== undefined && rawTrade.exitPrice !== null && rawTrade.exitPrice !== '' ? Number(rawTrade.exitPrice) : null,
+      source: String(rawTrade.source || 'manual'),
+      verifiedHistory: Boolean(rawTrade.verifiedHistory || rawTrade.source === 'manual' || rawTrade.source === 'positions_history'),
+      verifiedBothTimes: Boolean(rawTrade.verifiedBothTimes || rawTrade.source === 'manual')
+    };
+  }
+
+  function normalizeTradesBoxConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    const relX = isFinite(Number(rawCfg.relX)) ? Math.max(0, Math.min(1, Number(rawCfg.relX))) : base.relX;
+    const relY = isFinite(Number(rawCfg.relY)) ? Math.max(0, Math.min(1, Number(rawCfg.relY))) : base.relY;
+    const pinnedLeft = rawCfg.pinnedLeft !== null && rawCfg.pinnedLeft !== undefined && isFinite(Number(rawCfg.pinnedLeft)) ? Math.round(Number(rawCfg.pinnedLeft)) : null;
+    const pinnedTop = rawCfg.pinnedTop !== null && rawCfg.pinnedTop !== undefined && isFinite(Number(rawCfg.pinnedTop)) ? Math.round(Number(rawCfg.pinnedTop)) : null;
+    const seenIds = new Set();
+    const seenSigs = new Set();
+    const trades = Array.isArray(rawCfg.trades)
+      ? rawCfg.trades
+          // Filter out any legacy unverified 'dom_table' rows or corrupted Active Positions rows (where entryTime was swapped with a single timestamp)
+          .filter(raw => {
+            if (!raw || raw.source === 'dom_table') return false;
+            // Only keep manual trades or Position History rows that have verified both entry & exit timestamps
+            if (raw.source !== 'manual' && raw.verifiedBothTimes !== true) return false;
+            return true;
+          })
+          .map(normalizeTradeEntry)
+          .filter(t => {
+            if (!t) return false;
+            const sig = `${t.symbolKey}::${t.side}::${Math.round((t.exitTime || 0) / 5000)}::${Math.round((t.pnl || 0) * 100)}`;
+            if (seenIds.has(t.id) || seenSigs.has(sig)) return false;
+            seenIds.add(t.id);
+            seenSigs.add(sig);
+            return true;
+          })
+      : [];
+    // Sort newest exitTime first
+    trades.sort((a, b) => (b.exitTime || 0) - (a.exitTime || 0));
+
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: Boolean(rawCfg.enabled),
+      collapsed: Boolean(rawCfg.collapsed),
+      pinned: Boolean(rawCfg.pinned),
+      pinnedLeft,
+      pinnedTop,
+      relX,
+      relY,
+      boxTitle: typeof rawCfg.boxTitle === 'string' && rawCfg.boxTitle.trim() ? rawCfg.boxTitle.trim() : base.boxTitle,
+      // Auto-migrate legacy 385px / 420px / 450px widths to 465px so all 5 columns fit cleanly without overflowing
+      boxWidth: Math.max(430, Math.min(680, ([385, 420, 450].includes(Number(rawCfg.boxWidth)) ? 465 : Number(rawCfg.boxWidth)) || 465)),
+      maxTrades: Math.max(1, Math.min(50, Number(rawCfg.maxTrades) || 15)),
+      bgColor: normalizeHexColor(rawCfg.bgColor || base.bgColor, base.bgColor),
+      bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 88))),
+      borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor),
+      winRowColor: normalizeHexColor(rawCfg.winRowColor || base.winRowColor, base.winRowColor),
+      winRowOpacity: Math.max(8, Math.min(85, Number(rawCfg.winRowOpacity ?? 24))),
+      lossRowColor: normalizeHexColor(rawCfg.lossRowColor || base.lossRowColor, base.lossRowColor),
+      lossRowOpacity: Math.max(8, Math.min(85, Number(rawCfg.lossRowOpacity ?? 24))),
+      longBadgeTextColor: normalizeHexColor(rawCfg.longBadgeTextColor || base.longBadgeTextColor, base.longBadgeTextColor),
+      longBadgeBgColor: normalizeHexColor(rawCfg.longBadgeBgColor || base.longBadgeBgColor, base.longBadgeBgColor),
+      longBadgeBgOpacity: Math.max(0, Math.min(100, Number(rawCfg.longBadgeBgOpacity ?? 85))),
+      longBadgeBorderColor: normalizeHexColor(rawCfg.longBadgeBorderColor || base.longBadgeBorderColor, base.longBadgeBorderColor),
+      shortBadgeTextColor: normalizeHexColor(rawCfg.shortBadgeTextColor || base.shortBadgeTextColor, base.shortBadgeTextColor),
+      shortBadgeBgColor: normalizeHexColor(rawCfg.shortBadgeBgColor || base.shortBadgeBgColor, base.shortBadgeBgColor),
+      shortBadgeBgOpacity: Math.max(0, Math.min(100, Number(rawCfg.shortBadgeBgOpacity ?? 85))),
+      shortBadgeBorderColor: normalizeHexColor(rawCfg.shortBadgeBorderColor || base.shortBadgeBorderColor, base.shortBadgeBorderColor),
+      sideBadgeFontFamily: typeof rawCfg.sideBadgeFontFamily === 'string' && rawCfg.sideBadgeFontFamily.trim()
+        ? rawCfg.sideBadgeFontFamily
+        : base.sideBadgeFontFamily,
+      sideBadgeFontSize: Math.max(7, Math.min(15, Number(rawCfg.sideBadgeFontSize) || 9.5)),
+      sideBadgeFontStyle: ['normal', 'bold', 'italic', 'bold_italic'].includes(rawCfg.sideBadgeFontStyle)
+        ? rawCfg.sideBadgeFontStyle
+        : 'bold',
+      filterCurrentInstrument: rawCfg.filterCurrentInstrument !== false,
+      filterCurrentSessionOnly: rawCfg.filterCurrentSessionOnly !== false,
+      showSideBadge: rawCfg.showSideBadge !== false,
+      showSummaryFooter: rawCfg.showSummaryFooter !== false,
+      autoCaptureTrades: rawCfg.autoCaptureTrades !== false,
+      timeZoneMode: ['ny', 'local', 'utc'].includes(rawCfg.timeZoneMode) ? rawCfg.timeZoneMode : 'ny',
+      timeFormat: rawCfg.timeFormat === '24h' ? '24h' : '12h',
+      trades: trades.slice(0, 250)
+    };
+  }
+
   let settings = {
     activeTemplateId: null,
     defaultTemplateId: null,
@@ -265,7 +1229,15 @@
     rememberSidebarTools: true,
     rememberLastChartSettings: true,
     lastChartSettings: {},
+    favoriteTimeframes: [],
     sessionIndicators: JSON.parse(JSON.stringify(DEFAULT_SESSION_INDICATORS)),
+    autoFvg: JSON.parse(JSON.stringify(DEFAULT_AUTO_FVG)),
+    newsBox: JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX)),
+    tradesBox: JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX)),
+    candleOhlc: JSON.parse(JSON.stringify(DEFAULT_CANDLE_OHLC)),
+    positionHud: JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD)),
+    failLines: JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES)),
+    cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     enablePanelManagement: true,
     panelLayout: {},
     sidebarState: {
@@ -409,6 +1381,29 @@
   let syncMirrorTimeout = null;
   let pendingSyncData = {};
 
+  function mergeChartViewportMap(previous, incoming) {
+    const merged = { ...(previous || {}) };
+    Object.entries(incoming || {}).forEach(([key, state]) => {
+      const existing = merged[key];
+      if (!existing || (Number(state && state.updatedAt) || 0) >= (Number(existing.updatedAt) || 0)) {
+        merged[key] = state;
+      }
+    });
+    return merged;
+  }
+
+  function mergeLastChartSettings(previous, incoming) {
+    const prev = previous && typeof previous === 'object' ? previous : {};
+    const next = incoming && typeof incoming === 'object' ? incoming : {};
+    return {
+      ...prev,
+      ...next,
+      localStorageEntries: { ...(prev.localStorageEntries || {}), ...(next.localStorageEntries || {}) },
+      viewportsBySymbol: { ...(prev.viewportsBySymbol || {}), ...(next.viewportsBySymbol || {}) },
+      viewportsByChart: mergeChartViewportMap(prev.viewportsByChart, next.viewportsByChart)
+    };
+  }
+
   function safeStorageSet(data) {
     // Always mirror both templates and settings synchronously to the Domain Vault and window.localStorage
     // so they are never lost even if the extension is unloaded/removed and re-loaded
@@ -491,6 +1486,23 @@
     } catch (e) {}
   }
 
+  function syncChartMemoryFocusState() {
+    let focused = false;
+    try {
+      focused = document.visibilityState === 'visible' && document.hasFocus();
+    } catch (e) {}
+    postToMainWorlds({
+      type: 'VEST_TV_CHART_MEMORY_FOCUS',
+      payload: { focused }
+    });
+  }
+
+  window.addEventListener('focus', syncChartMemoryFocusState, true);
+  window.addEventListener('blur', syncChartMemoryFocusState, true);
+  document.addEventListener('visibilitychange', syncChartMemoryFocusState, true);
+  window.addEventListener('pageshow', syncChartMemoryFocusState, true);
+  setTimeout(syncChartMemoryFocusState, 0);
+
   let settingsLoaded = false;
 
   function notifyMainWorldConfig() {
@@ -499,9 +1511,61 @@
       type: 'VEST_TV_CONFIG_UPDATE',
       payload: {
         templates,
-        settings
+        settings,
+        globalDrawings
       }
     });
+    refreshCortexPaperStatsOnChart();
+  }
+
+  function normalizeFavoriteTimeframes(raw) {
+    const supported = new Set(['1', '3', '5', '15', '30', '60', '120', '240', '360', '480', '720', '1D', '3D', '1W', '1M']);
+    const seen = new Set();
+    return (Array.isArray(raw) ? raw : []).reduce((out, item) => {
+      const resolution = String(item && typeof item === 'object' ? item.resolution : item || '').trim();
+      if (!supported.has(resolution) || seen.has(resolution)) return out;
+      seen.add(resolution);
+      out.push({ resolution, label: String(item && item.label || '').trim() });
+      return out;
+    }, []);
+  }
+
+  function normalizeGlobalDrawings(raw) {
+    if (!Array.isArray(raw)) return [];
+    const normalized = [];
+    raw.slice(-1000).forEach(item => {
+      if (!item || typeof item !== 'object') return;
+      const id = String(item.id || '').slice(0, 120);
+      const symbol = String(item.symbol || '').slice(0, 200);
+      const shape = String(item.shape || '').slice(0, 80);
+      const points = Array.isArray(item.points) ? item.points.slice(0, 12).map(point => ({
+        time: Number(point && point.time),
+        price: Number(point && point.price)
+      })).filter(point => Number.isFinite(point.time) && Number.isFinite(point.price)) : [];
+      if (!id || !symbol || !shape || !points.length) return;
+      let properties = {};
+      try {
+        const serialized = JSON.stringify(item.properties || {});
+        if (serialized.length <= 100000) properties = JSON.parse(serialized);
+      } catch (e) {}
+      normalized.push({
+        ...item,
+        id,
+        symbol,
+        shape,
+        rawShapeName: String(item.rawShapeName || shape).slice(0, 80),
+        timeframe: String(item.timeframe || '').slice(0, 40),
+        points,
+        properties
+      });
+    });
+    return normalized;
+  }
+
+  function saveGlobalDrawings(next) {
+    globalDrawings = normalizeGlobalDrawings(next);
+    if (!isTopWindow || !isExtensionValid()) return;
+    chrome.storage.local.set({ globalDrawings }).catch(() => {});
   }
 
   // Listen for storage changes from popup
@@ -515,7 +1579,16 @@
           templates = sanitizeUserTemplates(changes.templates.newValue);
         }
         if (changes.settings && changes.settings.newValue) {
-          settings = { ...settings, ...changes.settings.newValue };
+          const incomingSettings = changes.settings.newValue;
+          settings = {
+            ...settings,
+            ...incomingSettings,
+            lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings)
+          };
+        }
+        if (changes.globalDrawings && Array.isArray(changes.globalDrawings.newValue)) {
+          globalDrawings = normalizeGlobalDrawings(changes.globalDrawings.newValue);
+          postToMainWorlds({ type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE', payload: { drawings: globalDrawings } });
         }
         if (changes.installedVersionOverride && changes.installedVersionOverride.newValue) {
           installedVersionOverride = changes.installedVersionOverride.newValue;
@@ -544,20 +1617,702 @@
 
   let lastCreatedTemplateSig = '';
   let lastCreatedTemplateTime = 0;
+  let liveExecutionGuardNoticeShown = false;
+  let cortexPaperStatsOverlay = null;
+
+  function getCortexExecutionStorageKey(symbol) {
+    const clean = String(symbol || 'DEFAULT').toUpperCase().replace(/[^A-Z0-9._-]/g, '_').slice(0, 100);
+    return `__trading_cortex_ci_execution__:${location.hostname}:${clean}`;
+  }
+
+  function readCortexExecutionState(symbol) {
+    const key = getCortexExecutionStorageKey(symbol);
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const state = JSON.parse(raw);
+        if (window.TradingCortexExecution?.ensureStats) window.TradingCortexExecution.ensureStats(state);
+        return { key, state };
+      }
+    } catch (e) {}
+    return { key, state: window.TradingCortexExecution?.createState(key) || { key, lastSignalId: '', position: null, trades: [], status: 'waiting' } };
+  }
+
+  function renderCortexPaperStatsOnChart(symbol, stats) {
+    if (!isTopWindow) return;
+    const ci = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+    const shouldShow = ci.enabled && String(symbol || '').trim();
+    if (!shouldShow) {
+      if (cortexPaperStatsOverlay?.isConnected) cortexPaperStatsOverlay.remove();
+      cortexPaperStatsOverlay = null;
+      return true;
+    }
+
+    const docs = [document];
+    document.querySelectorAll('iframe').forEach(frame => {
+      try {
+        if (frame.contentDocument && !docs.includes(frame.contentDocument)) docs.push(frame.contentDocument);
+      } catch (e) {}
+    });
+
+    let chartCanvas = null;
+    let largestArea = 0;
+    for (const doc of docs) {
+      try {
+        doc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)').forEach(canvas => {
+          const rect = canvas.getBoundingClientRect();
+          const area = rect.width * rect.height;
+          if (rect.width >= 240 && rect.height >= 140 && area > largestArea + 1000) {
+            chartCanvas = canvas;
+            largestArea = area;
+          }
+        });
+      } catch (e) {}
+    }
+    const parent = chartCanvas?.parentElement;
+    if (!parent) return false;
+
+    const ownerDoc = chartCanvas.ownerDocument || document;
+    if (!cortexPaperStatsOverlay || !cortexPaperStatsOverlay.isConnected || cortexPaperStatsOverlay.ownerDocument !== ownerDoc) {
+      if (cortexPaperStatsOverlay?.isConnected) cortexPaperStatsOverlay.remove();
+      cortexPaperStatsOverlay = ownerDoc.createElement('div');
+      cortexPaperStatsOverlay.className = 'vest-ci-paper-stats-chart-overlay';
+      cortexPaperStatsOverlay.setAttribute('role', 'status');
+      cortexPaperStatsOverlay.setAttribute('aria-live', 'polite');
+      cortexPaperStatsOverlay.style.cssText = 'position:absolute;top:10px;left:10px;z-index:12;pointer-events:none;box-sizing:border-box;width:min(480px,calc(100% - 20px));padding:8px 10px;border:1px solid #303744;border-radius:6px;background:rgba(11,14,20,.94);box-shadow:0 2px 8px rgba(0,0,0,.35);color:#34d399;font:12px -apple-system,BlinkMacSystemFont,"Trebuchet MS",Roboto,sans-serif;';
+    }
+    if (cortexPaperStatsOverlay.parentElement !== parent) {
+      const parentView = ownerDoc.defaultView;
+      if (parentView && parentView.getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+      parent.appendChild(cortexPaperStatsOverlay);
+    }
+
+    const cleanSymbol = escapeHtml(String(symbol).trim());
+    const values = ['tp1', 'tp2', 'tp3', 'entries', 'stopsBeforeProfit'].map(key => Math.max(0, Math.floor(Number(stats?.[key]) || 0)));
+    const content = `<div style="font-weight:600;color:#e4e4e7;margin-bottom:6px;">Paper stats · ${cleanSymbol}</div><div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;text-align:center;line-height:1.25;">${values.map((value, index) => `<div><b style="color:#34d399;">${value}</b><small style="display:block;color:#94a3b8;">${['TP1', 'TP2', 'TP3', 'Entries', 'Stop first'][index]}</small></div>`).join('')}</div><small style="display:block;margin-top:6px;color:#94a3b8;">Paper simulations only · saved per instrument</small>`;
+    if (cortexPaperStatsOverlay.innerHTML !== content) cortexPaperStatsOverlay.innerHTML = content;
+    return true;
+  }
+
+  function refreshCortexPaperStatsOnChart(symbol = currentInstrument, attempt = 0) {
+    if (!isTopWindow || !symbol) return;
+    const { state } = readCortexExecutionState(symbol);
+    const stats = window.TradingCortexExecution?.ensureStats(state) || state.stats || {};
+    const rendered = renderCortexPaperStatsOnChart(symbol, stats);
+    if (!rendered && attempt < 6) {
+      setTimeout(() => {
+        if (currentInstrument === symbol) refreshCortexPaperStatsOnChart(symbol, attempt + 1);
+      }, 350);
+    }
+  }
+
+  function saveCortexExecutionState(key, state) {
+    if (Array.isArray(state.trades) && state.trades.length > 500) state.trades = state.trades.slice(-500);
+    try { localStorage.setItem(key, JSON.stringify(state)); } catch (e) {}
+  }
+
+  function acquireCortexExecutionLock(symbol, ttlMs = 1500) {
+    const lockKey = `${getCortexExecutionStorageKey(symbol)}:lock`;
+    const token = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    try {
+      const current = JSON.parse(localStorage.getItem(lockKey) || 'null');
+      if (current && current.expiresAt > Date.now()) return null;
+      localStorage.setItem(lockKey, JSON.stringify({ token, expiresAt: Date.now() + Math.max(1500, ttlMs) }));
+      const verify = JSON.parse(localStorage.getItem(lockKey) || 'null');
+      if (!verify || verify.token !== token) return null;
+      return () => {
+        try {
+          const latest = JSON.parse(localStorage.getItem(lockKey) || 'null');
+          if (latest && latest.token === token) localStorage.removeItem(lockKey);
+        } catch (e) {}
+      };
+    } catch (e) { return null; }
+  }
+
+  function setVisibleInputValue(input, value) {
+    if (!input) return false;
+    const next = String(value);
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set;
+    if (setter) setter.call(input, next);
+    else input.value = next;
+    dispatchOrderInputEvents(input);
+    return String(input.value) === next;
+  }
+
+  function findLabeledOrderInput(panel, label, excluded = []) {
+    const pattern = new RegExp(label, 'i');
+    return Array.from(panel?.querySelectorAll('input') || []).find(input => {
+      if (excluded.includes(input)) return false;
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0 || ['checkbox', 'radio', 'range', 'hidden'].includes(input.type)) return false;
+      let node = input.parentElement;
+      for (let depth = 0; node && node !== panel && depth < 5; depth++, node = node.parentElement) {
+        const text = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (pattern.test(text) && text.length < 130) return true;
+      }
+      return pattern.test(`${input.getAttribute('aria-label') || ''} ${input.placeholder || ''} ${input.name || ''}`);
+    }) || null;
+  }
+
+  function findLimitPriceInput(panel, excluded = []) {
+    return Array.from(panel?.querySelectorAll('input') || []).find(input => {
+      if (excluded.includes(input)) return false;
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0 || ['checkbox', 'radio', 'range', 'hidden'].includes(input.type)) return false;
+      let node = input.parentElement;
+      for (let depth = 0; node && node !== panel && depth < 5; depth++, node = node.parentElement) {
+        const text = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (/^price(?:\s|$)/i.test(text) && text.length < 100 && !/take profit|stop loss/i.test(text)) return true;
+      }
+      return /^price$/i.test(`${input.getAttribute('aria-label') || ''} ${input.placeholder || ''} ${input.name || ''}`.trim());
+    }) || null;
+  }
+
+  function findVisibleOrderButton(panel, pattern) {
+    return Array.from(panel?.querySelectorAll('button, [role="button"]') || []).find(button => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && pattern.test((button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim());
+    }) || null;
+  }
+
+  function findTicketCheckbox(panel, id, labelText) {
+    const byId = panel?.querySelector(`#${id}`);
+    if (byId && byId.type === 'checkbox') return byId;
+    const label = Array.from(panel?.querySelectorAll('label') || []).find(el => (el.innerText || el.textContent || '').toLowerCase().includes(labelText.toLowerCase()));
+    return label?.querySelector('input[type="checkbox"]') || null;
+  }
+
+  function setTicketCheckbox(panel, id, labelText, checked) {
+    const input = findTicketCheckbox(panel, id, labelText);
+    if (!input) return false;
+    if (Boolean(input.checked) !== checked) input.click();
+    return Boolean(input.checked) === checked;
+  }
+
+  function getPositionRow(symbol) {
+    const panel = findPanelElement(PANEL_DEFINITIONS.find(def => def.key === 'bottom_positions'));
+    if (!panel) return null;
+    const ticker = normalizeInstrumentKey(symbol);
+    const candidates = Array.from(panel.querySelectorAll('tr, [role="row"]')).filter(row => {
+      const text = (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
+      return text && normalizeInstrumentKey(text).includes(ticker) && /\b(long|short)\b/i.test(text) && !/\bmarket\b/i.test(text);
+    });
+    for (const row of candidates) {
+      const text = (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
+      const table = row.closest('table');
+      let headers = Array.from(table?.querySelectorAll('thead th, thead [role="columnheader"]') || []).map(cell => (cell.innerText || cell.textContent || '').trim().toLowerCase());
+      if (!headers.length) headers = Array.from(table?.querySelectorAll('tr:first-child th, tr:first-child td, [role="row"]:first-child [role="columnheader"]') || []).map(cell => (cell.innerText || cell.textContent || '').trim().toLowerCase());
+      const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
+      const openPriceIndex = headers.findIndex(header => header.includes('open price'));
+      const openPriceText = openPriceIndex >= 0 ? (cells[openPriceIndex]?.innerText || cells[openPriceIndex]?.textContent || '') : '';
+      const openPrice = Number(String(openPriceText).replace(/[^\d.\-]/g, ''));
+      const quantityMatch = text.match(new RegExp(`(?:^|\\s)([0-9]+(?:\\.[0-9]+)?)\\s+${ticker}(?:\\s|$)`, 'i'));
+      const quantityText = quantityMatch?.[1] || '';
+      const quantityDecimals = quantityText.includes('.') ? quantityText.split('.')[1].length : 0;
+      return { row, text, side: /\blong\b/i.test(text) ? 'long' : 'short', entryPrice: Number.isFinite(openPrice) && openPrice > 0 ? openPrice : null, quantity: quantityMatch ? Number(quantityText) : null, quantityDecimals };
+    }
+    return null;
+  }
+
+  function isSelectedOrdersTab(tab) {
+    return tab?.getAttribute('aria-selected') === 'true' || tab?.getAttribute('data-state') === 'active' || tab?.getAttribute('data-selected') === 'true';
+  }
+
+  function getVisibleOpenOrdersTable(root = document) {
+    return Array.from(root.querySelectorAll('table, [role="table"]')).find(table => {
+      const rect = table.getBoundingClientRect();
+      const text = (table.innerText || table.textContent || '').replace(/\s+/g, ' ').toLowerCase();
+      return rect.width > 0 && rect.height > 0 && text.includes('trigger price') && text.includes('limit price');
+    }) || null;
+  }
+
+  function isOpenOrdersViewVisible(root = document) {
+    const text = (root.body?.innerText || root.innerText || root.textContent || '').replace(/\s+/g, ' ').trim();
+    return /no open orders(?: yet)?/i.test(text) || Boolean(getVisibleOpenOrdersTable(root));
+  }
+
+  function findOpenOrdersPanelContext() {
+    const isOpenOrdersLabel = item => /^open\s+orders(?:\s*\(\s*\d+\s*\))?$/i.test(
+      (item?.innerText || item?.textContent || '').replace(/\s+/g, ' ').trim()
+    );
+    const candidates = Array.from(document.querySelectorAll('[role="tab"], button, [role="button"]'))
+      .filter(item => {
+        const rect = item.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && isOpenOrdersLabel(item);
+      });
+    const tab = candidates.find(item => item.getAttribute('role') === 'tab') || candidates[0] || null;
+    if (!tab) return null;
+    const tabList = tab.closest('[role="tablist"]') || tab.parentElement;
+    return { panel: document, tab, tabList };
+  }
+
+  function readOpenOrdersPanelCount(panel, tab) {
+    const tabLabel = (tab?.innerText || tab?.textContent || '').replace(/\s+/g, ' ').trim();
+    const badgeMatch = tabLabel.match(/\(\s*(\d+)\s*\)/);
+    if (badgeMatch) return Number(badgeMatch[1]);
+    if (!isSelectedOrdersTab(tab) && !isOpenOrdersViewVisible(panel)) return null;
+
+    const table = getVisibleOpenOrdersTable(panel || document);
+    const rows = Array.from(table?.querySelectorAll('tbody tr, [role="row"]') || []).filter(row => {
+      const rect = row.getBoundingClientRect();
+      const text = (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
+      return rect.width > 0 && rect.height > 0 && text &&
+        !row.querySelector('th, [role="columnheader"]') &&
+        !/^(market|type|value|trigger price|limit price|mid price|created at|id)(\s|$)/i.test(text);
+    });
+    if (rows.length) return rows.length;
+    const panelText = (panel?.body?.innerText || panel?.innerText || panel?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (/no open orders(?: yet)?/i.test(panelText)) return 0;
+    return null;
+  }
+
+  async function openOrdersPanelMonitor() {
+    const context = findOpenOrdersPanelContext();
+    if (!context) return { error: 'not-found' };
+    const { panel, tab, tabList } = context;
+    const previousTab = Array.from(tabList?.querySelectorAll('[role="tab"]') || []).find(isSelectedOrdersTab) || null;
+    if (previousTab !== tab) {
+      tab.click();
+      const selected = await waitForOrderState(() => tab.isConnected && (isSelectedOrdersTab(tab) || isOpenOrdersViewVisible(panel)), 1800);
+      if (!selected) return { error: 'not-active' };
+    }
+    return {
+      count: () => readOpenOrdersPanelCount(panel, tab),
+      restore: async () => {
+        if (previousTab && previousTab !== tab && previousTab.isConnected) {
+          previousTab.click();
+          await waitForOrderState(() => isSelectedOrdersTab(previousTab), 1200);
+        }
+      }
+    };
+  }
+
+  function waitForOrderState(check, timeoutMs = 12000) {
+    return new Promise(resolve => {
+      const started = Date.now();
+      const poll = () => {
+        let result = null;
+        try { result = check(); } catch (e) {}
+        if (result) return resolve(result);
+        if (Date.now() - started >= timeoutMs) return resolve(null);
+        setTimeout(poll, 200);
+      };
+      poll();
+    });
+  }
+
+  async function selectTicketUnit(panel, ticker) {
+    const read = () => {
+      const unitControl = findOrderAmountControls(panel)?.unitControl;
+      return unitControl ? (unitControl.innerText || unitControl.textContent || unitControl.value || '').replace(/[↕▼⌄▾]/g, '').trim().toUpperCase() : '';
+    };
+    const controls = findOrderAmountControls(panel);
+    if (!controls?.unitControl) return false;
+    if (read() === ticker.toUpperCase()) return true;
+    controls.unitControl.click();
+    const option = await waitForOrderState(() => Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], button')).find(el => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && (el.innerText || el.textContent || '').replace(/[↕▼⌄▾]/g, '').trim().toUpperCase() === ticker.toUpperCase();
+    }), 2000);
+    if (!option) return false;
+    option.click();
+    return await waitForOrderState(() => read() === ticker.toUpperCase(), 2000) === true;
+  }
+
+  function syncManualTicketButtons() {
+    const panel = getOrderTicketPanel();
+    if (!panel || !isTopWindow || !isExtensionValid()) return;
+    const ci = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+    const nativeBuy = findVisibleOrderButton(panel, /^buy\s*\/\s*long$/i);
+    const nativeSell = findVisibleOrderButton(panel, /^sell\s*\/\s*short$/i);
+    if (!nativeBuy || !nativeSell) return;
+    let host = panel.querySelector('#vest-ci-manual-order-controls');
+    if (!ci.enabled) {
+      host?.remove();
+      return;
+    }
+    if (!host || !host.isConnected) {
+      host = document.createElement('div');
+      host.id = 'vest-ci-manual-order-controls';
+      host.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 8px;padding:8px;border:1px solid rgba(59,130,246,.35);border-radius:8px;background:rgba(15,23,42,.72);';
+      const makeButton = (side, text, background, border) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.cortexManualSide = side;
+        button.textContent = text;
+        button.title = `Confirm and submit a live market ${side} using the current ticket size, then stage the stop and three reduce-only target limits`;
+        button.style.cssText = `height:34px;border:1px solid ${border};border-radius:6px;background:${background};color:#fff;font:700 11px Arial,sans-serif;letter-spacing:.15px;cursor:pointer;`;
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const ticker = normalizeInstrumentKey(getOrderAmountMemoryKey().split(':').pop());
+          const marketPrice = getCurrentMarketPrice();
+          startManualChartOrder(side, { symbol: ticker, marketPrice });
+        });
+        return button;
+      };
+      host.append(makeButton('long', 'LIVE BUY + TARGETS', '#047857', '#10b981'));
+      host.append(makeButton('short', 'LIVE SELL + TARGETS', '#be123c', '#fb7185'));
+      const nativeActions = nativeBuy.parentElement === nativeSell.parentElement ? nativeBuy.parentElement : nativeBuy.parentElement?.parentElement;
+      if (nativeActions?.parentElement) nativeActions.parentElement.insertBefore(host, nativeActions);
+      else panel.append(host);
+    }
+  }
+
+  setInterval(syncManualTicketButtons, 800);
+  let manualChartOrderInProgress = false;
+  async function startManualChartOrder(side, payload) {
+    if (!isTopWindow || !isExtensionValid() || manualChartOrderInProgress || !['long', 'short'].includes(side)) return;
+    const actionName = side === 'long' ? 'Buy' : 'Sell';
+    const exitButtonPattern = side === 'long' ? /^sell\s*\/\s*short$/i : /^buy\s*\/\s*long$/i;
+    const entryButtonPattern = side === 'long' ? /^buy\s*\/\s*long$/i : /^sell\s*\/\s*short$/i;
+    const ticketPanel = getOrderTicketPanel();
+    const ci = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+    const ticker = normalizeInstrumentKey(getOrderAmountMemoryKey().split(':').pop());
+    const chartTicker = normalizeInstrumentKey(payload?.symbol);
+    const controls = findOrderAmountControls(ticketPanel);
+    const amount = Number(String(controls?.amountInput?.value || '').replace(/,/g, ''));
+    const unit = (controls?.unitControl?.innerText || controls?.unitControl?.textContent || controls?.unitControl?.value || '').replace(/[↕▼⌄▾]/g, '').trim();
+    const currentPosition = getPositionRow(ticker);
+    if (!ticketPanel || !controls || !Number.isFinite(amount) || amount <= 0) return showToast(`${actionName} stopped: Vest ticket amount or order panel is unavailable.`);
+    if (!ticker || !chartTicker || ticker !== chartTicker) return showToast(`${actionName} stopped: chart (${chartTicker || 'unknown'}) and Vest ticket (${ticker || 'unknown'}) do not match.`);
+    if (currentPosition) return showToast(`${actionName} stopped: an open ${currentPosition.side} position already exists for ${ticker}.`);
+    if (!ci.enabled) return showToast('Turn on the Cortex Indicator before using its ticket entry buttons.');
+    const preflightOrders = await openOrdersPanelMonitor();
+    if (preflightOrders?.error === 'not-found') return showToast(`${actionName} stopped: Vest's Open Orders tab was not found in the account panel.`);
+    if (preflightOrders?.error === 'not-active') return showToast(`${actionName} stopped: Vest's Open Orders tab did not activate. Select it manually and retry.`);
+    if (!preflightOrders) return showToast(`${actionName} stopped: Vest's Open Orders panel could not be read.`);
+    const openOrders = preflightOrders.count();
+    await preflightOrders.restore();
+    if (openOrders === null) return showToast(`${actionName} stopped: Vest's Open Orders panel did not show a count, rows, or an empty-state message.`);
+    if (openOrders > 0) return showToast(`${actionName} stopped: clear existing open orders before using the chart entry button.`);
+    const referencePrice = Number(payload.marketPrice);
+    const levels = window.TradingCortexExecution?.calculateManualLevels(side, referencePrice, ci);
+    if (!levels) return showToast(`${actionName} stopped: current market price is unavailable.`);
+
+    const marketTab = Array.from(ticketPanel.querySelectorAll('[role="tab"]')).find(tab => /^market$/i.test((tab.innerText || tab.textContent || '').trim()));
+    const takeProfitInput = findLabeledOrderInput(ticketPanel, 'take profit', [controls.amountInput]);
+    const stopLossInput = findStopLossInput(ticketPanel);
+    const tpslCheckbox = findTicketCheckbox(ticketPanel, 'tpsl', 'TP/SL');
+    const reduceOnlyCheckbox = findTicketCheckbox(ticketPanel, 'reduceOnly', 'Reduce Only');
+    if (!marketTab || !tpslCheckbox || !reduceOnlyCheckbox || !findVisibleOrderButton(ticketPanel, entryButtonPattern)) {
+      return showToast(`${actionName} stopped: Vest entry/stop controls did not match the verified ticket layout.`);
+    }
+    const accept = window.confirm(`${actionName.toUpperCase()} MARKET ${ticker}\nTicket size: ${amount} ${unit || 'units'}\nStop: ${roundStopPrice(levels.stopPrice, ticketPanel)}\nTargets (25% each): ${levels.targetPrices.map(price => roundStopPrice(price, ticketPanel)).join(' / ')}\n\nAfter the market position appears, Cortex will submit three reduce-only limit orders. Continue?`);
+    if (!accept) return;
+
+    const releaseLock = acquireCortexExecutionLock(ticker, 120000);
+    if (!releaseLock) return showToast('Another Cortex order workflow is already running for this instrument.');
+    manualChartOrderInProgress = true;
+    let original = null;
+    let restoreOpenOrdersPanel = null;
+    try {
+      original = {
+        amount: controls.amountInput.value,
+        unit,
+        tp: takeProfitInput?.value || '',
+        sl: stopLossInput?.value || '',
+        tpsl: Boolean(tpslCheckbox.checked),
+        reduceOnly: Boolean(reduceOnlyCheckbox.checked),
+        orderMode: (Array.from(ticketPanel.querySelectorAll('[role="tab"]')).find(tab => tab.getAttribute('aria-selected') === 'true' && /^(market|limit|scale)$/i.test((tab.innerText || tab.textContent || '').trim()))?.innerText || 'Market').trim(),
+        priceMode: (Array.from(ticketPanel.querySelectorAll('[role="tab"]')).find(tab => tab.getAttribute('aria-selected') === 'true' && /^(at price|in \$|in %)$/i.test((tab.innerText || tab.textContent || '').trim()))?.innerText || 'At Price').trim()
+      };
+      Array.from(ticketPanel.querySelectorAll('[role="tab"]')).find(tab => /^market$/i.test((tab.innerText || tab.textContent || '').trim()))?.click();
+      if (!setTicketCheckbox(ticketPanel, 'reduceOnly', 'Reduce Only', false) || !setTicketCheckbox(ticketPanel, 'tpsl', 'TP/SL', true)) {
+        throw new Error('Could not set the market ticket protections.');
+      }
+      const livePriceModeTab = await waitForOrderState(() => Array.from(ticketPanel.querySelectorAll('[role="tab"]')).find(tab => /^at price$/i.test((tab.innerText || tab.textContent || '').trim())), 1500);
+      if (!livePriceModeTab) throw new Error('Could not set the stop to an absolute price. No market entry was sent.');
+      livePriceModeTab.click();
+      const liveTakeProfitInput = await waitForOrderState(() => findLabeledOrderInput(ticketPanel, 'take profit', [findOrderAmountControls(ticketPanel)?.amountInput]), 1500);
+      const liveStopLossInput = await waitForOrderState(() => findStopLossInput(ticketPanel), 1500);
+      if (!liveTakeProfitInput || !liveStopLossInput) throw new Error('Could not expose the market ticket stop-loss fields. No market entry was sent.');
+      setVisibleInputValue(liveTakeProfitInput, '');
+      setVisibleInputValue(liveStopLossInput, String(roundStopPrice(levels.stopPrice, ticketPanel)));
+      showToast(`Submitting confirmed ${ticker} market ${side}; waiting for Vest to show the filled position.`);
+      const liveEntryButton = findVisibleOrderButton(ticketPanel, entryButtonPattern);
+      if (!liveEntryButton) throw new Error(`Vest’s ${side === 'long' ? 'Buy/Long' : 'Sell/Short'} button disappeared before submission. No market entry was sent.`);
+      liveEntryButton.click();
+      const position = await waitForOrderState(() => getPositionRow(ticker), 15000);
+      if (!position) throw new Error('Vest did not show a confirmed position within 15 seconds. No target orders were sent. Check the Vest ticket before retrying.');
+      if (position.side !== side) throw new Error('Vest showed a position on the wrong side. Target orders were not sent.');
+      if (!position.entryPrice || !position.quantity || position.quantity <= 0) throw new Error('Vest showed the position, but Cortex could not read its fill price and size. The initial stop was submitted; target limits were not sent.');
+
+      const filledLevels = window.TradingCortexExecution.calculateManualLevels(side, position.entryPrice, ci);
+      const targetOrders = filledLevels.targetPrices.map(price => roundStopPrice(price, ticketPanel));
+      const targetQty = Number((position.quantity * 0.25).toFixed(Math.min(8, position.quantityDecimals)));
+      if (!Number.isFinite(targetQty) || targetQty <= 0) throw new Error('Position size was too small to split into three targets. The initial stop remains in place.');
+      const orderMonitor = await openOrdersPanelMonitor();
+      if (!orderMonitor || orderMonitor.error) throw new Error(`Position is open, but Cortex could not read Vest’s Open Orders panel (${orderMonitor?.error || 'unknown'}). No target limits were sent.`);
+      restoreOpenOrdersPanel = orderMonitor.restore;
+      const beforeTargets = orderMonitor.count();
+      if (beforeTargets === null) throw new Error('Position is open, but Vest’s Open Orders panel did not show a count, rows, or an empty-state message. No target limits were sent.');
+
+      const limitTab = Array.from(ticketPanel.querySelectorAll('[role="tab"]')).find(tab => /^limit$/i.test((tab.innerText || tab.textContent || '').trim()));
+      if (!limitTab) throw new Error('Position is open, but Vest’s Limit tab was not found. No target limits were sent.');
+      limitTab.click();
+      const limitPriceInput = await waitForOrderState(() => findLimitPriceInput(ticketPanel, [findOrderAmountControls(ticketPanel)?.amountInput]), 2500);
+      if (!limitPriceInput) throw new Error('Position is open, but the Vest limit-price field could not be found. No target limits were sent.');
+      if (!await selectTicketUnit(ticketPanel, ticker)) throw new Error(`Position is open, but Vest could not switch the order size unit to ${ticker}. No target limits were sent.`);
+      if (!setTicketCheckbox(ticketPanel, 'reduceOnly', 'Reduce Only', true) || !setTicketCheckbox(ticketPanel, 'tpsl', 'TP/SL', false)) {
+        throw new Error('Position is open, but Cortex could not enable reduce-only target orders. No target limits were sent.');
+      }
+
+      let placed = 0;
+      for (let i = 0; i < targetOrders.length; i++) {
+        const amountInput = findOrderAmountControls(ticketPanel)?.amountInput;
+        const sideButton = findVisibleOrderButton(ticketPanel, exitButtonPattern);
+        const liveLimitPriceInput = findLimitPriceInput(ticketPanel, [amountInput]);
+        if (!amountInput || !sideButton || !liveLimitPriceInput || !setVisibleInputValue(amountInput, String(targetQty)) || !setVisibleInputValue(liveLimitPriceInput, String(targetOrders[i]))) {
+          throw new Error(`Position is open; only ${placed} of 3 targets were staged because Vest’s limit fields changed.`);
+        }
+        const liveReduceOnly = findTicketCheckbox(ticketPanel, 'reduceOnly', 'Reduce Only');
+        if (!liveReduceOnly?.checked) throw new Error('Position is open; reduce-only was turned off, so no further targets were sent.');
+        sideButton.click();
+        const expectedCount = beforeTargets + placed + 1;
+        const accepted = await waitForOrderState(() => {
+          const count = orderMonitor.count();
+          return count !== null && count >= expectedCount ? count : null;
+        }, 12000);
+        if (accepted === null) throw new Error(`Position is open; Vest did not confirm target ${i + 1}. ${placed} target(s) were confirmed.`);
+        placed += 1;
+      }
+
+      showToast(`Confirmed ${side} entry for ${ticker}; three reduce-only targets staged at ${targetOrders.join(', ')}.`);
+    } catch (error) {
+      showToast(error?.message || `${actionName} workflow stopped. Check the open position and orders in Vest.`);
+    } finally {
+      try { if (restoreOpenOrdersPanel) await restoreOpenOrdersPanel(); } catch (e) {}
+      try {
+        const currentPanel = getOrderTicketPanel();
+        if (currentPanel) {
+          const currentControls = findOrderAmountControls(currentPanel);
+          const restoreOrderMode = Array.from(currentPanel.querySelectorAll('[role="tab"]')).find(tab => (tab.innerText || tab.textContent || '').trim().toLowerCase() === (original?.orderMode || 'Market').toLowerCase());
+          restoreOrderMode?.click();
+          const restorePriceMode = Array.from(currentPanel.querySelectorAll('[role="tab"]')).find(tab => (tab.innerText || tab.textContent || '').trim().toLowerCase() === (original?.priceMode || 'At Price').toLowerCase());
+          restorePriceMode?.click();
+          if (currentControls?.amountInput && original) setVisibleInputValue(currentControls.amountInput, original.amount);
+          if (original?.unit) await selectTicketUnit(currentPanel, original.unit);
+          if (original) setVisibleInputValue(findLabeledOrderInput(currentPanel, 'take profit', [currentControls?.amountInput]), original.tp);
+          if (original) setVisibleInputValue(findStopLossInput(currentPanel), original.sl);
+          if (original) setTicketCheckbox(currentPanel, 'tpsl', 'TP/SL', original.tpsl);
+          if (original) setTicketCheckbox(currentPanel, 'reduceOnly', 'Reduce Only', original.reduceOnly);
+        }
+      } catch (e) {}
+      manualChartOrderInProgress = false;
+      releaseLock();
+    }
+  }
+
+  function handleCortexIndicatorBar(message, lockRetry = 0) {
+    if (!isTopWindow) return;
+    const engine = window.TradingCortexExecution;
+    if (!engine || !message || !message.bar || !message.symbol) return;
+    const ci = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+    if (!ci.enabled || !ci.executionEnabled) return;
+    if (ci.executionMode === 'live') {
+      if (!liveExecutionGuardNoticeShown) {
+        liveExecutionGuardNoticeShown = true;
+        showToast('Live execution is fail-closed: no orders were sent. The complete Vest order flow still needs verification.');
+      }
+      return;
+    }
+
+    const releaseLock = acquireCortexExecutionLock(message.symbol);
+    if (!releaseLock) {
+      if (lockRetry < 3) setTimeout(() => handleCortexIndicatorBar(message, lockRetry + 1), 60 * (lockRetry + 1));
+      return;
+    }
+    try {
+    const { key, state: storedState } = readCortexExecutionState(message.symbol);
+    const barKey = `${message.symbol}:${message.resolution}:${message.bar.timeSec}`;
+    if (storedState.lastBarKey === barKey) return;
+
+    const ticket = findOrderAmountControls(getOrderTicketPanel());
+    const rawAmount = Number(String(ticket?.amountInput?.value || '').replace(/,/g, ''));
+    const unit = ticket?.unitControl ? (ticket.unitControl.innerText || ticket.unitControl.textContent || '').replace(/[↕▼⌄▾]/g, '').trim() : '';
+    const size = Number.isFinite(rawAmount) && rawAmount > 0 ? { amount: rawAmount, unit } : null;
+    let state = storedState;
+    let actions = [];
+
+    const open = state.position;
+    if (!open || (open.symbol === message.symbol && open.resolution === message.resolution)) {
+      const advanced = engine.processBar(state, { ...message.bar, symbol: message.symbol, resolution: message.resolution });
+      state = advanced.state;
+      actions.push(...advanced.actions);
+    }
+    if (message.signal) {
+      const result = engine.processSignal(state, message.signal, engine.normalizeConfig(ci), size);
+      state = result.state;
+      actions.push(...result.actions);
+      if (result.actions.some(action => action.type === 'flatten')) {
+        // The paper ledger confirms the flatten synchronously. Live mode must
+        // instead wait for Vest's position row to report flat before this step.
+        const completed = engine.completeReversalAfterFlat(state, engine.normalizeConfig(ci));
+        state = completed.state;
+        actions.push(...completed.actions);
+      }
+    }
+    state.lastBarKey = barKey;
+    state.lastBarAt = Date.now();
+    saveCortexExecutionState(key, state);
+    const statusEl = document.querySelector('#vest-ci-execution-status');
+    const stats = window.TradingCortexExecution?.ensureStats(state) || state.stats || {};
+    renderCortexPaperStatsOnChart(message.symbol, stats);
+    if (statusEl) {
+      statusEl.textContent = state.position
+        ? `Paper ${state.position.side.toUpperCase()} open · ${state.position.remainingPercent}% remaining · stop ${state.position.stopPrice}`
+        : `Paper state: ${state.status || 'flat'} · ${state.trades.length} completed exits logged.`;
+      statusEl.style.color = state.position ? '#34d399' : '#94a3b8';
+    }
+
+    if (actions.some(action => action.type === 'enter')) {
+      showToast(`Paper ${message.signal?.side || 'signal'} entry logged for ${message.symbol} (${message.resolution}). No order was sent.`);
+    } else if (actions.some(action => action.type === 'ignore-reversal')) {
+      if (state.lastIgnoredNoticeId !== message.signal?.signalId) {
+        state.lastIgnoredNoticeId = message.signal?.signalId || '';
+        saveCortexExecutionState(key, state);
+        showToast(`Opposing signal ignored within the first ${ci.reversalIgnoreBars} bars after entry.`);
+      }
+    } else if (actions.some(action => action.type === 'enter-after-flat')) {
+      showToast(`Paper reversal logged for ${message.symbol}. No order was sent.`);
+    }
+    } finally {
+      releaseLock();
+    }
+  }
+
+  const CORTEX_IRISH_VOICE_PRESET = '__cortex_female_irish__';
+
+  function findCortexIrishVoice(voices) {
+    const irishVoices = (voices || []).filter(voice => /^en-ie(?:$|-)/i.test(String(voice.lang || '')));
+    if (!irishVoices.length) return null;
+    // SpeechSynthesisVoice has no gender field. Prefer a voice whose browser-provided
+    // name explicitly identifies it as female; otherwise use an Irish English voice
+    // and let the user verify its sound with the test button.
+    return irishVoices.find(voice => /female|woman/i.test(String(voice.name || ''))) || irishVoices[0];
+  }
+
+  function cortexVoiceOptionsMarkup(voices, selectedURI) {
+    const irishVoice = findCortexIrishVoice(voices);
+    return [
+      `<option value="" ${!selectedURI ? 'selected' : ''}>System default voice</option>`,
+      `<option value="${CORTEX_IRISH_VOICE_PRESET}" ${selectedURI === CORTEX_IRISH_VOICE_PRESET ? 'selected' : ''} ${irishVoice ? '' : 'disabled'}>${irishVoice ? `Irish English voice · feminine pitch (${escapeHtml(irishVoice.name)})` : 'Irish English voice (not available in browser)'}</option>`,
+      ...(voices || []).map(voice => {
+        const label = `${voice.name}${voice.lang ? ` (${voice.lang})` : ''}${voice.default ? ' — default' : ''}`;
+        return `<option value="${escapeHtml(voice.voiceURI)}" ${selectedURI === voice.voiceURI ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+      })
+    ].join('');
+  }
+
+  function speakCortexVoicePhrase(text, voiceURI) {
+    if (typeof window.speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return false;
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const isIrishPreset = voiceURI === CORTEX_IRISH_VOICE_PRESET;
+    const voice = isIrishPreset
+      ? findCortexIrishVoice(voices)
+      : voices.find(item => item.voiceURI === voiceURI) || voices.find(item => item.default) || voices[0];
+    if (isIrishPreset && !voice) return false;
+    if (voice) utterance.voice = voice;
+    utterance.rate = 1;
+    utterance.pitch = isIrishPreset ? 1.1 : 1;
+    utterance.volume = 1;
+    window.speechSynthesis.speak(utterance);
+    return true;
+  }
+
+  function speakCortexSignalAlert(message, confirmed) {
+    if (!isTopWindow || !message || !['long', 'short'].includes(message.side)) return;
+    const ci = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+    if (!ci.enabled || (confirmed ? !ci.confirmedSignalVoiceAlert : !ci.formingSignalVoiceAlert)) return;
+    const barKey = `${message.symbol}:${message.resolution}:${message.timeSec}${confirmed ? `:${message.side}` : ''}`;
+    const dedupeKey = `__trading_cortex_voice_alert__:${confirmed ? 'confirmed' : 'forming'}:${message.symbol}:${message.resolution}`;
+    try {
+      const recentKeys = JSON.parse(window.localStorage.getItem(dedupeKey) || '[]');
+      if (Array.isArray(recentKeys) && recentKeys.includes(barKey)) return;
+      const nextKeys = (Array.isArray(recentKeys) ? recentKeys : []).concat(barKey).slice(-24);
+      window.localStorage.setItem(dedupeKey, JSON.stringify(nextKeys));
+    } catch (e) {}
+
+    speakCortexVoicePhrase(confirmed
+      ? (message.side === 'long' ? 'Buy Now' : 'Sell Now')
+      : `${message.side === 'long' ? 'Buy' : 'Sell'} signal forming`, ci.signalAlertVoiceURI);
+  }
 
   // Listen for messages from MAIN world
   window.addEventListener('message', async (event) => {
     if (!event.data || typeof event.data !== 'object') return;
     const { type, templateId, template, updates } = event.data;
 
-    if (type === 'VEST_TV_MAIN_READY') {
+    if (type === 'VEST_TV_CI_SIGNAL_FORMING') {
+      speakCortexSignalAlert(event.data.payload || {}, false);
+    } else if (type === 'VEST_TV_CI_SIGNAL_CONFIRMED') {
+      speakCortexSignalAlert(event.data.payload || {}, true);
+    } else if (type === 'VEST_TV_CI_BAR_CLOSED') {
+      handleCortexIndicatorBar(event.data.payload || {});
+    } else if (type === 'VEST_TV_MAIN_READY') {
       if (settingsLoaded) {
         notifyMainWorldConfig();
       }
+    } else if (type === 'VEST_TV_GLOBAL_DRAWING_UPSERT') {
+      if (!isTopWindow || !isExtensionValid() || !event.data.drawing) return;
+      const drawing = event.data.drawing;
+      const stored = await chrome.storage.local.get(['globalDrawings']).catch(() => ({}));
+      const latest = normalizeGlobalDrawings(stored.globalDrawings || globalDrawings);
+      const next = latest.filter(item => item.id !== drawing.id);
+      next.push(drawing);
+      saveGlobalDrawings(next);
+    } else if (type === 'VEST_TV_GLOBAL_DRAWING_REMOVE') {
+      if (!isTopWindow || !isExtensionValid() || !event.data.drawingId) return;
+      const stored = await chrome.storage.local.get(['globalDrawings']).catch(() => ({}));
+      const latest = normalizeGlobalDrawings(stored.globalDrawings || globalDrawings);
+      saveGlobalDrawings(latest.filter(item => item.id !== event.data.drawingId));
+    } else if (type === 'VEST_TV_TOGGLE_TIMEFRAME_FAVORITE') {
+      if (!isTopWindow) return;
+      const payload = event.data.payload || {};
+      const resolution = String(payload.resolution || '').trim();
+      const favorites = normalizeFavoriteTimeframes(settings.favoriteTimeframes);
+      const existingIndex = favorites.findIndex(item => item.resolution === resolution);
+      if (existingIndex >= 0) {
+        favorites.splice(existingIndex, 1);
+      } else {
+        favorites.push({ resolution, label: String(payload.label || '').trim() });
+      }
+      settings.favoriteTimeframes = normalizeFavoriteTimeframes(favorites);
+      queueSettingsSave({ favoriteTimeframes: settings.favoriteTimeframes });
+      notifyMainWorldConfig();
     } else if (type === 'VEST_TV_ACTIVE_TEMPLATE_CHANGED') {
       settings.activeTemplateId = templateId;
       safeStorageSet({ settings });
       if (isTopWindow) renderFloatingBar();
+    } else if (type === 'VEST_TV_ADD_STOP_LOSS') {
+      const payload = event.data.payload || {};
+      if (!isTopWindow || !['long', 'short'].includes(payload.side)) return;
+      const side = payload.side;
+      const reportedMarket = Number(payload.marketPrice);
+      const reportedFail = Number(payload.failPrice);
+      const current = Number.isFinite(reportedMarket) && reportedMarket > 0 ? reportedMarket : getCurrentMarketPrice();
+      const fail = Number.isFinite(reportedFail) && reportedFail > 0 ? reportedFail : latestFailPrices[side];
+      if (!Number.isFinite(current) || !Number.isFinite(fail)) {
+        showToast(`Unable to read the current ${side} fail price or market price`);
+        return;
+      }
+      pendingStopLoss = { side, orderClickedAt: 0 };
+      const estimate = roundStopPrice((current + fail) / 2, getOrderTicketPanel());
+      setStopLossValue(estimate);
+      broadcastStopLossEstimate(side, estimate);
+    } else if (type === 'VEST_TV_STOP_LOSS_PRICE_UPDATE') {
+      const payload = event.data.payload || {};
+      if (!isTopWindow || !pendingStopLoss || payload.side !== pendingStopLoss.side) return;
+      const estimate = Number(payload.price);
+      if (Number.isFinite(estimate) && estimate > 0) {
+        const roundedEstimate = roundStopPrice(estimate, getOrderTicketPanel());
+        setStopLossValue(roundedEstimate);
+        broadcastStopLossEstimate(pendingStopLoss.side, roundedEstimate);
+      }
+    } else if (type === 'VEST_TV_FAIL_PRICES_UPDATE') {
+      // Price stream is consumed by the MAIN-world chart canvas renderer.
     } else if (type === 'VEST_TV_TEMPLATE_CREATED_FROM_SHAPE') {
       if (template) {
         const hydrated = hydrateTemplateForEditor(template);
@@ -669,18 +2424,7 @@
       if (event.data.lastChartSettings) {
         const incoming = event.data.lastChartSettings;
         const prev = settings.lastChartSettings || {};
-        settings.lastChartSettings = {
-          ...prev,
-          ...incoming,
-          localStorageEntries: {
-            ...(prev.localStorageEntries || {}),
-            ...(incoming.localStorageEntries || {})
-          },
-          viewportsBySymbol: {
-            ...(prev.viewportsBySymbol || {}),
-            ...(incoming.viewportsBySymbol || {})
-          }
-        };
+        settings.lastChartSettings = mergeLastChartSettings(prev, incoming);
         queueSettingsSave({ lastChartSettings: settings.lastChartSettings });
       }
     } else if (type === 'VEST_TV_SHOW_TOAST') {
@@ -688,9 +2432,18 @@
         showToast(event.data.message);
       }
     } else if (type === 'VEST_TICKER_UPDATE') {
+      const prevInst = currentInstrument;
       if (event.data.instrument) currentInstrument = event.data.instrument;
       if (event.data.price) currentPrice = event.data.price;
       updateHeaderTickerDisplay();
+      if (isTopWindow && prevInst !== currentInstrument && settings.tradesBox && settings.tradesBox.enabled && typeof renderChartTradesBox === 'function') {
+        renderChartTradesBox();
+      }
+      if (isTopWindow && prevInst !== currentInstrument) refreshCortexPaperStatsOnChart(currentInstrument);
+    } else if (type === 'VEST_TRADES_CAPTURED') {
+      if (isTopWindow && Array.isArray(event.data.trades) && event.data.trades.length > 0 && typeof mergeCapturedTrades === 'function') {
+        mergeCapturedTrades(event.data.trades, Boolean(event.data.notifyToast));
+      }
     } else if (type === 'VEST_OUTSIDE_INTERACTION') {
       if (studioMenuOpen && typeof closeStudioDropdown === 'function') {
         closeStudioDropdown();
@@ -701,6 +2454,10 @@
           closeStudioDropdown();
         }
         handleIncomingActionLog(event.data.event);
+      }
+    } else if (type === 'VEST_EXECUTE_FLATTEN_POSITION') {
+      if (isTopWindow && typeof executeTopWindowFlatten === 'function') {
+        executeTopWindowFlatten(event.data.payload || {});
       }
     }
   });
@@ -1125,9 +2882,13 @@
       match: (el) => {
         if (!el || el.nodeType !== 1) return false;
         const text = el.textContent || '';
+        const hasAccountTabs = Boolean(el.querySelector('[role="tab"]')) &&
+          text.includes('Active Positions') && text.includes('Open Orders') && text.includes('Funding History');
         return (
-          (text.includes('Active Positions') || text.includes('Open Orders') || text.includes('Positions History')) &&
-          text.includes('PnL')
+          hasAccountTabs || (
+            (text.includes('Active Positions') || text.includes('Open Orders') || text.includes('Positions History')) &&
+            text.includes('PnL')
+          )
         );
       }
     }
@@ -1150,6 +2911,51 @@
 
   let studioPillHeartbeat = null;
   let studioPillEl = null;
+  const CORTEX_TOP_BAR_ID = 'vest-cortex-top-bar';
+
+  function reserveBottomBarSpace() {
+    const root = document.documentElement;
+    const body = document.body;
+    if (!root || !body) return;
+    root.classList.add('vest-cortex-bottom-bar-active');
+    body.classList.add('vest-cortex-bottom-bar-active');
+
+    // Vest's app root commonly fills the whole viewport with overflow hidden. Cap that
+    // flow root so its final 50px remain reachable above the fixed Cortex bar.
+    const candidates = Array.from(body.children).filter(el => {
+      if (el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-')) return false;
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return style.position !== 'fixed' && style.position !== 'absolute' &&
+        rect.top <= 2 && rect.width >= window.innerWidth * 0.7 &&
+        rect.height >= window.innerHeight - 2;
+    });
+    const appRoot = candidates.sort((a, b) =>
+      (b.getBoundingClientRect().width * b.getBoundingClientRect().height) -
+      (a.getBoundingClientRect().width * a.getBoundingClientRect().height)
+    )[0];
+    if (appRoot) {
+      appRoot.style.setProperty('box-sizing', 'border-box', 'important');
+      appRoot.style.setProperty('max-height', 'calc(100vh - 50px)', 'important');
+      appRoot.style.setProperty('overflow-y', 'auto', 'important');
+    }
+  }
+
+  function ensureCortexTopBar() {
+    if (!document.body) return null;
+    reserveBottomBarSpace();
+    let bar = document.getElementById(CORTEX_TOP_BAR_ID);
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = CORTEX_TOP_BAR_ID;
+      bar.setAttribute('role', 'region');
+      bar.setAttribute('aria-label', 'Trading Cortex toolbar');
+    }
+    if (bar.parentElement !== document.body || document.body.lastElementChild !== bar) {
+      document.body.appendChild(bar);
+    }
+    return bar;
+  }
 
   function initPanelManager() {
     if (!isTopWindow) return;
@@ -1165,6 +2971,20 @@
           renderStudioHeaderPill();
         } else {
           dockStudioPillNextToMarketSelector(studioPillEl);
+        }
+        if (settings.newsBox && settings.newsBox.enabled) {
+          if (!chartNewsBoxEl || !chartNewsBoxEl.isConnected) {
+            renderChartNewsBox();
+          } else {
+            clampAndPositionChartNewsBox();
+          }
+        }
+        if (settings.tradesBox && settings.tradesBox.enabled) {
+          if (!chartTradesBoxEl || !chartTradesBoxEl.isConnected) {
+            renderChartTradesBox();
+          } else {
+            clampAndPositionChartTradesBox();
+          }
         }
       }, 900);
     }
@@ -1182,6 +3002,8 @@
               targetEl.id === 'vest-panel-toggle-pill' ||
               targetEl.id === 'vest-template-bar-root' ||
               targetEl.id === 'vest-action-log-box' ||
+              targetEl.id === 'vest-chart-news-box' ||
+              targetEl.id === 'vest-chart-trades-box' ||
               targetEl.classList.contains('vest-panel-header-bar') ||
               targetEl.classList.contains('vest-minimized-chip') ||
               targetEl.closest('#vest-minimized-dock') ||
@@ -1189,6 +3011,8 @@
               targetEl.closest('#vest-panel-toggle-pill') ||
               targetEl.closest('#vest-template-bar-root') ||
               targetEl.closest('#vest-action-log-box') ||
+              targetEl.closest('#vest-chart-news-box') ||
+              targetEl.closest('#vest-chart-trades-box') ||
               targetEl.closest('.vest-panel-header-bar')
             ) {
               continue;
@@ -1300,45 +3124,11 @@
   function dockStudioPillNextToMarketSelector(pillArg) {
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
     if (!pill) return false;
-
-    // Fast path: if the pill is already docked inside a connected header row, do NOT scan the DOM or touch any styles!
-    if (
-      pill.isConnected &&
-      pill.parentElement &&
-      pill.parentElement !== document.body &&
-      !pill.classList.contains('vest-studio-pill-floating-fallback')
-    ) {
-      return true;
-    }
-
-    if (cachedMarketRowEl && cachedMarketRowEl.isConnected && cachedMarketPillEl && cachedMarketPillEl.isConnected && cachedMarketPillEl.parentElement === cachedMarketRowEl) {
-      pill.classList.remove('vest-studio-pill-floating-fallback');
-      cachedMarketRowEl.insertBefore(pill, cachedMarketPillEl);
-      return true;
-    }
-
-    const found = findMarketSelectorElement();
-    if (found && found.rowEl && found.marketPillEl) {
-      cachedMarketRowEl = found.rowEl;
-      cachedMarketPillEl = found.marketPillEl;
-      const rowStyle = window.getComputedStyle(found.rowEl);
-      if (rowStyle.display === 'grid' || rowStyle.display === 'inline-grid') {
-        found.rowEl.style.display = 'flex';
-        found.rowEl.style.alignItems = 'center';
-      }
-      if (pill.parentElement !== found.rowEl || pill.nextElementSibling !== found.marketPillEl) {
-        pill.classList.remove('vest-studio-pill-floating-fallback');
-        found.rowEl.insertBefore(pill, found.marketPillEl);
-      }
-      return true;
-    }
-
-    // Fallback position at the exact top-left market bar coordinates until the market bar finishes mounting
-    if (!pill.isConnected) {
-      pill.classList.add('vest-studio-pill-floating-fallback');
-      document.body.appendChild(pill);
-    }
-    return false;
+    const bar = ensureCortexTopBar();
+    if (!bar) return false;
+    pill.classList.remove('vest-studio-pill-floating-fallback');
+    if (pill.parentElement !== bar) bar.appendChild(pill);
+    return true;
   }
 
   let studioMenuOpen = false;
@@ -1429,8 +3219,14 @@
     if (!triggerBtn) return;
     const rect = triggerBtn.getBoundingClientRect();
     menuEl.style.position = 'fixed';
-    menuEl.style.top = `${Math.round(rect.bottom + 6)}px`;
-    menuEl.style.left = `${Math.max(8, Math.round(rect.left))}px`;
+    const menuHeight = menuEl.offsetHeight || 440;
+    const opensAbove = rect.bottom + menuHeight + 6 > window.innerHeight;
+    const top = opensAbove
+      ? Math.max(8, rect.top - menuHeight - 6)
+      : rect.bottom + 6;
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuEl.offsetWidth - 8));
+    menuEl.style.top = `${Math.round(top)}px`;
+    menuEl.style.left = `${Math.round(left)}px`;
     menuEl.style.zIndex = '2147483647';
   }
 
@@ -1528,6 +3324,51 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.sessionIndicators && settings.sessionIndicators.enabled ? 'on' : ''}">${settings.sessionIndicators && settings.sessionIndicators.enabled ? 'ON' : 'OFF'}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-autofvg-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#a855f7;">
+              <rect x="3" y="7" width="18" height="10" rx="2"></rect>
+              <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2"></line>
+              <line x1="6" y1="3" x2="6" y2="7"></line>
+              <line x1="18" y1="17" x2="18" y2="21"></line>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Auto FVG's...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.autoFvg && settings.autoFvg.enabled ? 'on' : ''}">${settings.autoFvg && settings.autoFvg.enabled ? 'ON' : 'OFF'}</span>
+        </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-news-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f23645;">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Economic News Box...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.newsBox && settings.newsBox.enabled ? 'on' : ''}">${settings.newsBox && settings.newsBox.enabled ? 'ON' : 'OFF'}</span>
+        </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-trades-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#10b981;">
+              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+              <polyline points="17 6 23 6 23 12"></polyline>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Instrument Trades Box...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.tradesBox && settings.tradesBox.enabled ? 'on' : ''}">${settings.tradesBox && settings.tradesBox.enabled ? 'ON' : 'OFF'}</span>
+        </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-candleohlc-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f59e0b;">
+              <line x1="9" y1="2" x2="9" y2="6"></line>
+              <rect x="6" y="6" width="6" height="11" rx="1"></rect>
+              <line x1="9" y1="17" x2="9" y2="22"></line>
+              <line x1="17" y1="4" x2="17" y2="9"></line>
+              <rect x="14" y="9" width="6" height="8" rx="1"></rect>
+              <line x1="17" y1="17" x2="17" y2="21"></line>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Candle OHLC Values...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${(settings.candleOhlc && (settings.candleOhlc.enabled || settings.candleOhlc.showCandleNumbers || settings.candleOhlc.clickCandleToToggle !== false)) ? 'on' : ''}">${settings.candleOhlc && settings.candleOhlc.enabled ? 'ALL ON' : (settings.candleOhlc && settings.candleOhlc.showCandleNumbers ? 'BAR #s' : (settings.candleOhlc && settings.candleOhlc.clickCandleToToggle !== false ? 'CLICK' : 'OFF'))}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
@@ -1595,6 +3436,30 @@
     menuEl.querySelector('#vest-sdm-open-sessions-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('sessions');
+    });
+
+    // Auto FVG's Button -> opens Settings Dialog directly on Auto FVG's tab
+    menuEl.querySelector('#vest-sdm-open-autofvg-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('autofvg');
+    });
+
+    // Economic News Box Button -> opens Settings Dialog directly on Economic News Box tab
+    menuEl.querySelector('#vest-sdm-open-news-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('news');
+    });
+
+    // Instrument Trades Box Button -> opens Settings Dialog directly on Instrument Trades Box tab
+    menuEl.querySelector('#vest-sdm-open-trades-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('trades');
+    });
+
+    // Candle OHLC Values Button -> opens Settings Dialog directly on Candle OHLC tab
+    menuEl.querySelector('#vest-sdm-open-candleohlc-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('candleohlc');
     });
 
     // Top Settings Button -> opens Settings Dialog on About tab
@@ -1747,7 +3612,8 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    let activeTab = ['about', 'memory', 'sessions'].includes(initialTab) ? initialTab : 'about';
+    let activeTab = ['about', 'alertsvoice', 'memory', 'sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator'].includes(initialTab) ? initialTab : 'about';
+    let voicesChangedHandler = null;
 
     // Working draft so "Cancel" discards or "Save Settings" commits
     const draftSettings = JSON.parse(JSON.stringify(settings || {}));
@@ -1758,6 +3624,13 @@
       draftSettings.rememberLastChartSettings = true;
     }
     draftSettings.sessionIndicators = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
+    draftSettings.autoFvg = normalizeAutoFvgConfig(draftSettings.autoFvg);
+    draftSettings.newsBox = normalizeNewsBoxConfig(draftSettings.newsBox);
+    draftSettings.tradesBox = normalizeTradesBoxConfig(draftSettings.tradesBox);
+    draftSettings.candleOhlc = normalizeCandleOhlcConfig(draftSettings.candleOhlc);
+    draftSettings.positionHud = normalizePositionHudConfig(draftSettings.positionHud);
+    draftSettings.failLines = normalizeFailLinesConfig(draftSettings.failLines);
+    draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
     if (!draftSettings.sidebarState) {
       draftSettings.sidebarState = {
         magnet: false,
@@ -1782,6 +3655,11 @@
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`
       },
       {
+        id: 'alertsvoice',
+        label: 'Alerts & Voice Settings',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>`
+      },
+      {
         id: 'memory',
         label: 'Chart Memory Features',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`
@@ -1790,14 +3668,85 @@
         id: 'sessions',
         label: 'Session Indicators',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="20"/><line x1="16" y1="4" x2="16" y2="20"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`
+      },
+      {
+        id: 'autofvg',
+        label: "Auto FVG's",
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="18" height="10" rx="2"/><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2"/><line x1="6" y1="3" x2="6" y2="7"/><line x1="18" y1="17" x2="18" y2="21"/></svg>`
+      },
+      {
+        id: 'news',
+        label: 'Economic News Box',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`
+      },
+      {
+        id: 'trades',
+        label: 'Instrument Trades Box',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`
+      },
+      {
+        id: 'candleohlc',
+        label: 'Candle OHLC Values',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="9" y1="2" x2="9" y2="6"/><rect x="6" y="6" width="6" height="11" rx="1"/><line x1="9" y1="17" x2="9" y2="22"/><line x1="17" y1="4" x2="17" y2="9"/><rect x="14" y="9" width="6" height="8" rx="1"/><line x1="17" y1="17" x2="17" y2="21"/></svg>`
+      },
+      {
+        id: 'positionhud',
+        label: 'Active Position HUD',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 3"/><rect x="13" y="8" width="8" height="8" rx="1.5"/><line x1="15" y1="10" x2="19" y2="14"/><line x1="19" y1="10" x2="15" y2="14"/></svg>`
+      },
+      {
+        id: 'faillines',
+        label: 'Chart Trader Panel Settings',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18M3 17h18"/><path d="M6 5v4M18 15v4"/></svg>`
+      },
+      {
+        id: 'cortexindicator',
+        label: 'Cortex Indicator',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l5-6 4 3 7-9"/><path d="M3 21h18"/><path d="M5 7h4M15 17h4"/></svg>`
       }
     ];
 
     function broadcastLiveSessionDraft() {
       if (draftSettings.sessionIndicators) {
         settings.sessionIndicators = JSON.parse(JSON.stringify(draftSettings.sessionIndicators));
-        queueSettingsSave({ sessionIndicators: settings.sessionIndicators });
-        renderStudioHeaderPill();
+      }
+      if (draftSettings.autoFvg) {
+        settings.autoFvg = JSON.parse(JSON.stringify(draftSettings.autoFvg));
+      }
+      if (draftSettings.newsBox) {
+        settings.newsBox = JSON.parse(JSON.stringify(draftSettings.newsBox));
+      }
+      if (draftSettings.tradesBox) {
+        settings.tradesBox = JSON.parse(JSON.stringify(draftSettings.tradesBox));
+      }
+      if (draftSettings.candleOhlc) {
+        settings.candleOhlc = JSON.parse(JSON.stringify(draftSettings.candleOhlc));
+      }
+      if (draftSettings.positionHud) {
+        settings.positionHud = JSON.parse(JSON.stringify(draftSettings.positionHud));
+      }
+      if (draftSettings.failLines) {
+        settings.failLines = normalizeFailLinesConfig(draftSettings.failLines);
+      }
+      if (draftSettings.cortexIndicator) {
+        settings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+      }
+      queueSettingsSave({
+        sessionIndicators: settings.sessionIndicators,
+        autoFvg: settings.autoFvg,
+        newsBox: settings.newsBox,
+        tradesBox: settings.tradesBox,
+        candleOhlc: settings.candleOhlc,
+        positionHud: settings.positionHud,
+        failLines: settings.failLines,
+        cortexIndicator: settings.cortexIndicator
+      });
+      renderStudioHeaderPill();
+      if (typeof renderChartNewsBox === 'function') {
+        renderChartNewsBox();
+      }
+      if (typeof renderChartTradesBox === 'function') {
+        renderChartTradesBox();
       }
       postToMainWorlds({
         type: 'VEST_TV_CONFIG_UPDATE',
@@ -1812,6 +3761,33 @@
     }
 
     function renderRightPaneContent() {
+      if (activeTab === 'alertsvoice') {
+        const cfg = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+        draftSettings.cortexIndicator = cfg;
+        const voices = typeof window.speechSynthesis !== 'undefined' ? window.speechSynthesis.getVoices() : [];
+        const voiceOptions = cortexVoiceOptionsMarkup(voices, cfg.signalAlertVoiceURI);
+        return `
+          <div class="vest-tvs-section-title">ALERTS &amp; VOICE SETTINGS</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">Voice alerts follow the Cortex Indicator. A forming alert speaks at most once per candle, even if the signal appears late or changes during that candle. A confirmed signal speaks “Buy Now” or “Sell Now” after the candle closes.</p>
+          <div class="vest-tvs-toggle-box">
+            <div class="vest-tvs-toggle-info"><div class="vest-tvs-toggle-title">Alert when a signal first forms</div><div class="vest-tvs-toggle-desc">Speaks “Buy signal forming” or “Sell signal forming” once per bar.</div></div>
+            <label class="vest-tvs-switch"><input type="checkbox" id="vest-ci-forming-voice-alert" ${cfg.formingSignalVoiceAlert ? 'checked' : ''} /><span class="vest-tvs-switch-slider"></span></label>
+          </div>
+          <div class="vest-tvs-toggle-box" style="margin-top:10px;">
+            <div class="vest-tvs-toggle-info"><div class="vest-tvs-toggle-title">Speak when a signal is confirmed</div><div class="vest-tvs-toggle-desc">Speaks “Buy Now” or “Sell Now” only after the signal bar closes.</div></div>
+            <label class="vest-tvs-switch"><input type="checkbox" id="vest-ci-confirmed-voice-alert" ${cfg.confirmedSignalVoiceAlert ? 'checked' : ''} /><span class="vest-tvs-switch-slider"></span></label>
+          </div>
+          <div style="margin-top:16px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <label for="vest-ci-alert-voice" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:8px;">Spoken alert voice</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="vest-ci-alert-voice" style="flex:1;min-width:0;padding:9px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">${voiceOptions}</select>
+              <button type="button" class="vest-tvs-action-btn" id="vest-ci-test-alert-voice">Test voice</button>
+            </div>
+            <div id="vest-ci-alert-voice-status" role="status" style="margin-top:9px;font-size:11px;color:#94a3b8;">Choose Irish English to use an en-IE voice supplied by your browser. Browser voices do not expose gender, so use Test voice to check how it sounds.</div>
+          </div>
+        `;
+      }
+
       if (activeTab === 'about') {
         return `
           <div class="vest-tvs-section-title">ABOUT THIS TOOL</div>
@@ -1845,6 +3821,21 @@
                 </button>
               </div>
             </div>
+
+            <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(148,163,184,0.14);">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+                Version Log — Changes Since v${extVersion}
+              </div>
+              <ul style="margin:0; padding-left:18px; font-size:12px; color:#cbd5e1; line-height:1.65;">
+                <li><strong style="color:#f8fafc;">Moveable Economic News Box:</strong> Draggable across the screen, showing event time, country of origin, Red/Yellow/Green impact folder icons, and live countdowns. Minimized boxes dock into the Cortex bottom bar.</li>
+                <li><strong style="color:#f8fafc;">Auto FVG's Engine &amp; Settings Tab:</strong> Automatically detects 3-candle Bullish &amp; Bearish FVGs, auto-matches saved timeframe templates (e.g. <code>"5m FVG"</code>) or falls back to a default FVG template, and deduplicates against existing chart rectangles on refresh.</li>
+                <li><strong style="color:#f8fafc;">Dedicated Reclaimed FVG's Box &amp; TradingView Color Picker:</strong> Added a toggleable <em>Show Reclaimed FVG's</em> section with automatic custom reclaimed FVG coloring &amp; opacity, plus the native TradingView 8&times;10 swatch &amp; opacity color picker across all settings.</li>
+                <li><strong style="color:#f8fafc;">Configurable FVG Extension &amp; Reclaim:</strong> Choose whether unreclaimed FVGs extend far right or to the current candle (+ extra future bars) until reclaimed (by body close or full wick fill).</li>
+                <li><strong style="color:#f8fafc;">ICT Killzones &amp; Session Indicators:</strong> Shaded Asia, London, NY AM, NY Lunch, and NY PM boxes rendered behind chart drawings with centered watermarks.</li>
+                <li><strong style="color:#f8fafc;">Dual Session High/Low Lines &amp; Price Badges:</strong> Solid swept H/L lines plus 7-day extended dotted/dashed lines with right-axis price tags and customizable date stamps (default <code>M-d-y</code>) and label alignment.</li>
+                <li><strong style="color:#f8fafc;">Real-Time Drag &amp; Flicker-Free Rendering:</strong> Capture-phase drag tracking and single-RAF vsync coalescing so overlays move smoothly with the chart without color flicker.</li>
+              </ul>
+            </div>
           </div>
         `;
       }
@@ -1852,6 +3843,13 @@
       if (activeTab === 'memory') {
         const isRememberOn = draftSettings.rememberSidebarTools !== false;
         const isRememberChartSettingsOn = draftSettings.rememberLastChartSettings !== false;
+        const favoriteTimeframes = normalizeFavoriteTimeframes(draftSettings.favoriteTimeframes);
+        const favoriteTimeframeSet = new Set(favoriteTimeframes.map(item => item.resolution));
+        const timeframeOptions = [
+          ['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['30', '30m'],
+          ['60', '1h'], ['120', '2h'], ['240', '4h'], ['360', '6h'], ['480', '8h'], ['720', '12h'],
+          ['1D', '1D'], ['3D', '3D'], ['1W', '1W'], ['1M', '1M']
+        ];
 
         return `
           <div class="vest-tvs-section-title">CHART MEMORY FEATURES</div>
@@ -1881,6 +3879,23 @@
               <span class="vest-tvs-switch-slider"></span>
             </label>
           </div>
+
+          <div class="vest-tvs-toggle-box" style="display:block; margin-top:12px;">
+            <div class="vest-tvs-toggle-info" style="margin-bottom:10px;">
+              <div class="vest-tvs-toggle-title">Favorite timeframes</div>
+              <div class="vest-tvs-toggle-desc">
+                Choose the intervals shown beside the chart timeframe selector. You can also star or unstar intervals in the chart's timeframe dropdown. Favorites are saved across reloads.
+              </div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:7px 12px;">
+              ${timeframeOptions.map(([resolution, label]) => `
+                <label style="display:inline-flex; align-items:center; gap:5px; color:#cbd5e1; font-size:12px; cursor:pointer;">
+                  <input class="vest-tvs-favorite-timeframe" type="checkbox" value="${resolution}" ${favoriteTimeframeSet.has(resolution) ? 'checked' : ''} />
+                  <span>${label}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
         `;
       }
 
@@ -1900,7 +3915,7 @@
             <div class="vest-tvs-toggle-info">
               <div class="vest-tvs-toggle-title">Enable ICT Session Boxes & High/Low Liquidity Lines</div>
               <div class="vest-tvs-toggle-desc">
-                Draws shaded ICT session killzone boxes with centered watermarks (e.g. NY AM, NY Lunch, London, Asia) and extends Session High/Low lines until price sweeps them.
+                Draws shaded ICT session killzone boxes with centered watermarks (e.g. NY AM, NY Lunch, London, Asia). Extend uncleared High/Low lines to the right until the first sweep or close-through, or extend all levels after they are cleared.
               </div>
             </div>
             <label class="vest-tvs-switch" title="Toggle Session Indicators on Chart">
@@ -1967,6 +3982,13 @@
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-extend-hl" ${sc.extendHighLowLines !== false ? 'checked' : ''} />
                 <span>Solid H/L Line (Cut Off When Swept)</span>
+              </label>
+              <label class="vest-ed-field" style="min-width:270px; max-width:390px;">
+                <span class="vest-ed-label">Session H/L Right Extension</span>
+                <select class="vest-ed-select" id="vest-si-extend-hl-right" title="Choose which session High/Low levels extend to the chart's right edge">
+                  <option value="uncleared" ${sc.highLowLineExtensionMode !== 'all' ? 'selected' : ''}>Uncleared levels only (stop at sweep/close-through)</option>
+                  <option value="all" ${sc.highLowLineExtensionMode === 'all' ? 'selected' : ''}>All levels (continue after sweep/close-through)</option>
+                </select>
               </label>
               <label class="vest-ed-checkbox-label" style="font-size:12px;">
                 <input type="checkbox" id="vest-si-show-perm-dotted" ${sc.showPermanentDottedHighLow !== false ? 'checked' : ''} />
@@ -2081,7 +4103,7 @@
             ${sc.sessions.map((sess, idx) => `
               <div class="vest-tvs-toggle-box" data-sess-id="${escapeHtml(sess.id)}" style="padding:10px 14px; margin-bottom:0; gap:12px;">
                 <div style="display:flex; align-items:center; gap:10px; min-width:165px;">
-                  <input type="color" class="vest-ed-color vest-si-sess-color" data-idx="${idx}" value="${normalizeHexColor(sess.color, '#26a69a')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;" title="Session Box & High/Low Line Color" />
+                  <input type="color" class="vest-ed-color vest-si-sess-color" data-idx="${idx}" data-opacity-input="#vest-si-box-opacity" value="${normalizeHexColor(sess.color, '#26a69a')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;" title="Session Box & High/Low Line Color" />
                   <div style="display:flex; flex-direction:column; min-width:0;">
                     <span style="font-size:13px; font-weight:600; color:#f8fafc; white-space:nowrap;">${escapeHtml(sess.name)}</span>
                     <span style="font-size:10.5px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${escapeHtml(sess.shortTag)}.H / ${escapeHtml(sess.shortTag)}.L</span>
@@ -2110,6 +4132,1194 @@
         `;
       }
 
+      if (activeTab === 'autofvg') {
+        const fc = normalizeAutoFvgConfig(draftSettings.autoFvg);
+        draftSettings.autoFvg = fc;
+
+        const rectTemplates = templates.filter(t => (t.drawingType || 'rectangle') === 'rectangle');
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div class="vest-tvs-section-title" style="margin:0;">AUTO FAIR VALUE GAPS (ICT FVG)</div>
+            <button type="button" class="vest-tvs-action-btn" id="vest-afvg-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Enable Auto FVG Detection & Dynamic Extension</div>
+              <div class="vest-tvs-toggle-desc">
+                Automatically detects 3-candle Bullish & Bearish Fair Value Gaps on the active timeframe, extends them forward in real time until price reclaims them, and applies your matching timeframe FVG template (e.g. <code>5m FVG</code>) or default FVG styling.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Auto FVG's on Chart">
+              <input type="checkbox" id="vest-afvg-master-enabled" ${fc.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Template Matching & Label Rules
+            </div>
+            <div style="font-size:11.5px; color:#94a3b8; line-height:1.45; margin-bottom:10px;">
+              When set to <strong>Auto-Match by Timeframe</strong>, Trading Cortex automatically looks for a saved Rectangle template matching your current chart timeframe (for example, on the <strong>5m</strong> chart it looks for <code>5m Bullish FVG</code> / <code>5m Bearish FVG</code> &rarr; <code>5m FVG</code> &rarr; <code>FVG</code>). If none exists, it uses the Default FVG Template styling below.
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:8px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Bullish FVG Template</label>
+                <select class="vest-ed-select" id="vest-afvg-bull-tpl">
+                  <option value="auto" ${fc.bullishTemplateId === 'auto' ? 'selected' : ''}>✨ Auto-Match (e.g. "5m FVG")</option>
+                  <option value="default" ${fc.bullishTemplateId === 'default' ? 'selected' : ''}>🎨 Built-In Default Bullish FVG</option>
+                  ${rectTemplates.map(t => `
+                    <option value="${escapeHtml(t.id)}" ${fc.bullishTemplateId === t.id ? 'selected' : ''}>📦 ${escapeHtml(t.name)}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Bearish FVG Template</label>
+                <select class="vest-ed-select" id="vest-afvg-bear-tpl">
+                  <option value="auto" ${fc.bearishTemplateId === 'auto' ? 'selected' : ''}>✨ Auto-Match (e.g. "5m FVG")</option>
+                  <option value="default" ${fc.bearishTemplateId === 'default' ? 'selected' : ''}>🎨 Built-In Default Bearish FVG</option>
+                  ${rectTemplates.map(t => `
+                    <option value="${escapeHtml(t.id)}" ${fc.bearishTemplateId === t.id ? 'selected' : ''}>📦 ${escapeHtml(t.name)}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label" title="Used when no custom text label is defined on the matched template. Tokens: {tf} (e.g. 5m), {dir} (Bullish/Bearish)">
+                  Default Label Format
+                </label>
+                <input
+                  type="text"
+                  class="vest-ed-input"
+                  id="vest-afvg-label-format"
+                  value="${escapeHtml(fc.labelFormat || '{tf} FVG')}"
+                  placeholder="{tf} FVG"
+                  style="font-family:'JetBrains Mono', monospace; font-size:11.5px;"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Reclaim (Mitigation) & Extension Behavior
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Unreclaimed Extension Mode</label>
+                <select class="vest-ed-select" id="vest-afvg-extend-mode">
+                  <option value="right" ${(fc.extendMode || 'right') === 'right' ? 'selected' : ''}>Extend Far Right Until Reclaimed</option>
+                  <option value="current" ${fc.extendMode === 'current' ? 'selected' : ''}>Extend to Current Time (+ Bars)</option>
+                  <option value="template" ${fc.extendMode === 'template' ? 'selected' : ''}>Follow Matched Template Setting</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label" title="How many additional bars to project active FVGs past the current time bar (e.g. 0 = stop at current bar, 5 = 5 bars past current bar)">
+                  Bars Past Current Bar
+                </label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input
+                    type="number"
+                    class="vest-ed-input"
+                    id="vest-afvg-future-bars"
+                    min="0"
+                    max="200"
+                    step="1"
+                    value="${Number(fc.extendFutureBars ?? 0)}"
+                    style="width:72px; font-family:'JetBrains Mono', monospace; font-size:12px; ${(fc.extendMode || 'right') === 'right' ? 'opacity:0.55;' : ''}"
+                    title="Number of bars to extend past the current candle when using 'Extend to Current Time (+ Bars)'"
+                  />
+                  <span style="font-size:11px; color:#94a3b8; white-space:nowrap;">bars (+${Number(fc.extendFutureBars ?? 0)})</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Reclaim Condition</label>
+                <select class="vest-ed-select" id="vest-afvg-reclaim-mode">
+                  <option value="close" ${fc.reclaimMode === 'close' ? 'selected' : ''}>Candle Close Through FVG (Body)</option>
+                  <option value="wick" ${fc.reclaimMode === 'wick' ? 'selected' : ''}>Full Wick Fill Through FVG</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Max Active Unreclaimed FVGs</label>
+                <select class="vest-ed-select" id="vest-afvg-max-active">
+                  ${[5, 10, 15, 20, 25, 35, 50, 75].map(n => `
+                    <option value="${n}" ${Number(fc.maxActiveFvgs) === n ? 'selected' : ''}>${n} Active FVGs</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Bars Lookback</label>
+                <select class="vest-ed-select" id="vest-afvg-lookback">
+                  ${[200, 400, 600, 1000, 1500, 2500].map(n => `
+                    <option value="${n}" ${Number(fc.maxBarsLookback) === n ? 'selected' : ''}>Last ${n} Candles</option>
+                  `).join('')}
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-top:6px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-afvg-sync-native" ${fc.syncNativeDrawings ? 'checked' : ''} />
+                <span>Also Sync as Selectable TradingView Rectangle Shapes</span>
+              </label>
+              <button
+                type="button"
+                class="vest-tvs-action-btn"
+                id="vest-afvg-clear-log-btn"
+                style="height:24px; padding:0 9px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.35);"
+                title="Clears the persistent log of previously created FVGs so deleted FVGs can be created again"
+              >
+                Clear Created FVG Log
+              </button>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid ${fc.showReclaimed !== false ? 'rgba(56,189,248,0.35)' : 'rgba(148,163,184,0.16)'}; border-radius:10px; transition:border-color 0.15s ease;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:14px;">
+              <div style="display:flex; flex-direction:column; gap:3px; min-width:0;">
+                <div style="font-size:13px; font-weight:700; color:#f8fafc; display:flex; align-items:center; gap:8px;">
+                  <span>Show Reclaimed FVG's</span>
+                  <span style="font-size:10px; font-weight:600; padding:1px 7px; border-radius:999px; background:${fc.showReclaimed !== false ? 'rgba(16,185,129,0.16)' : 'rgba(148,163,184,0.12)'}; border:1px solid ${fc.showReclaimed !== false ? 'rgba(16,185,129,0.4)' : 'rgba(148,163,184,0.22)'}; color:${fc.showReclaimed !== false ? '#34d399' : '#94a3b8'};">
+                    ${fc.showReclaimed !== false ? 'VISIBLE' : 'HIDDEN'}
+                  </span>
+                </div>
+                <div style="font-size:11.5px; color:#94a3b8; line-height:1.4;">
+                  Keep mitigated FVGs visible on the chart (cut off at the candle that reclaimed them) and automatically apply a custom reclaimed color.
+                </div>
+              </div>
+              <label class="vest-tvs-switch" title="Toggle Show Reclaimed FVG's">
+                <input type="checkbox" id="vest-afvg-show-reclaimed" ${fc.showReclaimed !== false ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+
+            <div id="vest-afvg-reclaimed-settings-body" style="display:${fc.showReclaimed !== false ? 'block' : 'none'}; margin-top:12px; padding-top:12px; border-top:1px solid rgba(148,163,184,0.14);">
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Reclaimed Color Mode</label>
+                  <select class="vest-ed-select" id="vest-afvg-reclaimed-color-mode">
+                    <option value="custom" ${(fc.reclaimedColorMode || 'custom') === 'custom' ? 'selected' : ''}>Custom Reclaimed Colors (Box, Border &amp; Midline)</option>
+                    <option value="dim" ${fc.reclaimedColorMode === 'dim' ? 'selected' : ''}>Keep Original FVG Colors (Dimmed)</option>
+                  </select>
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Max Reclaimed History</label>
+                  <select class="vest-ed-select" id="vest-afvg-reclaimed-count">
+                    ${[5, 10, 15, 25, 40, 60].map(n => `
+                      <option value="${n}" ${Number(fc.showReclaimedHistoryCount ?? 15) === n ? 'selected' : ''}>Last ${n} Reclaimed FVGs</option>
+                    `).join('')}
+                  </select>
+                </div>
+              </div>
+
+              <div class="vest-ed-grid-3" id="vest-afvg-reclaimed-color-grid" style="${(fc.reclaimedColorMode || 'custom') === 'dim' ? 'opacity:0.45; pointer-events:none;' : ''}">
+                <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                  <label class="vest-ed-label" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;">
+                    <span>Box Fill Color</span>
+                    <span id="vest-afvg-rec-box-op-val" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${Number(fc.reclaimedBoxOpacity ?? 18)}%</span>
+                  </label>
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <input
+                      type="color"
+                      class="vest-ed-color"
+                      id="vest-afvg-rec-box-color"
+                      data-opacity-input="#vest-afvg-rec-box-opacity"
+                      value="${normalizeHexColor(fc.reclaimedBoxColor || fc.reclaimedColor, '#787b86')}"
+                      style="width:32px; height:26px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;"
+                      title="Reclaimed Box Fill Color & Opacity"
+                    />
+                    <span id="vest-afvg-rec-box-hex" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedBoxColor || fc.reclaimedColor, '#787b86')}</span>
+                  </div>
+                  <input type="range" class="vest-ed-range" id="vest-afvg-rec-box-opacity" min="0" max="100" value="${Number(fc.reclaimedBoxOpacity ?? 18)}" title="Reclaimed Box Fill Opacity (%)" />
+                </div>
+
+                <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                  <label class="vest-ed-label" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;">
+                    <span>Border Color</span>
+                    <span id="vest-afvg-rec-border-op-val" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${Number(fc.reclaimedBorderOpacity ?? 65)}%</span>
+                  </label>
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <input
+                      type="color"
+                      class="vest-ed-color"
+                      id="vest-afvg-rec-border-color"
+                      data-opacity-input="#vest-afvg-rec-border-opacity"
+                      value="${normalizeHexColor(fc.reclaimedBorderColor || fc.reclaimedColor, '#787b86')}"
+                      style="width:32px; height:26px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;"
+                      title="Reclaimed Border Color & Opacity"
+                    />
+                    <span id="vest-afvg-rec-border-hex" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedBorderColor || fc.reclaimedColor, '#787b86')}</span>
+                  </div>
+                  <input type="range" class="vest-ed-range" id="vest-afvg-rec-border-opacity" min="0" max="100" value="${Number(fc.reclaimedBorderOpacity ?? 65)}" title="Reclaimed Border Opacity (%)" />
+                </div>
+
+                <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                  <label class="vest-ed-label" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;">
+                    <span>Middle Line Color</span>
+                    <span id="vest-afvg-rec-mid-op-val" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${Number(fc.reclaimedMidlineOpacity ?? 60)}%</span>
+                  </label>
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <input
+                      type="color"
+                      class="vest-ed-color"
+                      id="vest-afvg-rec-mid-color"
+                      data-opacity-input="#vest-afvg-rec-mid-opacity"
+                      value="${normalizeHexColor(fc.reclaimedMidlineColor || fc.reclaimedColor, '#787b86')}"
+                      style="width:32px; height:26px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;"
+                      title="Reclaimed Middle Line (50% CE) Color & Opacity"
+                    />
+                    <span id="vest-afvg-rec-mid-hex" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedMidlineColor || fc.reclaimedColor, '#787b86')}</span>
+                  </div>
+                  <input type="range" class="vest-ed-range" id="vest-afvg-rec-mid-opacity" min="0" max="100" value="${Number(fc.reclaimedMidlineOpacity ?? 60)}" title="Reclaimed Middle Line Opacity (%)" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:4px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Default FVG Fallback Template Styling (Used When No Matching Template Exists)
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Default Bullish FVG Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-afvg-bull-color" data-opacity-input="#vest-afvg-opacity" value="${normalizeHexColor(fc.defaultBullishColor, '#26a69a')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.defaultBullishColor, '#26a69a')}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Default Bearish FVG Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-afvg-bear-color" data-opacity-input="#vest-afvg-opacity" value="${normalizeHexColor(fc.defaultBearishColor, '#ef4444')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.defaultBearishColor, '#ef4444')}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Default Fill Opacity: <span id="vest-afvg-opacity-val">${fc.defaultOpacity}%</span></label>
+                <input type="range" class="vest-ed-range" id="vest-afvg-opacity" min="5" max="85" value="${fc.defaultOpacity}" />
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-afvg-show-midline" ${fc.defaultShowMidline !== false ? 'checked' : ''} />
+                <span>Show 50% Consequent Encroachment (CE) Midline</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-afvg-show-label" ${fc.defaultShowLabel !== false ? 'checked' : ''} />
+                <span>Show FVG Label (e.g. "5m FVG")</span>
+              </label>
+            </div>
+          </div>
+        `;
+      }
+
+      if (activeTab === 'news') {
+        const nc = normalizeNewsBoxConfig(draftSettings.newsBox);
+        draftSettings.newsBox = nc;
+
+        const renderMiniFolderSvg = (colorHex) => `
+          <svg viewBox="0 0 24 24" width="16" height="15" style="flex-shrink:0; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="${colorHex}" stroke="rgba(255,255,255,0.28)" stroke-width="1.3"/>
+          </svg>
+        `;
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div class="vest-tvs-section-title" style="margin:0;">ECONOMIC NEWS BOX (ON-CHART WIDGET)</div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button type="button" class="vest-tvs-action-btn" id="vest-nb-refresh-feed-btn" style="height:26px; padding:0 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.4);">
+                ↻ Refresh Live Feed
+              </button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-nb-reset-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#cbd5e1;" title="Snap News Box back to the top-left of the screen">
+                Center / Reset Position
+              </button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-nb-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+                Reset Defaults
+              </button>
+            </div>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Enable Moveable Economic News Box on Chart</div>
+              <div class="vest-tvs-toggle-desc">
+                Displays a draggable upcoming economic news widget anywhere on screen with event time, country of origin, and Red / Yellow / Green impact folder icons. Its screen position is remembered, and minimizing docks it into the Cortex bottom bar.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Economic News Box on Chart">
+              <input type="checkbox" id="vest-nb-master-enabled" ${nc.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#f87171; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              News Folder Impact Filters &amp; Folder Icon Colors
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:4px;">
+              <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                  <label class="vest-ed-checkbox-label" style="font-size:12px; font-weight:600; color:#f8fafc;">
+                    <input type="checkbox" id="vest-nb-show-red" ${nc.showRedFolder !== false ? 'checked' : ''} />
+                    ${renderMiniFolderSvg(nc.redFolderColor)}
+                    <span>Red Folder (High)</span>
+                  </label>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-red-color" value="${normalizeHexColor(nc.redFolderColor, '#f23645')}" style="width:28px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.redFolderColor, '#f23645')}</span>
+                </div>
+              </div>
+
+              <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                  <label class="vest-ed-checkbox-label" style="font-size:12px; font-weight:600; color:#f8fafc;">
+                    <input type="checkbox" id="vest-nb-show-yellow" ${nc.showYellowFolder !== false ? 'checked' : ''} />
+                    ${renderMiniFolderSvg(nc.yellowFolderColor)}
+                    <span>Yellow Folder (Med)</span>
+                  </label>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-yellow-color" value="${normalizeHexColor(nc.yellowFolderColor, '#ff9800')}" style="width:28px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.yellowFolderColor, '#ff9800')}</span>
+                </div>
+              </div>
+
+              <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                  <label class="vest-ed-checkbox-label" style="font-size:12px; font-weight:600; color:#f8fafc;">
+                    <input type="checkbox" id="vest-nb-show-green" ${nc.showGreenFolder !== false ? 'checked' : ''} />
+                    ${renderMiniFolderSvg(nc.greenFolderColor)}
+                    <span>Green Folder (Low)</span>
+                  </label>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-green-color" value="${normalizeHexColor(nc.greenFolderColor, '#26a69a')}" style="width:28px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.greenFolderColor, '#26a69a')}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px;">
+                Countries of Origin Filter
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="vest-tvs-action-btn" id="vest-nb-countries-all" style="height:22px; padding:0 8px; font-size:10.5px;">Select All</button>
+                <button type="button" class="vest-tvs-action-btn" id="vest-nb-countries-usd" style="height:22px; padding:0 8px; font-size:10.5px;">USD Only</button>
+              </div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              ${NEWS_ALL_COUNTRIES.map(code => {
+                const checked = nc.countries.includes(code);
+                return `
+                  <label class="vest-ed-checkbox-label" style="padding:4px 9px; border-radius:6px; background:${checked ? 'rgba(56,189,248,0.14)' : 'rgba(255,255,255,0.03)'}; border:1px solid ${checked ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)'}; font-size:11.5px; font-family:'JetBrains Mono', monospace; font-weight:600;">
+                    <input type="checkbox" class="vest-nb-country-chk" value="${code}" ${checked ? 'checked' : ''} />
+                    <span>${getCountryFlagEmoji(code)} ${code}</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Box Appearance, Timezone &amp; Viewport Clamping
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Header Title</label>
+                <input type="text" class="vest-ed-input" id="vest-nb-title" value="${escapeHtml(nc.boxTitle)}" placeholder="Upcoming News" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Timezone Display</label>
+                <select class="vest-ed-select" id="vest-nb-tz">
+                  <option value="ny" ${nc.timeZoneMode === 'ny' ? 'selected' : ''}>New York (EST/EDT)</option>
+                  <option value="local" ${nc.timeZoneMode === 'local' ? 'selected' : ''}>Local Browser Time</option>
+                  <option value="utc" ${nc.timeZoneMode === 'utc' ? 'selected' : ''}>UTC</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Time Format</label>
+                <select class="vest-ed-select" id="vest-nb-time-fmt">
+                  <option value="12h" ${nc.timeFormat === '12h' ? 'selected' : ''}>12-Hour (8:30am)</option>
+                  <option value="24h" ${nc.timeFormat === '24h' ? 'selected' : ''}>24-Hour (08:30)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Max Visible Events</label>
+                <select class="vest-ed-select" id="vest-nb-max-events">
+                  ${[3, 4, 5, 6, 8, 10, 12, 15, 20].map(n => `
+                    <option value="${n}" ${Number(nc.maxEvents) === n ? 'selected' : ''}>${n} Events</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Width: <span id="vest-nb-width-val">${nc.boxWidth}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-nb-width" min="250" max="480" value="${nc.boxWidth}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Background &amp; Opacity</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-bg-color" data-opacity-input="#vest-nb-bg-opacity" value="${normalizeHexColor(nc.bgColor, '#131722')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span id="vest-nb-bg-op-badge" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${nc.bgOpacity}%</span>
+                  <input type="range" id="vest-nb-bg-opacity" min="25" max="100" value="${nc.bgOpacity}" style="display:none;" />
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Border Color</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-border-color" value="${normalizeHexColor(nc.borderColor, '#38bdf8')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.borderColor, '#38bdf8')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-nb-show-countdown" ${nc.showCountdown !== false ? 'checked' : ''} />
+                <span>Show Live Countdown Badge (e.g. <code>in 14m</code> / <code>2h 10m</code>)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-nb-show-flag" ${nc.showCountryFlag !== false ? 'checked' : ''} />
+                <span>Show Country Flag Next to Currency Code</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:4px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+              Add Custom Scheduled News Event
+            </div>
+            <div style="display:grid; grid-template-columns: 95px 86px 115px 1fr auto; gap:8px; align-items:center;">
+              <input type="time" class="vest-ed-input" id="vest-nb-cust-time" value="08:30" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11.5px;" title="Event Time" />
+              <select class="vest-ed-select" id="vest-nb-cust-country" style="height:28px; font-size:11.5px;">
+                ${NEWS_ALL_COUNTRIES.map(c => `<option value="${c}">${c}</option>`).join('')}
+              </select>
+              <select class="vest-ed-select" id="vest-nb-cust-folder" style="height:28px; font-size:11.5px;">
+                <option value="red">🔴 Red Folder</option>
+                <option value="yellow">🟡 Yellow Folder</option>
+                <option value="green">🟢 Green Folder</option>
+              </select>
+              <input type="text" class="vest-ed-input" id="vest-nb-cust-title" placeholder="e.g. CPI m/m, FOMC Statement..." style="height:28px; font-size:11.5px;" />
+              <button type="button" class="vest-tvs-action-btn" id="vest-nb-cust-add-btn" style="height:28px; padding:0 12px; border-color:#10b981; color:#34d399; font-size:11.5px;">
+                + Add
+              </button>
+            </div>
+            ${nc.customEvents.length > 0 ? `
+              <div style="display:flex; flex-direction:column; gap:4px; margin-top:8px;">
+                ${nc.customEvents.map((ev, idx) => `
+                  <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 8px; background:rgba(255,255,255,0.04); border-radius:6px; font-size:11.5px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <span style="font-family:'JetBrains Mono', monospace; color:#cbd5e1;">${escapeHtml(ev.time)}</span>
+                      <span style="font-family:'JetBrains Mono', monospace; font-weight:700; color:#f8fafc;">${getCountryFlagEmoji(ev.country)} ${escapeHtml(ev.country)}</span>
+                      ${renderMiniFolderSvg(ev.folder === 'red' ? nc.redFolderColor : (ev.folder === 'yellow' ? nc.yellowFolderColor : nc.greenFolderColor))}
+                      <span style="color:#e2e8f0;">${escapeHtml(ev.title)}</span>
+                    </div>
+                    <button type="button" class="vest-cnb-icon-btn vest-nb-cust-del" data-idx="${idx}" title="Remove custom event" style="color:#f87171;">×</button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      if (activeTab === 'trades') {
+        const tc = normalizeTradesBoxConfig(draftSettings.tradesBox);
+        draftSettings.tradesBox = tc;
+        const activeSymLabel = formatInstrumentDisplayLabel(currentInstrument || 'BTC-PERP');
+        const activeSymKey = normalizeInstrumentKey(currentInstrument || 'BTC-PERP');
+        const sessionBounds = getCurrentEtTradingSessionBounds();
+        const matchingTrades = tc.trades.filter(t => {
+          if (!t) return false;
+          if (tc.filterCurrentInstrument && activeSymKey && t.symbolKey && t.symbolKey !== activeSymKey) return false;
+          if (tc.filterCurrentSessionOnly !== false && !isTradeWithinCurrentEtSession(t, sessionBounds)) return false;
+          return true;
+        });
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div class="vest-tvs-section-title" style="margin:0;">INSTRUMENT TRADES BOX (ON-CHART PNL &amp; DURATION)</div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button type="button" class="vest-tvs-action-btn" id="vest-tb-scan-now-btn" style="height:26px; padding:0 10px; font-size:11px; color:#34d399; border-color:rgba(16,185,129,0.4);">
+                ↻ Sync Positions History
+              </button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-tb-reset-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.35);">
+                Reset Box Position
+              </button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-tb-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+                Reset Defaults
+              </button>
+            </div>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Enable Moveable Instrument Trades Box on Chart</div>
+              <div class="vest-tvs-toggle-desc">
+                Prepopulates once from <strong>Positions History</strong> for your currently selected instrument (<strong>${escapeHtml(activeSymLabel)}</strong>) within the active trading session (<strong>6:00 PM ET Prev Night – 4:59 PM ET Today</strong>), highlighting wins green and losses red with aligned Side, Entry, Exit, Duration, and PnL columns.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Instrument Trades Box on Chart">
+              <input type="checkbox" id="vest-tb-master-enabled" ${tc.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Winning &amp; Losing Trade Row Highlighting
+            </div>
+            <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:8px; background:${hexToRgba(tc.winRowColor, tc.winRowOpacity / 100)}; border:1px solid ${hexToRgba(tc.winRowColor, 0.5)};">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <span style="font-size:12.5px; font-weight:700; color:#f8fafc;">Winning Trade Row (Green)</span>
+                  <span style="font-size:10.5px; color:#cbd5e1;">Applied when Trade PnL &gt; $0.00</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:7px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-win-color" data-opacity-input="#vest-tb-win-opacity" value="${normalizeHexColor(tc.winRowColor, '#10b981')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span id="vest-tb-win-op-badge" style="font-size:11px; color:#e2e8f0; font-family:'JetBrains Mono', monospace;">${tc.winRowOpacity}%</span>
+                  <input type="range" id="vest-tb-win-opacity" min="8" max="85" value="${tc.winRowOpacity}" style="display:none;" />
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:8px; background:${hexToRgba(tc.lossRowColor, tc.lossRowOpacity / 100)}; border:1px solid ${hexToRgba(tc.lossRowColor, 0.5)};">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <span style="font-size:12.5px; font-weight:700; color:#f8fafc;">Losing Trade Row (Red)</span>
+                  <span style="font-size:10.5px; color:#cbd5e1;">Applied when Trade PnL &lt; $0.00</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:7px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-loss-color" data-opacity-input="#vest-tb-loss-opacity" value="${normalizeHexColor(tc.lossRowColor, '#f23645')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span id="vest-tb-loss-op-badge" style="font-size:11px; color:#e2e8f0; font-family:'JetBrains Mono', monospace;">${tc.lossRowOpacity}%</span>
+                  <input type="range" id="vest-tb-loss-opacity" min="8" max="85" value="${tc.lossRowOpacity}" style="display:none;" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Long &amp; Short Side Badge Colors &amp; Font Styling
+            </div>
+            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+              <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                  <span style="font-size:12px; font-weight:700; color:#f8fafc;">LONG Side Badge</span>
+                  <span class="vest-ctb-side-badge long" id="vest-tb-long-badge-preview" style="${buildSideBadgeInlineStyle('LONG', tc)}">LONG</span>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Text Color</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                      <input type="color" class="vest-ed-color" id="vest-tb-long-text-color" value="${normalizeHexColor(tc.longBadgeTextColor, '#38bdf8')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.longBadgeTextColor, '#38bdf8')}</span>
+                    </div>
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Fill &amp; Opacity</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                      <input type="color" class="vest-ed-color" id="vest-tb-long-bg-color" data-opacity-input="#vest-tb-long-bg-opacity" value="${normalizeHexColor(tc.longBadgeBgColor, '#0f172a')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                      <span id="vest-tb-long-bg-op-badge" style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${tc.longBadgeBgOpacity}%</span>
+                      <input type="range" id="vest-tb-long-bg-opacity" min="0" max="100" value="${tc.longBadgeBgOpacity}" style="display:none;" />
+                    </div>
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Border Color</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                      <input type="color" class="vest-ed-color" id="vest-tb-long-border-color" value="${normalizeHexColor(tc.longBadgeBorderColor, '#38bdf8')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.longBadgeBorderColor, '#38bdf8')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                  <span style="font-size:12px; font-weight:700; color:#f8fafc;">SHORT Side Badge</span>
+                  <span class="vest-ctb-side-badge short" id="vest-tb-short-badge-preview" style="${buildSideBadgeInlineStyle('SHORT', tc)}">SHORT</span>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Text Color</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                      <input type="color" class="vest-ed-color" id="vest-tb-short-text-color" value="${normalizeHexColor(tc.shortBadgeTextColor, '#fbbf24')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.shortBadgeTextColor, '#fbbf24')}</span>
+                    </div>
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Fill &amp; Opacity</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                      <input type="color" class="vest-ed-color" id="vest-tb-short-bg-color" data-opacity-input="#vest-tb-short-bg-opacity" value="${normalizeHexColor(tc.shortBadgeBgColor, '#0f172a')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                      <span id="vest-tb-short-bg-op-badge" style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${tc.shortBadgeBgOpacity}%</span>
+                      <input type="range" id="vest-tb-short-bg-opacity" min="0" max="100" value="${tc.shortBadgeBgOpacity}" style="display:none;" />
+                    </div>
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Border Color</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                      <input type="color" class="vest-ed-color" id="vest-tb-short-border-color" value="${normalizeHexColor(tc.shortBadgeBorderColor, '#fbbf24')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
+                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.shortBadgeBorderColor, '#fbbf24')}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Side Badge Font Family</label>
+                <select class="vest-ed-select" id="vest-tb-side-font-family">
+                  ${SESSION_FONT_FAMILIES.map(f => `
+                    <option value="${escapeHtml(f.id)}" ${f.id === tc.sideBadgeFontFamily ? 'selected' : ''}>${escapeHtml(f.label)}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Badge Font Size: <span id="vest-tb-side-fontsize-val">${tc.sideBadgeFontSize}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-tb-side-font-size" min="7" max="14" step="0.5" value="${tc.sideBadgeFontSize}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Badge Font Style</label>
+                <select class="vest-ed-select" id="vest-tb-side-font-style">
+                  <option value="normal" ${tc.sideBadgeFontStyle === 'normal' ? 'selected' : ''}>Normal</option>
+                  <option value="bold" ${(tc.sideBadgeFontStyle || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
+                  <option value="italic" ${tc.sideBadgeFontStyle === 'italic' ? 'selected' : ''}>Italic</option>
+                  <option value="bold_italic" ${tc.sideBadgeFontStyle === 'bold_italic' ? 'selected' : ''}>Bold Italic</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Box Appearance, Timezone &amp; Instrument Filtering
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Header Title</label>
+                <input type="text" class="vest-ed-input" id="vest-tb-title" value="${escapeHtml(tc.boxTitle)}" placeholder="Instrument Trades" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Timezone Display</label>
+                <select class="vest-ed-select" id="vest-tb-tz">
+                  <option value="ny" ${tc.timeZoneMode === 'ny' ? 'selected' : ''}>New York (EST/EDT)</option>
+                  <option value="local" ${tc.timeZoneMode === 'local' ? 'selected' : ''}>Local Browser Time</option>
+                  <option value="utc" ${tc.timeZoneMode === 'utc' ? 'selected' : ''}>UTC</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Time Format</label>
+                <select class="vest-ed-select" id="vest-tb-time-fmt">
+                  <option value="12h" ${tc.timeFormat === '12h' ? 'selected' : ''}>12-Hour (9:30am)</option>
+                  <option value="24h" ${tc.timeFormat === '24h' ? 'selected' : ''}>24-Hour (09:30)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Max Visible Trades</label>
+                <select class="vest-ed-select" id="vest-tb-max-trades">
+                  ${[4, 6, 8, 10, 12, 15, 20, 30].map(n => `
+                    <option value="${n}" ${Number(tc.maxTrades) === n ? 'selected' : ''}>${n} Trades</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Width: <span id="vest-tb-width-val">${tc.boxWidth}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-tb-width" min="430" max="660" value="${tc.boxWidth}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Background &amp; Opacity</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-bg-color" data-opacity-input="#vest-tb-bg-opacity" value="${normalizeHexColor(tc.bgColor, '#131722')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span id="vest-tb-bg-op-badge" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${tc.bgOpacity}%</span>
+                  <input type="range" id="vest-tb-bg-opacity" min="25" max="100" value="${tc.bgOpacity}" style="display:none;" />
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Border Color</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-border-color" value="${normalizeHexColor(tc.borderColor, '#38bdf8')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
+                  <span style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.borderColor, '#38bdf8')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-filter-inst" ${tc.filterCurrentInstrument !== false ? 'checked' : ''} />
+                <span>Filter to Currently Selected Instrument Only (<strong>${escapeHtml(activeSymLabel)}</strong>)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-filter-session" ${tc.filterCurrentSessionOnly !== false ? 'checked' : ''} />
+                <span>Current Trading Session Only (<strong>6:00 PM ET Prev Night – 4:59 PM ET Today</strong>)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-show-side" ${tc.showSideBadge !== false ? 'checked' : ''} />
+                <span>Show Long / Short Badge</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-show-summary" ${tc.showSummaryFooter !== false ? 'checked' : ''} />
+                <span>Show Net PnL &amp; Win Rate Footer</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-auto-capture" ${tc.autoCaptureTrades !== false ? 'checked' : ''} />
+                <span>Auto-Populate Once from Positions History</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:4px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px;">
+                Log Trade for ${escapeHtml(activeSymLabel)} (${matchingTrades.length} Recorded)
+              </div>
+              ${tc.trades.length > 0 ? `
+                <button type="button" class="vest-tvs-action-btn" id="vest-tb-clear-all-btn" style="height:22px; padding:0 8px; font-size:10.5px; color:#f87171; border-color:rgba(248,113,113,0.35);">
+                  Clear All Trades
+                </button>
+              ` : ''}
+            </div>
+            <div style="display:grid; grid-template-columns: 92px 76px 96px 96px 1fr auto; gap:6px; align-items:center;">
+              <input type="text" class="vest-ed-input" id="vest-tb-add-symbol" value="${escapeHtml(activeSymLabel)}" placeholder="Symbol" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11.5px;" title="Instrument Symbol" />
+              <select class="vest-ed-select" id="vest-tb-add-side" style="height:28px; font-size:11.5px;">
+                <option value="LONG">LONG</option>
+                <option value="SHORT">SHORT</option>
+              </select>
+              <input type="time" class="vest-ed-input" id="vest-tb-add-entry" value="09:35" step="1" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11px;" title="Entry Time" />
+              <input type="time" class="vest-ed-input" id="vest-tb-add-exit" value="09:52" step="1" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11px;" title="Exit Time" />
+              <input type="number" class="vest-ed-input" id="vest-tb-add-pnl" step="0.01" placeholder="PnL ($) e.g. 245.50 or -110" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11.5px;" title="Realized PnL in USD (+ for Win, - for Loss)" />
+              <button type="button" class="vest-tvs-action-btn" id="vest-tb-add-btn" style="height:28px; padding:0 12px; border-color:#10b981; color:#34d399; font-size:11.5px;">
+                + Add Trade
+              </button>
+            </div>
+            ${matchingTrades.length > 0 ? `
+              <div style="display:flex; flex-direction:column; gap:4px; margin-top:8px; max-height:140px; overflow-y:auto;">
+                ${matchingTrades.slice(0, 20).map((tr) => {
+                  const isWin = tr.pnl > 0;
+                  const isLoss = tr.pnl < 0;
+                  const rowBg = isWin
+                    ? hexToRgba(tc.winRowColor, Math.min(45, tc.winRowOpacity) / 100)
+                    : isLoss
+                      ? hexToRgba(tc.lossRowColor, Math.min(45, tc.lossRowOpacity) / 100)
+                      : 'rgba(255,255,255,0.04)';
+                  const pnlFormatted = `${tr.pnl >= 0 ? '+' : '-'}$${Math.abs(tr.pnl).toFixed(2)}`;
+                  const dateFormatted = formatTradeDateShort(tr.exitTime || tr.entryTime, tc);
+                  const sideBadgeStyle = buildSideBadgeInlineStyle(tr.side, tc);
+                  return `
+                    <div style="display:grid; grid-template-columns: 52px minmax(0, 1fr); gap:8px; align-items:center;">
+                      <span class="vest-ctb-side-badge ${tr.side === 'SHORT' ? 'short' : 'long'}" style="${sideBadgeStyle}">${escapeHtml(tr.side)}</span>
+                      <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 8px; background:${rowBg}; border-left:3px solid ${isWin ? tc.winRowColor : isLoss ? tc.lossRowColor : '#64748b'}; border-radius:5px; font-size:11.5px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <span style="font-family:'JetBrains Mono', monospace; font-weight:700; color:#f8fafc;">${escapeHtml(tr.symbol)}</span>
+                          <span style="font-family:'JetBrains Mono', monospace; color:#cbd5e1;">${escapeHtml(dateFormatted)}</span>
+                          <span style="font-family:'JetBrains Mono', monospace; color:#e2e8f0;">${escapeHtml(formatTradeTimeShort(tr.entryTime, tc))} → ${escapeHtml(formatTradeTimeShort(tr.exitTime, tc))}</span>
+                          <span style="font-family:'JetBrains Mono', monospace; color:#94a3b8;">(${escapeHtml(formatTradeDuration(tr.durationMs || (tr.exitTime - tr.entryTime)))})</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <span style="font-family:'JetBrains Mono', monospace; font-weight:700; color:${isWin ? '#4ade80' : isLoss ? '#fca5a5' : '#cbd5e1'};">${escapeHtml(pnlFormatted)}</span>
+                          <button type="button" class="vest-cnb-icon-btn vest-tb-del-trade" data-id="${escapeHtml(tr.id)}" title="Delete trade" style="color:#f87171;">×</button>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      if (activeTab === 'candleohlc') {
+        const co = normalizeCandleOhlcConfig(draftSettings.candleOhlc);
+        draftSettings.candleOhlc = co;
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div>
+              <div class="vest-tvs-section-title" style="margin-bottom:2px;">CANDLE OHLC, NUMBERING &amp; WIDTH SETTINGS</div>
+              <div style="font-size:11.5px; color:#868993;">Display OHLC values, label candles #1–#${co.candleNumbersMax} in an outlined box below each candle, and adjust candle width.</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button type="button" class="vest-tvs-action-btn" id="vest-co-clear-clicked-btn" style="height:28px; padding:0 10px; font-size:11.5px;" title="Turn off all individually clicked candle OHLC labels">
+                Clear Clicked Candles
+              </button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-co-reset-defaults-btn" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(248,113,113,0.35); color:#f87171;" title="Reset Candle settings to factory defaults">
+                Reset Defaults
+              </button>
+            </div>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="margin-bottom:10px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Number Candles Backward (#1 = Current Forming Candle → #${co.candleNumbersMax})</div>
+              <div class="vest-tvs-toggle-desc">
+                Labels each candle with its bar number in a small outlined box right below the candle's low wick, starting at <strong>#1</strong> on the current forming candle and counting backward up to ${co.candleNumbersMax} candles.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Bar #1–#${co.candleNumbersMax} Outlined Boxes on Chart">
+              <input type="checkbox" id="vest-co-show-numbers" ${co.showCandleNumbers ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(56,189,248,0.04); border:1px solid rgba(56,189,248,0.18); border-radius:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px;">
+                Candle Numbering Box &amp; Candle Body Size / Spacing
+              </div>
+              <label class="vest-ed-checkbox-label" style="font-size:11.5px; color:#e2e8f0;" title="Resize candle bodies &amp; proportionally space out adjacent candles left and right so they never overlap">
+                <input type="checkbox" id="vest-co-custom-width-enabled" ${co.customCandleWidthEnabled ? 'checked' : ''} />
+                <span>Custom Candle Size &amp; Spacing</span>
+              </label>
+            </div>
+
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Candle Width Scale (<span id="vest-co-width-val">${co.candleWidthPx}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <button type="button" class="vest-tvs-action-btn" id="vest-co-width-dec-btn" style="height:24px; width:26px; padding:0; font-weight:700;" title="Make candles narrower and tighter">−</button>
+                  <input type="range" class="vest-ed-range" id="vest-co-candle-width" min="40" max="260" step="5" value="${co.candleWidthPx}" style="flex:1;" />
+                  <button type="button" class="vest-tvs-action-btn" id="vest-co-width-inc-btn" style="height:24px; width:26px; padding:0; font-weight:700;" title="Make candles wider and space out left &amp; right">+</button>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Max Numbered Candles (<span id="vest-co-num-max-val">#1–#${co.candleNumbersMax}</span>)</label>
+                <input type="number" class="vest-ed-input" id="vest-co-num-max" min="10" max="300" step="5" value="${co.candleNumbersMax}" style="height:28px; font-family:'JetBrains Mono', monospace;" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Number Font Size (<span id="vest-co-num-fontsize-val">${co.candleNumberFontSize}px</span>)</label>
+                <input type="range" class="vest-ed-range" id="vest-co-num-font-size" min="7.5" max="14" step="0.5" value="${co.candleNumberFontSize}" />
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Outline / Border Color</label>
+                <div class="vest-ed-color-wrap" style="height:28px; padding:0 8px;">
+                  <input type="color" id="vest-co-num-glow-color" value="${co.candleNumberGlowColor}" />
+                  <span style="font-size:11px; font-family:monospace; color:#d1d4dc;">${co.candleNumberGlowColor}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Number Text Color</label>
+                <div class="vest-ed-color-wrap" style="height:28px; padding:0 8px;">
+                  <input type="color" id="vest-co-num-text-color" value="${co.candleNumberTextColor}" />
+                  <span style="font-size:11px; font-family:monospace; color:#d1d4dc;">${co.candleNumberTextColor}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Fill &amp; Opacity (<span id="vest-co-num-bg-op-val">${co.candleNumberBgOpacity}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" id="vest-co-num-bg-color" value="${co.candleNumberBgColor}" style="width:28px; height:26px; border:none; background:transparent; cursor:pointer; padding:0;" />
+                  <input type="range" class="vest-ed-range" id="vest-co-num-bg-opacity" min="20" max="100" step="1" value="${co.candleNumberBgOpacity}" style="flex:1;" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="margin-bottom:10px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Show OHLC Values on All Visible Candles</div>
+              <div class="vest-tvs-toggle-desc">
+                When enabled, automatically displays High, Low, Open, and Close values on every visible candle on the chart. You can still click any candle to turn its individual OHLC display off or back on.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Show OHLC Values on All Visible Candles">
+              <input type="checkbox" id="vest-co-master-enabled" ${co.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Click Any Candle to Toggle Its OHLC Values ON / OFF</div>
+              <div class="vest-tvs-toggle-desc">
+                Simply click directly on any candle body or wick (or its OHLC label) on the chart to toggle that specific candle's Open, High, Low, and Close values ON or OFF.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Click Any Candle to Toggle OHLC">
+              <input type="checkbox" id="vest-co-click-toggle" ${co.clickCandleToToggle !== false ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Displayed Values &amp; Layout Style
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
+                <input type="checkbox" id="vest-co-show-open" ${co.showOpen !== false ? 'checked' : ''} />
+                <span>Open (O)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
+                <input type="checkbox" id="vest-co-show-high" ${co.showHigh !== false ? 'checked' : ''} />
+                <span>High (H)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
+                <input type="checkbox" id="vest-co-show-low" ${co.showLow !== false ? 'checked' : ''} />
+                <span>Low (L)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
+                <input type="checkbox" id="vest-co-show-close" ${co.showClose !== false ? 'checked' : ''} />
+                <span>Close (C)</span>
+              </label>
+            </div>
+
+            <div class="vest-ed-grid-3" style="margin-bottom:4px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Display Mode</label>
+                <select class="vest-ed-select" id="vest-co-display-mode">
+                  <option value="badge" ${co.displayMode !== 'levels' ? 'selected' : ''}>Stacked OHLC Callout Card</option>
+                  <option value="levels" ${co.displayMode === 'levels' ? 'selected' : ''}>Price Tags at Exact O/H/L/C Levels</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Price Decimals</label>
+                <select class="vest-ed-select" id="vest-co-decimals">
+                  <option value="auto" ${co.decimals === 'auto' ? 'selected' : ''}>Auto-Detect Instrument Tick</option>
+                  <option value="0" ${co.decimals === '0' ? 'selected' : ''}>0 Decimals (12345)</option>
+                  <option value="1" ${co.decimals === '1' ? 'selected' : ''}>1 Decimal (12345.6)</option>
+                  <option value="2" ${co.decimals === '2' ? 'selected' : ''}>2 Decimals (12345.67)</option>
+                  <option value="3" ${co.decimals === '3' ? 'selected' : ''}>3 Decimals (1.234)</option>
+                  <option value="4" ${co.decimals === '4' ? 'selected' : ''}>4 Decimals (1.2345)</option>
+                  <option value="5" ${co.decimals === '5' ? 'selected' : ''}>5 Decimals (1.23456)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Font Size (<span id="vest-co-fontsize-val">${co.fontSize}px</span>)</label>
+                <input type="range" class="vest-ed-range" id="vest-co-font-size" min="8" max="15" step="0.5" value="${co.fontSize}" />
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:8px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Badge &amp; Accent Colors
+            </div>
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Card Background &amp; Opacity (<span id="vest-co-bg-op-badge">${co.bgOpacity}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" id="vest-co-bg-color" value="${co.bgColor}" style="width:28px; height:26px; border:none; background:transparent; cursor:pointer; padding:0;" />
+                  <input type="range" class="vest-ed-range" id="vest-co-bg-opacity" min="25" max="100" step="1" value="${co.bgOpacity}" style="flex:1;" />
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Value Text Color</label>
+                <div class="vest-ed-color-wrap" style="height:28px; padding:0 8px;">
+                  <input type="color" id="vest-co-text-color" value="${co.textColor}" />
+                  <span style="font-size:11px; font-family:monospace; color:#d1d4dc;">${co.textColor}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Bullish / Bearish Border Accent</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div class="vest-ed-color-wrap" style="height:28px; padding:0 6px; flex:1;" title="Bullish Candle Accent">
+                    <input type="color" id="vest-co-bull-color" value="${co.bullColor}" />
+                    <span style="font-size:10.5px; font-family:monospace; color:#d1d4dc;">Bull</span>
+                  </div>
+                  <div class="vest-ed-color-wrap" style="height:28px; padding:0 6px; flex:1;" title="Bearish Candle Accent">
+                    <input type="color" id="vest-co-bear-color" value="${co.bearColor}" />
+                    <span style="font-size:10.5px; font-family:monospace; color:#d1d4dc;">Bear</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      if (activeTab === 'positionhud') {
+        const ph = normalizePositionHudConfig(draftSettings.positionHud);
+        draftSettings.positionHud = ph;
+
+        return `
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div>
+              <div class="vest-tvs-section-title" style="margin-bottom:2px;">ACTIVE POSITION CHART HUD &amp; QUICK FLATTEN</div>
+              <div style="font-size:11.5px; color:#868993;">Live estimated PnL following the yellow price line, one-click position flatten [ ✕ ], and unclipped entry box PnL badge.</div>
+            </div>
+            <button type="button" class="vest-tvs-action-btn" id="vest-ph-reset-defaults-btn" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(248,113,113,0.35); color:#f87171;" title="Reset Position HUD to factory defaults">
+              Reset Defaults
+            </button>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Enable Active Position Chart Overlay HUD</div>
+              <div class="vest-tvs-toggle-desc">
+                When you have an open trade, tracks the position in real time on the chart with interactive PnL overlays and one-click execution.
+              </div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Active Position Chart Overlay HUD">
+              <input type="checkbox" id="vest-ph-master-enabled" ${ph.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(234,179,8,0.04); border:1px solid rgba(234,179,8,0.2); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#eab308; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+              Yellow Current Price Line Overlay
+            </div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <div class="vest-tvs-toggle-box" style="margin-bottom:0; background:transparent; border:none; padding:0;">
+                <div class="vest-tvs-toggle-info">
+                  <div class="vest-tvs-toggle-title">Show Live PnL Box on Yellow Price Line</div>
+                  <div class="vest-tvs-toggle-desc">
+                    Rectangle box that dynamically moves vertically with the yellow current price line, showing the estimated dollar amount you will make/lose if you close 100% of your position right at that price tick.
+                  </div>
+                </div>
+                <label class="vest-tvs-switch" title="Toggle Live PnL Box on Yellow Price Line">
+                  <input type="checkbox" id="vest-ph-price-line" ${ph.showPriceLineHud ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="vest-tvs-toggle-box" style="margin-bottom:0; background:transparent; border:none; padding:0;">
+                <div class="vest-tvs-toggle-info">
+                  <div class="vest-tvs-toggle-title">Show Quick Flatten [ ✕ ] Button next to Price Line PnL</div>
+                  <div class="vest-tvs-toggle-desc">
+                    Adds a tactile red <strong>[ ✕ ]</strong> button right beside the price line PnL box to completely flatten (market close 100% of) your open position in a single click.
+                  </div>
+                </div>
+                <label class="vest-tvs-switch" title="Toggle Quick Flatten Button on Price Line">
+                  <input type="checkbox" id="vest-ph-flatten-btn" ${ph.showFlattenBtn ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(56,189,248,0.04); border:1px solid rgba(56,189,248,0.2); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+              Chart Entry Box PnL Badge
+            </div>
+            <div class="vest-tvs-toggle-box" style="margin-bottom:0; background:transparent; border:none; padding:0;">
+              <div class="vest-tvs-toggle-info">
+                <div class="vest-tvs-toggle-title">Show Unclipped PnL Badge Immediately to Left of Entry Box</div>
+                <div class="vest-tvs-toggle-desc">
+                  Places a clean, full-width badge (e.g. <strong>[ PNL +$0.14 ]</strong>) directly to the left of TradingView's native entry box so the dollar return is never truncated with ellipses.
+                </div>
+              </div>
+              <label class="vest-tvs-switch" title="Toggle Entry Box Left PnL Badge">
+                <input type="checkbox" id="vest-ph-entry-badge" ${ph.showEntryBadge ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Display Formatting &amp; Execution
+            </div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-ph-pnl-percent" ${ph.showPnlPercent ? 'checked' : ''} />
+                <span>Show Return Percentage Alongside Dollar PnL (e.g. <strong>+$0.14 (+0.05%)</strong>)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-ph-auto-confirm" ${ph.autoConfirmFlatten ? 'checked' : ''} />
+                <span>Auto-Confirm Platform Close Confirmation Dialog when Clicking Flatten [ ✕ ]</span>
+              </label>
+            </div>
+          </div>
+        `;
+      }
+
+      if (activeTab === 'faillines') {
+        const cfg = normalizeFailLinesConfig(draftSettings.failLines);
+        draftSettings.failLines = cfg;
+        return `
+          <div class="vest-tvs-section-title">CHART TRADER PANEL SETTINGS</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.5;margin:0 0 14px;">Shows Vest's current Long and Short fail prices as horizontal chart lines. The lines update as the prices in the order panel change.</p>
+          <div class="vest-tvs-toggle-box">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Show Long and Short Fail Price Lines</div>
+              <div class="vest-tvs-toggle-desc">Reads the live fail prices from the Vest trading panel and keeps both labeled lines aligned with their chart prices.</div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle live fail price chart lines">
+              <input type="checkbox" id="vest-fail-lines-enabled" ${cfg.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+          <div style="margin-top:16px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <label for="vest-fail-lines-label-size" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin-bottom:8px;">Label size <span id="vest-fail-lines-label-size-value" style="color:#38bdf8;">${cfg.labelSize}%</span></label>
+            <input id="vest-fail-lines-label-size" type="range" min="75" max="150" step="5" value="${cfg.labelSize}" style="width:100%;accent-color:#0ea5e9;" />
+            <label for="vest-fail-lines-font-size" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:14px 0 8px;">Font size <span id="vest-fail-lines-font-size-value" style="color:#38bdf8;">${cfg.fontSize}px</span></label>
+            <input id="vest-fail-lines-font-size" type="range" min="8" max="18" step="1" value="${cfg.fontSize}" style="width:100%;accent-color:#0ea5e9;" />
+          </div>
+        `;
+      }
+
+      if (activeTab === 'cortexindicator') {
+        const cfg = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+        draftSettings.cortexIndicator = cfg;
+        const range = (id, label, min, max, step, value, unit = '') => `
+          <label for="${id}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:14px 0 7px;">${label}<span id="${id}-value" style="color:#38bdf8;">${value}${unit}</span></label>
+          <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" style="width:100%;accent-color:#0ea5e9;" />`;
+        return `
+          <div class="vest-tvs-section-title">CORTEX INDICATOR</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">A configurable trend-following prototype inspired by the supplied chart: ATR trend bands, a shaded EMA channel, trend-flip markers, projected risk/targets, and multi-timeframe direction. The original indicator’s private formula is unknown, so this is an approximation.</p>
+          <div class="vest-tvs-toggle-box">
+            <div class="vest-tvs-toggle-info"><div class="vest-tvs-toggle-title">Show Cortex Indicator</div><div class="vest-tvs-toggle-desc">Draw the indicator over the current chart candles.</div></div>
+            <label class="vest-tvs-switch"><input type="checkbox" id="vest-ci-enabled" ${cfg.enabled ? 'checked' : ''} /><span class="vest-tvs-switch-slider"></span></label>
+          </div>
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            ${range('vest-ci-ema-length', 'EMA channel length', 5, 100, 1, cfg.emaLength)}
+            ${range('vest-ci-atr-length', 'ATR length', 3, 50, 1, cfg.atrLength)}
+            ${range('vest-ci-trend-multiplier', 'Trend stop multiplier', 1, 6, 0.1, cfg.trendMultiplier, '×')}
+          </div>
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <label for="vest-ci-distance-mode" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:8px;">Entry, stop &amp; target distance</label>
+            <select id="vest-ci-distance-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+              <option value="points" ${cfg.levelDistanceMode === 'points' ? 'selected' : ''}>Fixed chart points</option>
+              <option value="atr" ${cfg.levelDistanceMode === 'atr' ? 'selected' : ''}>ATR-based (current trend stop)</option>
+            </select>
+            ${range('vest-ci-stop-points', 'Stop loss distance', 1, 20, 0.25, cfg.stopLossPoints, ' pts')}
+            ${range('vest-ci-target-spacing', 'Distance between target levels', 0.25, 20, 0.25, cfg.targetSpacingPoints, ' pts')}
+            ${range('vest-ci-level-font-size', 'Level label font size', 8, 24, 1, cfg.levelFontSize, ' px')}
+            ${range('vest-ci-level-box-scale', 'Level label box size', 75, 200, 5, cfg.levelBoxScale, '%')}
+          </div>
+          <div style="margin-top:12px;display:flex;flex-direction:column;gap:9px;">
+            <label class="vest-ed-checkbox-label"><input type="checkbox" id="vest-ci-show-signals" ${cfg.showSignals ? 'checked' : ''} /><span>Show Buy/Sell trend-flip markers</span></label>
+            <label class="vest-ed-checkbox-label"><input type="checkbox" id="vest-ci-show-targets" ${cfg.showTargets ? 'checked' : ''} /><span>Show latest entry, stop loss, and three targets</span></label>
+            <label class="vest-ed-checkbox-label"><input type="checkbox" id="vest-ci-show-table" ${cfg.showTrendTable ? 'checked' : ''} /><span>Show multi-timeframe trend table</span></label>
+          </div>
+          <div style="margin-top:16px;padding:14px;border:1px solid #334155;border-radius:8px;background:#11151d;">
+            <div class="vest-tvs-section-title">SIGNAL AUTOMATION</div>
+            <p style="font-size:11px;color:#a1a1aa;line-height:1.5;margin:0 0 12px;">Uses the last closed Cortex Indicator bar. Paper mode simulates 25% exits at each target and moves the stop to entry, then the prior target. Opposing signals are ignored for the first five bars after entry.</p>
+            <label class="vest-ed-checkbox-label"><input type="checkbox" id="vest-ci-execution-enabled" ${cfg.executionEnabled ? 'checked' : ''} /><span>Enable signal automation</span></label>
+            <label for="vest-ci-execution-mode" style="display:block;font-size:12px;color:#e4e4e7;margin:13px 0 7px;">Execution mode</label>
+            <select id="vest-ci-execution-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+              <option value="paper" ${cfg.executionMode !== 'live' ? 'selected' : ''}>Paper testing (no orders sent)</option>
+              <option value="live" ${cfg.executionMode === 'live' ? 'selected' : ''}>Live Vest orders</option>
+            </select>
+            <label class="vest-ed-checkbox-label" style="margin-top:12px;"><input type="checkbox" id="vest-ci-live-armed" disabled ${cfg.liveArmed ? 'checked' : ''} /><span>Live arm switch (locked until order workflow is verified)</span></label>
+            <div style="margin-top:9px;padding:9px;border-radius:6px;background:#2a1717;color:#fca5a5;font-size:11px;line-height:1.45;">Signal-driven Live automation remains locked and will not submit orders. The chart’s LIVE BUY button is a separate manual flow: it submits a market buy after its confirmation, attaches the configured stop, waits for the position, then submits three reduce-only limit targets at approximately 25% of the filled size each (rounded to the instrument size precision). It can place real orders regardless of the Paper/Live selector above. The manual flow does not yet move the stop after target fills.</div>
+            ${range('vest-ci-reversal-ignore-bars', 'Ignore opposing signals for', 0, 20, 1, cfg.reversalIgnoreBars, ' bars')}
+            <div id="vest-ci-execution-status" role="status" style="margin-top:8px;color:${!cfg.executionEnabled ? '#94a3b8' : !cfg.enabled ? '#fca5a5' : cfg.executionMode === 'paper' ? '#34d399' : '#fca5a5'};font-size:11px;">${!cfg.executionEnabled ? 'Automation is off.' : !cfg.enabled ? 'Turn on Show Cortex Indicator to generate signals.' : cfg.executionMode === 'paper' ? 'Paper simulation is active; no orders will be sent.' : 'Live mode is locked until the Vest order adapter is verified.'}</div>
+          </div>
+          <div style="margin-top:12px;font-size:11px;color:#94a3b8;line-height:1.5;">Signals are generated when the ATR trend direction flips. Fixed-point mode defaults to an 8-point stop and targets 4, 8, and 12 points from entry.</div>
+        `;
+      }
+
       return '';
     }
 
@@ -2120,11 +5330,18 @@
     let justFinishedDragging = false;
 
     function closeSettingsOverlay() {
+      if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
+      if (voicesChangedHandler && typeof window.speechSynthesis !== 'undefined') {
+        window.speechSynthesis.removeEventListener('voiceschanged', voicesChangedHandler);
+        voicesChangedHandler = null;
+      }
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
       overlay.remove();
       // Restore committed settings to main world in case user cancelled after previewing
       notifyMainWorldConfig();
+      if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
+      if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
     }
 
     function onModalMouseMove(e) {
@@ -2152,6 +5369,10 @@
     window.addEventListener('mouseup', onModalMouseUp, true);
 
     function renderDialog() {
+      if (voicesChangedHandler && typeof window.speechSynthesis !== 'undefined') {
+        window.speechSynthesis.removeEventListener('voiceschanged', voicesChangedHandler);
+        voicesChangedHandler = null;
+      }
       overlay.innerHTML = `
         <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: 820px; height: 580px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
           <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move">
@@ -2189,6 +5410,21 @@
       `;
 
       wireDialogEvents();
+      if (activeTab === 'alertsvoice' && typeof window.speechSynthesis !== 'undefined') {
+        voicesChangedHandler = () => {
+          const select = overlay.querySelector('#vest-ci-alert-voice');
+          if (!select || !overlay.isConnected) return;
+          const preferred = select.value || normalizeCortexIndicatorConfig(draftSettings.cortexIndicator).signalAlertVoiceURI;
+          const voices = window.speechSynthesis.getVoices();
+          select.innerHTML = cortexVoiceOptionsMarkup(voices, preferred);
+          select.value = preferred === CORTEX_IRISH_VOICE_PRESET || voices.some(voice => voice.voiceURI === preferred) ? preferred : '';
+          const status = overlay.querySelector('#vest-ci-alert-voice-status');
+          if (status && !findCortexIrishVoice(voices)) {
+            status.textContent = 'This browser has not supplied an en-IE voice. Choose another browser voice or check again after browser voices finish loading.';
+          }
+        };
+        window.speechSynthesis.addEventListener('voiceschanged', voicesChangedHandler);
+      }
     }
 
     function syncCurrentPaneToDraft() {
@@ -2199,6 +5435,17 @@
       const remChartToggle = overlay.querySelector('#vest-tvs-remember-chart-settings-toggle');
       if (remChartToggle) {
         draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
+      }
+      const favoriteTimeframeInputs = overlay.querySelectorAll('.vest-tvs-favorite-timeframe');
+      if (favoriteTimeframeInputs.length) {
+        const labels = new Map([
+          ['1', '1 minute'], ['3', '3 minutes'], ['5', '5 minutes'], ['15', '15 minutes'], ['30', '30 minutes'],
+          ['60', '1 hour'], ['120', '2 hours'], ['240', '4 hours'], ['360', '6 hours'], ['480', '8 hours'], ['720', '12 hours'],
+          ['1D', '1 day'], ['3D', '3 days'], ['1W', '1 week'], ['1M', '1 month']
+        ]);
+        draftSettings.favoriteTimeframes = Array.from(favoriteTimeframeInputs)
+          .filter(input => input.checked)
+          .map(input => ({ resolution: input.value, label: labels.get(input.value) || input.value }));
       }
 
       // Sync Session Indicators tab if mounted
@@ -2213,6 +5460,7 @@
         if (q('#vest-si-box-opacity')) sc.boxOpacity = Number(q('#vest-si-box-opacity').value) || 18;
         if (q('#vest-si-days-back')) sc.maxDaysBack = Number(q('#vest-si-days-back').value) || 5;
         if (q('#vest-si-hl-style')) sc.highLowLineStyle = Number(q('#vest-si-hl-style').value ?? 0);
+        if (q('#vest-si-extend-hl-right')) sc.highLowLineExtensionMode = q('#vest-si-extend-hl-right').value === 'all' ? 'all' : 'uncleared';
         if (q('#vest-si-show-watermark')) sc.showWatermark = Boolean(q('#vest-si-show-watermark').checked);
         if (q('#vest-si-font-bold')) sc.fontBold = Boolean(q('#vest-si-font-bold').checked);
         if (q('#vest-si-extend-hl')) sc.extendHighLowLines = Boolean(q('#vest-si-extend-hl').checked);
@@ -2253,6 +5501,390 @@
           if (sc.sessions[idx] && el.value) sc.sessions[idx].endTime = el.value;
         });
       }
+
+      // Sync Auto FVG's tab if mounted
+      const masterAfvg = overlay.querySelector('#vest-afvg-master-enabled');
+      if (masterAfvg && draftSettings.autoFvg) {
+        const fc = draftSettings.autoFvg;
+        fc.enabled = Boolean(masterAfvg.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-afvg-bull-tpl')) fc.bullishTemplateId = q('#vest-afvg-bull-tpl').value || 'auto';
+        if (q('#vest-afvg-bear-tpl')) fc.bearishTemplateId = q('#vest-afvg-bear-tpl').value || 'auto';
+        if (q('#vest-afvg-label-format')) fc.labelFormat = q('#vest-afvg-label-format').value || '{tf} FVG';
+        if (q('#vest-afvg-extend-mode')) fc.extendMode = q('#vest-afvg-extend-mode').value || 'right';
+        if (q('#vest-afvg-future-bars')) {
+          const rawFb = Number(q('#vest-afvg-future-bars').value);
+          fc.extendFutureBars = isFinite(rawFb) ? Math.max(0, Math.min(200, Math.round(rawFb))) : 0;
+          q('#vest-afvg-future-bars').style.opacity = fc.extendMode === 'right' ? '0.55' : '1';
+          const badgeSpan = q('#vest-afvg-future-bars').nextElementSibling;
+          if (badgeSpan) badgeSpan.textContent = `bars (+${fc.extendFutureBars})`;
+        }
+        if (q('#vest-afvg-reclaim-mode')) fc.reclaimMode = q('#vest-afvg-reclaim-mode').value === 'wick' ? 'wick' : 'close';
+        if (q('#vest-afvg-max-active')) fc.maxActiveFvgs = Number(q('#vest-afvg-max-active').value) || 25;
+        if (q('#vest-afvg-lookback')) fc.maxBarsLookback = Number(q('#vest-afvg-lookback').value) || 600;
+        if (q('#vest-afvg-show-reclaimed')) {
+          fc.showReclaimed = Boolean(q('#vest-afvg-show-reclaimed').checked);
+          fc.hideReclaimed = !fc.showReclaimed;
+        }
+        if (q('#vest-afvg-reclaimed-color-mode')) {
+          fc.reclaimedColorMode = q('#vest-afvg-reclaimed-color-mode').value === 'dim' ? 'dim' : 'custom';
+          const recGrid = q('#vest-afvg-reclaimed-color-grid');
+          if (recGrid) {
+            recGrid.style.opacity = fc.reclaimedColorMode === 'dim' ? '0.45' : '1';
+            recGrid.style.pointerEvents = fc.reclaimedColorMode === 'dim' ? 'none' : 'auto';
+          }
+        }
+        if (q('#vest-afvg-rec-box-color')) {
+          fc.reclaimedBoxColor = normalizeHexColor(q('#vest-afvg-rec-box-color').value, fc.reclaimedBoxColor || '#787b86');
+          fc.reclaimedColor = fc.reclaimedBoxColor;
+          const hexSpan = q('#vest-afvg-rec-box-hex');
+          if (hexSpan) hexSpan.textContent = fc.reclaimedBoxColor;
+        }
+        if (q('#vest-afvg-rec-box-opacity')) {
+          fc.reclaimedBoxOpacity = Math.max(0, Math.min(100, Number(q('#vest-afvg-rec-box-opacity').value ?? 18)));
+          fc.reclaimedOpacity = fc.reclaimedBoxOpacity;
+          const opBadge = q('#vest-afvg-rec-box-op-val');
+          if (opBadge) opBadge.textContent = `${fc.reclaimedBoxOpacity}%`;
+        }
+        if (q('#vest-afvg-rec-border-color')) {
+          fc.reclaimedBorderColor = normalizeHexColor(q('#vest-afvg-rec-border-color').value, fc.reclaimedBorderColor || '#787b86');
+          const hexSpan = q('#vest-afvg-rec-border-hex');
+          if (hexSpan) hexSpan.textContent = fc.reclaimedBorderColor;
+        }
+        if (q('#vest-afvg-rec-border-opacity')) {
+          fc.reclaimedBorderOpacity = Math.max(0, Math.min(100, Number(q('#vest-afvg-rec-border-opacity').value ?? 65)));
+          const opBadge = q('#vest-afvg-rec-border-op-val');
+          if (opBadge) opBadge.textContent = `${fc.reclaimedBorderOpacity}%`;
+        }
+        if (q('#vest-afvg-rec-mid-color')) {
+          fc.reclaimedMidlineColor = normalizeHexColor(q('#vest-afvg-rec-mid-color').value, fc.reclaimedMidlineColor || '#787b86');
+          const hexSpan = q('#vest-afvg-rec-mid-hex');
+          if (hexSpan) hexSpan.textContent = fc.reclaimedMidlineColor;
+        }
+        if (q('#vest-afvg-rec-mid-opacity')) {
+          fc.reclaimedMidlineOpacity = Math.max(0, Math.min(100, Number(q('#vest-afvg-rec-mid-opacity').value ?? 60)));
+          const opBadge = q('#vest-afvg-rec-mid-op-val');
+          if (opBadge) opBadge.textContent = `${fc.reclaimedMidlineOpacity}%`;
+        }
+        if (q('#vest-afvg-reclaimed-count')) {
+          fc.showReclaimedHistoryCount = Math.max(0, Math.min(100, Number(q('#vest-afvg-reclaimed-count').value ?? 15)));
+        }
+        fc.shrinkOnPartialFill = false;
+        if (q('#vest-afvg-sync-native')) fc.syncNativeDrawings = Boolean(q('#vest-afvg-sync-native').checked);
+        if (q('#vest-afvg-bull-color')) {
+          fc.defaultBullishColor = normalizeHexColor(q('#vest-afvg-bull-color').value, fc.defaultBullishColor || '#26a69a');
+          const s = q('#vest-afvg-bull-color').nextElementSibling;
+          if (s) s.textContent = fc.defaultBullishColor;
+        }
+        if (q('#vest-afvg-bear-color')) {
+          fc.defaultBearishColor = normalizeHexColor(q('#vest-afvg-bear-color').value, fc.defaultBearishColor || '#ef4444');
+          const s = q('#vest-afvg-bear-color').nextElementSibling;
+          if (s) s.textContent = fc.defaultBearishColor;
+        }
+        if (q('#vest-afvg-opacity')) fc.defaultOpacity = Number(q('#vest-afvg-opacity').value) || 22;
+        if (q('#vest-afvg-show-midline')) fc.defaultShowMidline = Boolean(q('#vest-afvg-show-midline').checked);
+        if (q('#vest-afvg-show-label')) fc.defaultShowLabel = Boolean(q('#vest-afvg-show-label').checked);
+      }
+
+      // Sync Economic News Box tab if mounted
+      const masterNb = overlay.querySelector('#vest-nb-master-enabled');
+      if (masterNb && draftSettings.newsBox) {
+        const nc = draftSettings.newsBox;
+        nc.enabled = Boolean(masterNb.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-nb-show-red')) nc.showRedFolder = Boolean(q('#vest-nb-show-red').checked);
+        if (q('#vest-nb-show-yellow')) nc.showYellowFolder = Boolean(q('#vest-nb-show-yellow').checked);
+        if (q('#vest-nb-show-green')) nc.showGreenFolder = Boolean(q('#vest-nb-show-green').checked);
+        if (q('#vest-nb-red-color')) {
+          nc.redFolderColor = normalizeHexColor(q('#vest-nb-red-color').value, nc.redFolderColor || '#f23645');
+          const s = q('#vest-nb-red-color').nextElementSibling;
+          if (s) s.textContent = nc.redFolderColor;
+        }
+        if (q('#vest-nb-yellow-color')) {
+          nc.yellowFolderColor = normalizeHexColor(q('#vest-nb-yellow-color').value, nc.yellowFolderColor || '#ff9800');
+          const s = q('#vest-nb-yellow-color').nextElementSibling;
+          if (s) s.textContent = nc.yellowFolderColor;
+        }
+        if (q('#vest-nb-green-color')) {
+          nc.greenFolderColor = normalizeHexColor(q('#vest-nb-green-color').value, nc.greenFolderColor || '#26a69a');
+          const s = q('#vest-nb-green-color').nextElementSibling;
+          if (s) s.textContent = nc.greenFolderColor;
+        }
+        const checkedCountries = Array.from(overlay.querySelectorAll('.vest-nb-country-chk:checked')).map(el => el.value);
+        if (checkedCountries.length > 0) {
+          nc.countries = checkedCountries;
+        }
+        if (q('#vest-nb-title')) nc.boxTitle = q('#vest-nb-title').value.trim() || 'Upcoming News';
+        if (q('#vest-nb-tz')) {
+          nc.timeZoneMode = q('#vest-nb-tz').value || 'ny';
+          if (draftSettings.tradesBox) draftSettings.tradesBox.timeZoneMode = nc.timeZoneMode;
+        }
+        if (q('#vest-nb-time-fmt')) {
+          nc.timeFormat = q('#vest-nb-time-fmt').value === '24h' ? '24h' : '12h';
+          if (draftSettings.tradesBox) draftSettings.tradesBox.timeFormat = nc.timeFormat;
+        }
+        if (q('#vest-nb-max-events')) nc.maxEvents = Number(q('#vest-nb-max-events').value) || 6;
+        if (q('#vest-nb-width')) nc.boxWidth = Number(q('#vest-nb-width').value) || 325;
+        if (q('#vest-nb-bg-color')) nc.bgColor = normalizeHexColor(q('#vest-nb-bg-color').value, nc.bgColor || '#131722');
+        if (q('#vest-nb-bg-opacity')) {
+          nc.bgOpacity = Math.max(25, Math.min(100, Number(q('#vest-nb-bg-opacity').value) || 88));
+          const opBadge = q('#vest-nb-bg-op-badge');
+          if (opBadge) opBadge.textContent = `${nc.bgOpacity}%`;
+        }
+        if (q('#vest-nb-border-color')) {
+          nc.borderColor = normalizeHexColor(q('#vest-nb-border-color').value, nc.borderColor || '#38bdf8');
+          const s = q('#vest-nb-border-color').nextElementSibling;
+          if (s) s.textContent = nc.borderColor;
+        }
+        if (q('#vest-nb-show-countdown')) nc.showCountdown = Boolean(q('#vest-nb-show-countdown').checked);
+        if (q('#vest-nb-show-flag')) nc.showCountryFlag = Boolean(q('#vest-nb-show-flag').checked);
+      }
+
+      // Sync Instrument Trades Box tab if mounted
+      const masterTb = overlay.querySelector('#vest-tb-master-enabled');
+      if (masterTb && draftSettings.tradesBox) {
+        const tc = draftSettings.tradesBox;
+        tc.enabled = Boolean(masterTb.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-tb-win-color')) {
+          tc.winRowColor = normalizeHexColor(q('#vest-tb-win-color').value, tc.winRowColor || '#10b981');
+        }
+        if (q('#vest-tb-win-opacity')) {
+          tc.winRowOpacity = Math.max(8, Math.min(85, Number(q('#vest-tb-win-opacity').value) || 24));
+          const opBadge = q('#vest-tb-win-op-badge');
+          if (opBadge) opBadge.textContent = `${tc.winRowOpacity}%`;
+        }
+        if (q('#vest-tb-loss-color')) {
+          tc.lossRowColor = normalizeHexColor(q('#vest-tb-loss-color').value, tc.lossRowColor || '#f23645');
+        }
+        if (q('#vest-tb-loss-opacity')) {
+          tc.lossRowOpacity = Math.max(8, Math.min(85, Number(q('#vest-tb-loss-opacity').value) || 24));
+          const opBadge = q('#vest-tb-loss-op-badge');
+          if (opBadge) opBadge.textContent = `${tc.lossRowOpacity}%`;
+        }
+        if (q('#vest-tb-long-text-color')) {
+          tc.longBadgeTextColor = normalizeHexColor(q('#vest-tb-long-text-color').value, tc.longBadgeTextColor || '#38bdf8');
+          const s = q('#vest-tb-long-text-color').nextElementSibling;
+          if (s) s.textContent = tc.longBadgeTextColor;
+        }
+        if (q('#vest-tb-long-bg-color')) {
+          tc.longBadgeBgColor = normalizeHexColor(q('#vest-tb-long-bg-color').value, tc.longBadgeBgColor || '#0f172a');
+        }
+        if (q('#vest-tb-long-bg-opacity')) {
+          tc.longBadgeBgOpacity = Math.max(0, Math.min(100, Number(q('#vest-tb-long-bg-opacity').value ?? 85)));
+          const opBadge = q('#vest-tb-long-bg-op-badge');
+          if (opBadge) opBadge.textContent = `${tc.longBadgeBgOpacity}%`;
+        }
+        if (q('#vest-tb-long-border-color')) {
+          tc.longBadgeBorderColor = normalizeHexColor(q('#vest-tb-long-border-color').value, tc.longBadgeBorderColor || '#38bdf8');
+          const s = q('#vest-tb-long-border-color').nextElementSibling;
+          if (s) s.textContent = tc.longBadgeBorderColor;
+        }
+        if (q('#vest-tb-short-text-color')) {
+          tc.shortBadgeTextColor = normalizeHexColor(q('#vest-tb-short-text-color').value, tc.shortBadgeTextColor || '#fbbf24');
+          const s = q('#vest-tb-short-text-color').nextElementSibling;
+          if (s) s.textContent = tc.shortBadgeTextColor;
+        }
+        if (q('#vest-tb-short-bg-color')) {
+          tc.shortBadgeBgColor = normalizeHexColor(q('#vest-tb-short-bg-color').value, tc.shortBadgeBgColor || '#0f172a');
+        }
+        if (q('#vest-tb-short-bg-opacity')) {
+          tc.shortBadgeBgOpacity = Math.max(0, Math.min(100, Number(q('#vest-tb-short-bg-opacity').value ?? 85)));
+          const opBadge = q('#vest-tb-short-bg-op-badge');
+          if (opBadge) opBadge.textContent = `${tc.shortBadgeBgOpacity}%`;
+        }
+        if (q('#vest-tb-short-border-color')) {
+          tc.shortBadgeBorderColor = normalizeHexColor(q('#vest-tb-short-border-color').value, tc.shortBadgeBorderColor || '#fbbf24');
+          const s = q('#vest-tb-short-border-color').nextElementSibling;
+          if (s) s.textContent = tc.shortBadgeBorderColor;
+        }
+        if (q('#vest-tb-side-font-family')) {
+          tc.sideBadgeFontFamily = q('#vest-tb-side-font-family').value || tc.sideBadgeFontFamily;
+        }
+        if (q('#vest-tb-side-font-size')) {
+          tc.sideBadgeFontSize = Math.max(7, Math.min(15, Number(q('#vest-tb-side-font-size').value) || 9.5));
+          const szVal = q('#vest-tb-side-fontsize-val');
+          if (szVal) szVal.textContent = `${tc.sideBadgeFontSize}px`;
+        }
+        if (q('#vest-tb-side-font-style')) {
+          tc.sideBadgeFontStyle = q('#vest-tb-side-font-style').value || 'bold';
+        }
+        const longPrev = q('#vest-tb-long-badge-preview');
+        if (longPrev) longPrev.setAttribute('style', buildSideBadgeInlineStyle('LONG', tc));
+        const shortPrev = q('#vest-tb-short-badge-preview');
+        if (shortPrev) shortPrev.setAttribute('style', buildSideBadgeInlineStyle('SHORT', tc));
+        if (q('#vest-tb-title')) tc.boxTitle = q('#vest-tb-title').value.trim() || 'Instrument Trades';
+        if (q('#vest-tb-tz')) {
+          tc.timeZoneMode = q('#vest-tb-tz').value || 'ny';
+          if (draftSettings.newsBox) draftSettings.newsBox.timeZoneMode = tc.timeZoneMode;
+        }
+        if (q('#vest-tb-time-fmt')) {
+          tc.timeFormat = q('#vest-tb-time-fmt').value === '24h' ? '24h' : '12h';
+          if (draftSettings.newsBox) draftSettings.newsBox.timeFormat = tc.timeFormat;
+        }
+        if (q('#vest-tb-max-trades')) tc.maxTrades = Number(q('#vest-tb-max-trades').value) || 8;
+        if (q('#vest-tb-width')) tc.boxWidth = Number(q('#vest-tb-width').value) || 505;
+        if (q('#vest-tb-bg-color')) tc.bgColor = normalizeHexColor(q('#vest-tb-bg-color').value, tc.bgColor || '#131722');
+        if (q('#vest-tb-bg-opacity')) {
+          tc.bgOpacity = Math.max(25, Math.min(100, Number(q('#vest-tb-bg-opacity').value) || 88));
+          const opBadge = q('#vest-tb-bg-op-badge');
+          if (opBadge) opBadge.textContent = `${tc.bgOpacity}%`;
+        }
+        if (q('#vest-tb-border-color')) {
+          tc.borderColor = normalizeHexColor(q('#vest-tb-border-color').value, tc.borderColor || '#38bdf8');
+          const s = q('#vest-tb-border-color').nextElementSibling;
+          if (s) s.textContent = tc.borderColor;
+        }
+        if (q('#vest-tb-filter-inst')) tc.filterCurrentInstrument = Boolean(q('#vest-tb-filter-inst').checked);
+        if (q('#vest-tb-filter-session')) tc.filterCurrentSessionOnly = Boolean(q('#vest-tb-filter-session').checked);
+        if (q('#vest-tb-show-side')) tc.showSideBadge = Boolean(q('#vest-tb-show-side').checked);
+        if (q('#vest-tb-show-summary')) tc.showSummaryFooter = Boolean(q('#vest-tb-show-summary').checked);
+        if (q('#vest-tb-auto-capture')) tc.autoCaptureTrades = Boolean(q('#vest-tb-auto-capture').checked);
+      }
+
+      // Sync Candle OHLC tab if mounted
+      const masterCo = overlay.querySelector('#vest-co-master-enabled');
+      if (masterCo && draftSettings.candleOhlc) {
+        const co = draftSettings.candleOhlc;
+        co.enabled = Boolean(masterCo.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-co-show-numbers')) co.showCandleNumbers = Boolean(q('#vest-co-show-numbers').checked);
+        if (q('#vest-co-num-max')) {
+          co.candleNumbersMax = Math.max(10, Math.min(300, Math.round(Number(q('#vest-co-num-max').value) || 100)));
+          const maxSpan = q('#vest-co-num-max-val');
+          if (maxSpan) maxSpan.textContent = `#1–#${co.candleNumbersMax}`;
+        }
+        if (q('#vest-co-num-font-size')) {
+          co.candleNumberFontSize = Math.max(7.5, Math.min(14, Number(q('#vest-co-num-font-size').value) || 9.5));
+          const nfSpan = q('#vest-co-num-fontsize-val');
+          if (nfSpan) nfSpan.textContent = `${co.candleNumberFontSize}px`;
+        }
+        if (q('#vest-co-num-glow-color')) {
+          co.candleNumberGlowColor = normalizeHexColor(q('#vest-co-num-glow-color').value, co.candleNumberGlowColor || '#38bdf8');
+          const s = q('#vest-co-num-glow-color').nextElementSibling;
+          if (s) s.textContent = co.candleNumberGlowColor;
+        }
+        if (q('#vest-co-num-text-color')) {
+          co.candleNumberTextColor = normalizeHexColor(q('#vest-co-num-text-color').value, co.candleNumberTextColor || '#f8fafc');
+          const s = q('#vest-co-num-text-color').nextElementSibling;
+          if (s) s.textContent = co.candleNumberTextColor;
+        }
+        if (q('#vest-co-num-bg-color')) {
+          co.candleNumberBgColor = normalizeHexColor(q('#vest-co-num-bg-color').value, co.candleNumberBgColor || '#0f172a');
+        }
+        if (q('#vest-co-num-bg-opacity')) {
+          co.candleNumberBgOpacity = Math.max(20, Math.min(100, Number(q('#vest-co-num-bg-opacity').value ?? 90)));
+          const opVal = q('#vest-co-num-bg-op-val');
+          if (opVal) opVal.textContent = `${co.candleNumberBgOpacity}%`;
+        }
+        if (q('#vest-co-custom-width-enabled')) {
+          co.customCandleWidthEnabled = Boolean(q('#vest-co-custom-width-enabled').checked);
+        }
+        if (q('#vest-co-candle-width')) {
+          co.candleWidthPx = Math.max(40, Math.min(260, Number(q('#vest-co-candle-width').value) || 140));
+          const wVal = q('#vest-co-width-val');
+          if (wVal) wVal.textContent = `${co.candleWidthPx}%`;
+        }
+        if (q('#vest-co-click-toggle')) co.clickCandleToToggle = Boolean(q('#vest-co-click-toggle').checked);
+        if (q('#vest-co-show-open')) co.showOpen = Boolean(q('#vest-co-show-open').checked);
+        if (q('#vest-co-show-high')) co.showHigh = Boolean(q('#vest-co-show-high').checked);
+        if (q('#vest-co-show-low')) co.showLow = Boolean(q('#vest-co-show-low').checked);
+        if (q('#vest-co-show-close')) co.showClose = Boolean(q('#vest-co-show-close').checked);
+        if (q('#vest-co-display-mode')) co.displayMode = q('#vest-co-display-mode').value === 'levels' ? 'levels' : 'badge';
+        if (q('#vest-co-decimals')) co.decimals = q('#vest-co-decimals').value || 'auto';
+        if (q('#vest-co-font-size')) {
+          co.fontSize = Math.max(8, Math.min(15, Number(q('#vest-co-font-size').value) || 10));
+          const szVal = q('#vest-co-fontsize-val');
+          if (szVal) szVal.textContent = `${co.fontSize}px`;
+        }
+        if (q('#vest-co-bg-color')) co.bgColor = normalizeHexColor(q('#vest-co-bg-color').value, co.bgColor || '#0f172a');
+        if (q('#vest-co-bg-opacity')) {
+          co.bgOpacity = Math.max(25, Math.min(100, Number(q('#vest-co-bg-opacity').value) || 88));
+          const opBadge = q('#vest-co-bg-op-badge');
+          if (opBadge) opBadge.textContent = `${co.bgOpacity}%`;
+        }
+        if (q('#vest-co-text-color')) {
+          co.textColor = normalizeHexColor(q('#vest-co-text-color').value, co.textColor || '#f8fafc');
+          const s = q('#vest-co-text-color').nextElementSibling;
+          if (s) s.textContent = co.textColor;
+        }
+        if (q('#vest-co-bull-color')) {
+          co.bullColor = normalizeHexColor(q('#vest-co-bull-color').value, co.bullColor || '#10b981');
+        }
+        if (q('#vest-co-bear-color')) {
+          co.bearColor = normalizeHexColor(q('#vest-co-bear-color').value, co.bearColor || '#f23645');
+        }
+      }
+
+      // Sync Active Position HUD tab if mounted
+      const masterPh = overlay.querySelector('#vest-ph-master-enabled');
+      if (masterPh && draftSettings.positionHud) {
+        const ph = draftSettings.positionHud;
+        ph.enabled = Boolean(masterPh.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-ph-price-line')) ph.showPriceLineHud = Boolean(q('#vest-ph-price-line').checked);
+        if (q('#vest-ph-flatten-btn')) ph.showFlattenBtn = Boolean(q('#vest-ph-flatten-btn').checked);
+        if (q('#vest-ph-entry-badge')) ph.showEntryBadge = Boolean(q('#vest-ph-entry-badge').checked);
+        if (q('#vest-ph-pnl-percent')) ph.showPnlPercent = Boolean(q('#vest-ph-pnl-percent').checked);
+        if (q('#vest-ph-auto-confirm')) ph.autoConfirmFlatten = Boolean(q('#vest-ph-auto-confirm').checked);
+      }
+      const failLinesToggle = overlay.querySelector('#vest-fail-lines-enabled');
+      if (failLinesToggle) {
+        draftSettings.failLines = { ...normalizeFailLinesConfig(draftSettings.failLines), enabled: Boolean(failLinesToggle.checked) };
+      }
+      const failLinesCfg = normalizeFailLinesConfig(draftSettings.failLines);
+      const labelSize = overlay.querySelector('#vest-fail-lines-label-size');
+      const fontSize = overlay.querySelector('#vest-fail-lines-font-size');
+      if (labelSize) failLinesCfg.labelSize = Number(labelSize.value);
+      if (fontSize) failLinesCfg.fontSize = Number(fontSize.value);
+      draftSettings.failLines = normalizeFailLinesConfig(failLinesCfg);
+      const labelSizeValue = overlay.querySelector('#vest-fail-lines-label-size-value');
+      const fontSizeValue = overlay.querySelector('#vest-fail-lines-font-size-value');
+      if (labelSizeValue) labelSizeValue.textContent = `${draftSettings.failLines.labelSize}%`;
+      if (fontSizeValue) fontSizeValue.textContent = `${draftSettings.failLines.fontSize}px`;
+
+      const ciEnabled = overlay.querySelector('#vest-ci-enabled');
+      if (ciEnabled) {
+        const ci = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+        const q = (id) => overlay.querySelector(`#${id}`);
+        ci.enabled = Boolean(ciEnabled.checked);
+        if (q('vest-ci-ema-length')) ci.emaLength = Number(q('vest-ci-ema-length').value);
+        if (q('vest-ci-atr-length')) ci.atrLength = Number(q('vest-ci-atr-length').value);
+        if (q('vest-ci-trend-multiplier')) ci.trendMultiplier = Number(q('vest-ci-trend-multiplier').value);
+        if (q('vest-ci-distance-mode')) ci.levelDistanceMode = q('vest-ci-distance-mode').value;
+        if (q('vest-ci-stop-points')) ci.stopLossPoints = Number(q('vest-ci-stop-points').value);
+        if (q('vest-ci-target-spacing')) ci.targetSpacingPoints = Number(q('vest-ci-target-spacing').value);
+        if (q('vest-ci-level-font-size')) ci.levelFontSize = Number(q('vest-ci-level-font-size').value);
+        if (q('vest-ci-level-box-scale')) ci.levelBoxScale = Number(q('vest-ci-level-box-scale').value);
+        if (q('vest-ci-show-signals')) ci.showSignals = Boolean(q('vest-ci-show-signals').checked);
+        if (q('vest-ci-show-targets')) ci.showTargets = Boolean(q('vest-ci-show-targets').checked);
+        if (q('vest-ci-show-table')) ci.showTrendTable = Boolean(q('vest-ci-show-table').checked);
+        if (q('vest-ci-execution-enabled')) ci.executionEnabled = Boolean(q('vest-ci-execution-enabled').checked);
+        if (q('vest-ci-execution-mode')) ci.executionMode = q('vest-ci-execution-mode').value === 'live' ? 'live' : 'paper';
+        if (q('vest-ci-live-armed')) ci.liveArmed = Boolean(q('vest-ci-live-armed').checked);
+        if (q('vest-ci-reversal-ignore-bars')) ci.reversalIgnoreBars = Number(q('vest-ci-reversal-ignore-bars').value);
+        draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(ci);
+        [['vest-ci-ema-length', '', 0], ['vest-ci-atr-length', '', 0], ['vest-ci-trend-multiplier', '×', 1], ['vest-ci-stop-points', ' pts', 2], ['vest-ci-target-spacing', ' pts', 2], ['vest-ci-level-font-size', ' px', 0], ['vest-ci-level-box-scale', '%', 0], ['vest-ci-reversal-ignore-bars', ' bars', 0]].forEach(([id, unit, digits]) => {
+          const input = q(id);
+          const value = q(`${id}-value`);
+          if (input && value) value.textContent = `${Number(input.value).toFixed(digits)}${unit}`;
+        });
+        const status = q('vest-ci-execution-status');
+        if (status) {
+          status.textContent = !ci.executionEnabled ? 'Automation is off.' : !ci.enabled ? 'Turn on Show Cortex Indicator to generate signals.' : ci.executionMode === 'paper' ? 'Paper simulation is active; no orders will be sent.' : 'Live mode is locked until the Vest order adapter is verified.';
+          status.style.color = !ci.executionEnabled ? '#94a3b8' : ci.executionMode === 'paper' ? '#34d399' : '#fca5a5';
+        }
+      }
+      const formingAlert = overlay.querySelector('#vest-ci-forming-voice-alert');
+      const confirmedAlert = overlay.querySelector('#vest-ci-confirmed-voice-alert');
+      const alertVoice = overlay.querySelector('#vest-ci-alert-voice');
+      if (formingAlert || confirmedAlert || alertVoice) {
+        const ci = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+        if (formingAlert) ci.formingSignalVoiceAlert = Boolean(formingAlert.checked);
+        if (confirmedAlert) ci.confirmedSignalVoiceAlert = Boolean(confirmedAlert.checked);
+        if (alertVoice) ci.signalAlertVoiceURI = alertVoice.value;
+        draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(ci);
+      }
     }
 
     function commitDraftAndClose() {
@@ -2279,7 +5911,10 @@
         });
       }
       renderStudioHeaderPill();
+      if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
+      if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
       showToast('Settings saved');
+      if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
       overlay.remove();
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
@@ -2322,6 +5957,19 @@
           draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
         });
       }
+
+      overlay.querySelectorAll('.vest-tvs-favorite-timeframe').forEach(input => {
+        input.addEventListener('change', () => {
+          const labels = new Map([
+            ['1', '1 minute'], ['3', '3 minutes'], ['5', '5 minutes'], ['15', '15 minutes'], ['30', '30 minutes'],
+            ['60', '1 hour'], ['120', '2 hours'], ['240', '4 hours'], ['360', '6 hours'], ['480', '8 hours'], ['720', '12 hours'],
+            ['1D', '1 day'], ['3D', '3 days'], ['1W', '1 week'], ['1M', '1 month']
+          ]);
+          draftSettings.favoriteTimeframes = Array.from(overlay.querySelectorAll('.vest-tvs-favorite-timeframe'))
+            .filter(item => item.checked)
+            .map(item => ({ resolution: item.value, label: labels.get(item.value) || item.value }));
+        });
+      });
 
       // Live preview & range label updates on Session Indicators tab
       if (activeTab === 'sessions') {
@@ -2410,6 +6058,518 @@
         });
       }
 
+      if (activeTab === 'autofvg') {
+        const opRange = overlay.querySelector('#vest-afvg-opacity');
+        const opVal = overlay.querySelector('#vest-afvg-opacity-val');
+        if (opRange && opVal) {
+          opRange.addEventListener('input', () => {
+            opVal.textContent = `${opRange.value}%`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const showReclaimedToggle = overlay.querySelector('#vest-afvg-show-reclaimed');
+        if (showReclaimedToggle) {
+          showReclaimedToggle.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            renderDialog();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        ['#vest-afvg-rec-box-opacity', '#vest-afvg-rec-border-opacity', '#vest-afvg-rec-mid-opacity'].forEach(sel => {
+          const rng = overlay.querySelector(sel);
+          if (rng) {
+            rng.addEventListener('input', () => {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            });
+          }
+        });
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+          rightPane.addEventListener('input', (e) => {
+            if (e.target && (e.target.type === 'color' || e.target.type === 'text' || e.target.type === 'number')) {
+              if (e.target.id === 'vest-afvg-future-bars' && draftSettings.autoFvg && draftSettings.autoFvg.extendMode === 'right') {
+                const modeSel = overlay.querySelector('#vest-afvg-extend-mode');
+                if (modeSel && Number(e.target.value) > 0) {
+                  modeSel.value = 'current';
+                }
+              }
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+
+        overlay.querySelector('#vest-afvg-clear-log-btn')?.addEventListener('click', () => {
+          try {
+            window.localStorage.removeItem('__trading_cortex_created_fvgs_log__');
+          } catch (e) {}
+          postToMainWorlds({
+            type: 'VEST_TV_CLEAR_CREATED_FVG_LOG'
+          });
+          showToast('Cleared created FVG log');
+        });
+
+        overlay.querySelector('#vest-afvg-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.autoFvg = JSON.parse(JSON.stringify(DEFAULT_AUTO_FVG));
+          draftSettings.autoFvg.enabled = true;
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast("Reset Auto FVG's to defaults");
+        });
+      }
+
+      if (activeTab === 'news') {
+        const widthRange = overlay.querySelector('#vest-nb-width');
+        const widthVal = overlay.querySelector('#vest-nb-width-val');
+        if (widthRange && widthVal) {
+          widthRange.addEventListener('input', () => {
+            widthVal.textContent = `${widthRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const bgOpRange = overlay.querySelector('#vest-nb-bg-opacity');
+        if (bgOpRange) {
+          bgOpRange.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        overlay.querySelector('#vest-nb-countries-all')?.addEventListener('click', () => {
+          draftSettings.newsBox.countries = [...NEWS_ALL_COUNTRIES];
+          renderDialog();
+          broadcastLiveSessionDraft();
+        });
+
+        overlay.querySelector('#vest-nb-countries-usd')?.addEventListener('click', () => {
+          draftSettings.newsBox.countries = ['USD'];
+          renderDialog();
+          broadcastLiveSessionDraft();
+        });
+
+        overlay.querySelector('#vest-nb-refresh-feed-btn')?.addEventListener('click', () => {
+          fetchLiveEconomicNewsEvents(true).then(() => {
+            renderChartNewsBox();
+            showToast('Economic news calendar refreshed');
+          });
+        });
+
+        overlay.querySelector('#vest-nb-reset-pos-btn')?.addEventListener('click', () => {
+          draftSettings.newsBox.relX = 0.02;
+          draftSettings.newsBox.relY = 0.08;
+          draftSettings.newsBox.pinned = false;
+          draftSettings.newsBox.pinnedLeft = null;
+          draftSettings.newsBox.pinnedTop = null;
+          draftSettings.newsBox.collapsed = false;
+          broadcastLiveSessionDraft();
+          showToast('News Box position reset to the top-left of the screen');
+        });
+
+        overlay.querySelector('#vest-nb-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.newsBox = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
+          draftSettings.newsBox.enabled = true;
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Economic News Box to defaults');
+        });
+
+        overlay.querySelector('#vest-nb-cust-add-btn')?.addEventListener('click', () => {
+          const tEl = overlay.querySelector('#vest-nb-cust-time');
+          const cEl = overlay.querySelector('#vest-nb-cust-country');
+          const fEl = overlay.querySelector('#vest-nb-cust-folder');
+          const titleEl = overlay.querySelector('#vest-nb-cust-title');
+          const title = (titleEl?.value || '').trim();
+          if (!title) {
+            showToast('Enter an event title first (e.g. CPI m/m)');
+            return;
+          }
+          if (!Array.isArray(draftSettings.newsBox.customEvents)) {
+            draftSettings.newsBox.customEvents = [];
+          }
+          draftSettings.newsBox.customEvents.push({
+            id: `cust_${Date.now()}`,
+            time: tEl?.value || '08:30',
+            country: (cEl?.value || 'USD').toUpperCase(),
+            folder: fEl?.value || 'red',
+            title
+          });
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast(`Added "${title}" to News Box`);
+        });
+
+        overlay.querySelectorAll('.vest-nb-cust-del').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const idx = Number(btn.dataset.idx);
+            if (Array.isArray(draftSettings.newsBox.customEvents)) {
+              draftSettings.newsBox.customEvents.splice(idx, 1);
+              renderDialog();
+              broadcastLiveSessionDraft();
+            }
+          });
+        });
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', (e) => {
+            syncCurrentPaneToDraft();
+            if (e.target && e.target.classList.contains('vest-nb-country-chk')) {
+              renderDialog();
+            }
+            broadcastLiveSessionDraft();
+          });
+          rightPane.addEventListener('input', (e) => {
+            if (e.target && (e.target.type === 'color' || e.target.type === 'text')) {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+      }
+
+      if (activeTab === 'trades') {
+        const widthRange = overlay.querySelector('#vest-tb-width');
+        const widthVal = overlay.querySelector('#vest-tb-width-val');
+        if (widthRange && widthVal) {
+          widthRange.addEventListener('input', () => {
+            widthVal.textContent = `${widthRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const sideFontSizeRange = overlay.querySelector('#vest-tb-side-font-size');
+        const sideFontSizeVal = overlay.querySelector('#vest-tb-side-fontsize-val');
+        if (sideFontSizeRange && sideFontSizeVal) {
+          sideFontSizeRange.addEventListener('input', () => {
+            sideFontSizeVal.textContent = `${sideFontSizeRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        ['#vest-tb-bg-opacity', '#vest-tb-win-opacity', '#vest-tb-loss-opacity', '#vest-tb-long-bg-opacity', '#vest-tb-short-bg-opacity'].forEach(sel => {
+          const rng = overlay.querySelector(sel);
+          if (rng) {
+            rng.addEventListener('input', () => {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            });
+          }
+        });
+
+        overlay.querySelector('#vest-tb-scan-now-btn')?.addEventListener('click', async () => {
+          const addedCount = await ensurePositionsHistoryPrepopulatedOnce(true);
+          draftSettings.tradesBox = normalizeTradesBoxConfig(settings.tradesBox);
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast(addedCount > 0 ? `Synced ${addedCount} trade(s) from Positions History` : 'Synced with Positions History (6pm–4:59pm ET session)');
+        });
+
+        overlay.querySelector('#vest-tb-reset-pos-btn')?.addEventListener('click', () => {
+          draftSettings.tradesBox.relX = 0.02;
+          draftSettings.tradesBox.relY = 0.42;
+          draftSettings.tradesBox.pinned = false;
+          draftSettings.tradesBox.pinnedLeft = null;
+          draftSettings.tradesBox.pinnedTop = null;
+          draftSettings.tradesBox.collapsed = false;
+          broadcastLiveSessionDraft();
+          showToast('Trades Box position reset to the top-left of the screen');
+        });
+
+        overlay.querySelector('#vest-tb-reset-defaults-btn')?.addEventListener('click', () => {
+          const existingTrades = Array.isArray(draftSettings.tradesBox?.trades) ? draftSettings.tradesBox.trades : [];
+          draftSettings.tradesBox = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
+          draftSettings.tradesBox.enabled = true;
+          draftSettings.tradesBox.trades = existingTrades;
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Instrument Trades Box styling to defaults');
+        });
+
+        overlay.querySelector('#vest-tb-clear-all-btn')?.addEventListener('click', () => {
+          draftSettings.tradesBox.trades = [];
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Cleared recorded trade history');
+        });
+
+        overlay.querySelector('#vest-tb-add-btn')?.addEventListener('click', () => {
+          const symEl = overlay.querySelector('#vest-tb-add-symbol');
+          const sideEl = overlay.querySelector('#vest-tb-add-side');
+          const entryEl = overlay.querySelector('#vest-tb-add-entry');
+          const exitEl = overlay.querySelector('#vest-tb-add-exit');
+          const pnlEl = overlay.querySelector('#vest-tb-add-pnl');
+
+          const rawPnlStr = (pnlEl?.value || '').trim();
+          if (rawPnlStr === '' || isNaN(Number(rawPnlStr))) {
+            showToast('Enter a valid PnL amount (e.g. 245.50 or -110)');
+            return;
+          }
+
+          const newTrade = normalizeTradeEntry({
+            id: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            symbol: (symEl?.value || currentInstrument || 'BTC-PERP').trim(),
+            side: sideEl?.value || 'LONG',
+            entryTime: entryEl?.value || '09:35',
+            exitTime: exitEl?.value || '09:52',
+            pnl: Number(rawPnlStr),
+            source: 'manual'
+          });
+
+          if (newTrade) {
+            if (!Array.isArray(draftSettings.tradesBox.trades)) {
+              draftSettings.tradesBox.trades = [];
+            }
+            draftSettings.tradesBox.trades.unshift(newTrade);
+            draftSettings.tradesBox = normalizeTradesBoxConfig(draftSettings.tradesBox);
+            renderDialog();
+            broadcastLiveSessionDraft();
+            showToast(`Added ${newTrade.symbol} trade (${newTrade.pnl >= 0 ? '+' : '-'}$${Math.abs(newTrade.pnl).toFixed(2)})`);
+          }
+        });
+
+        overlay.querySelectorAll('.vest-tb-del-trade').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            if (Array.isArray(draftSettings.tradesBox.trades)) {
+              draftSettings.tradesBox.trades = draftSettings.tradesBox.trades.filter(t => t.id !== id);
+              renderDialog();
+              broadcastLiveSessionDraft();
+            }
+          });
+        });
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+          rightPane.addEventListener('input', (e) => {
+            if (e.target && (e.target.type === 'color' || e.target.type === 'text')) {
+              syncCurrentPaneToDraft();
+              if (e.target.id === 'vest-tb-win-color' || e.target.id === 'vest-tb-loss-color') {
+                renderDialog();
+              }
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+      }
+
+      if (activeTab === 'candleohlc') {
+        const fontSizeRange = overlay.querySelector('#vest-co-font-size');
+        const fontSizeVal = overlay.querySelector('#vest-co-fontsize-val');
+        if (fontSizeRange && fontSizeVal) {
+          fontSizeRange.addEventListener('input', () => {
+            fontSizeVal.textContent = `${fontSizeRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const numFontSizeRange = overlay.querySelector('#vest-co-num-font-size');
+        const numFontSizeVal = overlay.querySelector('#vest-co-num-fontsize-val');
+        if (numFontSizeRange && numFontSizeVal) {
+          numFontSizeRange.addEventListener('input', () => {
+            numFontSizeVal.textContent = `${numFontSizeRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+
+        const candleWidthRange = overlay.querySelector('#vest-co-candle-width');
+        const candleWidthVal = overlay.querySelector('#vest-co-width-val');
+        const customWidthChk = overlay.querySelector('#vest-co-custom-width-enabled');
+        const applyLiveCandleWidth = (newVal) => {
+          const clamped = Math.max(40, Math.min(260, Math.round(Number(newVal) / 5) * 5));
+          if (candleWidthRange) candleWidthRange.value = String(clamped);
+          if (candleWidthVal) candleWidthVal.textContent = `${clamped}%`;
+          if (customWidthChk && !customWidthChk.checked) {
+            customWidthChk.checked = true;
+          }
+          syncCurrentPaneToDraft();
+          broadcastLiveSessionDraft();
+          postToMainWorlds({
+            type: 'VEST_TV_SET_CANDLE_WIDTH',
+            candleWidthPx: clamped
+          });
+        };
+
+        if (candleWidthRange) {
+          candleWidthRange.addEventListener('input', () => {
+            applyLiveCandleWidth(Number(candleWidthRange.value) || 140);
+          });
+        }
+        overlay.querySelector('#vest-co-width-dec-btn')?.addEventListener('click', () => {
+          const cur = Number(candleWidthRange?.value) || 140;
+          applyLiveCandleWidth(Math.max(40, cur - 10));
+        });
+        overlay.querySelector('#vest-co-width-inc-btn')?.addEventListener('click', () => {
+          const cur = Number(candleWidthRange?.value) || 140;
+          applyLiveCandleWidth(Math.min(260, cur + 10));
+        });
+        if (customWidthChk) {
+          customWidthChk.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+            postToMainWorlds({
+              type: 'VEST_TV_SET_CANDLE_WIDTH',
+              candleWidthPx: Number(candleWidthRange?.value) || 140
+            });
+          });
+        }
+
+        ['#vest-co-show-numbers', '#vest-co-master-enabled', '#vest-co-click-toggle'].forEach(sel => {
+          const chk = overlay.querySelector(sel);
+          if (chk) {
+            chk.addEventListener('change', () => {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+              renderStudioHeaderPill();
+            });
+          }
+        });
+
+        ['#vest-co-bg-opacity', '#vest-co-num-bg-opacity'].forEach(sel => {
+          const rng = overlay.querySelector(sel);
+          if (rng) {
+            rng.addEventListener('input', () => {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            });
+          }
+        });
+
+        overlay.querySelector('#vest-co-clear-clicked-btn')?.addEventListener('click', () => {
+          postToMainWorlds({
+            type: 'VEST_TV_CLEAR_CLICKED_CANDLE_OHLC'
+          });
+          showToast('Cleared all individually clicked candle OHLC labels');
+        });
+
+        overlay.querySelector('#vest-co-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.candleOhlc = JSON.parse(JSON.stringify(DEFAULT_CANDLE_OHLC));
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Candle settings to defaults');
+        });
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+          rightPane.addEventListener('input', (e) => {
+            if (e.target && (e.target.type === 'color' || e.target.type === 'text' || e.target.type === 'number')) {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+      }
+
+      if (activeTab === 'positionhud') {
+        ['#vest-ph-master-enabled', '#vest-ph-price-line', '#vest-ph-flatten-btn', '#vest-ph-entry-badge', '#vest-ph-pnl-percent', '#vest-ph-auto-confirm'].forEach(sel => {
+          const chk = overlay.querySelector(sel);
+          if (chk) {
+            chk.addEventListener('change', () => {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            });
+          }
+        });
+
+        overlay.querySelector('#vest-ph-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.positionHud = JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD));
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Active Position HUD settings to defaults');
+        });
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+      }
+
+      if (activeTab === 'faillines') {
+        overlay.querySelector('#vest-fail-lines-enabled')?.addEventListener('change', () => {
+          syncCurrentPaneToDraft();
+          broadcastLiveSessionDraft();
+        });
+        ['#vest-fail-lines-label-size', '#vest-fail-lines-font-size'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+      }
+
+      if (activeTab === 'cortexindicator') {
+        ['#vest-ci-enabled', '#vest-ci-show-signals', '#vest-ci-show-targets', '#vest-ci-show-table', '#vest-ci-execution-enabled', '#vest-ci-live-armed'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+        ['#vest-ci-ema-length', '#vest-ci-atr-length', '#vest-ci-trend-multiplier'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+        overlay.querySelector('#vest-ci-distance-mode')?.addEventListener('change', () => {
+          syncCurrentPaneToDraft();
+          broadcastLiveSessionDraft();
+        });
+        overlay.querySelector('#vest-ci-execution-mode')?.addEventListener('change', () => {
+          syncCurrentPaneToDraft();
+          broadcastLiveSessionDraft();
+        });
+        ['#vest-ci-stop-points', '#vest-ci-target-spacing', '#vest-ci-level-font-size', '#vest-ci-level-box-scale', '#vest-ci-reversal-ignore-bars'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+      }
+
+      if (activeTab === 'alertsvoice') {
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        rightPane?.addEventListener('change', () => {
+          syncCurrentPaneToDraft();
+          broadcastLiveSessionDraft();
+        });
+        overlay.querySelector('#vest-ci-test-alert-voice')?.addEventListener('click', () => {
+          syncCurrentPaneToDraft();
+          const status = overlay.querySelector('#vest-ci-alert-voice-status');
+          const voiceURI = overlay.querySelector('#vest-ci-alert-voice')?.value || '';
+          const played = speakCortexVoicePhrase('Cortex voice test', voiceURI);
+          if (status) status.textContent = played
+            ? 'Voice test sent to your selected browser voice.'
+            : voiceURI === CORTEX_IRISH_VOICE_PRESET
+              ? 'This browser has not supplied an en-IE voice.'
+              : 'Speech voices are not available in this browser.';
+        });
+      }
+
       // Close / Cancel / Save Settings
       overlay.querySelector('#vest-tvs-close')?.addEventListener('click', closeSettingsOverlay);
       overlay.querySelector('#vest-tvs-cancel')?.addEventListener('click', closeSettingsOverlay);
@@ -2430,6 +6590,1716 @@
       if (e.target === overlay) closeSettingsOverlay();
     });
     document.body.appendChild(overlay);
+  }
+
+  // -------------------------------------------------------------
+  // Moveable Economic News Box on Chart (Pinned to Chart Viewport)
+  // -------------------------------------------------------------
+  let chartNewsBoxEl = null;
+  let liveEconomicNewsEvents = [];
+  let isFetchingEconomicNews = false;
+  let newsBoxTickerInterval = null;
+  let activeNewsBoxDrag = null;
+
+  function getCountryFlagEmoji(countryCode) {
+    const code = String(countryCode || '').toUpperCase().trim();
+    const FLAGS = {
+      USD: '🇺🇸',
+      EUR: '🇪🇺',
+      GBP: '🇬🇧',
+      JPY: '🇯🇵',
+      CAD: '🇨🇦',
+      AUD: '🇦🇺',
+      CHF: '🇨🇭',
+      NZD: '🇳🇿',
+      CNY: '🇨🇳',
+      ALL: '🌐'
+    };
+    return FLAGS[code] || '🌐';
+  }
+
+  function mapImpactToFolderKey(rawImpact) {
+    const imp = String(rawImpact || '').toLowerCase().trim();
+    if (imp.includes('high') || imp === 'red' || imp === '3') return 'red';
+    if (imp.includes('med') || imp === 'yellow' || imp === 'orange' || imp === '2') return 'yellow';
+    if (imp.includes('low') || imp === 'green' || imp === '1') return 'green';
+    return 'green';
+  }
+
+  /**
+   * Generates fallback upcoming recurring macro news releases if the external calendar feed is unreachable
+   */
+  function buildFallbackMacroSchedule() {
+    const now = new Date();
+    const baseMs = now.getTime();
+    const todayStr = now.toISOString().slice(0, 10);
+    const makeTodayIso = (hh, mm, dayOffset = 0) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hh, mm, 0);
+      return d.toISOString();
+    };
+    return [
+      { title: 'Core Retail Sales / Macro Data', country: 'USD', date: makeTodayIso(8, 30, 0), impact: 'High' },
+      { title: 'Unemployment Claims / Philly Fed', country: 'USD', date: makeTodayIso(8, 30, 0), impact: 'High' },
+      { title: 'Prelim Consumer Sentiment / PMI', country: 'USD', date: makeTodayIso(10, 0, 0), impact: 'Medium' },
+      { title: 'ECB Monetary Policy / Eurozone CPI', country: 'EUR', date: makeTodayIso(8, 15, 0), impact: 'High' },
+      { title: 'FOMC Member Speaks / Treasury Auction', country: 'USD', date: makeTodayIso(13, 0, 0), impact: 'Medium' },
+      { title: 'Tokyo Core CPI y/y / BOJ Outlook', country: 'JPY', date: makeTodayIso(19, 30, 0), impact: 'Medium' },
+      { title: 'UK Retail Sales / BOE Gov Speaks', country: 'GBP', date: makeTodayIso(7, 0, 1), impact: 'High' },
+      { title: 'US Core PCE / Non-Farm Payrolls', country: 'USD', date: makeTodayIso(8, 30, 1), impact: 'High' },
+      { title: 'ISM Manufacturing / Services PMI', country: 'USD', date: makeTodayIso(10, 0, 1), impact: 'High' },
+      { title: 'CAD Employment Change / BOC', country: 'CAD', date: makeTodayIso(8, 30, 1), impact: 'Medium' }
+    ];
+  }
+
+  async function fetchLiveEconomicNewsEvents(forceRefresh = false) {
+    if (isFetchingEconomicNews && !forceRefresh) return liveEconomicNewsEvents;
+    isFetchingEconomicNews = true;
+
+    try {
+      let events = [];
+
+      // 1. Request via background service worker (bypasses page CORS)
+      if (isExtensionValid() && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        try {
+          const resp = await new Promise((resolve) => {
+            chrome.runtime.sendMessage({ action: 'fetchEconomicCalendar', forceRefresh }, (res) => {
+              if (chrome.runtime.lastError) resolve(null);
+              else resolve(res);
+            });
+          });
+          if (resp && resp.feed && Array.isArray(resp.feed.events) && resp.feed.events.length > 0) {
+            events = resp.feed.events;
+          }
+        } catch (e) {}
+      }
+
+      // 2. Fallback to cached econCalendarCache in chrome.storage.local
+      if (events.length === 0 && isExtensionValid()) {
+        try {
+          const data = await chrome.storage.local.get(['econCalendarCache']);
+          if (data && data.econCalendarCache && Array.isArray(data.econCalendarCache.events)) {
+            events = data.econCalendarCache.events;
+          }
+        } catch (e) {}
+      }
+
+      // 3. Fallback schedule if offline
+      if (!Array.isArray(events) || events.length === 0) {
+        events = buildFallbackMacroSchedule();
+      }
+
+      liveEconomicNewsEvents = events;
+    } catch (e) {
+      if (liveEconomicNewsEvents.length === 0) {
+        liveEconomicNewsEvents = buildFallbackMacroSchedule();
+      }
+    } finally {
+      isFetchingEconomicNews = false;
+    }
+
+    return liveEconomicNewsEvents;
+  }
+
+  /** Available full-screen area, reserving the bottom 50px for the Cortex bar. */
+  function getScreenBoundsRect() {
+    const left = 0;
+    const top = 0;
+    const right = Math.max(1, window.innerWidth);
+    const bottom = Math.max(1, window.innerHeight - 50);
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  }
+
+  /**
+   * Places minimized News and Trades pills inside the Cortex bottom bar.
+   */
+  function getMinimizedCortexBarCoords(boxType, boxEl) {
+    const boxW = (boxEl && boxEl.offsetWidth) || (boxType === 'trades' ? 235 : 210);
+    const boxH = (boxEl && boxEl.offsetHeight) || 32;
+    const pill = document.getElementById('vest-studio-pill-btn');
+    const pillRect = pill ? pill.getBoundingClientRect() : { right: 28 };
+    let targetLeft = pillRect.right + 12;
+    if (boxType === 'trades' && settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
+      const newsW = (chartNewsBoxEl && chartNewsBoxEl.offsetWidth) || 215;
+      targetLeft += newsW + 8;
+    }
+    targetLeft = Math.min(Math.max(8, targetLeft), Math.max(8, window.innerWidth - boxW - 8));
+    const targetTop = Math.round(window.innerHeight - 50 + (50 - boxH) / 2);
+    return {
+      left: Math.round(targetLeft),
+      top: Math.round(targetTop)
+    };
+  }
+
+  /**
+   * Performs a smooth FLIP (First, Last, Invert, Play) window minimize/restore animation
+   * between the box's last saved position and its place in the Cortex bottom bar.
+   */
+  function animateChartBoxMinimizeOrRestore(boxEl, prevRect, isMinimizing) {
+    if (!boxEl || !prevRect || typeof boxEl.animate !== 'function') return;
+    try {
+      const nextRect = boxEl.getBoundingClientRect();
+      if (!nextRect.width || !nextRect.height) return;
+
+      const dx = prevRect.left - nextRect.left;
+      const dy = prevRect.top - nextRect.top;
+      const sx = Math.max(0.25, Math.min(3.5, prevRect.width / nextRect.width));
+      const sy = Math.max(0.15, Math.min(4.5, prevRect.height / nextRect.height));
+
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2 && Math.abs(sx - 1) < 0.05 && Math.abs(sy - 1) < 0.05) {
+        return;
+      }
+
+      boxEl.style.transformOrigin = 'top left';
+      const anim = boxEl.animate(
+        [
+          {
+            transform: `translate3d(${dx}px, ${dy}px, 0) scale(${sx}, ${sy})`,
+            opacity: isMinimizing ? 0.92 : 0.78
+          },
+          {
+            transform: 'translate3d(0, 0, 0) scale(1, 1)',
+            opacity: 1
+          }
+        ],
+        {
+          duration: 280,
+          easing: isMinimizing ? 'cubic-bezier(0.32, 0.72, 0, 1)' : 'cubic-bezier(0.22, 1, 0.36, 1)'
+        }
+      );
+      anim.onfinish = () => {
+        if (boxEl) boxEl.style.transformOrigin = '';
+      };
+    } catch (e) {}
+  }
+
+  /**
+   * Positions and clamps the News Box across the available screen area, or docks it into the Cortex bar when minimized.
+   */
+  function clampAndPositionChartNewsBox() {
+    if (!chartNewsBoxEl || chartNewsBoxEl.style.display === 'none' || activeNewsBoxDrag) return;
+    const nc = normalizeNewsBoxConfig(settings.newsBox);
+    const vp = getScreenBoundsRect();
+
+    if (nc.collapsed) {
+      const minPos = getMinimizedCortexBarCoords('news', chartNewsBoxEl);
+      chartNewsBoxEl.style.left = `${minPos.left}px`;
+      chartNewsBoxEl.style.top = `${minPos.top}px`;
+      return;
+    }
+
+    const boxW = chartNewsBoxEl.offsetWidth || nc.boxWidth || 325;
+    const boxH = chartNewsBoxEl.offsetHeight || 160;
+
+    let targetLeft;
+    let targetTop;
+    if (nc.pinned && nc.pinnedLeft !== null && nc.pinnedTop !== null) {
+      targetLeft = nc.pinnedLeft;
+      targetTop = nc.pinnedTop;
+    } else {
+      const maxOffsetX = Math.max(0, vp.width - boxW);
+      const maxOffsetY = Math.max(0, vp.height - boxH);
+      targetLeft = Math.round(vp.left + nc.relX * maxOffsetX);
+      targetTop = Math.round(vp.top + nc.relY * maxOffsetY);
+    }
+
+    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
+    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
+
+    chartNewsBoxEl.style.left = `${clampedLeft}px`;
+    chartNewsBoxEl.style.top = `${clampedTop}px`;
+  }
+
+  function formatNewsEventTime(dateObj, nc) {
+    if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return '--:--';
+    const is24h = nc.timeFormat === '24h';
+    const opts = {
+      hour: is24h ? '2-digit' : 'numeric',
+      minute: '2-digit',
+      hour12: !is24h
+    };
+    if (nc.timeZoneMode === 'ny') {
+      opts.timeZone = 'America/New_York';
+    } else if (nc.timeZoneMode === 'utc') {
+      opts.timeZone = 'UTC';
+    }
+
+    try {
+      const now = new Date();
+      const sameDayOpts = { year: 'numeric', month: '2-digit', day: '2-digit' };
+      if (opts.timeZone) sameDayOpts.timeZone = opts.timeZone;
+      const evDayStr = new Intl.DateTimeFormat('en-US', sameDayOpts).format(dateObj);
+      const nowDayStr = new Intl.DateTimeFormat('en-US', sameDayOpts).format(now);
+
+      let timeStr = new Intl.DateTimeFormat('en-US', opts).format(dateObj);
+      if (!is24h) {
+        timeStr = timeStr.replace(/\s+/g, '').toLowerCase();
+      }
+      if (evDayStr !== nowDayStr) {
+        const wkOpts = { weekday: 'short' };
+        if (opts.timeZone) wkOpts.timeZone = opts.timeZone;
+        const wk = new Intl.DateTimeFormat('en-US', wkOpts).format(dateObj);
+        return `${wk} ${timeStr}`;
+      }
+      return timeStr;
+    } catch (e) {
+      return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+
+  function formatNewsCountdown(diffMs) {
+    if (diffMs < 0) {
+      const minsAgo = Math.round(Math.abs(diffMs) / 60000);
+      return minsAgo <= 1 ? 'NOW' : `${minsAgo}m ago`;
+    }
+    const totalMins = Math.max(1, Math.floor(diffMs / 60000));
+    if (totalMins < 60) {
+      return `in ${totalMins}m`;
+    }
+    const hrs = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    if (hrs < 24) {
+      return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+    }
+    const days = Math.floor(hrs / 24);
+    const remHrs = hrs % 24;
+    return remHrs > 0 ? `${days}d ${remHrs}h` : `${days}d`;
+  }
+
+  function renderFolderIconSvg(folderKey, nc) {
+    const colorHex = folderKey === 'red'
+      ? (nc.redFolderColor || '#f23645')
+      : folderKey === 'yellow'
+        ? (nc.yellowFolderColor || '#ff9800')
+        : (nc.greenFolderColor || '#26a69a');
+    const label = folderKey === 'red' ? 'High Impact (Red Folder)' : folderKey === 'yellow' ? 'Medium Impact (Yellow Folder)' : 'Low Impact (Green Folder)';
+    return `
+      <span class="vest-cnb-folder" title="${label}">
+        <svg viewBox="0 0 24 24">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="${colorHex}" stroke="rgba(255,255,255,0.32)" stroke-width="1.3"></path>
+          <line x1="2" y1="9" x2="22" y2="9" stroke="rgba(0,0,0,0.28)" stroke-width="1"></line>
+        </svg>
+      </span>
+    `;
+  }
+
+  function getFilteredUpcomingNewsList(nc) {
+    const nowMs = Date.now();
+    const pastCutoffMs = nowMs - (Number(nc.showPastTodayMinutes ?? 15) * 60 * 1000);
+    const allowedCountries = new Set((nc.countries || NEWS_ALL_COUNTRIES).map(c => String(c).toUpperCase()));
+
+    const combined = [];
+
+    // 1. Live feed events
+    for (let i = 0; i < liveEconomicNewsEvents.length; i++) {
+      const raw = liveEconomicNewsEvents[i];
+      if (!raw || !raw.title) continue;
+      const country = String(raw.country || 'USD').toUpperCase().trim();
+      const folder = mapImpactToFolderKey(raw.impact);
+      const dt = new Date(raw.date);
+      if (isNaN(dt.getTime())) continue;
+      combined.push({
+        title: String(raw.title).trim(),
+        country,
+        folder,
+        dateObj: dt,
+        epochMs: dt.getTime()
+      });
+    }
+
+    // 2. User custom scheduled events (for today)
+    if (Array.isArray(nc.customEvents)) {
+      const now = new Date();
+      for (const ce of nc.customEvents) {
+        if (!ce || !ce.title) continue;
+        const [hh, mm] = String(ce.time || '08:30').split(':').map(n => parseInt(n, 10) || 0);
+        const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0);
+        if (dt.getTime() < pastCutoffMs) {
+          dt.setDate(dt.getDate() + 1);
+        }
+        combined.push({
+          title: String(ce.title).trim(),
+          country: String(ce.country || 'USD').toUpperCase(),
+          folder: ['red', 'yellow', 'green'].includes(ce.folder) ? ce.folder : 'red',
+          dateObj: dt,
+          epochMs: dt.getTime()
+        });
+      }
+    }
+
+    const filtered = combined.filter(ev => {
+      if (ev.epochMs < pastCutoffMs) return false;
+      if (!allowedCountries.has(ev.country) && ev.country !== 'ALL') return false;
+      if (ev.folder === 'red' && nc.showRedFolder === false) return false;
+      if (ev.folder === 'yellow' && nc.showYellowFolder === false) return false;
+      if (ev.folder === 'green' && nc.showGreenFolder === false) return false;
+      return true;
+    });
+
+    filtered.sort((a, b) => a.epochMs - b.epochMs);
+    return filtered.slice(0, Math.max(1, Number(nc.maxEvents) || 6));
+  }
+
+  function renderChartNewsBox(animateFromRect = null) {
+    if (!isTopWindow) return;
+
+    const nc = normalizeNewsBoxConfig(settings.newsBox);
+    settings.newsBox = nc;
+
+    if (!nc.enabled) {
+      if (chartNewsBoxEl) {
+        chartNewsBoxEl.style.display = 'none';
+      }
+      if (newsBoxTickerInterval) {
+        clearInterval(newsBoxTickerInterval);
+        newsBoxTickerInterval = null;
+      }
+      return;
+    }
+
+    if (liveEconomicNewsEvents.length === 0 && !isFetchingEconomicNews) {
+      fetchLiveEconomicNewsEvents(false).then(() => {
+        if (settings.newsBox && settings.newsBox.enabled) {
+          renderChartNewsBox();
+        }
+      });
+    }
+
+    if (!chartNewsBoxEl || !chartNewsBoxEl.isConnected) {
+      chartNewsBoxEl = document.getElementById('vest-chart-news-box');
+      if (!chartNewsBoxEl) {
+        chartNewsBoxEl = document.createElement('div');
+        chartNewsBoxEl.id = 'vest-chart-news-box';
+        document.body.appendChild(chartNewsBoxEl);
+      }
+    }
+
+    chartNewsBoxEl.style.display = 'block';
+    chartNewsBoxEl.classList.toggle('is-pinned', Boolean(nc.pinned && !nc.collapsed));
+    chartNewsBoxEl.classList.toggle('is-minimized-pill', Boolean(nc.collapsed));
+    chartNewsBoxEl.style.width = nc.collapsed ? 'auto' : `${nc.boxWidth}px`;
+    chartNewsBoxEl.style.background = hexToRgba(nc.bgColor || '#131722', (Number(nc.bgOpacity ?? 88)) / 100);
+    chartNewsBoxEl.style.borderColor = hexToRgba(nc.borderColor || '#38bdf8', nc.pinned ? 0.72 : 0.48);
+
+    const eventsToShow = getFilteredUpcomingNewsList(nc);
+    const nowMs = Date.now();
+    const tzBadge = nc.timeZoneMode === 'ny' ? 'NY' : nc.timeZoneMode === 'utc' ? 'UTC' : 'LOC';
+
+    if (nc.collapsed) {
+      chartNewsBoxEl.innerHTML = `
+        <div class="vest-cnb-min-pill-bar" id="vest-cnb-restore-bar" title="Click to restore ${escapeHtml(nc.boxTitle || 'Upcoming News')} to its last position">
+          <div class="vest-cnb-title-group">
+            <span class="vest-cnb-title-dot" style="background:${nc.redFolderColor}; box-shadow:0 0 8px ${nc.redFolderColor};"></span>
+            <span class="vest-cnb-title">${escapeHtml(nc.boxTitle || 'Upcoming News')}</span>
+            <span style="font-size:9.5px; font-family:'JetBrains Mono', monospace; color:#94a3b8; background:rgba(255,255,255,0.06); padding:1px 5px; border-radius:4px;">${eventsToShow.length}</span>
+          </div>
+          <span class="vest-cnb-restore-hint" title="Restore Window">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+          </span>
+        </div>
+      `;
+    } else {
+      chartNewsBoxEl.innerHTML = `
+        <div class="vest-cnb-header" id="vest-cnb-drag-handle" title="${nc.pinned ? 'Window is pinned to screen position (click pin to unlock)' : 'Drag to move anywhere on screen'}">
+          <div class="vest-cnb-title-group">
+            <span class="vest-cnb-title-dot" style="background:${nc.redFolderColor}; box-shadow:0 0 8px ${nc.redFolderColor};"></span>
+            <span class="vest-cnb-title">${escapeHtml(nc.boxTitle || 'Upcoming News')}</span>
+            <span style="font-size:9.5px; font-family:'JetBrains Mono', monospace; color:#94a3b8; background:rgba(255,255,255,0.06); padding:1px 5px; border-radius:4px;">${tzBadge}</span>
+          </div>
+          <div class="vest-cnb-actions">
+            <button type="button" class="vest-cnb-icon-btn" id="vest-cnb-refresh-btn" title="Refresh Economic News">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/>
+              </svg>
+            </button>
+            <button type="button" class="vest-cnb-icon-btn" id="vest-cnb-settings-btn" title="Customize News Box Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+            <button type="button" class="vest-cnb-icon-btn ${nc.pinned ? 'is-pinned' : ''}" id="vest-cnb-pin-btn" title="${nc.pinned ? 'Pinned to screen position (click to unpin and allow moving)' : 'Pin window to exact screen position (remembers on refresh)'}">
+              <svg viewBox="0 0 24 24" fill="${nc.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+              </svg>
+            </button>
+            <button type="button" class="vest-cnb-icon-btn" id="vest-cnb-collapse-btn" title="Minimize to the Cortex bottom bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="vest-cnb-body">
+          ${eventsToShow.length === 0 ? `
+            <div class="vest-cnb-empty">No upcoming news matching current folder/country filters.</div>
+          ` : eventsToShow.map(ev => {
+            const diffMs = ev.epochMs - nowMs;
+            const isPast = diffMs < 0;
+            const isImminent = diffMs >= 0 && diffMs <= 30 * 60 * 1000;
+            const timeText = formatNewsEventTime(ev.dateObj, nc);
+            const flagStr = nc.showCountryFlag !== false ? `${getCountryFlagEmoji(ev.country)} ` : '';
+            const countdownHtml = nc.showCountdown !== false
+              ? `<span class="vest-cnb-countdown ${isImminent ? 'imminent' : ''}">${escapeHtml(formatNewsCountdown(diffMs))}</span>`
+              : '';
+            return `
+              <div class="vest-cnb-row ${isImminent ? 'is-imminent' : ''} ${isPast ? 'is-past' : ''}" style="${nc.showCountdown === false ? 'grid-template-columns: 58px 46px 22px minmax(0, 1fr);' : ''}">
+                <span class="vest-cnb-time">${escapeHtml(timeText)}</span>
+                <span class="vest-cnb-country">${flagStr}${escapeHtml(ev.country)}</span>
+                ${renderFolderIconSvg(ev.folder, nc)}
+                <span class="vest-cnb-event-title" title="${escapeHtml(ev.title)}">${escapeHtml(ev.title)}</span>
+                ${countdownHtml}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    wireChartNewsBoxEvents();
+    clampAndPositionChartNewsBox();
+
+    if (animateFromRect) {
+      animateChartBoxMinimizeOrRestore(chartNewsBoxEl, animateFromRect, Boolean(nc.collapsed));
+    }
+
+    // If Trades Box is also minimized at the bottom-left, keep its horizontal offset synced
+    if (settings.tradesBox && settings.tradesBox.enabled && settings.tradesBox.collapsed) {
+      clampAndPositionChartTradesBox();
+    }
+
+    if (!newsBoxTickerInterval) {
+      // Refresh countdowns & viewport clamping every 15 seconds, plus periodic feed check
+      newsBoxTickerInterval = setInterval(() => {
+        if (!settings.newsBox || !settings.newsBox.enabled) return;
+        if (!activeNewsBoxDrag) {
+          renderChartNewsBox();
+        }
+      }, 15000);
+    }
+  }
+
+  function wireChartNewsBoxEvents() {
+    if (!chartNewsBoxEl) return;
+
+    const restoreBar = chartNewsBoxEl.querySelector('#vest-cnb-restore-bar');
+    if (restoreBar) {
+      restoreBar.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const prevRect = chartNewsBoxEl.getBoundingClientRect();
+        if (!settings.newsBox) settings.newsBox = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
+        settings.newsBox.collapsed = false;
+        queueSettingsSave({ newsBox: settings.newsBox });
+        renderChartNewsBox(prevRect);
+      });
+      return;
+    }
+
+    const dragHandle = chartNewsBoxEl.querySelector('#vest-cnb-drag-handle');
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button')) return;
+        if (settings.newsBox && settings.newsBox.pinned) {
+          showToast('News Box is pinned — click the pin icon to move it');
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = chartNewsBoxEl.getBoundingClientRect();
+        activeNewsBoxDrag = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        chartNewsBoxEl.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+          if (!activeNewsBoxDrag || !chartNewsBoxEl) return;
+          const vp = getScreenBoundsRect();
+          const boxW = chartNewsBoxEl.offsetWidth || 325;
+          const boxH = chartNewsBoxEl.offsetHeight || 160;
+
+          const rawLeft = ev.clientX - activeNewsBoxDrag.offsetX;
+          const rawTop = ev.clientY - activeNewsBoxDrag.offsetY;
+
+          // Keep the whole box inside the usable screen area above the Cortex bottom bar.
+          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
+          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
+
+          chartNewsBoxEl.style.left = `${Math.round(clampedLeft)}px`;
+          chartNewsBoxEl.style.top = `${Math.round(clampedTop)}px`;
+
+          const maxOffsetX = Math.max(1, vp.width - boxW);
+          const maxOffsetY = Math.max(1, vp.height - boxH);
+          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
+          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
+
+          if (!settings.newsBox) settings.newsBox = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
+          settings.newsBox.relX = Math.round(relX * 10000) / 10000;
+          settings.newsBox.relY = Math.round(relY * 10000) / 10000;
+          settings.newsBox.pinnedLeft = Math.round(clampedLeft);
+          settings.newsBox.pinnedTop = Math.round(clampedTop);
+        };
+
+        const onUp = () => {
+          if (!activeNewsBoxDrag) return;
+          activeNewsBoxDrag = null;
+          if (chartNewsBoxEl) chartNewsBoxEl.classList.remove('dragging');
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove, true);
+          window.removeEventListener('mouseup', onUp, true);
+          queueSettingsSave({ newsBox: settings.newsBox });
+        };
+
+        window.addEventListener('mousemove', onMove, true);
+        window.addEventListener('mouseup', onUp, true);
+      });
+    }
+
+    chartNewsBoxEl.querySelector('#vest-cnb-refresh-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchLiveEconomicNewsEvents(true).then(() => {
+        renderChartNewsBox();
+        showToast('Upcoming news updated');
+      });
+    });
+
+    chartNewsBoxEl.querySelector('#vest-cnb-settings-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openStudioSettingsModal('news');
+    });
+
+    chartNewsBoxEl.querySelector('#vest-cnb-pin-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!settings.newsBox) settings.newsBox = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
+      const nextPinned = !settings.newsBox.pinned;
+      settings.newsBox.pinned = nextPinned;
+      if (nextPinned && chartNewsBoxEl) {
+        const rect = chartNewsBoxEl.getBoundingClientRect();
+        const vp = getScreenBoundsRect();
+        const boxW = chartNewsBoxEl.offsetWidth || settings.newsBox.boxWidth || 325;
+        const boxH = chartNewsBoxEl.offsetHeight || 160;
+        settings.newsBox.pinnedLeft = Math.round(rect.left);
+        settings.newsBox.pinnedTop = Math.round(rect.top);
+        settings.newsBox.relX = Math.round(Math.max(0, Math.min(1, (rect.left - vp.left) / Math.max(1, vp.width - boxW))) * 10000) / 10000;
+        settings.newsBox.relY = Math.round(Math.max(0, Math.min(1, (rect.top - vp.top) / Math.max(1, vp.height - boxH))) * 10000) / 10000;
+      }
+      queueSettingsSave({ newsBox: settings.newsBox });
+      renderChartNewsBox();
+          showToast(nextPinned ? 'News Box pinned to screen position' : 'News Box unpinned');
+    });
+
+    chartNewsBoxEl.querySelector('#vest-cnb-collapse-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prevRect = chartNewsBoxEl.getBoundingClientRect();
+      if (!settings.newsBox) settings.newsBox = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
+      // Save exact current position before minimizing so restoring returns to the exact spot it was left in
+      const vp = getScreenBoundsRect();
+      const boxW = prevRect.width || settings.newsBox.boxWidth || 325;
+      const boxH = prevRect.height || 160;
+      settings.newsBox.relX = Math.round(Math.max(0, Math.min(1, (prevRect.left - vp.left) / Math.max(1, vp.width - boxW))) * 10000) / 10000;
+      settings.newsBox.relY = Math.round(Math.max(0, Math.min(1, (prevRect.top - vp.top) / Math.max(1, vp.height - boxH))) * 10000) / 10000;
+      if (settings.newsBox.pinned) {
+        settings.newsBox.pinnedLeft = Math.round(prevRect.left);
+        settings.newsBox.pinnedTop = Math.round(prevRect.top);
+      }
+      settings.newsBox.collapsed = true;
+      queueSettingsSave({ newsBox: settings.newsBox });
+      renderChartNewsBox(prevRect);
+    });
+  }
+
+  if (isTopWindow) {
+    window.addEventListener('resize', () => {
+      if (settings.newsBox && settings.newsBox.enabled) {
+        clampAndPositionChartNewsBox();
+      }
+      if (settings.tradesBox && settings.tradesBox.enabled) {
+        clampAndPositionChartTradesBox();
+      }
+    });
+  }
+
+  // -------------------------------------------------------------
+  // Moveable Instrument Trades Box on Chart (Pinned to Chart Viewport)
+  // -------------------------------------------------------------
+  let chartTradesBoxEl = null;
+  let activeTradesBoxDrag = null;
+  let tradesDomScanInterval = null;
+  let hasPrepopulatedPositionsHistoryOnce = false;
+  let isPrepopulatingPositionsHistory = false;
+
+  function formatDateWithCortexPattern(d, patternStr, timeZone) {
+    let yyyy = d.getFullYear();
+    let m = d.getMonth() + 1;
+    let day = d.getDate();
+
+    try {
+      const fmtOpts = {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+      };
+      if (timeZone) fmtOpts.timeZone = timeZone;
+      const parts = new Intl.DateTimeFormat('en-US', fmtOpts).formatToParts(d);
+      for (const p of parts) {
+        if (p.type === 'year') yyyy = parseInt(p.value, 10);
+        else if (p.type === 'month') m = parseInt(p.value, 10);
+        else if (p.type === 'day') day = parseInt(p.value, 10);
+      }
+    } catch (e) {}
+
+    const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthsFull = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    let fmt = (typeof patternStr === 'string' && patternStr.trim()) ? patternStr.trim() : 'M-d-y';
+    // Ensure year is always included in the date pattern if the user's pattern omitted it
+    if (!/[yY]/.test(fmt)) {
+      const sep = fmt.includes('/') ? '/' : '-';
+      fmt = `${fmt}${sep}y`;
+    }
+
+    const tokenMap = {
+      MMMM: monthsFull[m - 1] || String(m),
+      MMM: monthsShort[m - 1] || String(m),
+      MM: String(m).padStart(2, '0'),
+      M: String(m),
+      dd: String(day).padStart(2, '0'),
+      DD: String(day).padStart(2, '0'),
+      d: String(day),
+      D: String(day),
+      yyyy: String(yyyy),
+      YYYY: String(yyyy),
+      yy: String(yyyy).slice(-2),
+      YY: String(yyyy).slice(-2),
+      y: String(yyyy).slice(-2),
+      Y: String(yyyy).slice(-2)
+    };
+
+    return fmt.replace(/MMMM|MMM|MM|M|dd|DD|d|D|yyyy|YYYY|yy|YY|y|Y/g, (match) => {
+      return tokenMap[match] !== undefined ? tokenMap[match] : match;
+    });
+  }
+
+  function resolveCortexTimeZone(tc) {
+    const mode = (tc && tc.timeZoneMode) || (settings.newsBox && settings.newsBox.timeZoneMode) || 'ny';
+    if (mode === 'ny') return 'America/New_York';
+    if (mode === 'utc') return 'UTC';
+    return undefined;
+  }
+
+  function formatTradeDateShort(epochMs, tc) {
+    const ms = Number(epochMs);
+    if (!isFinite(ms) || ms <= 0) return '--/--/--';
+    const d = new Date(ms);
+    if (isNaN(d.getTime())) return '--/--/--';
+
+    const cortexDatePattern =
+      (tc && tc.dateFormat) ||
+      (settings.sessionIndicators && settings.sessionIndicators.permDateFormat) ||
+      'M-d-y';
+    const tz = resolveCortexTimeZone(tc);
+    return formatDateWithCortexPattern(d, cortexDatePattern, tz);
+  }
+
+  function formatTradeTimeShort(epochMs, tc) {
+    const ms = Number(epochMs);
+    if (!isFinite(ms) || ms <= 0) return '--:--';
+    const d = new Date(ms);
+    if (isNaN(d.getTime())) return '--:--';
+
+    const effectiveTimeFmt = (tc && tc.timeFormat) || (settings.newsBox && settings.newsBox.timeFormat) || '12h';
+    const is24h = effectiveTimeFmt === '24h';
+    const opts = {
+      hour: is24h ? '2-digit' : 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: !is24h
+    };
+    const tz = resolveCortexTimeZone(tc);
+    if (tz) {
+      opts.timeZone = tz;
+    }
+
+    try {
+      // If seconds are 00, omit seconds for cleaner display
+      if (d.getSeconds() === 0) {
+        delete opts.second;
+      }
+      let timeStr = new Intl.DateTimeFormat('en-US', opts).format(d);
+      if (!is24h) {
+        timeStr = timeStr.replace(/\s+/g, '').toLowerCase();
+      }
+      return timeStr;
+    } catch (e) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  }
+
+  function formatTradeDuration(durationMs) {
+    const ms = Math.max(0, Number(durationMs) || 0);
+    const totalSecs = Math.round(ms / 1000);
+    if (totalSecs < 60) {
+      return `${totalSecs}s`;
+    }
+    const totalMins = Math.floor(totalSecs / 60);
+    const remSecs = totalSecs % 60;
+    if (totalMins < 60) {
+      return remSecs > 0 ? `${totalMins}m ${remSecs}s` : `${totalMins}m`;
+    }
+    const totalHours = Math.floor(totalMins / 60);
+    const remMins = totalMins % 60;
+    if (totalHours < 24) {
+      return remMins > 0 ? `${totalHours}h ${remMins}m` : `${totalHours}h`;
+    }
+    const days = Math.floor(totalHours / 24);
+    const remHours = totalHours % 24;
+    return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
+  }
+
+  function buildSideBadgeInlineStyle(side, tc) {
+    const isShort = side === 'SHORT';
+    const textColor = isShort
+      ? (tc?.shortBadgeTextColor || '#fbbf24')
+      : (tc?.longBadgeTextColor || '#38bdf8');
+    const bgHex = isShort
+      ? (tc?.shortBadgeBgColor || '#0f172a')
+      : (tc?.longBadgeBgColor || '#0f172a');
+    const bgOp = isShort
+      ? Number(tc?.shortBadgeBgOpacity ?? 85)
+      : Number(tc?.longBadgeBgOpacity ?? 85);
+    const borderHex = isShort
+      ? (tc?.shortBadgeBorderColor || textColor)
+      : (tc?.longBadgeBorderColor || textColor);
+    const fontFamily = tc?.sideBadgeFontFamily || '"JetBrains Mono", Consolas, "Liberation Mono", monospace';
+    const fontSize = Math.max(7, Math.min(15, Number(tc?.sideBadgeFontSize) || 9.5));
+    const styleMode = tc?.sideBadgeFontStyle || 'bold';
+    const fontWeight = (styleMode === 'bold' || styleMode === 'bold_italic') ? '700' : '500';
+    const fontStyle = (styleMode === 'italic' || styleMode === 'bold_italic') ? 'italic' : 'normal';
+
+    const bgRgba = hexToRgba(bgHex, Math.max(0, Math.min(100, bgOp)) / 100);
+    const borderRgba = hexToRgba(borderHex, 0.52);
+    const glowRgba = hexToRgba(borderHex, 0.14);
+
+    return `color:${textColor}; background:${bgRgba}; border:1px solid ${borderRgba}; box-shadow:inset 0 0 8px ${glowRgba}; font-family:${escapeHtml(fontFamily)}; font-size:${fontSize}px; font-weight:${fontWeight}; font-style:${fontStyle};`;
+  }
+
+  function mergeCapturedTrades(rawTradesList, showNotification = false) {
+    if (!Array.isArray(rawTradesList) || rawTradesList.length === 0) return 0;
+    const tc = normalizeTradesBoxConfig(settings.tradesBox);
+    if (tc.autoCaptureTrades === false && !showNotification) return 0;
+
+    const existingIds = new Set(tc.trades.map(t => t.id));
+    const existingSigs = new Set(
+      tc.trades.map(t => `${t.symbolKey}::${t.side}::${Math.round((t.exitTime || 0) / 5000)}::${Math.round((t.pnl || 0) * 100)}`)
+    );
+
+    let addedCount = 0;
+    for (const raw of rawTradesList) {
+      const norm = normalizeTradeEntry(raw);
+      if (!norm) continue;
+      const sig = `${norm.symbolKey}::${norm.side}::${Math.round((norm.exitTime || 0) / 5000)}::${Math.round((norm.pnl || 0) * 100)}`;
+      if (existingIds.has(norm.id) || existingSigs.has(sig)) continue;
+      existingIds.add(norm.id);
+      existingSigs.add(sig);
+      tc.trades.unshift(norm);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      hasPrepopulatedPositionsHistoryOnce = true;
+      settings.tradesBox = normalizeTradesBoxConfig(tc);
+      queueSettingsSave({ tradesBox: settings.tradesBox });
+      if (settings.tradesBox.enabled) {
+        renderChartTradesBox();
+      }
+      if (showNotification) {
+        showToast(`Captured ${addedCount} trade${addedCount === 1 ? '' : 's'} from Positions History`);
+      }
+    }
+    return addedCount;
+  }
+
+  /**
+   * Locates the bottom Positions panel and inspects its tab buttons:
+   * Returns { panelEl, activeTabText, positionsHistoryTabBtn, activeTabBtn, isPositionsHistoryActive }
+   */
+  function inspectBottomPositionsPanelTabs() {
+    const candidates = Array.from(document.querySelectorAll('button, [role="tab"], div[class*="tab"], span[class*="tab"], a[role="tab"]'));
+    let positionsHistoryTabBtn = null;
+    for (const el of candidates) {
+      if (el.closest('#vest-studio-settings-dialog') || el.closest('#vest-chart-trades-box') || el.closest('#vest-action-log-box')) continue;
+      const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+      if (/^positions?\s+history(\s*\(\d+\))?$/i.test(txt) || /^closed\s+positions?(\s*\(\d+\))?$/i.test(txt)) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 20 && r.height > 12 && r.top > 180) {
+          positionsHistoryTabBtn = el;
+          break;
+        }
+      }
+    }
+
+    if (!positionsHistoryTabBtn) {
+      return { panelEl: null, activeTabText: '', positionsHistoryTabBtn: null, activeTabBtn: null, isPositionsHistoryActive: false };
+    }
+
+    // Find the tablist / tab bar row containing Positions History and sibling tabs (Active Positions, Open Orders, etc.)
+    let tabBarEl = positionsHistoryTabBtn.parentElement;
+    while (tabBarEl && tabBarEl !== document.body) {
+      const t = (tabBarEl.innerText || tabBarEl.textContent || '');
+      if (/active\s+positions|open\s+orders/i.test(t)) {
+        break;
+      }
+      tabBarEl = tabBarEl.parentElement;
+    }
+
+    let panelEl = tabBarEl || positionsHistoryTabBtn.parentElement;
+    while (panelEl && panelEl !== document.body) {
+      if (panelEl.querySelector('table, [role="table"], [role="grid"]') || panelEl.getBoundingClientRect().height >= 120) {
+        break;
+      }
+      panelEl = panelEl.parentElement;
+    }
+
+    // Check which tab button in tabBarEl is currently active/selected
+    let activeTabBtn = null;
+    let activeTabText = '';
+    const isBtnActive = (btn) => {
+      if (!btn) return false;
+      const aria = btn.getAttribute('aria-selected');
+      const state = btn.getAttribute('data-state') || btn.getAttribute('data-active') || '';
+      const cls = typeof btn.className === 'string' ? btn.className : '';
+      if (aria === 'true' || state === 'active' || state === 'true') return true;
+      if (/\b(active|selected|current)\b/i.test(cls)) return true;
+      const cs = window.getComputedStyle(btn);
+      if (cs.borderBottomWidth && parseFloat(cs.borderBottomWidth) >= 1.5 && cs.borderBottomColor !== 'rgba(0, 0, 0, 0)' && cs.borderBottomColor !== 'transparent') {
+        return true;
+      }
+      // Also check if a child underline indicator element exists inside the tab button
+      const childDivs = btn.querySelectorAll('div, span');
+      for (const cd of childDivs) {
+        const r = cd.getBoundingClientRect();
+        if (r.height >= 1 && r.height <= 4 && r.width >= 16) {
+          const cdCs = window.getComputedStyle(cd);
+          if (cdCs.backgroundColor && cdCs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cdCs.backgroundColor !== 'transparent') {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    //Also check if the visible table headers inside panelEl explicitly show Positions History columns ("Opened At" + "Closed At" / "Close Price" / "Close Reason")
+    let hasPositionsHistoryColumnsVisible = false;
+    if (panelEl) {
+      const panelText = (panelEl.innerText || panelEl.textContent || '');
+      if (/\b(Opened\s+At|Open\s+Price)\b/i.test(panelText) && /\b(Closed\s+At|Close\s+Price|Close\s+Reason)\b/i.test(panelText)) {
+        hasPositionsHistoryColumnsVisible = true;
+      }
+    }
+
+    if (tabBarEl) {
+      const tabBtns = Array.from(tabBarEl.querySelectorAll('button, [role="tab"], a, div')).filter(b => {
+        const tx = (b.innerText || b.textContent || '').trim().replace(/\s+/g, ' ');
+        return /^(active\s+positions|positions(\s*\(\d+\))?|open\s+orders|positions?\s+history|order\s+history|trade\s+history|funding\s+history|balances)/i.test(tx) && b.children.length <= 3;
+      });
+      for (const b of tabBtns) {
+        if (isBtnActive(b) || (b.parentElement && b.parentElement !== tabBarEl && isBtnActive(b.parentElement))) {
+          activeTabBtn = b;
+          activeTabText = (b.innerText || b.textContent || '').trim().replace(/\s+/g, ' ');
+          break;
+        }
+      }
+    }
+
+    const isPositionsHistoryActive = Boolean(
+      hasPositionsHistoryColumnsVisible ||
+      isBtnActive(positionsHistoryTabBtn) ||
+      (positionsHistoryTabBtn.parentElement && positionsHistoryTabBtn.parentElement !== tabBarEl && isBtnActive(positionsHistoryTabBtn.parentElement)) ||
+      /positions?\s+history|closed\s+positions/i.test(activeTabText)
+    );
+
+    return {
+      panelEl,
+      tabBarEl,
+      activeTabText,
+      positionsHistoryTabBtn,
+      activeTabBtn,
+      isPositionsHistoryActive
+    };
+  }
+
+  /**
+   * Scans ONLY the "Positions History" table in Vest's bottom panel.
+   * Strictly ignores "Active Positions", "Open Orders", and any table with open-position columns (Liq. Price, Margin, Mark Price, TP/SL, Unrealized PnL).
+   */
+  function scanDomTradeTablesForTrades(manualTrigger = false) {
+    if (!isTopWindow) return 0;
+    const tc = normalizeTradesBoxConfig(settings.tradesBox);
+    if (!manualTrigger && tc.autoCaptureTrades === false) return 0;
+
+    const tabInfo = inspectBottomPositionsPanelTabs();
+    // If the bottom panel exists and its active tab is NOT Positions History (e.g. user is on Active Positions or Open Orders), DO NOT scrape!
+    if (tabInfo.positionsHistoryTabBtn && !tabInfo.isPositionsHistoryActive) {
+      return 0;
+    }
+
+    const extracted = [];
+    try {
+      const scopeRoot = (tabInfo.panelEl && tabInfo.isPositionsHistoryActive) ? tabInfo.panelEl : document;
+
+      // 1. Standard <table> / [role="table"] / [role="grid"] scan + Flex/Grid div-based table scan (used by Vest Markets Positions History)
+      const tableContainers = Array.from(scopeRoot.querySelectorAll('table, [role="table"], [role="grid"]'));
+      if (tabInfo.panelEl && !tableContainers.includes(tabInfo.panelEl)) {
+        tableContainers.push(tabInfo.panelEl);
+      }
+
+      const seenRowSignatures = new Set();
+
+      tableContainers.forEach(table => {
+        if (table.closest('#vest-studio-settings-dialog') || table.closest('#vest-chart-trades-box') || table.closest('#vest-action-log-box')) return;
+
+        // Inspect column headers: check both standard <th> / [role="columnheader"] and Vest's div-based header row ("Market", "Size", "Open Price", "Close Price", "PnL", "Opened At", "Closed At")
+        let headerCells = Array.from(table.querySelectorAll('th, [role="columnheader"], thead td'));
+        if (headerCells.length === 0) {
+          // Find the header row div that contains "Opened At" and "Closed At"
+          const candidateDivs = Array.from(table.querySelectorAll('div, tr'));
+          for (const d of candidateDivs) {
+            if (d.children.length >= 5 && d.children.length <= 15) {
+              const childTexts = Array.from(d.children).map(c => (c.innerText || c.textContent || '').trim().toLowerCase().replace(/\s+/g, ' '));
+              if (
+                childTexts.some(t => t.startsWith('market') || t.startsWith('symbol')) &&
+                childTexts.some(t => t.startsWith('pnl') || t.includes('realized')) &&
+                childTexts.some(t => t.includes('closed at') || t.includes('close price') || t.includes('close time'))
+              ) {
+                headerCells = Array.from(d.children);
+                break;
+              }
+            }
+          }
+        }
+
+        const headers = headerCells.map(h => (h.innerText || h.textContent || '').trim().toLowerCase().replace(/\s+/g, ' '));
+        if (headers.length === 0) return;
+
+        // Strictly require closed/history column headers ("closed at", "close price", "close reason", "exit time")
+        // and reject Active Positions / Open Orders tables!
+        const hasOpenPositionHeaders = headers.some(h =>
+          h.includes('liq') ||
+          h.includes('liquidation') ||
+          h.includes('unrealized') ||
+          h.includes('upnl') ||
+          h.includes('mark price') ||
+          h.includes('tp/sl') ||
+          h.includes('tp / sl') ||
+          h.includes('margin') ||
+          h.includes('est. liq')
+        );
+        if (hasOpenPositionHeaders) return;
+
+        const hasPnlCol = headers.some(h => h.startsWith('pnl') || h.includes('pnl') || h.includes('profit') || h.includes('realized') || h.includes('p&l'));
+        const hasClosedAtCol = headers.some(h =>
+          h.includes('closed at') ||
+          h.includes('close time') ||
+          h.includes('exit time') ||
+          h.includes('close price') ||
+          h.includes('close reason')
+        );
+
+        if (!hasPnlCol || !hasClosedAtCol) return;
+
+        const colIdx = {
+          symbol: headers.findIndex(h => h.includes('market') || h.includes('symbol') || h.includes('instrument') || h.includes('pair') || h.includes('asset') || h.includes('contract')),
+          side: headers.findIndex(h => h.includes('side') || h.includes('direction') || h.includes('type')),
+          openPrice: headers.findIndex(h => h.includes('open price') || h.includes('entry price')),
+          closePrice: headers.findIndex(h => h.includes('close price') || h.includes('exit price')),
+          pnl: headers.findIndex(h => h.startsWith('pnl') || h.includes('realized') || h.includes('closed pnl') || h.includes('pnl') || h.includes('p&l') || h.includes('profit')),
+          entryTime: headers.findIndex(h => (h.includes('opened') || h.includes('open') || h.includes('entry') || h.includes('created')) && (h.includes('at') || h.includes('time') || h.includes('date'))),
+          exitTime: headers.findIndex(h => (h.includes('closed') || h.includes('close') || h.includes('exit') || h.includes('settled')) && (h.includes('at') || h.includes('time') || h.includes('date'))),
+          duration: headers.findIndex(h => h.includes('duration') || h.includes('hold') || h.includes('held')),
+          tradeId: headers.findIndex(h => h === 'id' || h.startsWith('id '))
+        };
+
+        // Gather rows: either standard <tr> / [role="row"] or sibling row divs under the table body
+        let rows = Array.from(table.querySelectorAll('tbody tr, [role="row"]'));
+        if (rows.length === 0 && headerCells.length > 0 && headerCells[0].parentElement) {
+          const headerRowEl = headerCells[0].parentElement;
+          const rowContainer = headerRowEl.nextElementSibling || headerRowEl.parentElement;
+          if (rowContainer) {
+            const candidateRowDivs = Array.from(rowContainer.querySelectorAll('div, tr')).filter(el => {
+              if (el === headerRowEl || el.contains(headerRowEl)) return false;
+              if (el.children.length < 5 || el.children.length > 15) return false;
+              const txt = (el.innerText || el.textContent || '');
+              return /\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}/.test(txt) && /\$[0-9]/.test(txt);
+            });
+            rows = candidateRowDivs;
+          }
+        }
+
+        rows.forEach(row => {
+          if (row.querySelector('th, [role="columnheader"]')) return;
+          let rawCellEls = Array.from(row.querySelectorAll('td, [role="cell"], [role="gridcell"]'));
+          if (rawCellEls.length === 0) {
+            rawCellEls = Array.from(row.children);
+          }
+          const cells = rawCellEls.map(c => (c.innerText || c.textContent || '').trim());
+          if (cells.length < 5) return;
+
+          const joinedRow = cells.join(' ');
+          if (/no\s+(positions?|trades?|history|data|records)/i.test(joinedRow)) return;
+
+          // Extract Realized PnL
+          let pnlVal = null;
+          if (colIdx.pnl >= 0 && cells[colIdx.pnl]) {
+            const cellStr = cells[colIdx.pnl].replace(/,/g, '');
+            const m = cellStr.match(/([+-]?\s*\$\s*[0-9]+(?:\.[0-9]+)?|\$\s*[+-]?[0-9]+(?:\.[0-9]+)?|[+-]?[0-9]+(?:\.[0-9]+)?\s*(?:USD|USDC|USDT|\$))/i) ||
+                      cellStr.match(/([+-]?[0-9]+\.[0-9]+)/);
+            if (m) {
+              const sign = /-\s*\$|\$-\s*[0-9]|^-\s*[0-9]|\([$\d.,]+\)/.test(cellStr) ? -1 : 1;
+              const absVal = Math.abs(Number(m[1].replace(/[^0-9.]/g, '')));
+              if (isFinite(absVal)) {
+                pnlVal = sign < 0 ? -absVal : (cellStr.includes('-') ? -absVal : absVal);
+              }
+            }
+          }
+          if (pnlVal === null || !isFinite(pnlVal)) return;
+
+          // Extract Symbol & Side (in Vest Positions History, cell 0 has "NQ\nShort 50x" or "NQ\nLong 50x")
+          let sym = currentInstrument || 'BTC-PERP';
+          let side = 'LONG';
+          const rowTextUpper = joinedRow.toUpperCase();
+
+          if (colIdx.symbol >= 0 && cells[colIdx.symbol]) {
+            const rawSymCell = cells[colIdx.symbol].replace(/\s+/g, ' ').trim();
+            const tok = rawSymCell.split(' ')[0];
+            if (tok) sym = tok;
+            if (/\b(SHORT|SELL)\b/i.test(rawSymCell)) {
+              side = 'SHORT';
+            } else if (/\b(LONG|BUY)\b/i.test(rawSymCell)) {
+              side = 'LONG';
+            }
+          } else {
+            const symCell = cells.find(c => /\b([A-Z0-9]{2,10}[-/](?:PERP|USD|USDT|USDC)|BTC|ETH|SOL|NQ|ES|SPCX|TSLA)\b/i.test(c));
+            if (symCell) sym = symCell.split(/\s+/)[0];
+          }
+
+          if (colIdx.side >= 0 && cells[colIdx.side]) {
+            side = /SHORT|SELL/i.test(cells[colIdx.side]) ? 'SHORT' : 'LONG';
+          } else if (/\b(SHORT|SELL)\b/.test(rowTextUpper) && !/\b(LONG|BUY)\b/.test(rowTextUpper)) {
+            side = 'SHORT';
+          }
+
+          // Extract Duration if column exists
+          const durationRaw = (colIdx.duration >= 0 && cells[colIdx.duration]) ? cells[colIdx.duration] : null;
+          const durationMs = durationRaw ? parseDurationStringMs(durationRaw) : null;
+
+          // Extract Opened At and Closed At timestamps from row
+          const timeCells = cells.filter((c, idx) => {
+            if (idx === colIdx.pnl || idx === colIdx.duration || idx === colIdx.symbol || idx === colIdx.side) return false;
+            return (
+              /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\s+\d{1,2}:\d{2}(:\d{2})?\b/.test(c) ||
+              /\b202\d[-/]\d{1,2}[-/]\d{1,2}\b/.test(c) ||
+              /\b\d{1,2}:\d{2}(:\d{2})?\b/.test(c)
+            );
+          });
+
+          let entryRaw = (colIdx.entryTime >= 0 && cells[colIdx.entryTime]) ? cells[colIdx.entryTime] : null;
+          let exitRaw = (colIdx.exitTime >= 0 && cells[colIdx.exitTime]) ? cells[colIdx.exitTime] : null;
+
+          if ((!entryRaw || !exitRaw) && timeCells.length >= 2) {
+            entryRaw = entryRaw || timeCells[0];
+            exitRaw = exitRaw || timeCells[1];
+          }
+
+          // Strictly require BOTH entryTime ("Opened At") and exitTime ("Closed At") so we never fabricate an exit time from Date.now()!
+          if (!entryRaw || !exitRaw) return;
+
+          const rowIdCell = (colIdx.tradeId >= 0 && cells[colIdx.tradeId]) ? cells[colIdx.tradeId].trim() : '';
+          const rowSig = `${sym}::${side}::${entryRaw}::${exitRaw}::${pnlVal}`;
+          if (seenRowSignatures.has(rowSig)) return;
+          seenRowSignatures.add(rowSig);
+
+          extracted.push({
+            id: rowIdCell ? `vh_${rowIdCell.replace(/\s+/g, '')}` : undefined,
+            symbol: sym,
+            side,
+            pnl: pnlVal,
+            entryTime: entryRaw,
+            exitTime: exitRaw,
+            durationMs,
+            source: 'positions_history',
+            verifiedHistory: true,
+            verifiedBothTimes: true
+          });
+        });
+      });
+    } catch (e) {}
+
+    if (extracted.length > 0) {
+      hasPrepopulatedPositionsHistoryOnce = true;
+      return mergeCapturedTrades(extracted, false);
+    }
+    if (tabInfo.isPositionsHistoryActive) {
+      // We read the Positions History panel while it was active
+      hasPrepopulatedPositionsHistoryOnce = true;
+    }
+    return 0;
+  }
+
+  /**
+   * Prepopulates the Trades Box once by reading the Positions History panel:
+   * 1. First asks main world to inspect React Fiber state / API cache for Positions History.
+   * 2. If the bottom panel is currently on another tab (e.g. "Active Positions") and we haven't read Positions History yet,
+   *    briefly switches to "Positions History", scrapes the rows once, and immediately restores the user's previous tab.
+   */
+  async function ensurePositionsHistoryPrepopulatedOnce(forceRescan = false) {
+    if (!isTopWindow) return 0;
+    if (isPrepopulatingPositionsHistory) return 0;
+    if (hasPrepopulatedPositionsHistoryOnce && !forceRescan) return 0;
+
+    isPrepopulatingPositionsHistory = true;
+    try {
+      // First request main-world React state / network cache scan
+      postToMainWorlds({ type: 'VEST_TV_SCAN_PLATFORM_TRADES' });
+
+      const tabInfo = inspectBottomPositionsPanelTabs();
+      if (!tabInfo.positionsHistoryTabBtn) {
+        return 0;
+      }
+
+      // If Positions History is already the active tab, just read it directly
+      if (tabInfo.isPositionsHistoryActive) {
+        const count = scanDomTradeTablesForTrades(true);
+        hasPrepopulatedPositionsHistoryOnce = true;
+        return count;
+      }
+
+      // Otherwise, briefly activate Positions History once, read its rows, and switch back to the original tab
+      const previousActiveTabBtn = tabInfo.activeTabBtn;
+      tabInfo.positionsHistoryTabBtn.click();
+
+      // Wait briefly for React to render Positions History rows (or fetch them)
+      let captured = 0;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await new Promise(r => setTimeout(r, 150));
+        postToMainWorlds({ type: 'VEST_TV_SCAN_PLATFORM_TRADES' });
+        const c = scanDomTradeTablesForTrades(true);
+        captured += c;
+        const currentCheck = inspectBottomPositionsPanelTabs();
+        if (captured > 0) break;
+        // Check if table shows "No positions" / empty message so we can stop waiting early
+        if (currentCheck.panelEl && /no\s+(positions?|history|trades|data)/i.test(currentCheck.panelEl.innerText || '')) {
+          break;
+        }
+      }
+
+      hasPrepopulatedPositionsHistoryOnce = true;
+
+      // Restore the user's previous tab (e.g., Active Positions)
+      if (previousActiveTabBtn && previousActiveTabBtn !== tabInfo.positionsHistoryTabBtn && previousActiveTabBtn.isConnected) {
+        previousActiveTabBtn.click();
+      }
+      return captured;
+    } catch (e) {
+      return 0;
+    } finally {
+      isPrepopulatingPositionsHistory = false;
+    }
+  }
+
+  /**
+   * One-Click Quick Flatten Execution:
+   * 1. Finds the Active Positions tab in the bottom panel. If not active, clicks it.
+   * 2. Finds the position row matching the open symbol (or first open position).
+   * 3. Finds and clicks the native "Market" or "Close" button.
+   * 4. If an auto-confirm dialog appears, confirms it immediately.
+   */
+  function executeTopWindowFlatten(payload = {}) {
+    try {
+      const symFilter = String(payload.symbol || currentInstrument || '').trim().toUpperCase();
+      const tabInfo = inspectBottomPositionsPanelTabs();
+
+      const clickMarketCloseInActiveTable = () => {
+        let closed = false;
+        const candidateRows = Array.from(document.querySelectorAll('tbody tr, [role="row"], div[class*="row"]'));
+        for (const row of candidateRows) {
+          if (row.closest('#vest-studio-settings-dialog') || row.closest('#vest-chart-trades-box') || row.closest('#vest-action-log-box')) continue;
+          const text = (row.innerText || row.textContent || '').trim().toUpperCase();
+          if (symFilter && !text.includes(symFilter.replace('-PERP', '')) && !text.includes('BTC') && candidateRows.length > 1) {
+            continue;
+          }
+          const buttons = Array.from(row.querySelectorAll('button, a, div[role="button"], span[role="button"]'));
+          const closeBtn = buttons.find(b => {
+            const bt = (b.innerText || b.textContent || '').trim().toLowerCase();
+            return bt === 'market' || bt === 'close' || bt.includes('market') || bt.includes('close position') || bt === 'flatten';
+          });
+          if (closeBtn) {
+            closeBtn.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+            closeBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            closeBtn.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
+            closeBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            closeBtn.click();
+            closed = true;
+            break;
+          }
+        }
+
+        const autoConfirm = (settings.positionHud && settings.positionHud.autoConfirmFlatten !== false);
+        if (autoConfirm) {
+          setTimeout(() => {
+            const modals = Array.from(document.querySelectorAll('[role="dialog"], div[class*="modal"], div[class*="dialog"], div[class*="popup"]'));
+            for (const m of modals) {
+              if (m.id.startsWith('vest-')) continue;
+              const modalBtns = Array.from(m.querySelectorAll('button, [role="button"]'));
+              const confirmBtn = modalBtns.find(b => {
+                const bt = (b.innerText || b.textContent || '').trim().toLowerCase();
+                return bt === 'confirm' || bt.includes('confirm') || bt === 'close' || bt.includes('close position') || bt === 'market';
+              });
+              if (confirmBtn) {
+                confirmBtn.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+                confirmBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                confirmBtn.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
+                confirmBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                confirmBtn.click();
+                break;
+              }
+            }
+          }, 100);
+        }
+
+        showToast(closed ? `Flattened position for ${symFilter || 'active trade'}!` : 'Market close triggered (check Active Positions)');
+      };
+
+      if (tabInfo.tabBarEl) {
+        const candidateActiveTabs = Array.from(tabInfo.tabBarEl.querySelectorAll('button, [role="tab"], div, a')).filter(b => {
+          const t = (b.innerText || b.textContent || '').trim().toLowerCase();
+          return t.startsWith('active pos') || t === 'positions' || /^positions\s*\(\d+\)$/i.test(t);
+        });
+        if (candidateActiveTabs.length > 0) {
+          candidateActiveTabs[0].click();
+          setTimeout(clickMarketCloseInActiveTable, 120);
+          return;
+        }
+      }
+
+      clickMarketCloseInActiveTable();
+    } catch (e) {
+      console.warn('[TradingCortex:Flatten]', e);
+    }
+  }
+
+  function clampAndPositionChartTradesBox() {
+    if (!chartTradesBoxEl || chartTradesBoxEl.style.display === 'none' || activeTradesBoxDrag) return;
+    const tc = normalizeTradesBoxConfig(settings.tradesBox);
+    const vp = getScreenBoundsRect();
+
+    if (tc.collapsed) {
+      const minPos = getMinimizedCortexBarCoords('trades', chartTradesBoxEl);
+      chartTradesBoxEl.style.left = `${minPos.left}px`;
+      chartTradesBoxEl.style.top = `${minPos.top}px`;
+      return;
+    }
+
+    const boxW = chartTradesBoxEl.offsetWidth || tc.boxWidth || 420;
+    const boxH = chartTradesBoxEl.offsetHeight || 180;
+
+    let targetLeft;
+    let targetTop;
+    if (tc.pinned && tc.pinnedLeft !== null && tc.pinnedTop !== null) {
+      targetLeft = tc.pinnedLeft;
+      targetTop = tc.pinnedTop;
+    } else {
+      const maxOffsetX = Math.max(0, vp.width - boxW);
+      const maxOffsetY = Math.max(0, vp.height - boxH);
+      targetLeft = Math.round(vp.left + tc.relX * maxOffsetX);
+      targetTop = Math.round(vp.top + tc.relY * maxOffsetY);
+    }
+
+    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
+    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
+
+    chartTradesBoxEl.style.left = `${clampedLeft}px`;
+    chartTradesBoxEl.style.top = `${clampedTop}px`;
+  }
+
+  function getFilteredTradesForActiveInstrument(tc) {
+    const activeSymKey = normalizeInstrumentKey(currentInstrument || '');
+    const allTrades = Array.isArray(tc.trades) ? tc.trades : [];
+    const sessionBounds = getCurrentEtTradingSessionBounds();
+    const filtered = allTrades.filter(t => {
+      if (!t) return false;
+      if (tc.filterCurrentInstrument && activeSymKey && t.symbolKey && t.symbolKey !== activeSymKey) {
+        return false;
+      }
+      if (tc.filterCurrentSessionOnly !== false && !isTradeWithinCurrentEtSession(t, sessionBounds)) {
+        return false;
+      }
+      return true;
+    });
+    return filtered.slice(0, Math.max(1, Number(tc.maxTrades) || 15));
+  }
+
+  function renderChartTradesBox(animateFromRect = null) {
+    if (!isTopWindow) return;
+
+    const tc = normalizeTradesBoxConfig(settings.tradesBox);
+    settings.tradesBox = tc;
+
+    if (!tc.enabled) {
+      if (chartTradesBoxEl) {
+        chartTradesBoxEl.style.display = 'none';
+      }
+      if (tradesDomScanInterval) {
+        clearInterval(tradesDomScanInterval);
+        tradesDomScanInterval = null;
+      }
+      return;
+    }
+
+    if (!tradesDomScanInterval) {
+      setTimeout(() => {
+        if (!hasPrepopulatedPositionsHistoryOnce) {
+          ensurePositionsHistoryPrepopulatedOnce(false);
+        } else {
+          postToMainWorlds({ type: 'VEST_TV_SCAN_PLATFORM_TRADES' });
+          scanDomTradeTablesForTrades(false);
+        }
+      }, 600);
+      tradesDomScanInterval = setInterval(() => {
+        if (settings.tradesBox && settings.tradesBox.enabled) {
+          if (!hasPrepopulatedPositionsHistoryOnce) {
+            ensurePositionsHistoryPrepopulatedOnce(false);
+          } else {
+            postToMainWorlds({ type: 'VEST_TV_SCAN_PLATFORM_TRADES' });
+            scanDomTradeTablesForTrades(false);
+          }
+        }
+      }, 2500);
+    }
+
+    if (!chartTradesBoxEl || !chartTradesBoxEl.isConnected) {
+      chartTradesBoxEl = document.getElementById('vest-chart-trades-box');
+      if (!chartTradesBoxEl) {
+        chartTradesBoxEl = document.createElement('div');
+        chartTradesBoxEl.id = 'vest-chart-trades-box';
+        document.body.appendChild(chartTradesBoxEl);
+      }
+    }
+
+    chartTradesBoxEl.style.display = 'block';
+    chartTradesBoxEl.classList.toggle('is-pinned', Boolean(tc.pinned && !tc.collapsed));
+    chartTradesBoxEl.classList.toggle('is-minimized-pill', Boolean(tc.collapsed));
+    chartTradesBoxEl.style.width = tc.collapsed ? 'auto' : `${tc.boxWidth}px`;
+    chartTradesBoxEl.style.background = hexToRgba(tc.bgColor || '#131722', (Number(tc.bgOpacity ?? 88)) / 100);
+    chartTradesBoxEl.style.borderColor = hexToRgba(tc.borderColor || '#38bdf8', tc.pinned ? 0.72 : 0.48);
+
+    const activeSymLabel = formatInstrumentDisplayLabel(currentInstrument || 'ALL');
+    const tradesToShow = getFilteredTradesForActiveInstrument(tc);
+
+    let totalPnl = 0;
+    let wins = 0;
+    let losses = 0;
+    for (const tr of tradesToShow) {
+      const p = Number(tr.pnl) || 0;
+      totalPnl += p;
+      if (p > 0) wins++;
+      else if (p < 0) losses++;
+    }
+    const winRate = (wins + losses) > 0 ? Math.round((wins / (wins + losses)) * 100) : 0;
+    const netColor = totalPnl > 0 ? '#4ade80' : totalPnl < 0 ? '#fca5a5' : '#cbd5e1';
+    const netText = `${totalPnl >= 0 ? '+' : '-'}$${Math.abs(totalPnl).toFixed(2)}`;
+    const dotColor = totalPnl > 0 ? tc.winRowColor : totalPnl < 0 ? tc.lossRowColor : '#38bdf8';
+    const showSide = tc.showSideBadge !== false;
+    const noSideClass = showSide ? '' : 'no-side';
+
+    if (tc.collapsed) {
+      chartTradesBoxEl.innerHTML = `
+        <div class="vest-cnb-min-pill-bar" id="vest-ctb-restore-bar" title="Click to restore ${escapeHtml(tc.boxTitle || 'Instrument Trades')} to its last position">
+          <div class="vest-cnb-title-group">
+            <span class="vest-cnb-title-dot" style="background:${dotColor}; box-shadow:0 0 8px ${dotColor};"></span>
+            <span class="vest-cnb-title">${escapeHtml(tc.boxTitle || 'Instrument Trades')}</span>
+            <span style="font-size:9.5px; font-family:'JetBrains Mono', monospace; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.14); border:1px solid rgba(56,189,248,0.32); padding:1px 5px; border-radius:4px;">
+              ${escapeHtml(tc.filterCurrentInstrument ? activeSymLabel : 'ALL')}
+            </span>
+            <span style="font-size:10px; font-family:'JetBrains Mono', monospace; font-weight:700; color:${netColor};">
+              ${escapeHtml(netText)}
+            </span>
+          </div>
+          <span class="vest-cnb-restore-hint" title="Restore Window">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+          </span>
+        </div>
+      `;
+    } else {
+      chartTradesBoxEl.innerHTML = `
+        <div class="vest-cnb-header" id="vest-ctb-drag-handle" title="${tc.pinned ? 'Window is pinned to screen position (click pin to unlock)' : 'Drag to move anywhere on screen'}">
+          <div class="vest-cnb-title-group">
+            <span class="vest-cnb-title-dot" style="background:${dotColor}; box-shadow:0 0 8px ${dotColor};"></span>
+            <span class="vest-cnb-title">${escapeHtml(tc.boxTitle || 'Instrument Trades')}</span>
+            <span style="font-size:10px; font-family:'JetBrains Mono', monospace; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.14); border:1px solid rgba(56,189,248,0.32); padding:1px 6px; border-radius:4px;">
+              ${escapeHtml(tc.filterCurrentInstrument ? activeSymLabel : 'ALL')}
+            </span>
+            ${tc.filterCurrentSessionOnly !== false ? `
+              <span style="font-size:9px; font-family:'JetBrains Mono', monospace; color:#94a3b8; background:rgba(255,255,255,0.06); padding:1px 5px; border-radius:4px;" title="Trading Session: 6:00 PM ET Previous Night – 4:59 PM ET Today">
+                6PM–5PM ET
+              </span>
+            ` : ''}
+          </div>
+          <div class="vest-cnb-actions">
+            <button type="button" class="vest-cnb-icon-btn" id="vest-ctb-add-quick-btn" title="Log a Trade for ${escapeHtml(activeSymLabel)}" style="color:#34d399; font-weight:700; font-size:14px;">
+              +
+            </button>
+            <button type="button" class="vest-cnb-icon-btn" id="vest-ctb-sync-btn" title="Sync Trades from Positions History">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/>
+              </svg>
+            </button>
+            <button type="button" class="vest-cnb-icon-btn" id="vest-ctb-settings-btn" title="Customize Instrument Trades Box Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+            <button type="button" class="vest-cnb-icon-btn ${tc.pinned ? 'is-pinned' : ''}" id="vest-ctb-pin-btn" title="${tc.pinned ? 'Pinned to screen position (click to unpin and allow moving)' : 'Pin window to exact screen position (remembers on refresh)'}">
+              <svg viewBox="0 0 24 24" fill="${tc.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+              </svg>
+            </button>
+            <button type="button" class="vest-cnb-icon-btn" id="vest-ctb-collapse-btn" title="Minimize to the Cortex bottom bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="vest-ctb-col-header ${noSideClass}">
+          ${showSide ? '<span style="text-align:center;">Side</span>' : ''}
+          <div class="vest-ctb-col-header-inner">
+            <span>Date</span>
+            <span>Entry</span>
+            <span>Exit</span>
+            <span style="text-align:center;">Dur</span>
+            <span style="text-align:right;">PnL</span>
+          </div>
+        </div>
+
+        <div class="vest-ctb-body">
+          ${tradesToShow.length === 0 ? `
+            <div class="vest-cnb-empty">
+              No closed trades for <strong>${escapeHtml(activeSymLabel)}</strong> in current session (6:00pm – 4:59pm ET).<br/>
+              <span style="font-size:10.5px; color:#64748b;">Reads once from <strong>Positions History</strong>, or click <strong>↻</strong> / <strong>+</strong>.</span>
+            </div>
+          ` : tradesToShow.map(tr => {
+            const pnlVal = Number(tr.pnl) || 0;
+            const isWin = pnlVal > 0;
+            const isLoss = pnlVal < 0;
+            const rowBg = isWin
+              ? hexToRgba(tc.winRowColor || '#10b981', (Number(tc.winRowOpacity ?? 24)) / 100)
+              : isLoss
+                ? hexToRgba(tc.lossRowColor || '#f23645', (Number(tc.lossRowOpacity ?? 24)) / 100)
+                : 'rgba(255,255,255,0.03)';
+            const rowBorder = isWin
+              ? hexToRgba(tc.winRowColor || '#10b981', 0.48)
+              : isLoss
+                ? hexToRgba(tc.lossRowColor || '#f23645', 0.48)
+                : 'rgba(255,255,255,0.08)';
+            const leftAccent = isWin
+              ? (tc.winRowColor || '#10b981')
+              : isLoss
+                ? (tc.lossRowColor || '#f23645')
+                : '#64748b';
+            const dateStr = formatTradeDateShort(tr.exitTime || tr.entryTime, tc);
+            const entryStr = formatTradeTimeShort(tr.entryTime, tc);
+            const exitStr = formatTradeTimeShort(tr.exitTime, tc);
+            const durStr = formatTradeDuration(tr.durationMs || Math.max(0, (tr.exitTime || 0) - (tr.entryTime || 0)));
+            const pnlStr = `${pnlVal >= 0 ? '+' : '-'}$${Math.abs(pnlVal).toFixed(2)}`;
+            const sideBadgeStyle = buildSideBadgeInlineStyle(tr.side, tc);
+            const sideBadgeHtml = showSide
+              ? `<span class="vest-ctb-side-badge ${tr.side === 'SHORT' ? 'short' : 'long'}" style="${sideBadgeStyle}">${escapeHtml(tr.side)}</span>`
+              : '';
+            const symPrefix = !tc.filterCurrentInstrument ? `<span style="color:#93c5fd; font-weight:700;">${escapeHtml(tr.symbol)}</span> ` : '';
+
+            return `
+              <div class="vest-ctb-row-outer ${noSideClass}" title="${escapeHtml(tr.symbol)} ${escapeHtml(tr.side)} | Date: ${escapeHtml(dateStr)} | Entry: ${escapeHtml(entryStr)} → Exit: ${escapeHtml(exitStr)} | Duration: ${escapeHtml(durStr)} | PnL: ${escapeHtml(pnlStr)}">
+                ${sideBadgeHtml}
+                <div class="vest-ctb-row ${isWin ? 'is-win' : ''} ${isLoss ? 'is-loss' : ''}" style="background:${rowBg}; border-color:${rowBorder}; border-left:3px solid ${leftAccent};">
+                  <span class="vest-ctb-date-cell">${escapeHtml(dateStr)}</span>
+                  <span class="vest-ctb-time-cell">${symPrefix}${escapeHtml(entryStr)}</span>
+                  <span class="vest-ctb-time-cell">${escapeHtml(exitStr)}</span>
+                  <span class="vest-ctb-duration">${escapeHtml(durStr)}</span>
+                  <span class="vest-ctb-pnl ${isWin ? 'win' : isLoss ? 'loss' : 'flat'}">${escapeHtml(pnlStr)}</span>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+
+        ${tc.showSummaryFooter !== false && tradesToShow.length > 0 ? `
+          <div class="vest-ctb-footer">
+            <span><strong>${tradesToShow.length}</strong> Trade${tradesToShow.length === 1 ? '' : 's'} (${wins}W / ${losses}L · ${winRate}%)</span>
+            <span>Net: <strong style="color:${netColor};">${escapeHtml(netText)}</strong></span>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    wireChartTradesBoxEvents();
+    clampAndPositionChartTradesBox();
+
+    if (animateFromRect) {
+      animateChartBoxMinimizeOrRestore(chartTradesBoxEl, animateFromRect, Boolean(tc.collapsed));
+    }
+  }
+
+  function wireChartTradesBoxEvents() {
+    if (!chartTradesBoxEl) return;
+
+    const restoreBar = chartTradesBoxEl.querySelector('#vest-ctb-restore-bar');
+    if (restoreBar) {
+      restoreBar.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const prevRect = chartTradesBoxEl.getBoundingClientRect();
+        if (!settings.tradesBox) settings.tradesBox = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
+        settings.tradesBox.collapsed = false;
+        queueSettingsSave({ tradesBox: settings.tradesBox });
+        renderChartTradesBox(prevRect);
+      });
+      return;
+    }
+
+    const dragHandle = chartTradesBoxEl.querySelector('#vest-ctb-drag-handle');
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button')) return;
+        if (settings.tradesBox && settings.tradesBox.pinned) {
+          showToast('Trades Box is pinned — click the pin icon to move it');
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = chartTradesBoxEl.getBoundingClientRect();
+        activeTradesBoxDrag = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        chartTradesBoxEl.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+          if (!activeTradesBoxDrag || !chartTradesBoxEl) return;
+          const vp = getScreenBoundsRect();
+          const boxW = chartTradesBoxEl.offsetWidth || 420;
+          const boxH = chartTradesBoxEl.offsetHeight || 180;
+
+          const rawLeft = ev.clientX - activeTradesBoxDrag.offsetX;
+          const rawTop = ev.clientY - activeTradesBoxDrag.offsetY;
+
+          // Keep the whole box inside the usable screen area above the Cortex bottom bar.
+          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
+          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
+
+          chartTradesBoxEl.style.left = `${Math.round(clampedLeft)}px`;
+          chartTradesBoxEl.style.top = `${Math.round(clampedTop)}px`;
+
+          const maxOffsetX = Math.max(1, vp.width - boxW);
+          const maxOffsetY = Math.max(1, vp.height - boxH);
+          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
+          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
+
+          if (!settings.tradesBox) settings.tradesBox = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
+          settings.tradesBox.relX = Math.round(relX * 10000) / 10000;
+          settings.tradesBox.relY = Math.round(relY * 10000) / 10000;
+          settings.tradesBox.pinnedLeft = Math.round(clampedLeft);
+          settings.tradesBox.pinnedTop = Math.round(clampedTop);
+        };
+
+        const onUp = () => {
+          if (!activeTradesBoxDrag) return;
+          activeTradesBoxDrag = null;
+          if (chartTradesBoxEl) chartTradesBoxEl.classList.remove('dragging');
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove, true);
+          window.removeEventListener('mouseup', onUp, true);
+          queueSettingsSave({ tradesBox: settings.tradesBox });
+        };
+
+        window.addEventListener('mousemove', onMove, true);
+        window.addEventListener('mouseup', onUp, true);
+      });
+    }
+
+    chartTradesBoxEl.querySelector('#vest-ctb-add-quick-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openStudioSettingsModal('trades');
+    });
+
+    chartTradesBoxEl.querySelector('#vest-ctb-sync-btn')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const added = await ensurePositionsHistoryPrepopulatedOnce(true);
+      renderChartTradesBox();
+      showToast(added > 0 ? `Synced ${added} trade(s) from Positions History` : 'Synced with Positions History (6pm–4:59pm ET session)');
+    });
+
+    chartTradesBoxEl.querySelector('#vest-ctb-settings-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openStudioSettingsModal('trades');
+    });
+
+    chartTradesBoxEl.querySelector('#vest-ctb-pin-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!settings.tradesBox) settings.tradesBox = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
+      const nextPinned = !settings.tradesBox.pinned;
+      settings.tradesBox.pinned = nextPinned;
+      if (nextPinned && chartTradesBoxEl) {
+        const rect = chartTradesBoxEl.getBoundingClientRect();
+        const vp = getScreenBoundsRect();
+        const boxW = chartTradesBoxEl.offsetWidth || settings.tradesBox.boxWidth || 420;
+        const boxH = chartTradesBoxEl.offsetHeight || 180;
+        settings.tradesBox.pinnedLeft = Math.round(rect.left);
+        settings.tradesBox.pinnedTop = Math.round(rect.top);
+        settings.tradesBox.relX = Math.round(Math.max(0, Math.min(1, (rect.left - vp.left) / Math.max(1, vp.width - boxW))) * 10000) / 10000;
+        settings.tradesBox.relY = Math.round(Math.max(0, Math.min(1, (rect.top - vp.top) / Math.max(1, vp.height - boxH))) * 10000) / 10000;
+      }
+      queueSettingsSave({ tradesBox: settings.tradesBox });
+      renderChartTradesBox();
+      showToast(nextPinned ? 'Trades Box pinned to screen position' : 'Trades Box unpinned');
+    });
+
+    chartTradesBoxEl.querySelector('#vest-ctb-collapse-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prevRect = chartTradesBoxEl.getBoundingClientRect();
+      if (!settings.tradesBox) settings.tradesBox = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
+      // Save exact current position before minimizing so restoring returns to the exact spot it was left in
+      const vp = getScreenBoundsRect();
+      const boxW = prevRect.width || settings.tradesBox.boxWidth || 420;
+      const boxH = prevRect.height || 180;
+      settings.tradesBox.relX = Math.round(Math.max(0, Math.min(1, (prevRect.left - vp.left) / Math.max(1, vp.width - boxW))) * 10000) / 10000;
+      settings.tradesBox.relY = Math.round(Math.max(0, Math.min(1, (prevRect.top - vp.top) / Math.max(1, vp.height - boxH))) * 10000) / 10000;
+      if (settings.tradesBox.pinned) {
+        settings.tradesBox.pinnedLeft = Math.round(prevRect.left);
+        settings.tradesBox.pinnedTop = Math.round(prevRect.top);
+      }
+      settings.tradesBox.collapsed = true;
+      queueSettingsSave({ tradesBox: settings.tradesBox });
+      renderChartTradesBox(prevRect);
+    });
   }
 
   let chartMaximized = false;
@@ -3767,6 +9637,256 @@
     return parseCssColor(c, fallback).hex;
   }
 
+  // -------------------------------------------------------------
+  // TradingView Default Color Picker Popover
+  // -------------------------------------------------------------
+  const TV_PALETTE_TOP_ROWS = [
+    ['#ffffff', '#d1d4dc', '#b2b5be', '#9598a1', '#787b86', '#5d606b', '#434651', '#2a2e39', '#131722', '#000000'],
+    ['#f23645', '#ff9800', '#ffeb3b', '#4caf50', '#089981', '#00bcd4', '#2962ff', '#673ab7', '#9c27b0', '#e91e63']
+  ];
+
+  const TV_PALETTE_SHADE_ROWS = [
+    ['#fccbcd', '#ffe0b2', '#fff9c4', '#c8e6c9', '#b2dfdb', '#b2ebf2', '#bbdefb', '#d1c4e9', '#e1bee7', '#f8bbd0'],
+    ['#fbaaaf', '#ffcc80', '#fff59d', '#a5d6a7', '#80cbc4', '#80deea', '#90caf9', '#b39ddb', '#ce93d8', '#f48fb1'],
+    ['#f77c80', '#ffb74d', '#fff176', '#81c784', '#4db6ac', '#4dd0e1', '#64b5f6', '#9575cd', '#ba68c8', '#f06292'],
+    ['#f23645', '#ffa726', '#ffee58', '#66bb6a', '#26a69a', '#26c6da', '#42a5f5', '#7e57c2', '#ab47bc', '#ec407a'],
+    ['#b22833', '#f57c00', '#fbc02d', '#388e3c', '#00796b', '#0097a7', '#1976d2', '#512da8', '#7b1fa2', '#c2185b'],
+    ['#801922', '#e65100', '#f57f17', '#1b5e20', '#004d40', '#006064', '#0d47a1', '#311b92', '#4a148c', '#880e4f']
+  ];
+
+  let activeTvColorPopover = null;
+  let activeTvColorTargetInput = null;
+
+  function closeTvColorPickerPopover() {
+    if (activeTvColorPopover) {
+      activeTvColorPopover.remove();
+      activeTvColorPopover = null;
+    }
+    activeTvColorTargetInput = null;
+  }
+
+  function openTvColorPickerPopover(colorInput) {
+    if (!colorInput || !isTopWindow) return;
+
+    if (activeTvColorPopover && activeTvColorTargetInput === colorInput) {
+      closeTvColorPickerPopover();
+      return;
+    }
+    closeTvColorPickerPopover();
+
+    activeTvColorTargetInput = colorInput;
+    const popover = document.createElement('div');
+    popover.className = 'vest-tv-color-popover';
+    activeTvColorPopover = popover;
+
+    // Resolve optional linked opacity input (e.g. data-opacity-input="#vest-afvg-reclaimed-opacity")
+    let linkedOpacityInput = null;
+    const opacitySelector = colorInput.dataset ? colorInput.dataset.opacityInput : null;
+    if (opacitySelector) {
+      const rootScope = colorInput.closest('.vest-tvs-overlay') || document;
+      linkedOpacityInput = rootScope.querySelector(opacitySelector) || document.querySelector(opacitySelector);
+    }
+
+    const getCurrentHex = () => normalizeHexColor(colorInput.value, '#2962ff').toLowerCase();
+    const getCurrentOpacity = () => {
+      if (linkedOpacityInput) {
+        const v = Number(linkedOpacityInput.value);
+        return isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 100;
+      }
+      const attrOp = Number(colorInput.dataset?.opacityValue);
+      return isFinite(attrOp) ? Math.max(0, Math.min(100, Math.round(attrOp))) : 100;
+    };
+
+    const minOp = linkedOpacityInput && linkedOpacityInput.min !== '' ? Number(linkedOpacityInput.min) : 0;
+    const maxOp = linkedOpacityInput && linkedOpacityInput.max !== '' ? Number(linkedOpacityInput.max) : 100;
+
+    function applyColorSelection(newHex, closeAfter = false) {
+      const clean = normalizeHexColor(newHex, getCurrentHex());
+      colorInput.value = clean;
+      colorInput.dispatchEvent(new Event('input', { bubbles: true }));
+      colorInput.dispatchEvent(new Event('change', { bubbles: true }));
+      updatePopoverState();
+      if (closeAfter) {
+        closeTvColorPickerPopover();
+      }
+    }
+
+    function applyOpacitySelection(newOp) {
+      const clamped = Math.max(minOp, Math.min(maxOp, Math.round(Number(newOp) || 0)));
+      if (linkedOpacityInput) {
+        linkedOpacityInput.value = String(clamped);
+        linkedOpacityInput.dispatchEvent(new Event('input', { bubbles: true }));
+        linkedOpacityInput.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (colorInput.dataset) {
+        colorInput.dataset.opacityValue = String(clamped);
+      }
+      updatePopoverState();
+    }
+
+    function renderPopoverContent() {
+      const curHex = getCurrentHex();
+      const curOp = getCurrentOpacity();
+      const customColors = Array.isArray(settings.customColorSwatches) ? settings.customColorSwatches : [];
+
+      const renderSwatchBtn = (hex) => {
+        const lower = hex.toLowerCase();
+        const isDark = lower === '#131722' || lower === '#000000' || lower === '#2a2e39';
+        const isActive = lower === curHex;
+        return `<button type="button" class="vest-tvcp-swatch ${isDark ? 'is-dark-swatch' : ''} ${isActive ? 'active' : ''}" data-hex="${lower}" style="background:${lower};" title="${lower.toUpperCase()}"></button>`;
+      };
+
+      popover.innerHTML = `
+        <div class="vest-tvcp-grid">
+          ${TV_PALETTE_TOP_ROWS.flat().map(renderSwatchBtn).join('')}
+        </div>
+        <div class="vest-tvcp-grid vest-tvcp-grid-group-gap">
+          ${TV_PALETTE_SHADE_ROWS.flat().map(renderSwatchBtn).join('')}
+        </div>
+        <div class="vest-tvcp-divider"></div>
+        <div class="vest-tvcp-custom-row">
+          ${customColors.map(renderSwatchBtn).join('')}
+          <button type="button" class="vest-tvcp-add-btn" id="vest-tvcp-add-custom" title="Add custom color">+</button>
+          <input type="color" id="vest-tvcp-native-picker" data-vest-native-bypass="1" value="${curHex}" style="position:fixed; opacity:0; width:1px; height:1px; pointer-events:none;" tabindex="-1" />
+        </div>
+        <div class="vest-tvcp-opacity-section" style="${linkedOpacityInput ? '' : 'display:none;'}">
+          <div class="vest-tvcp-opacity-label">Opacity</div>
+          <div class="vest-tvcp-opacity-controls">
+            <div class="vest-tvcp-opacity-track-wrap">
+              <div class="vest-tvcp-opacity-gradient" id="vest-tvcp-op-grad" style="background: linear-gradient(90deg, ${hexToRgba(curHex, 0)} 0%, ${curHex} 100%);"></div>
+              <input type="range" class="vest-tvcp-opacity-range" id="vest-tvcp-op-range" min="${minOp}" max="${maxOp}" value="${curOp}" />
+            </div>
+            <div class="vest-tvcp-opacity-box">
+              <input type="number" class="vest-tvcp-opacity-num" id="vest-tvcp-op-num" min="${minOp}" max="${maxOp}" value="${curOp}" />
+              <span>%</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      popover.querySelectorAll('.vest-tvcp-swatch').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          applyColorSelection(btn.dataset.hex, false);
+        });
+      });
+
+      const addBtn = popover.querySelector('#vest-tvcp-add-custom');
+      const nativePicker = popover.querySelector('#vest-tvcp-native-picker');
+      if (addBtn && nativePicker) {
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          nativePicker.value = getCurrentHex();
+          nativePicker.click();
+        });
+        nativePicker.addEventListener('input', (e) => {
+          e.stopPropagation();
+          applyColorSelection(nativePicker.value, false);
+        });
+        nativePicker.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const picked = normalizeHexColor(nativePicker.value, getCurrentHex()).toLowerCase();
+          if (!Array.isArray(settings.customColorSwatches)) {
+            settings.customColorSwatches = [];
+          }
+          if (!settings.customColorSwatches.includes(picked)) {
+            settings.customColorSwatches.push(picked);
+            if (settings.customColorSwatches.length > 18) {
+              settings.customColorSwatches.shift();
+            }
+            queueSettingsSave({ customColorSwatches: settings.customColorSwatches });
+          }
+          applyColorSelection(picked, false);
+          renderPopoverContent();
+        });
+      }
+
+      const opRange = popover.querySelector('#vest-tvcp-op-range');
+      const opNum = popover.querySelector('#vest-tvcp-op-num');
+      if (opRange) {
+        opRange.addEventListener('input', (e) => {
+          e.stopPropagation();
+          applyOpacitySelection(opRange.value);
+        });
+      }
+      if (opNum) {
+        opNum.addEventListener('input', (e) => {
+          e.stopPropagation();
+          applyOpacitySelection(opNum.value);
+        });
+      }
+    }
+
+    function updatePopoverState() {
+      if (!activeTvColorPopover) return;
+      const curHex = getCurrentHex();
+      const curOp = getCurrentOpacity();
+      activeTvColorPopover.querySelectorAll('.vest-tvcp-swatch').forEach(sw => {
+        sw.classList.toggle('active', sw.dataset.hex === curHex);
+      });
+      const grad = activeTvColorPopover.querySelector('#vest-tvcp-op-grad');
+      if (grad) {
+        grad.style.background = `linear-gradient(90deg, ${hexToRgba(curHex, 0)} 0%, ${curHex} 100%)`;
+      }
+      const opRange = activeTvColorPopover.querySelector('#vest-tvcp-op-range');
+      if (opRange && document.activeElement !== opRange) {
+        opRange.value = String(curOp);
+      }
+      const opNum = activeTvColorPopover.querySelector('#vest-tvcp-op-num');
+      if (opNum && document.activeElement !== opNum) {
+        opNum.value = String(curOp);
+      }
+    }
+
+    renderPopoverContent();
+    popover.addEventListener('click', (e) => e.stopPropagation());
+    popover.addEventListener('mousedown', (e) => e.stopPropagation());
+    document.body.appendChild(popover);
+
+    // Position anchored to the color swatch button
+    const rect = colorInput.getBoundingClientRect();
+    const popW = 244;
+    const popH = popover.offsetHeight || (linkedOpacityInput ? 310 : 250);
+    let left = Math.round(rect.left);
+    let top = Math.round(rect.bottom + 6);
+
+    if (left + popW > window.innerWidth - 10) {
+      left = Math.max(10, window.innerWidth - popW - 10);
+    }
+    if (top + popH > window.innerHeight - 10) {
+      top = Math.max(10, Math.round(rect.top - popH - 6));
+    }
+
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+  }
+
+  if (isTopWindow) {
+    // Intercept clicks on any .vest-ed-color input to open the TradingView Default Color Picker Popover
+    document.addEventListener('click', (e) => {
+      const target = e.target;
+      if (!target || target.nodeType !== 1) return;
+
+      const colorInput = target.closest('input.vest-ed-color');
+      if (colorInput && !colorInput.dataset.vestNativeBypass) {
+        e.preventDefault();
+        e.stopPropagation();
+        openTvColorPickerPopover(colorInput);
+        return;
+      }
+
+      if (activeTvColorPopover && !activeTvColorPopover.contains(target)) {
+        closeTvColorPickerPopover();
+      }
+    }, true);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && activeTvColorPopover) {
+        e.stopPropagation();
+        closeTvColorPickerPopover();
+      }
+    }, true);
+  }
+
   /**
    * Hydrates a template object (including older saved templates or templates with rgba() / rawProperties)
    * so all editor fields (color, backgroundColor, opacity, middleLine, text, etc.) are normalized.
@@ -3982,6 +10102,7 @@
     let justFinishedDragging = false;
 
     function closeManagerOverlay() {
+      if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
       overlay.remove();
@@ -4173,7 +10294,7 @@
             </div>
             <div class="vest-ed-field">
               <label class="vest-ed-label">Background / Fill Color</label>
-              <input type="color" class="vest-ed-color" id="vest-tm-bg-color" value="${bgHex}" />
+              <input type="color" class="vest-ed-color" id="vest-tm-bg-color" data-opacity-input="#vest-tm-opacity" value="${bgHex}" />
             </div>
             <div class="vest-ed-field">
               <label class="vest-ed-label">Fill Opacity: <span id="vest-tm-opacity-val">${opacityVal}%</span></label>
@@ -4683,7 +10804,8 @@
   // -------------------------------------------------------------
   async function init() {
     try {
-      const data = await safeStorageGet(['templates', 'settings', 'updaterState', 'installedVersionOverride']);
+      const data = await safeStorageGet(['templates', 'settings', 'globalDrawings', 'updaterState', 'installedVersionOverride']);
+      globalDrawings = normalizeGlobalDrawings(data.globalDrawings);
       if (data.installedVersionOverride) {
         installedVersionOverride = data.installedVersionOverride;
       }
@@ -4697,7 +10819,14 @@
           ...settings,
           ...data.settings,
           autoApplyToNew: false,
-          sessionIndicators: normalizeSessionIndicatorsConfig(data.settings.sessionIndicators)
+          sessionIndicators: normalizeSessionIndicatorsConfig(data.settings.sessionIndicators),
+          autoFvg: normalizeAutoFvgConfig(data.settings.autoFvg),
+          newsBox: normalizeNewsBoxConfig(data.settings.newsBox),
+          tradesBox: normalizeTradesBoxConfig(data.settings.tradesBox),
+          candleOhlc: normalizeCandleOhlcConfig(data.settings.candleOhlc),
+          failLines: normalizeFailLinesConfig(data.settings.failLines),
+          cortexIndicator: normalizeCortexIndicatorConfig(data.settings.cortexIndicator),
+          favoriteTimeframes: normalizeFavoriteTimeframes(data.settings.favoriteTimeframes)
         };
         if (settings.activeTemplateId && LEGACY_PRESET_IDS.has(String(settings.activeTemplateId))) {
           settings.activeTemplateId = templates[0]?.id || null;
@@ -4707,6 +10836,13 @@
         }
       } else {
         settings.sessionIndicators = normalizeSessionIndicatorsConfig(settings.sessionIndicators);
+        settings.autoFvg = normalizeAutoFvgConfig(settings.autoFvg);
+        settings.newsBox = normalizeNewsBoxConfig(settings.newsBox);
+        settings.tradesBox = normalizeTradesBoxConfig(settings.tradesBox);
+        settings.candleOhlc = normalizeCandleOhlcConfig(settings.candleOhlc);
+        settings.failLines = normalizeFailLinesConfig(settings.failLines);
+        settings.cortexIndicator = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+        settings.favoriteTimeframes = normalizeFavoriteTimeframes(settings.favoriteTimeframes);
       }
       // Persist cleaned templates & settings so legacy defaults are permanently removed
       safeStorageSet({ templates, settings });
@@ -4732,6 +10868,8 @@
 
       if (isTopWindow) {
         initPanelManager();
+        renderChartNewsBox();
+        renderChartTradesBox();
         setupIsolatedActionTracking();
         // Run background update check on page refresh / load
         triggerQuickUpdateCheck();

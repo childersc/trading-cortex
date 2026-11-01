@@ -126,9 +126,258 @@
     hotkeysEnabled: true,
     rememberSidebarTools: true,
     rememberLastChartSettings: true,
-    lastChartSettings: {}
+    lastChartSettings: {},
+    favoriteTimeframes: [],
+    cortexIndicator: { enabled: false }
   };
+  let currentGlobalDrawings = [];
+  const globalDrawingEntityMap = new Map(); // chart entity id -> persistent global drawing id
+  const globalDrawingRestoreSuppression = new Set();
+  const globalDrawingUpdateTimers = new Map();
+  const removedGlobalDrawingIds = new Set();
+  const nativeAutoFvgRemovalSuppression = new Set();
+  const globalDrawingRestoreStartTimes = new WeakMap();
   let hasReceivedConfigUpdate = false;
+  let liveFailPrices = { long: null, short: null };
+  let liveEstimatedStopLoss = { side: null, price: null };
+  let liveEstimatedPnl = null;
+  let lastCortexAutomationClosedBarKey = '';
+  let lastCortexAutomationContextKey = '';
+  let lastCortexAlertClosedBarKey = '';
+  let lastCortexAlertContextKey = '';
+  let lastCortexFormingAlertKey = '';
+  let lastStopLossEstimateMessage = '';
+  let failPriceLineButtons = { long: null, short: null };
+  let latestChartMarketPrice = null;
+
+  const TIMEFRAME_OPTIONS = [
+    { resolution: '1', label: '1 minute', short: '1m' },
+    { resolution: '3', label: '3 minutes', short: '3m' },
+    { resolution: '5', label: '5 minutes', short: '5m' },
+    { resolution: '15', label: '15 minutes', short: '15m' },
+    { resolution: '30', label: '30 minutes', short: '30m' },
+    { resolution: '60', label: '1 hour', short: '1h' },
+    { resolution: '120', label: '2 hours', short: '2h' },
+    { resolution: '240', label: '4 hours', short: '4h' },
+    { resolution: '360', label: '6 hours', short: '6h' },
+    { resolution: '480', label: '8 hours', short: '8h' },
+    { resolution: '720', label: '12 hours', short: '12h' },
+    { resolution: '1D', label: '1 day', short: '1D' },
+    { resolution: '3D', label: '3 days', short: '3D' },
+    { resolution: '1W', label: '1 week', short: '1W' },
+    { resolution: '1M', label: '1 month', short: '1M' }
+  ];
+  const TIMEFRAME_BY_RESOLUTION = new Map(TIMEFRAME_OPTIONS.map(item => [item.resolution.toLowerCase(), item]));
+  const TIMEFRAME_BY_LABEL = new Map(TIMEFRAME_OPTIONS.map(item => [item.label.toLowerCase(), item]));
+  const timeframeStarCaptureDocs = new WeakSet();
+  const timeframeFavoriteCaptureDocs = new WeakSet();
+
+  function getTimeframeFavorites() {
+    const seen = new Set();
+    return (Array.isArray(currentSettings.favoriteTimeframes) ? currentSettings.favoriteTimeframes : [])
+      .map(item => {
+        const resolution = String(item && typeof item === 'object' ? item.resolution : item || '').trim();
+        const option = TIMEFRAME_BY_RESOLUTION.get(resolution.toLowerCase());
+        return option ? { ...option, savedLabel: item && item.label } : null;
+      })
+      .filter(item => {
+        if (!item || seen.has(item.resolution)) return false;
+        seen.add(item.resolution);
+        return true;
+      });
+  }
+
+  function selectFavoriteTimeframe(resolution) {
+    try {
+      const chart = activeChart || (activeChartApi && typeof activeChartApi.activeChart === 'function' ? activeChartApi.activeChart() : null);
+      if (chart && typeof chart.setResolution === 'function') {
+        chart.setResolution(String(resolution), () => scheduleSaveCurrentChartSettings(200));
+      }
+    } catch (e) {}
+  }
+
+  function installTimeframeFavoriteCapture(doc) {
+    if (!doc || timeframeFavoriteCaptureDocs.has(doc)) return;
+    timeframeFavoriteCaptureDocs.add(doc);
+    const view = doc.defaultView;
+    if (!view) return;
+    const captureFavoriteAction = event => {
+      const target = event.target;
+      const button = target && typeof target.closest === 'function'
+        ? target.closest('#vest-timeframe-favorites [data-tc-timeframe-resolution]')
+        : null;
+      if (!button) return;
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (event.type !== 'click') return;
+      event.preventDefault();
+      selectFavoriteTimeframe(button.getAttribute('data-tc-timeframe-resolution'));
+    };
+    // Keep Vest/TradingView's interval control from treating a chip click as a native toolbar action.
+    view.addEventListener('pointerdown', captureFavoriteAction, true);
+    view.addEventListener('mousedown', captureFavoriteAction, true);
+    view.addEventListener('click', captureFavoriteAction, true);
+  }
+
+  function findTimeframeMenuRow(target, option) {
+    let node = target;
+    while (node && node !== document.body && node.parentElement) {
+      const text = String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (text === option.label.toLowerCase() || text === option.short.toLowerCase()) {
+        const rect = node.getBoundingClientRect();
+        if (rect.width >= 70 && rect.height >= 18 && rect.height <= 64) return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function enhanceTimeframeMenu() {
+    const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
+    const favoriteSet = new Set(getTimeframeFavorites().map(item => item.resolution));
+    docs.forEach(doc => {
+      try {
+        installTimeframeStarCapture(doc);
+        const candidates = doc.querySelectorAll('[role="menuitem"], [data-role="menuitem"], [class*="item"], [class*="Item"]');
+        candidates.forEach(candidate => {
+          const text = String(candidate.innerText || candidate.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          const option = TIMEFRAME_BY_LABEL.get(text) || TIMEFRAME_OPTIONS.find(item => item.short.toLowerCase() === text);
+          if (!option) return;
+          const row = findTimeframeMenuRow(candidate, option);
+          if (!row) return;
+          const existingStar = row.querySelector('[data-tc-timeframe-star]');
+          if (existingStar) {
+            const isFavorite = favoriteSet.has(option.resolution);
+            existingStar.textContent = isFavorite ? '★' : '☆';
+            existingStar.style.color = isFavorite ? '#f5c542' : '#a1a1aa';
+            existingStar.setAttribute('aria-label', `${isFavorite ? 'Remove' : 'Add'} ${option.label} ${isFavorite ? 'from' : 'to'} favorite timeframes`);
+            existingStar.title = existingStar.getAttribute('aria-label');
+            return;
+          }
+          const computed = doc.defaultView.getComputedStyle(row);
+          if (computed.position === 'static') row.style.position = 'relative';
+          row.style.paddingRight = '38px';
+          const star = doc.createElement('button');
+          star.type = 'button';
+          star.setAttribute('data-tc-timeframe-star', option.resolution);
+          star.setAttribute('aria-label', `${favoriteSet.has(option.resolution) ? 'Remove' : 'Add'} ${option.label} ${favoriteSet.has(option.resolution) ? 'from' : 'to'} favorite timeframes`);
+          star.title = star.getAttribute('aria-label');
+          star.textContent = favoriteSet.has(option.resolution) ? '★' : '☆';
+          Object.assign(star.style, {
+            position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)',
+            border: '0', background: 'transparent', color: favoriteSet.has(option.resolution) ? '#f5c542' : '#a1a1aa',
+            fontSize: '23px', lineHeight: '26px', width: '30px', height: '30px', cursor: 'pointer', padding: '0', zIndex: '2'
+          });
+          row.appendChild(star);
+        });
+      } catch (e) {}
+    });
+  }
+
+  function installTimeframeStarCapture(doc) {
+    if (!doc || timeframeStarCaptureDocs.has(doc)) return;
+    timeframeStarCaptureDocs.add(doc);
+    const view = doc.defaultView;
+    if (!view) return;
+    const stopNativeTimeframeAction = event => {
+      const target = event.target;
+      const star = target && typeof target.closest === 'function' ? target.closest('[data-tc-timeframe-star]') : null;
+      if (!star) return;
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (event.type !== 'click') return;
+      event.preventDefault();
+      const resolution = star.getAttribute('data-tc-timeframe-star');
+      const option = TIMEFRAME_BY_RESOLUTION.get(String(resolution || '').toLowerCase());
+      if (option) {
+        postToIsolated({ type: 'VEST_TV_TOGGLE_TIMEFRAME_FAVORITE', payload: { resolution: option.resolution, label: option.label } });
+      }
+    };
+    // Intercept at window capture, before Vest/TradingView's delegated menu handlers can select the row.
+    view.addEventListener('pointerdown', stopNativeTimeframeAction, true);
+    view.addEventListener('mousedown', stopNativeTimeframeAction, true);
+    view.addEventListener('click', stopNativeTimeframeAction, true);
+  }
+
+  function enhanceTimeframeFavoritesBar() {
+    const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
+    const favorites = getTimeframeFavorites();
+    docs.forEach(doc => {
+      try {
+        const existing = doc.getElementById('vest-timeframe-favorites');
+        installTimeframeFavoriteCapture(doc);
+        // Anchor only to the actual TradingView header interval group. Broad "interval" matches
+        // can select a chart-title or menu element, placing favorites on the wrong toolbar row.
+        // The selector lives in TradingView's top-toolbar wrapper, whose identifier is
+        // an id in current Vest charts (not data-name). Prefer it over the separate,
+        // narrower chart-title interval button to avoid anchoring favorites in a clipped group.
+        let intervalControl = Array.from(doc.querySelectorAll('#header-toolbar-intervals, [data-name="header-toolbar-intervals"]')).find(el => {
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top < 180;
+        });
+        if (!intervalControl) intervalControl = findVisibleTimeframeButton(doc);
+        if (!favorites.length || !intervalControl || !intervalControl.parentElement) {
+          if (existing) existing.remove();
+          return;
+        }
+        const intervalWrapper = intervalControl.closest('#header-toolbar-intervals, [data-name="header-toolbar-intervals"]') || intervalControl;
+        // The interval selector sits inside a fixed-width, overflow-hidden toolbar group.
+        // Put favorites after that group (as a sibling in the full-width toolbar), otherwise
+        // the buttons exist in the DOM but are clipped and never appear on screen.
+        const toolbarGroup = intervalWrapper.parentElement || intervalControl.parentElement;
+        if (!toolbarGroup || !toolbarGroup.parentElement) {
+          if (existing) existing.remove();
+          return;
+        }
+        const bar = existing || doc.createElement('div');
+        bar.id = 'vest-timeframe-favorites';
+        bar.setAttribute('data-tc-favorites-placement', 'toolbar-row');
+        bar.setAttribute('aria-label', 'Favorite timeframes');
+        Object.assign(bar.style, { display: 'inline-flex', visibility: 'visible', opacity: '1', alignItems: 'center', gap: '3px', marginLeft: '5px', whiteSpace: 'nowrap', verticalAlign: 'middle', flex: '0 0 auto', position: 'relative', zIndex: '20' });
+        bar.replaceChildren();
+        let activeResolution = '';
+        try { activeResolution = String((activeChart && activeChart.resolution && activeChart.resolution()) || '').toLowerCase(); } catch (e) {}
+        favorites.forEach(option => {
+          const button = doc.createElement('button');
+          button.type = 'button';
+          button.textContent = option.short;
+          button.title = `${option.label} — click to switch`;
+          button.setAttribute('data-tc-timeframe-resolution', option.resolution);
+          const isActive = activeResolution === option.resolution.toLowerCase();
+          Object.assign(button.style, {
+            border: '1px solid ' + (isActive ? 'rgba(56,189,248,.65)' : 'rgba(148,163,184,.24)'),
+            borderRadius: '4px', background: isActive ? 'rgba(14,116,144,.25)' : 'rgba(15,23,42,.55)',
+            color: isActive ? '#7dd3fc' : '#d1d5db', font: '600 11px/20px Arial,sans-serif',
+            minWidth: '27px', padding: '0 5px', cursor: 'pointer'
+          });
+          bar.appendChild(button);
+        });
+        const toolbarRow = toolbarGroup.parentElement;
+        if (bar.parentElement !== toolbarRow || bar.previousElementSibling !== toolbarGroup) {
+          toolbarRow.insertBefore(bar, toolbarGroup.nextSibling);
+        }
+      } catch (e) {}
+    });
+  }
+
+  function findVisibleTimeframeButton(doc) {
+    let resolution = '';
+    try { resolution = String((activeChart && activeChart.resolution && activeChart.resolution()) || '').toLowerCase(); } catch (e) {}
+    const activeOption = TIMEFRAME_BY_RESOLUTION.get(resolution);
+    if (!activeOption) return null;
+    const matches = Array.from(doc.querySelectorAll('button, [role="button"]')).filter(el => {
+      if (el.closest('#vest-timeframe-favorites') || el.closest('[role="menu"], [data-name*="menu"]')) return false;
+      const rect = el.getBoundingClientRect();
+      const text = String(el.innerText || el.textContent || '').replace(/\s+/g, '').trim().toLowerCase();
+      return rect.width > 15 && rect.width < 100 && rect.height >= 18 && rect.height < 60 && rect.top >= 0 && rect.top < 180 && text === activeOption.short.toLowerCase();
+    });
+    return matches.sort((a, b) => a.getBoundingClientRect().width - b.getBoundingClientRect().width)[0] || null;
+  }
+
+  function enhanceTimeframeControls() {
+    enhanceTimeframeMenu();
+    enhanceTimeframeFavoritesBar();
+  }
 
   // Read isolated settings mirror (if present on same origin) so we know immediately at document_start if rememberSidebarTools is enabled
   try {
@@ -378,17 +627,22 @@
 
     const opacityPct = typeof tpl.opacity === 'number' ? tpl.opacity : 20;
     const transparency = Math.max(0, Math.min(100, 100 - opacityPct));
-    const mainColor = parseColorAndAlpha(tpl.color, '#22c55e').hex;
-    const bgColor = parseColorAndAlpha(tpl.backgroundColor || mainColor, mainColor).hex;
+    const mainColorHex = parseColorAndAlpha(tpl.color, '#22c55e').hex;
+    const borderOpacityPct = typeof tpl.borderOpacity === 'number' ? Math.max(0, Math.min(100, tpl.borderOpacity)) : 100;
+    const mainColor = borderOpacityPct < 100 ? hexToRgbaString(mainColorHex, borderOpacityPct) : mainColorHex;
+    const bgColor = parseColorAndAlpha(tpl.backgroundColor || mainColorHex, mainColorHex).hex;
     const lineW = Number(tpl.linewidth) || 1;
     const lineS = Number(tpl.linestyle ?? 0);
     const showMiddleLine = Boolean(tpl.showMiddleLine);
-    const middleLineColor = parseColorAndAlpha(tpl.middleLineColor || mainColor, mainColor).hex;
+    const middleLineColorHex = parseColorAndAlpha(tpl.middleLineColor || mainColorHex, mainColorHex).hex;
+    const middleLineOpacityPct = typeof tpl.middleLineOpacity === 'number' ? Math.max(0, Math.min(100, tpl.middleLineOpacity)) : 100;
+    const middleLineColor = middleLineOpacityPct < 100 ? hexToRgbaString(middleLineColorHex, middleLineOpacityPct) : middleLineColorHex;
     const middleLineWidth = Number(tpl.middleLineWidth) || 1;
     const middleLineStyle = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
     const horzAlign = tpl.horzLabelsAlign || 'right';
     const vertAlign = tpl.vertLabelsAlign || 'middle';
-    const txtColor = parseColorAndAlpha(tpl.textColor || mainColor, mainColor).hex;
+    const txtColorHex = parseColorAndAlpha(tpl.textColor || mainColorHex, mainColorHex).hex;
+    const txtColor = borderOpacityPct < 100 ? hexToRgbaString(txtColorHex, Math.max(borderOpacityPct, 65)) : txtColorHex;
     const fontSz = Number(tpl.fontSize) || 12;
 
     const props = {
@@ -1147,10 +1401,16 @@
     setupSidebarObserver();
     setupChartSettingsObserver();
     setupContextMenuHandler();
-    restoreSidebarSelections();
-    restoreLastChartSettings();
+    enhanceTimeframeControls();
+    if (!hasCompletedInitialSidebarRestore) {
+      restoreSidebarSelections();
+    }
+    if (!hasCompletedInitialChartSettingsRestore) {
+      restoreLastChartSettings();
+    }
     syncExtendedRectangleTextHooks();
     setupIctSessionIndicators();
+    restoreGlobalDrawings();
 
     if (!rectTextPollTimer) {
       rectTextPollTimer = setInterval(() => {
@@ -1186,6 +1446,32 @@
   // -------------------------------------------------------------
   function onDrawingEvent(entityId, eventType) {
     try {
+      if (String(eventType || '').toLowerCase() === 'remove' && entityId) {
+        if (globalDrawingUpdateTimers.has(entityId)) {
+          clearTimeout(globalDrawingUpdateTimers.get(entityId));
+          globalDrawingUpdateTimers.delete(entityId);
+        }
+        const removedGlobalId = globalDrawingEntityMap.get(entityId);
+        if (removedGlobalId) {
+          globalDrawingEntityMap.delete(entityId);
+          // Background charts can remove/recreate local entities while following a
+          // focused tab. Only the focused tab is allowed to change the shared record.
+          if (chartMemoryTabFocused && !globalDrawingRestoreSuppression.has(entityId)) {
+            removedGlobalDrawingIds.add(removedGlobalId);
+            postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_REMOVE', drawingId: removedGlobalId });
+          }
+        }
+        for (const [fvgKey, entry] of nativeAutoFvgShapesMap.entries()) {
+          if (entry && entry.entityId === entityId) {
+            nativeAutoFvgShapesMap.delete(fvgKey);
+            if (!nativeAutoFvgRemovalSuppression.has(entityId)) dismissCreatedFvg(fvgKey);
+          }
+        }
+        nativeAutoFvgRemovalSuppression.delete(entityId);
+        scheduleIctSessionsRender(true);
+        return;
+      }
+
       if (!activeChart) {
         if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
           activeChart = activeChartApi.activeChart();
@@ -1201,6 +1487,11 @@
       const rawProps = typeof shape.getProperties === 'function' ? (shape.getProperties() || {}) : {};
       if (isOrderOrPositionLineProps(rawProps, shapeMeta && shapeMeta.name)) {
         return;
+      }
+
+      const globalId = globalDrawingEntityMap.get(entityId);
+      if (globalId && chartMemoryTabFocused && !globalDrawingRestoreSuppression.has(entityId)) {
+        queueGlobalDrawingUpdate(entityId, globalId);
       }
 
       lastInteractedShapeId = entityId;
@@ -1279,6 +1570,261 @@
       }
     } catch (e) {}
     return { id: entityId, drawingType: 'rectangle', rawName: 'rectangle', isOrderLine: false };
+  }
+
+  function serializeGlobalDrawing(entityId, globalId = null) {
+    try {
+      if (!activeChart || !entityId) return null;
+      const shape = activeChart.getShapeById(entityId);
+      if (!shape) return null;
+      const meta = getShapeMetadataById(entityId);
+      if (!meta || meta.isOrderLine) return null;
+      const rawPoints = typeof shape.getPoints === 'function' ? shape.getPoints() : [];
+      const points = Array.isArray(rawPoints) ? rawPoints.map(point => ({
+        time: normalizeEpochSec(getDrawingPointTime(point)),
+        price: Number(point && (point.price ?? point.value))
+      })).filter(point => Number.isFinite(point.time) && Number.isFinite(point.price)) : [];
+      if (!points.length) return null;
+      let properties = {};
+      try {
+        const raw = typeof shape.getProperties === 'function' ? shape.getProperties() : {};
+        properties = JSON.parse(JSON.stringify(raw || {}));
+      } catch (e) {}
+      const all = typeof activeChart.getAllShapes === 'function' ? activeChart.getAllShapes() || [] : [];
+      const metadata = all.find(item => item && item.id === entityId);
+      const rawShapeName = String(metadata && metadata.name || meta.rawName || meta.drawingType || 'rectangle');
+      let timeframe = '5m';
+      try { timeframe = formatCurrentResolutionLabel(); } catch (e) {}
+      return {
+        id: globalId || `gd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+        symbol: getCurrentChartSymbolKey(),
+        timeframe,
+        shape: canonicalizeDrawingType(rawShapeName),
+        rawShapeName,
+        drawingType: meta.drawingType,
+        points,
+        properties,
+        updatedAt: Date.now(),
+        sourceEntityId: String(entityId)
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function toggleGlobalSyncForShape(entityId) {
+    if (!chartMemoryTabFocused) {
+      postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: 'Focus this chart tab to change global drawing sync' });
+      return;
+    }
+    const existingId = globalDrawingEntityMap.get(entityId);
+    if (existingId) {
+      globalDrawingEntityMap.delete(entityId);
+      removedGlobalDrawingIds.add(existingId);
+      postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_REMOVE', drawingId: existingId });
+      return;
+    }
+    const drawing = serializeGlobalDrawing(entityId);
+    if (!drawing) {
+      postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: 'Unable to sync this drawing globally' });
+      return;
+    }
+    globalDrawingEntityMap.set(entityId, drawing.id);
+    postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
+    postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: `Syncing ${drawing.timeframe} drawing globally across ${drawing.symbol} charts` });
+  }
+
+  function queueGlobalDrawingUpdate(entityId, globalId) {
+    if (!chartMemoryTabFocused) return;
+    const previous = globalDrawingUpdateTimers.get(entityId);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      globalDrawingUpdateTimers.delete(entityId);
+      if (!chartMemoryTabFocused || globalDrawingEntityMap.get(entityId) !== globalId) return;
+      const drawing = serializeGlobalDrawing(entityId, globalId);
+      if (drawing) postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
+    }, 300);
+    globalDrawingUpdateTimers.set(entityId, timer);
+  }
+
+  function globalDrawingPointArraysMatch(record, rawPoints) {
+    try {
+      if (!Array.isArray(rawPoints) || rawPoints.length !== record.points.length) return false;
+      return rawPoints.every((point, idx) => {
+        const saved = record.points[idx];
+        const time = normalizeEpochSec(getDrawingPointTime(point));
+        const price = Number(point && (point.price ?? point.value));
+        return Math.abs(time - Number(saved.time)) <= 1 && Math.abs(price - Number(saved.price)) <= Math.max(1e-6, Math.abs(price) * 1e-8);
+      });
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function globalDrawingPointsMatch(record, shape) {
+    try {
+      const points = typeof shape.getPoints === 'function' ? shape.getPoints() : [];
+      return globalDrawingPointArraysMatch(record, points);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getPersistedChartDrawingCandidates() {
+    const candidates = [];
+    const storages = [];
+    try { storages.push(window.localStorage); } catch (e) {}
+    try {
+      if (window.top && window.top !== window && window.top.localStorage) storages.push(window.top.localStorage);
+    } catch (e) {}
+    const seen = new Set();
+    for (const storage of storages) {
+      try {
+        for (let idx = 0; idx < storage.length; idx++) {
+          const key = storage.key(idx);
+          if (!key || (!key.startsWith('tv-chart-drawings-') && !key.startsWith('tv-drawings-flush:')) || seen.has(key)) continue;
+          seen.add(key);
+          const raw = storage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          const sources = parsed && Array.isArray(parsed.sources) ? parsed.sources : [];
+          for (const entry of sources) {
+            const source = Array.isArray(entry) ? entry[1] : entry;
+            if (!source || typeof source !== 'object') continue;
+            const name = source.toolName || source.type || (source.state && source.state.type) || '';
+            const points = source.state && Array.isArray(source.state.points)
+              ? source.state.points
+              : (Array.isArray(source.points) ? source.points : []);
+            const normalized = points.map(point => ({
+              time: normalizeEpochSec(getDrawingPointTime(point)),
+              price: Number(point && (point.price ?? point.value))
+            }));
+            if (!name || !normalized.length || normalized.some(point => !Number.isFinite(point.time) || !Number.isFinite(point.price))) continue;
+            candidates.push({ name: canonicalizeDrawingType(name), points: normalized });
+          }
+        }
+      } catch (e) {}
+    }
+    return candidates;
+  }
+
+  function applyGlobalDrawingRecord(record, entityId, shape) {
+    if (!record || !shape) return;
+    const pointsMatch = globalDrawingPointsMatch(record, shape);
+    let propertiesMatch = false;
+    try {
+      const current = typeof shape.getProperties === 'function' ? shape.getProperties() || {} : {};
+      propertiesMatch = JSON.stringify(current) === JSON.stringify(record.properties || {});
+    } catch (e) {}
+    if (pointsMatch && propertiesMatch) return;
+    globalDrawingRestoreSuppression.add(entityId);
+    if (!pointsMatch && typeof shape.setPoints === 'function') {
+      try { shape.setPoints(record.points.map(point => ({ time: Number(point.time), price: Number(point.price) }))); } catch (e) {}
+    }
+    if (!propertiesMatch && record.properties && typeof shape.setProperties === 'function') {
+      try { shape.setProperties(record.properties); } catch (e) {}
+    }
+    setTimeout(() => globalDrawingRestoreSuppression.delete(entityId), 1200);
+  }
+
+  function getDrawingPointTime(point) {
+    if (!point || typeof point !== 'object') return point;
+    if (point.time && typeof point.time === 'object') {
+      return point.time.value ?? point.time.timestamp ?? point.time.time ?? point.time_t;
+    }
+    return point.time ?? point.time_t;
+  }
+
+  function restoreGlobalDrawings() {
+    if (!activeChart || typeof activeChart.getAllShapes !== 'function' || !Array.isArray(currentGlobalDrawings)) return;
+    let symbol = '';
+    try { symbol = getCurrentChartSymbolKey(); } catch (e) {}
+    if (!symbol) return;
+    const normalizedSymbol = String(symbol).toUpperCase();
+    let restoreState = globalDrawingRestoreStartTimes.get(activeChart);
+    if (!restoreState || restoreState.symbol !== normalizedSymbol) {
+      restoreState = { symbol: normalizedSymbol, startedAt: Date.now() };
+      globalDrawingRestoreStartTimes.set(activeChart, restoreState);
+    }
+    const withinInitialHydrationWindow = Date.now() - restoreState.startedAt < 6000;
+    const records = currentGlobalDrawings.filter(record => record && String(record.symbol).toUpperCase() === normalizedSymbol);
+    let chartShapes = [];
+    try { chartShapes = activeChart.getAllShapes() || []; } catch (e) { return; }
+    const persistedShapes = getPersistedChartDrawingCandidates();
+    const liveIds = new Set(chartShapes.map(item => item && item.id).filter(Boolean));
+    const registeredIds = new Set(currentGlobalDrawings.map(record => record && record.id).filter(Boolean));
+    for (const [entityId, globalId] of globalDrawingEntityMap.entries()) {
+      if (!liveIds.has(entityId)) globalDrawingEntityMap.delete(entityId);
+      else if (!registeredIds.has(globalId)) {
+        globalDrawingEntityMap.delete(entityId);
+      }
+    }
+    if (!records.length) return;
+
+    records.forEach(record => {
+      try {
+        if (removedGlobalDrawingIds.has(record.id)) return;
+        const mapped = Array.from(globalDrawingEntityMap.entries()).find(([, id]) => id === record.id);
+        if (mapped) {
+          const mappedShape = activeChart.getShapeById(mapped[0]);
+          if (mappedShape) {
+            applyGlobalDrawingRecord(record, mapped[0], mappedShape);
+            return;
+          }
+        }
+        const matchingOnChart = chartShapes.filter(item => {
+          if (!item || !item.id || canonicalizeDrawingType(item.name) !== canonicalizeDrawingType(record.shape)) return false;
+          const candidate = activeChart.getShapeById(item.id);
+          return candidate && globalDrawingPointsMatch(record, candidate);
+        });
+        const alreadyOnChart = matchingOnChart[0];
+        if (alreadyOnChart) {
+          globalDrawingEntityMap.set(alreadyOnChart.id, record.id);
+          applyGlobalDrawingRecord(record, alreadyOnChart.id, activeChart.getShapeById(alreadyOnChart.id));
+          // Clean up identical copies left by earlier restores, while preserving same-geometry drawings with different properties.
+          const canonicalProperties = JSON.stringify(record.properties || {});
+          matchingOnChart.slice(1).forEach(duplicate => {
+            const duplicateShape = activeChart.getShapeById(duplicate.id);
+            let sameProperties = false;
+            try { sameProperties = JSON.stringify(duplicateShape.getProperties() || {}) === canonicalProperties; } catch (e) {}
+            if (sameProperties) {
+              globalDrawingEntityMap.delete(duplicate.id);
+              try { activeChart.removeEntity(duplicate.id); } catch (e) {}
+            }
+          });
+          return;
+        }
+        // Vest may not have hydrated its saved shapes into the chart API yet. Wait for that persisted
+        // geometry to appear before creating a replacement, or the saved drawing and restore will overlap.
+        const existsInPersistedChart = persistedShapes.some(candidate =>
+          candidate.name === canonicalizeDrawingType(record.shape) &&
+          globalDrawingPointArraysMatch(record, candidate.points)
+        );
+        if (withinInitialHydrationWindow && existsInPersistedChart) return;
+        if (!record.points.length) return;
+        let entityId = null;
+        const points = record.points.map(point => ({ time: Number(point.time), price: Number(point.price) }));
+        if (points.length === 1 && typeof activeChart.createShape === 'function') {
+          entityId = activeChart.createShape(points[0], { shape: record.shape, disableSave: false });
+        } else if (typeof activeChart.createMultipointShape === 'function') {
+          entityId = activeChart.createMultipointShape(points, { shape: record.shape, lock: false, disableSelection: false, disableSave: false });
+        }
+        if (!entityId) return;
+        globalDrawingEntityMap.set(entityId, record.id);
+        globalDrawingRestoreSuppression.add(entityId);
+        setTimeout(() => globalDrawingRestoreSuppression.delete(entityId), 1200);
+        const shape = activeChart.getShapeById(entityId);
+        if (shape) applyGlobalDrawingRecord(record, entityId, shape);
+      } catch (e) {}
+    });
+  }
+
+  function updateGlobalDrawingsSnapshot(drawings) {
+    currentGlobalDrawings = Array.isArray(drawings) ? drawings : [];
+    const activeIds = new Set(currentGlobalDrawings.map(record => record && record.id).filter(Boolean));
+    for (const id of removedGlobalDrawingIds) {
+      if (!activeIds.has(id)) removedGlobalDrawingIds.delete(id);
+    }
   }
 
   function applyPropertiesToInternalSource(shape, entityId, props) {
@@ -1887,9 +2433,12 @@
         'div[data-name="menu-inner"], div[data-name="popup-menu-container"], div[class*="menuWrap-"], div[class*="popupMenu-"], div[class*="menu-"]'
       );
       if (popupRoot && popupRoot !== doc.body) {
-        popupRoot.style.display = 'none';
+        popupRoot.style.setProperty('display', 'none', 'important');
       }
-      doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      const view = doc.defaultView || window;
+      const escapeEvent = new view.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true });
+      doc.dispatchEvent(escapeEvent);
+      view.dispatchEvent(new view.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
     } catch (e) {}
   }
 
@@ -2385,7 +2934,10 @@
 
   function injectTemplatesIntoTradingViewMenu(visualOrderRow, rowParent, doc) {
     if (!visualOrderRow || !rowParent) return false;
-    if (rowParent.querySelector('[data-vest-cmi="true"]')) return true;
+    if (rowParent.querySelector('[data-vest-cmi="true"]')) {
+      injectSyncGloballyMenuItem(rowParent, doc);
+      return true;
+    }
 
     ensureContextStylesInjected(doc);
 
@@ -2451,9 +3003,84 @@
 
     // Insert "Template" directly above "Visual order" (matching TradingView.com)
     rowParent.insertBefore(templateRow, visualOrderRow);
+    injectSyncGloballyMenuItem(rowParent, doc);
 
     log('Successfully injected native "Template >" row above "Visual order"!');
     return true;
+  }
+
+  function injectSyncGloballyMenuItem(rowParent, doc) {
+    if (!rowParent || !doc) return;
+    const shapeInfo = getRightClickedOrSelectedShapeInfo();
+    const targetShapeId = shapeInfo && shapeInfo.id ? shapeInfo.id : rightClickedShapeId;
+    const lockRow = Array.from(rowParent.children).find(row =>
+      String(row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'lock'
+    );
+    if (!lockRow) return;
+    let syncRow = rowParent.querySelector('[data-vest-sync-global="true"]');
+    const isSynced = Boolean(shapeInfo && globalDrawingEntityMap.has(shapeInfo.id));
+    if (!syncRow) {
+      syncRow = lockRow.cloneNode(true);
+      syncRow.setAttribute('data-vest-sync-global', 'true');
+      syncRow.setAttribute('data-vest-cmi', 'true');
+      syncRow.removeAttribute('data-name');
+      syncRow.removeAttribute('data-role');
+      syncRow.removeAttribute('aria-label');
+      syncRow.querySelectorAll('[data-name], [data-role], [data-tooltip]').forEach(el => {
+        el.removeAttribute('data-name');
+        el.removeAttribute('data-role');
+        el.removeAttribute('data-tooltip');
+      });
+      const walker = doc.createTreeWalker(syncRow, NodeFilter.SHOW_TEXT, null);
+      let textNode;
+      while ((textNode = walker.nextNode())) {
+        if (/^\s*lock\s*$/i.test(textNode.nodeValue || '')) {
+          textNode.nodeValue = textNode.nodeValue.replace(/lock/i, 'Sync globally');
+          break;
+        }
+      }
+      const svgs = syncRow.querySelectorAll('svg');
+      if (svgs.length) {
+        svgs[0].innerHTML = '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
+        svgs[0].setAttribute('viewBox', '0 0 24 24');
+        svgs[0].setAttribute('fill', 'none');
+        svgs[0].setAttribute('stroke', 'currentColor');
+        svgs[0].setAttribute('stroke-width', '1.8');
+      }
+      let lastActivationAt = 0;
+      const activateSyncItem = event => {
+        if (event.type === 'pointerdown' && event.button !== 0) return;
+        if (Date.now() - lastActivationAt < 450) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+          return;
+        }
+        lastActivationAt = Date.now();
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        const current = getRightClickedOrSelectedShapeInfo();
+        const resolvedShapeId = targetShapeId || (current && current.id);
+        if (resolvedShapeId) {
+          toggleGlobalSyncForShape(resolvedShapeId);
+          injectSyncGloballyMenuItem(rowParent, doc);
+        }
+        closeTradingViewPopupMenu(syncRow);
+      };
+      // Some TradingView menu builds tear down the popup during pointerdown, before
+      // a click event can reach a custom row. Activate at pointerdown and retain a
+      // click fallback for keyboard and older pointer implementations.
+      syncRow.addEventListener('pointerdown', activateSyncItem);
+      syncRow.addEventListener('click', activateSyncItem);
+    }
+    syncRow.setAttribute('aria-checked', isSynced ? 'true' : 'false');
+    syncRow.title = isSynced ? 'This drawing is synced globally. Click to stop syncing.' : 'Show this drawing on every chart for this instrument.';
+    const firstSvg = syncRow.querySelector('svg');
+    if (firstSvg) firstSvg.style.color = isSynced ? '#22c55e' : '';
+    if (syncRow.parentElement !== rowParent || syncRow.nextElementSibling !== lockRow) {
+      rowParent.insertBefore(syncRow, lockRow);
+    }
   }
 
   function tryInjectTemplatesMenu(targetDoc = document) {
@@ -2561,6 +3188,60 @@
     const { type, payload } = event.data;
 
     switch (type) {
+      case 'VEST_TV_FAIL_PRICES_UPDATE': {
+        const next = payload || {};
+        const longPrice = Number(next.long);
+        const shortPrice = Number(next.short);
+        liveFailPrices = {
+          long: Number.isFinite(longPrice) && longPrice > 0 ? longPrice : null,
+          short: Number.isFinite(shortPrice) && shortPrice > 0 ? shortPrice : null
+        };
+        scheduleIctSessionsRender(false);
+        break;
+      }
+      case 'VEST_TV_STOP_LOSS_UPDATE': {
+        const next = payload || {};
+        const side = ['long', 'short'].includes(next.side) ? next.side : null;
+        const price = Number(next.price);
+        liveEstimatedStopLoss = {
+          side,
+          price: side && Number.isFinite(price) && price > 0 ? price : null
+        };
+        scheduleIctSessionsRender(false);
+        break;
+      }
+      case 'VEST_TV_STOP_LOSS_PRICE_UPDATE': {
+        const next = payload || {};
+        if (next.side === liveEstimatedStopLoss.side && Number.isFinite(Number(next.price)) && Number(next.price) > 0) {
+          liveEstimatedStopLoss.price = Number(next.price);
+          scheduleIctSessionsRender(false);
+        }
+        break;
+      }
+      case 'VEST_TV_ESTIMATED_PNL_UPDATE': {
+        const value = Number(payload && payload.value);
+        liveEstimatedPnl = Number.isFinite(value) ? value : null;
+        scheduleIctSessionsRender(false);
+        break;
+      }
+      case 'VEST_TV_GLOBAL_DRAWINGS_UPDATE': {
+        updateGlobalDrawingsSnapshot(payload && payload.drawings);
+        restoreGlobalDrawings();
+        break;
+      }
+      case 'VEST_TV_CHART_MEMORY_FOCUS': {
+        const wasFocused = chartMemoryTabFocused;
+        chartMemoryTabFocused = Boolean(payload && payload.focused);
+        if (wasFocused && !chartMemoryTabFocused) {
+          // Flush the final viewport before this tab stops being the publisher.
+          saveCurrentChartSettings(true);
+        } else if (!wasFocused && chartMemoryTabFocused) {
+          // A newly focused tab becomes the single publisher for this chart key.
+          scheduleSaveCurrentChartSettings(80);
+        }
+        break;
+      }
+
       case 'VEST_TV_CONFIG_UPDATE': {
         const wasRemembering = currentSettings.rememberSidebarTools !== false;
         const wasRememberingChart = currentSettings.rememberLastChartSettings !== false;
@@ -2573,6 +3254,7 @@
           currentSettings = {
             ...currentSettings,
             ...payload.settings,
+            lastChartSettings: mergeChartMemoryState(currentSettings.lastChartSettings, payload.settings.lastChartSettings),
             sidebarState: {
               ...prevSidebar,
               ...incomingSidebar,
@@ -2582,6 +3264,10 @@
               }
             }
           };
+          if (!currentSettings.cortexIndicator || currentSettings.cortexIndicator.enabled !== true) {
+            lastCortexAutomationClosedBarKey = '';
+            lastCortexAutomationContextKey = '';
+          }
           try {
             window.localStorage.setItem(
               '__trading_cortex_isolated_settings__',
@@ -2599,7 +3285,12 @@
             }
           } catch (e) {}
         }
+        if (Array.isArray(payload.globalDrawings)) {
+          updateGlobalDrawingsSnapshot(payload.globalDrawings);
+        }
         hasReceivedConfigUpdate = true;
+        enhanceTimeframeFavoritesBar();
+        restoreGlobalDrawings();
 
         const activeTpl = getActiveTemplate();
         if (activeTpl) {
@@ -2617,6 +3308,11 @@
         if (isRememberingChart && (!hasCompletedInitialChartSettingsRestore || !wasRememberingChart)) {
           chartSettingsRestoreAttempts = 0;
           restoreLastChartSettings();
+        } else if (isRememberingChart && hasCompletedInitialChartSettingsRestore) {
+          applyIncomingChartViewportIfNewer();
+        }
+        if (currentSettings.candleOhlc && currentSettings.candleOhlc.customCandleWidthEnabled) {
+          applyCustomCandleWidthToChart(currentSettings.candleOhlc.candleWidthPx, false);
         }
         syncExtendedRectangleTextHooks();
         scheduleIctSessionsRender(true);
@@ -2694,6 +3390,38 @@
             type: 'VEST_TV_SHAPE_PROPERTIES_FOR_EDITOR',
             properties: extracted
           });
+        }
+        break;
+      }
+
+      case 'VEST_TV_CLEAR_CREATED_FVG_LOG': {
+        clearCreatedFvgsLog();
+        if (window === window.top || activeChart) {
+          postToIsolated({
+            type: 'VEST_TV_SHOW_TOAST',
+            message: 'Cleared created FVG log — FVGs will be re-evaluated'
+          });
+        }
+        scheduleIctSessionsRender(true);
+        break;
+      }
+
+      case 'VEST_TV_SCAN_PLATFORM_TRADES': {
+        if (window === window.top) {
+          scanPlatformTradesInMainWorld(true);
+        }
+        break;
+      }
+
+      case 'VEST_TV_CLEAR_CLICKED_CANDLE_OHLC': {
+        clearAllClickedCandleOhlcState();
+        scheduleIctSessionsRender(false);
+        break;
+      }
+
+      case 'VEST_TV_SET_CANDLE_WIDTH': {
+        if (typeof event.data.candleWidthPx === 'number') {
+          applyCustomCandleWidthToChart(event.data.candleWidthPx, true);
         }
         break;
       }
@@ -4157,10 +4885,88 @@
   let hasCompletedInitialChartSettingsRestore = false;
   let chartSettingsRestoreAttempts = 0;
   let chartSettingsCaptureDebounceTimer = null;
+  const chartViewportAppliedAt = new Map();
+  let chartMemoryTabId = '';
+  let chartMemoryTabFocused = false;
+  try {
+    chartMemoryTabId = window.__TRADING_CORTEX_CHART_MEMORY_TAB_ID__ ||
+      `tc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+    window.__TRADING_CORTEX_CHART_MEMORY_TAB_ID__ = chartMemoryTabId;
+  } catch (e) {
+    chartMemoryTabId = `tc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  function getActiveChartMemoryContext() {
+    if (!activeChart) return null;
+    let symbol = '';
+    let resolution = '';
+    try { symbol = typeof activeChart.symbol === 'function' ? String(activeChart.symbol() || '') : ''; } catch (e) {}
+    try { resolution = typeof activeChart.resolution === 'function' ? String(activeChart.resolution() || '') : ''; } catch (e) {}
+    if (!symbol || !resolution) return null;
+    return {
+      symbol,
+      resolution,
+      key: `${symbol.toUpperCase()}|${resolution.toUpperCase()}`
+    };
+  }
+
+  function mergeChartMemoryState(previous, incoming) {
+    const prev = previous && typeof previous === 'object' ? previous : {};
+    const next = incoming && typeof incoming === 'object' ? incoming : {};
+    const viewportsByChart = { ...(prev.viewportsByChart || {}) };
+    Object.entries(next.viewportsByChart || {}).forEach(([key, state]) => {
+      const current = viewportsByChart[key];
+      if (!current || (Number(state && state.updatedAt) || 0) >= (Number(current.updatedAt) || 0)) {
+        viewportsByChart[key] = state;
+      }
+    });
+    return {
+      ...prev,
+      ...next,
+      localStorageEntries: { ...(prev.localStorageEntries || {}), ...(next.localStorageEntries || {}) },
+      viewportsBySymbol: { ...(prev.viewportsBySymbol || {}), ...(next.viewportsBySymbol || {}) },
+      viewportsByChart
+    };
+  }
+
+  function getSavedViewportForActiveChart(saved) {
+    const context = getActiveChartMemoryContext();
+    if (!saved || !context) return null;
+    const chartState = saved.viewportsByChart && saved.viewportsByChart[context.key];
+    if (chartState && chartState.viewport) return chartState;
+    const symbolState = saved.viewportsBySymbol && saved.viewportsBySymbol[context.symbol];
+    if (symbolState && String(symbolState.resolution || '').toUpperCase() === context.resolution.toUpperCase()) {
+      return symbolState.viewport ? symbolState : { ...symbolState, viewport: symbolState };
+    }
+    if (
+      saved.symbol && String(saved.symbol).toUpperCase() === context.symbol.toUpperCase() &&
+      String(saved.resolution || '').toUpperCase() === context.resolution.toUpperCase() && saved.viewport
+    ) {
+      return { viewport: saved.viewport, resolution: context.resolution, symbol: context.symbol, updatedAt: 0 };
+    }
+    return null;
+  }
+
+  function applyIncomingChartViewportIfNewer() {
+    if (currentSettings.rememberLastChartSettings === false || !activeChart) return;
+    // The focused tab is authoritative. Background tabs follow its updates but never
+    // push their own viewport back into the shared chart-memory record.
+    if (chartMemoryTabFocused) return;
+    const context = getActiveChartMemoryContext();
+    const state = getSavedViewportForActiveChart(currentSettings.lastChartSettings || {});
+    if (!context || !state || !state.viewport || state.sourceTabId === chartMemoryTabId) return;
+    const updatedAt = Number(state.updatedAt) || 0;
+    if (updatedAt <= (chartViewportAppliedAt.get(context.key) || 0)) return;
+    chartViewportAppliedAt.set(context.key, updatedAt);
+    isRestoringChartSettings = true;
+    applyViewportStateToChart(state.viewport);
+    setTimeout(() => { isRestoringChartSettings = false; }, 450);
+  }
 
   function scheduleSaveCurrentChartSettings(delayMs = 280) {
     if (isRestoringChartSettings) return;
     if (currentSettings.rememberLastChartSettings === false) return;
+    if (!chartMemoryTabFocused) return;
     if (chartSettingsCaptureDebounceTimer) {
       clearTimeout(chartSettingsCaptureDebounceTimer);
     }
@@ -4554,9 +5360,10 @@
     chartSettingsObserverInitialized = true;
   }
 
-  function saveCurrentChartSettings() {
+  function saveCurrentChartSettings(allowBlurred = false) {
     if (isRestoringChartSettings) return;
     if (currentSettings.rememberLastChartSettings === false) return;
+    if (!allowBlurred && !chartMemoryTabFocused) return;
 
     const prev = currentSettings.lastChartSettings || {};
     let resolution = prev.resolution || null;
@@ -4586,13 +5393,23 @@
 
     const viewport = captureCurrentViewportState();
     const viewportsBySymbol = { ...(prev.viewportsBySymbol || {}) };
+    const viewportsByChart = { ...(prev.viewportsByChart || {}) };
+    const savedAt = Date.now();
+    const symKey = symbol || '__default__';
+    const chartKey = symbol && resolution
+      ? `${String(symbol).toUpperCase()}|${String(resolution).toUpperCase()}`
+      : null;
     if (viewport) {
-      const symKey = symbol || '__default__';
-      viewportsBySymbol[symKey] = {
+      const chartState = {
         ...viewport,
+        viewport,
+        symbol,
         resolution,
-        updatedAt: Date.now()
+        sourceTabId: chartMemoryTabId,
+        updatedAt: savedAt
       };
+      viewportsBySymbol[symKey] = chartState;
+      if (chartKey) viewportsByChart[chartKey] = chartState;
     }
 
     const localEntries = collectTvChartLocalStorage();
@@ -4607,15 +5424,24 @@
       chartType,
       viewport: viewport || prev.viewport || null,
       viewportsBySymbol,
+      viewportsByChart,
       localStorageEntries: mergedEntries
     };
 
-    // Compare ignoring updatedAt timestamp
+    const comparableViewportMap = viewportMap => Object.fromEntries(
+      Object.entries(viewportMap || {}).map(([key, state]) => {
+        const { updatedAt, sourceTabId, ...stableState } = state || {};
+        return [key, stableState];
+      })
+    );
+
+    // Compare without metadata timestamps so unchanged viewports do not create cross-tab update loops.
     const prevComparable = JSON.stringify({
       symbol: prev.symbol,
       resolution: prev.resolution,
       chartType: prev.chartType,
       viewport: prev.viewport,
+      viewportsByChart: comparableViewportMap(prev.viewportsByChart),
       localStorageEntries: prev.localStorageEntries
     });
     const nextComparable = JSON.stringify({
@@ -4623,6 +5449,7 @@
       resolution: nextSettings.resolution,
       chartType: nextSettings.chartType,
       viewport: nextSettings.viewport,
+      viewportsByChart: comparableViewportMap(nextSettings.viewportsByChart),
       localStorageEntries: nextSettings.localStorageEntries
     });
 
@@ -4656,6 +5483,7 @@
         saved.chartType == null &&
         !saved.viewport &&
         !saved.viewportsBySymbol &&
+        !saved.viewportsByChart &&
         !saved.localStorageEntries)
     ) {
       if (hasReceivedConfigUpdate) {
@@ -4714,49 +5542,22 @@
         } catch (e) {}
       }
 
-      // Determine target viewport for current symbol (or fallback to last saved viewport)
-      let currentSymbol = null;
-      try {
-        if (typeof activeChart.symbol === 'function') {
-          currentSymbol = activeChart.symbol();
-        }
-      } catch (e) {}
+      // Determine target viewport for current symbol (ONLY apply a saved priceRange if it was saved for THIS exact symbol!)
+      const savedChartState = getSavedViewportForActiveChart(saved);
+      const targetViewport = savedChartState && savedChartState.viewport;
 
-      const targetViewport =
-        (currentSymbol && saved.viewportsBySymbol && saved.viewportsBySymbol[currentSymbol]) ||
-        saved.viewport ||
-        null;
-
-      // 3. Restore saved resolution (timeframe), then apply viewport position & zoom
-      let didChangeResolution = false;
-      if (saved.resolution && typeof activeChart.setResolution === 'function') {
-        try {
-          const currentRes = typeof activeChart.resolution === 'function' ? String(activeChart.resolution()) : null;
-          if (currentRes !== String(saved.resolution)) {
-            log('Restoring chart resolution to', saved.resolution);
-            didChangeResolution = true;
-            activeChart.setResolution(String(saved.resolution), () => {
-              if (targetViewport) {
-                setTimeout(() => applyViewportStateToChart(targetViewport), 180);
-                setTimeout(() => applyViewportStateToChart(targetViewport), 650);
-              }
-            });
-          }
-        } catch (e) {}
-      }
-
-      // 4. Restore chart viewport position (left/right pan, up/down price scale, zoom)
-      // We apply once shortly after hook and a second pass after historical bars finish rendering
+      // 3. Restore only the viewport saved for this exact instrument and selected interval.
+      // The chart's current interval is authoritative; another tab's last interval must not change it.
       if (targetViewport) {
-        const firstDelay = didChangeResolution ? 350 : 180;
-        const secondDelay = didChangeResolution ? 1100 : 750;
+        const context = getActiveChartMemoryContext();
+        if (context) chartViewportAppliedAt.set(context.key, Number(savedChartState.updatedAt) || 0);
         setTimeout(() => {
-          log('Restoring chart viewport position & zoom (pass 1):', targetViewport);
+          log('Restoring chart viewport position & zoom for', context && context.key, targetViewport);
           applyViewportStateToChart(targetViewport);
-        }, firstDelay);
+        }, 180);
         setTimeout(() => {
           applyViewportStateToChart(targetViewport);
-        }, secondDelay);
+        }, 750);
       }
     } catch (err) {
       log('Error restoring last chart settings:', err);
@@ -4777,6 +5578,64 @@
   let cachedIctComputedSessions = [];
   let cachedIctBarsSignature = '';
   let cachedIctConfigSignature = '';
+
+  function removeFailPriceLineButtons() {
+    for (const side of ['long', 'short']) {
+      if (failPriceLineButtons[side] && failPriceLineButtons[side].isConnected) {
+        try { failPriceLineButtons[side].remove(); } catch (e) {}
+      }
+      failPriceLineButtons[side] = null;
+    }
+  }
+
+  function syncCortexManualBuyButton(enabled, symbol, price) {
+    // Manual execution controls now live in Vest's order ticket. Remove the
+    // earlier chart-overlay button from pages that still have it mounted.
+    try { document.querySelectorAll('#vest-ci-manual-buy-button').forEach(button => button.remove()); } catch (e) {}
+  }
+
+  function removeFailPriceLineButton(side) {
+    const button = failPriceLineButtons[side];
+    if (button && button.isConnected) {
+      try { button.remove(); } catch (e) {}
+    }
+    failPriceLineButtons[side] = null;
+  }
+
+  function positionFailPriceLineButton(side, x, y, width, height, fontSize) {
+    if (!ictSessionsCanvas || !ictSessionsCanvas.parentElement) return;
+    const ownerDoc = ictSessionsCanvas.ownerDocument || document;
+    let button = failPriceLineButtons[side];
+    if (!button || !button.isConnected || button.parentElement !== ictSessionsCanvas.parentElement) {
+      if (button && button.isConnected) button.remove();
+      button = ownerDoc.createElement('button');
+      button.type = 'button';
+      button.className = `vest-fail-price-add-stop-loss vest-fail-price-add-stop-loss-${side}`;
+      button.textContent = 'Add Stop Loss';
+      button.title = `Set the Stop Loss to the midpoint between the market and ${side} fail price`;
+      button.setAttribute('aria-label', `Add stop loss from ${side} fail price`);
+      button.style.cssText = 'position:absolute;z-index:6;display:flex;align-items:center;justify-content:center;padding:0 5px;border:1px solid rgba(56,189,248,.72);border-radius:5px;background:rgba(7,22,34,.96);color:#7dd3fc;font-family:Arial,sans-serif;font-weight:700;white-space:nowrap;cursor:pointer;pointer-events:auto;box-shadow:0 1px 4px rgba(0,0,0,.55);';
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const failPrice = liveFailPrices[side];
+        if (!Number.isFinite(latestChartMarketPrice) || !Number.isFinite(failPrice)) return;
+        try {
+          window.top.postMessage({
+            type: 'VEST_TV_ADD_STOP_LOSS',
+            payload: { side, marketPrice: latestChartMarketPrice, failPrice }
+          }, '*');
+        } catch (e) {}
+      });
+      ictSessionsCanvas.parentElement.appendChild(button);
+      failPriceLineButtons[side] = button;
+    }
+    button.style.left = `${Math.max(2, x)}px`;
+    button.style.top = `${Math.max(1, y)}px`;
+    button.style.width = `${Math.max(55, width)}px`;
+    button.style.height = `${Math.max(14, height)}px`;
+    button.style.fontSize = `${Math.max(8, fontSize)}px`;
+  }
 
   const nyDateFormatter = (() => {
     try {
@@ -4869,13 +5728,23 @@
   let cachedTargetChartCanvas = null;
 
   function findMainChartPaneCanvas() {
-    // Only render from the top window (which has access to both document and same-origin/blob iframe.contentDocument).
-    // If we are inside a child iframe and window.top also initialized content-main.js, let window.top handle it so we NEVER double-render!
+    // If we are inside a child iframe and window.top also initialized content-main.js,
+    // only yield to window.top if window.top can actually read our document (same-origin/blob) AND we do not exclusively own the chart model.
     try {
       if (window.top && window.top !== window && window.top.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) {
-        return null;
+        // Check if window.top can access our document without throwing a cross-origin SecurityError
+        const topDoc = window.top.document;
+        if (topDoc) {
+          // If window.top already mounted a .vest-ict-sessions-canvas inside our document, let window.top drive it
+          const existingTopCanvas = document.querySelector('.vest-ict-sessions-canvas[data-vest-owner="top"]');
+          if (existingTopCanvas) {
+            return null;
+          }
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      // Cross-origin iframe: window.top CANNOT access our DOM, so this child frame MUST render the overlay canvas!
+    }
 
     // Fast path: reuse cached target canvas if it is still connected and sized!
     if (cachedTargetChartCanvas && cachedTargetChartCanvas.isConnected) {
@@ -4930,38 +5799,45 @@
     if (!targetChartCanvas || !targetChartCanvas.parentElement) return null;
     const parent = targetChartCanvas.parentElement;
     const ownerDoc = targetChartCanvas.ownerDocument || document;
+    const ownerTag = (window.top === window) ? 'top' : 'frame';
 
     if (!ictSessionsCanvas || !ictSessionsCanvas.isConnected || ictSessionsCanvas.parentElement !== parent) {
-      // Only scan & clean up stale .vest-ict-sessions-canvas elements when actually mounting/remounting
-      const docs = [document];
-      document.querySelectorAll('iframe').forEach(ifr => {
-        try {
-          if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument);
-        } catch (e) {}
-      });
-      docs.forEach(d => {
-        try {
-          d.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
-            if (el !== ictSessionsCanvas) {
-              try { el.remove(); } catch (e) {}
-            }
-          });
-        } catch (e) {}
-      });
+      // Reuse an existing .vest-ict-sessions-canvas in this parent if already mounted, or clean up stale ones
+      const existingInParent = parent.querySelector('.vest-ict-sessions-canvas');
+      if (existingInParent) {
+        ictSessionsCanvas = existingInParent;
+        ictSessionsCanvas.setAttribute('data-vest-owner', ownerTag);
+      } else {
+        const docs = [document];
+        document.querySelectorAll('iframe').forEach(ifr => {
+          try {
+            if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument);
+          } catch (e) {}
+        });
+        docs.forEach(d => {
+          try {
+            d.querySelectorAll('.vest-ict-sessions-canvas').forEach(el => {
+              if (el !== ictSessionsCanvas) {
+                try { el.remove(); } catch (e) {}
+              }
+            });
+          } catch (e) {}
+        });
 
-      if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
-        try { ictSessionsCanvas.remove(); } catch (e) {}
-      }
-      ictSessionsCanvas = ownerDoc.createElement('canvas');
-      ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
-      // Put the parent container into an isolated stacking context and GPU layer so mix-blend-mode: screen never flickers during canvas repaints!
-      const parentCs = ownerDoc.defaultView ? ownerDoc.defaultView.getComputedStyle(parent) : null;
-      if (parentCs && parentCs.isolation !== 'isolate') {
-        parent.style.isolation = 'isolate';
+        if (ictSessionsCanvas && ictSessionsCanvas.parentElement) {
+          try { ictSessionsCanvas.remove(); } catch (e) {}
+        }
+        ictSessionsCanvas = ownerDoc.createElement('canvas');
+        ictSessionsCanvas.className = 'vest-ict-sessions-canvas';
+        ictSessionsCanvas.setAttribute('data-vest-owner', ownerTag);
+        const parentCs = ownerDoc.defaultView ? ownerDoc.defaultView.getComputedStyle(parent) : null;
+        if (parentCs && parentCs.isolation !== 'isolate') {
+          parent.style.isolation = 'isolate';
+        }
+        parent.appendChild(ictSessionsCanvas);
       }
       ictSessionsCanvas.style.cssText =
-        'position:absolute;top:0;left:0;pointer-events:none;z-index:1;mix-blend-mode:screen;user-select:none;will-change:contents;transform:translateZ(0);backface-visibility:hidden;';
-      parent.appendChild(ictSessionsCanvas);
+        'position:absolute;top:0;left:0;pointer-events:none;z-index:4;mix-blend-mode:normal;user-select:none;will-change:contents;transform:translateZ(0);backface-visibility:hidden;';
     }
 
     const cssW = targetChartCanvas.clientWidth || Math.round(targetChartCanvas.getBoundingClientRect().width);
@@ -4988,19 +5864,30 @@
 
   let cachedSessionsChartModel = null;
 
-  function findChartModelForSessions() {
-    if (
-      cachedSessionsChartModel &&
-      (typeof cachedSessionsChartModel.mainSeries === 'function' || cachedSessionsChartModel._mainSeries)
-    ) {
-      return cachedSessionsChartModel;
+  function isLiveChartModelInstance(model) {
+    if (!model || typeof model !== 'object') return false;
+    try {
+      if (typeof model.isDestroyed === 'function' && model.isDestroyed()) return false;
+      if (model._destroyed || model.m_destroyed) return false;
+      const ms = typeof model.mainSeries === 'function' ? model.mainSeries() : model._mainSeries;
+      if (ms && (typeof ms.isDestroyed === 'function' && ms.isDestroyed())) return false;
+      return Boolean(typeof model.mainSeries === 'function' || model._mainSeries || typeof model.timeScale === 'function');
+    } catch (e) {
+      return false;
     }
+  }
 
-    // 1. Check direct helpers first
+  function findChartModelForSessions() {
+    // 0. Always check direct internal chart model from the live activeChart first so if the chart widget/model
+    // was replaced on an instrument switch, we immediately switch to the live model!
     const direct = getInternalChartModel() || getChartModel();
-    if (direct && (typeof direct.mainSeries === 'function' || direct._mainSeries)) {
+    if (direct && isLiveChartModelInstance(direct)) {
       cachedSessionsChartModel = direct;
       return direct;
+    }
+
+    if (cachedSessionsChartModel && isLiveChartModelInstance(cachedSessionsChartModel)) {
+      return cachedSessionsChartModel;
     }
 
     // 2. If there is any drawing shape on the chart, its internal source._model is ALWAYS the exact ChartModel!
@@ -5190,6 +6077,30 @@
 
   let cachedExtractedBarsObj = null;
   let cachedQuickPlotSig = '';
+  let lastExtractedSeriesSymbol = '';
+
+  function getSeriesSymbolIdentifier(mainSeries, model) {
+    try {
+      if (mainSeries) {
+        if (typeof mainSeries.symbol === 'function') {
+          const s = mainSeries.symbol();
+          if (s && typeof s === 'string') return s.trim();
+        }
+        if (typeof mainSeries.symbolInfo === 'function') {
+          const si = mainSeries.symbolInfo();
+          if (si && (si.name || si.ticker || si.full_name)) {
+            return String(si.name || si.ticker || si.full_name).trim();
+          }
+        }
+        if (mainSeries._symbol) return String(mainSeries._symbol).trim();
+      }
+      if (activeChart && typeof activeChart.symbol === 'function') {
+        const s = activeChart.symbol();
+        if (s && typeof s === 'string') return s.trim();
+      }
+    } catch (e) {}
+    return lastTrackedInstrument || '';
+  }
 
   function extractSeriesBarsFromModel(forceFullExtract = false) {
     const model = findChartModelForSessions();
@@ -5199,6 +6110,17 @@
     if (!mainSeries) return null;
 
     const timeScale = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
+    const seriesSym = getSeriesSymbolIdentifier(mainSeries, model);
+    if (seriesSym && lastExtractedSeriesSymbol && seriesSym !== lastExtractedSeriesSymbol) {
+      lastExtractedSeriesSymbol = seriesSym;
+      forceFullExtract = true;
+      cachedExtractedBarsObj = null;
+      cachedQuickPlotSig = '';
+      cachedIctBarsSignature = '';
+      cachedAutoFvgSignature = '';
+    } else if (seriesSym) {
+      lastExtractedSeriesSymbol = seriesSym;
+    }
 
     let plotList = null;
     try {
@@ -5234,15 +6156,16 @@
 
     if (!plotList) return null;
 
-    // Fast path during pan/zoom: check if firstIndex, lastIndex, and the last 2 bars are identical to our cached extraction!
+    // Fast path during pan/zoom: check if symbol, firstIndex, lastIndex, first bar, and the last 2 bars are identical to our cached extraction!
     if (!forceFullExtract && !ictSessionsNeedsFullRecompute && cachedExtractedBarsObj && cachedExtractedBarsObj.bars.length > 0) {
       try {
         if (typeof plotList.firstIndex === 'function' && typeof plotList.lastIndex === 'function' && typeof plotList.valueAt === 'function') {
           const fIdx = plotList.firstIndex();
           const lIdx = plotList.lastIndex();
+          const fVal = typeof fIdx === 'number' ? plotList.valueAt(fIdx) : null;
           const lVal = typeof lIdx === 'number' ? plotList.valueAt(lIdx) : null;
           const pVal = typeof lIdx === 'number' ? plotList.valueAt(lIdx - 1) : null;
-          const quickSig = `${fIdx}_${lIdx}_${lVal ? JSON.stringify(lVal) : ''}_${pVal ? JSON.stringify(pVal) : ''}`;
+          const quickSig = `${seriesSym}_${fIdx}_${lIdx}_${fVal ? JSON.stringify(fVal) : ''}_${lVal ? JSON.stringify(lVal) : ''}_${pVal ? JSON.stringify(pVal) : ''}`;
           if (quickSig === cachedQuickPlotSig) {
             cachedExtractedBarsObj.model = model;
             cachedExtractedBarsObj.mainSeries = mainSeries;
@@ -5252,9 +6175,10 @@
           cachedQuickPlotSig = quickSig;
         } else if (Array.isArray(plotList._items) && plotList._items.length > 0) {
           const len = plotList._items.length;
+          const fItem = plotList._items[0];
           const lItem = plotList._items[len - 1];
           const pItem = len > 1 ? plotList._items[len - 2] : lItem;
-          const quickSig = `${len}_${JSON.stringify(lItem)}_${JSON.stringify(pItem)}`;
+          const quickSig = `${seriesSym}_${len}_${JSON.stringify(fItem)}_${JSON.stringify(lItem)}_${JSON.stringify(pItem)}`;
           if (quickSig === cachedQuickPlotSig) {
             cachedExtractedBarsObj.model = model;
             cachedExtractedBarsObj.mainSeries = mainSeries;
@@ -5328,7 +6252,7 @@
           const tv = timeScale[tk];
           if (tv && typeof tv === 'object') {
             if (typeof tv.indexToTimePoint === 'function') {
-              if (!timeScale.__vestTimePointsObj) timeScale.__vestTimePointsObj = tv;
+              timeScale.__vestTimePointsObj = tv;
             }
             for (const sk of Object.getOwnPropertyNames(tv)) {
               const sv = tv[sk];
@@ -5437,16 +6361,19 @@
       }
 
       if (
-        typeof timeSec === 'number' &&
-        isFinite(timeSec) &&
-        timeSec > 1e8 &&
         isFinite(high) &&
         isFinite(low) &&
-        high >= low
+        high >= low &&
+        isFinite(open) &&
+        isFinite(close)
       ) {
+        const effectiveTimeSec = (typeof timeSec === 'number' && isFinite(timeSec) && timeSec > 1e8)
+          ? timeSec
+          : (typeof barIndex === 'number' && isFinite(barIndex) ? barIndex : i);
         normalizedBars.push({
           barIndex,
-          timeSec,
+          timeSec: effectiveTimeSec,
+          hasRealTimeSec: Boolean(typeof timeSec === 'number' && isFinite(timeSec) && timeSec > 1e8),
           open,
           high,
           low,
@@ -5597,6 +6524,10 @@
       let highSweptTimeSec = null;
       let lowSweptBarIndex = null;
       let lowSweptTimeSec = null;
+      let highCloseThroughBarIndex = null;
+      let highCloseThroughTimeSec = null;
+      let lowCloseThroughBarIndex = null;
+      let lowCloseThroughTimeSec = null;
       let midSweptBarIndex = null;
       let midSweptTimeSec = null;
 
@@ -5614,13 +6545,24 @@
             lowSweptBarIndex = postBar.barIndex;
             lowSweptTimeSec = postBar.timeSec;
           }
+          // Only completed candles qualify for the close-through endpoint; the last bar is live.
+          if (j < annotated.length - 1) {
+            if (highCloseThroughBarIndex === null && postBar.close > inst.high) {
+              highCloseThroughBarIndex = postBar.barIndex;
+              highCloseThroughTimeSec = postBar.timeSec;
+            }
+            if (lowCloseThroughBarIndex === null && postBar.close < inst.low) {
+              lowCloseThroughBarIndex = postBar.barIndex;
+              lowCloseThroughTimeSec = postBar.timeSec;
+            }
+          }
           if (midSweptBarIndex === null && postBar.low <= midPrice && postBar.high >= midPrice) {
             midSweptBarIndex = postBar.barIndex;
             midSweptTimeSec = postBar.timeSec;
           }
-          if (highSweptBarIndex !== null && lowSweptBarIndex !== null && midSweptBarIndex !== null) {
-            break;
-          }
+          // Continue through all post-session bars. A sweep and midpoint touch can happen
+          // well before the first completed close-through, which is what ends the line in
+          // close mode and determines whether its right-side label should be removed.
         }
       }
 
@@ -5632,6 +6574,10 @@
         highSweptTimeSec,
         lowSweptBarIndex,
         lowSweptTimeSec,
+        highCloseThroughBarIndex,
+        highCloseThroughTimeSec,
+        lowCloseThroughBarIndex,
+        lowCloseThroughTimeSec,
         midSweptBarIndex,
         midSweptTimeSec,
         latestBarIndex: latestBar.barIndex,
@@ -5640,6 +6586,2085 @@
     });
 
     return results;
+  }
+
+  // -------------------------------------------------------------
+  // Auto FVG (Fair Value Gap) Detection, Template Matching & Rendering
+  // + Persistent Created-FVG Log (Prevents Doubling Up on Refresh)
+  // -------------------------------------------------------------
+  let cachedComputedAutoFvgs = [];
+  let cachedAutoFvgSignature = '';
+  const nativeAutoFvgShapesMap = new Map(); // fvgKey -> { entityId, lastEndTimeSec, top, bottom }
+  const CREATED_FVGS_LOG_STORAGE_KEY = '__trading_cortex_created_fvgs_log__';
+  const DISMISSED_FVGS_STORAGE_KEY = '__trading_cortex_dismissed_fvgs__';
+  let createdFvgsLogCache = null;
+
+  function readDismissedFvgs() {
+    const merged = {};
+    const storages = [];
+    try { storages.push(window.localStorage); } catch (e) {}
+    try {
+      if (window.top && window.top !== window && window.top.localStorage) storages.push(window.top.localStorage);
+    } catch (e) {}
+    for (const storage of storages) {
+      try {
+        const parsed = JSON.parse(storage.getItem(DISMISSED_FVGS_STORAGE_KEY) || '{}');
+        if (parsed && typeof parsed === 'object') Object.assign(merged, parsed);
+      } catch (e) {}
+    }
+    return merged;
+  }
+
+  function saveDismissedFvgs(dismissed) {
+    const serialized = JSON.stringify(dismissed || {});
+    try { window.localStorage.setItem(DISMISSED_FVGS_STORAGE_KEY, serialized); } catch (e) {}
+    try {
+      if (window.top && window.top !== window && window.top.localStorage) {
+        window.top.localStorage.setItem(DISMISSED_FVGS_STORAGE_KEY, serialized);
+      }
+    } catch (e) {}
+  }
+
+  function dismissCreatedFvg(fvgKey) {
+    if (!fvgKey) return;
+    const dismissed = readDismissedFvgs();
+    dismissed[fvgKey] = Date.now();
+    const logMap = loadCreatedFvgsLog();
+    const savedEntry = logMap[fvgKey];
+    if (savedEntry && savedEntry.legacyKey) dismissed[savedEntry.legacyKey] = dismissed[fvgKey];
+    const dismissalKeys = Object.keys(dismissed);
+    if (dismissalKeys.length > 2500) {
+      dismissalKeys
+        .sort((a, b) => (Number(dismissed[a]) || 0) - (Number(dismissed[b]) || 0))
+        .slice(0, dismissalKeys.length - 2000)
+        .forEach(key => delete dismissed[key]);
+    }
+    saveDismissedFvgs(dismissed);
+    delete logMap[fvgKey];
+    saveCreatedFvgsLog(logMap);
+  }
+
+  function isCreatedFvgDismissed(fvg) {
+    if (!fvg) return false;
+    const dismissed = readDismissedFvgs();
+    return Boolean(dismissed[fvg.key] || (fvg.legacyKey && dismissed[fvg.legacyKey]));
+  }
+
+  function getCurrentChartSymbolKey() {
+    try {
+      if (activeChart && typeof activeChart.symbol === 'function') {
+        const s = activeChart.symbol();
+        if (s && typeof s === 'string' && s.trim()) return s.trim().toUpperCase();
+      }
+      if (activeChart && typeof activeChart.symbolExt === 'function') {
+        const ext = activeChart.symbolExt();
+        if (ext && ext.symbol && String(ext.symbol).trim()) return String(ext.symbol).trim().toUpperCase();
+      }
+      const model = cachedSessionsChartModel || getInternalChartModel();
+      const ms = model ? findMainSeriesFromModel(model) : null;
+      const msSym = getSeriesSymbolIdentifier(ms, model);
+      if (msSym) return String(msSym).trim().toUpperCase();
+    } catch (e) {}
+    return String(lastTrackedInstrument || 'DEFAULT').trim().toUpperCase();
+  }
+
+  function loadCreatedFvgsLog() {
+    const merged = { ...(createdFvgsLogCache || {}) };
+    try {
+      const rawLocal = window.localStorage.getItem(CREATED_FVGS_LOG_STORAGE_KEY);
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal);
+        mergeCreatedFvgsLogs(merged, parsed);
+      }
+    } catch (e) {}
+    try {
+      if (window.top && window.top !== window && window.top.localStorage) {
+        const rawTop = window.top.localStorage.getItem(CREATED_FVGS_LOG_STORAGE_KEY);
+        if (rawTop) {
+          const parsedTop = JSON.parse(rawTop);
+          mergeCreatedFvgsLogs(merged, parsedTop);
+        }
+      }
+    } catch (e) {}
+    createdFvgsLogCache = merged;
+    return createdFvgsLogCache;
+  }
+
+  function mergeCreatedFvgsLogs(target, source) {
+    if (!source || typeof source !== 'object') return target;
+    Object.entries(source).forEach(([key, incoming]) => {
+      if (!incoming || typeof incoming !== 'object') return;
+      const existing = target[key];
+      if (!existing || (Number(incoming.updatedAt) || 0) >= (Number(existing.updatedAt) || 0)) {
+        target[key] = incoming;
+      }
+    });
+    return target;
+  }
+
+  function saveCreatedFvgsLog(logMap) {
+    if (!logMap || typeof logMap !== 'object') return;
+    // Merge the latest storage snapshot before writing so concurrent tabs do not replace each other's FVG records.
+    const latest = {};
+    try {
+      const rawLocal = window.localStorage.getItem(CREATED_FVGS_LOG_STORAGE_KEY);
+      if (rawLocal) mergeCreatedFvgsLogs(latest, JSON.parse(rawLocal));
+    } catch (e) {}
+    try {
+      if (window.top && window.top !== window && window.top.localStorage) {
+        const rawTop = window.top.localStorage.getItem(CREATED_FVGS_LOG_STORAGE_KEY);
+        if (rawTop) mergeCreatedFvgsLogs(latest, JSON.parse(rawTop));
+      }
+    } catch (e) {}
+    mergeCreatedFvgsLogs(latest, logMap);
+    Object.keys(logMap).forEach(key => delete logMap[key]);
+    Object.assign(logMap, latest);
+    // A dismissal wins over an older copy still present in another tab's localStorage snapshot.
+    const dismissed = readDismissedFvgs();
+    Object.keys(dismissed).forEach(key => delete logMap[key]);
+    // Prune oldest entries if log exceeds 2500 entries so localStorage stays lightweight
+    const keys = Object.keys(logMap);
+    if (keys.length > 2500) {
+      keys
+        .sort((a, b) => (Number(logMap[a]?.createdAt) || 0) - (Number(logMap[b]?.createdAt) || 0))
+        .slice(0, keys.length - 2000)
+        .forEach(k => delete logMap[k]);
+    }
+    createdFvgsLogCache = logMap;
+    try {
+      const serialized = JSON.stringify(logMap);
+      window.localStorage.setItem(CREATED_FVGS_LOG_STORAGE_KEY, serialized);
+      if (window.top && window.top !== window && window.top.localStorage) {
+        window.top.localStorage.setItem(CREATED_FVGS_LOG_STORAGE_KEY, serialized);
+      }
+    } catch (e) {}
+  }
+
+  function clearCreatedFvgsLog() {
+    createdFvgsLogCache = {};
+    try {
+      window.localStorage.removeItem(CREATED_FVGS_LOG_STORAGE_KEY);
+      window.localStorage.removeItem(DISMISSED_FVGS_STORAGE_KEY);
+      if (window.top && window.top !== window && window.top.localStorage) {
+        window.top.localStorage.removeItem(CREATED_FVGS_LOG_STORAGE_KEY);
+        window.top.localStorage.removeItem(DISMISSED_FVGS_STORAGE_KEY);
+      }
+    } catch (e) {}
+    log('Cleared persistent created FVG log');
+  }
+
+  function findLoggedFvgEntry(fvg, logMap, barIntervalSec = 300) {
+    if (!fvg || !logMap || typeof logMap !== 'object') return null;
+    if (logMap[fvg.key]) return logMap[fvg.key];
+    if (fvg.legacyKey && logMap[fvg.legacyKey]) return logMap[fvg.legacyKey];
+
+    // Also check by symbol + timeframe + direction + matching startTimeSec & price bounds
+    const interval = Math.max(60, barIntervalSec || 300);
+    const gapHeight = Math.max(1e-9, Math.abs(fvg.top - fvg.bottom));
+    const priceTol = Math.max(gapHeight * 0.25, Math.abs(fvg.top) * 0.0001, 1e-6);
+    for (const k of Object.keys(logMap)) {
+      const entry = logMap[k];
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.symbol && fvg.symbol && entry.symbol !== fvg.symbol) continue;
+      if (entry.tfLabel && fvg.tfLabel && entry.tfLabel !== fvg.tfLabel) continue;
+      if (entry.direction && fvg.direction && entry.direction !== fvg.direction) continue;
+      if (
+        Math.abs((Number(entry.startTimeSec) || 0) - fvg.startTimeSec) <= interval &&
+        Math.abs((Number(entry.top) || 0) - fvg.top) <= priceTol &&
+        Math.abs((Number(entry.bottom) || 0) - fvg.bottom) <= priceTol
+      ) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  function recordFvgInCreatedLog(fvg, entityId, logMap) {
+    if (!fvg) return;
+    const targetLog = logMap || loadCreatedFvgsLog();
+    targetLog[fvg.key] = {
+      key: fvg.key,
+      legacyKey: fvg.legacyKey || null,
+      symbol: fvg.symbol || getCurrentChartSymbolKey(),
+      tfLabel: fvg.tfLabel,
+      timeframe: fvg.tfLabel || formatCurrentResolutionLabel(),
+      resolution: activeChart && typeof activeChart.resolution === 'function' ? String(activeChart.resolution()) : null,
+      direction: fvg.direction,
+      startTimeSec: fvg.startTimeSec,
+      top: fvg.top,
+      bottom: fvg.bottom,
+      entityId: entityId || null,
+      createdAt: targetLog[fvg.key]?.createdAt || Date.now(),
+      updatedAt: Date.now()
+    };
+    saveCreatedFvgsLog(targetLog);
+  }
+
+  function formatCurrentResolutionLabel() {
+    let rawRes = '5';
+    try {
+      if (activeChart && typeof activeChart.resolution === 'function') {
+        rawRes = String(activeChart.resolution() || '5').trim();
+      } else if (currentSettings && currentSettings.lastChartSettings && currentSettings.lastChartSettings.resolution) {
+        rawRes = String(currentSettings.lastChartSettings.resolution).trim();
+      }
+    } catch (e) {}
+
+    const upper = rawRes.toUpperCase();
+    if (/^\d+$/.test(upper)) {
+      const mins = parseInt(upper, 10);
+      if (mins >= 60 && mins % 60 === 0) {
+        return `${mins / 60}h`;
+      }
+      return `${mins}m`;
+    }
+    if (upper === '1D' || upper === 'D') return '1D';
+    if (upper === '1W' || upper === 'W') return '1W';
+    if (upper === '1M' || upper === 'M') return '1M';
+    if (/^\d+[SMHDWM]$/.test(upper)) {
+      return upper.toLowerCase().replace('d', 'D').replace('w', 'W');
+    }
+    return rawRes;
+  }
+
+  function buildTimeframeAliases(tfLabel) {
+    const clean = String(tfLabel || '').trim().toLowerCase();
+    const aliases = new Set([clean]);
+    const mMatch = clean.match(/^(\d+)m$/);
+    if (mMatch) {
+      const n = parseInt(mMatch[1], 10);
+      aliases.add(`${n}m`);
+      aliases.add(`${n}min`);
+      aliases.add(`${n} min`);
+      aliases.add(`${n} m`);
+      if (n === 60) {
+        aliases.add('1h');
+        aliases.add('1hr');
+        aliases.add('1 hour');
+      } else if (n === 240) {
+        aliases.add('4h');
+        aliases.add('4hr');
+      }
+    }
+    const hMatch = clean.match(/^(\d+)h$/);
+    if (hMatch) {
+      const h = parseInt(hMatch[1], 10);
+      aliases.add(`${h}h`);
+      aliases.add(`${h}hr`);
+      aliases.add(`${h} hour`);
+      aliases.add(`${h * 60}m`);
+      aliases.add(`${h * 60}min`);
+    }
+    if (clean === '1d' || clean === 'd') {
+      aliases.add('1d');
+      aliases.add('d');
+      aliases.add('daily');
+      aliases.add('day');
+    }
+    if (clean === '1w' || clean === 'w') {
+      aliases.add('1w');
+      aliases.add('w');
+      aliases.add('weekly');
+      aliases.add('week');
+    }
+    return Array.from(aliases);
+  }
+
+  function resolveAutoFvgTemplate(direction, tfLabel, fvgConfig) {
+    const isBull = direction === 'bullish';
+    const explicitId = isBull ? (fvgConfig.bullishTemplateId || 'auto') : (fvgConfig.bearishTemplateId || 'auto');
+    const rectTemplates = Array.isArray(currentTemplates)
+      ? currentTemplates.filter(t => t && canonicalizeDrawingType(t.drawingType || 'rectangle') === 'rectangle')
+      : [];
+
+    // 1. If user explicitly picked a specific saved template in Settings -> Auto FVG's
+    if (explicitId && explicitId !== 'auto' && explicitId !== 'default') {
+      const explicitFound = rectTemplates.find(t => t.id === explicitId);
+      if (explicitFound) return explicitFound;
+    }
+
+    // 2. If set to Auto-Match, search user's saved rectangle templates for a matching timeframe FVG template (e.g. "5m FVG")
+    if (explicitId === 'auto' && rectTemplates.length > 0) {
+      const tfAliases = buildTimeframeAliases(tfLabel);
+      const dirKeywords = isBull ? ['bull', 'bullish', 'bisi', 'long', '+'] : ['bear', 'bearish', 'sibi', 'short', '-'];
+      const oppositeKeywords = isBull ? ['bear', 'bearish', 'sibi', 'short'] : ['bull', 'bullish', 'bisi', 'long'];
+
+      const hasToken = (str, token) => {
+        const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`, 'i').test(str);
+      };
+
+      let bestMatch = null;
+      let bestScore = 0;
+
+      for (const t of rectTemplates) {
+        const nameLower = String(t.name || '').trim().toLowerCase();
+        const textLower = String(t.text || '').trim().toLowerCase();
+        const combined = `${nameLower} ${textLower}`;
+
+        const hasFvgWord = /\bfvg\b|fair\s*value\s*gap|\bimbalance\b|\bbisi\b|\bsibi\b/i.test(combined);
+        const matchesTf = tfAliases.some(alias => hasToken(nameLower, alias) || hasToken(textLower, alias));
+        const matchesDir = dirKeywords.some(k => hasToken(combined, k));
+        const matchesOppositeDir = oppositeKeywords.some(k => hasToken(combined, k));
+
+        // Never use a Bearish-labeled template for a Bullish FVG or vice versa
+        if (matchesOppositeDir && !matchesDir) continue;
+
+        let score = 0;
+        if (matchesTf && hasFvgWord && matchesDir) {
+          score = 100; // e.g. "5m Bullish FVG"
+        } else if (matchesTf && hasFvgWord) {
+          score = 85; // e.g. "5m FVG"
+        } else if (nameLower === `${tfLabel.toLowerCase()} fvg`) {
+          score = 95;
+        } else if (hasFvgWord && matchesDir && !/\b\d+[mhdw]\b/i.test(combined)) {
+          score = 60; // Generic "Bullish FVG" / "Bearish FVG" without another timeframe's prefix
+        } else if ((nameLower === 'fvg' || textLower === 'fvg') && !/\b\d+[mhdw]\b/i.test(combined)) {
+          score = 45; // Generic "FVG" template
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = t;
+        }
+      }
+
+      if (bestMatch) {
+        return bestMatch;
+      }
+    }
+
+    // 3. Fallback: Build Default FVG Template for current timeframe
+    const defaultColor = isBull
+      ? (fvgConfig.defaultBullishColor || '#26a69a')
+      : (fvgConfig.defaultBearishColor || '#ef4444');
+    const defaultOpacity = typeof fvgConfig.defaultOpacity === 'number' ? fvgConfig.defaultOpacity : 22;
+    const rawFormat = typeof fvgConfig.labelFormat === 'string' && fvgConfig.labelFormat.trim()
+      ? fvgConfig.labelFormat.trim()
+      : '{tf} FVG';
+    const formattedLabel = rawFormat
+      .replace(/\{tf\}/gi, tfLabel)
+      .replace(/\{dir\}/gi, isBull ? 'Bull' : 'Bear');
+
+    return {
+      id: `__default_fvg_${direction}__`,
+      isDefaultFallback: true,
+      name: `${tfLabel} FVG`,
+      drawingType: 'rectangle',
+      color: defaultColor,
+      backgroundColor: defaultColor,
+      opacity: defaultOpacity,
+      linewidth: 1,
+      linestyle: 0,
+      extendRight: true,
+      extendLeft: false,
+      showMiddleLine: fvgConfig.defaultShowMidline !== false,
+      middleLineColor: defaultColor,
+      middleLineWidth: 1,
+      middleLineStyle: 2,
+      showLabel: fvgConfig.defaultShowLabel !== false,
+      text: formattedLabel,
+      textColor: defaultColor,
+      fontSize: 11,
+      horzLabelsAlign: 'right',
+      vertLabelsAlign: 'middle'
+    };
+  }
+
+  function computeAutoFvgsFromBars(bars, fvgConfig) {
+    if (!bars || bars.length < 3 || !fvgConfig || !fvgConfig.enabled) return [];
+
+    const lookback = Math.max(50, Math.min(bars.length, Number(fvgConfig.maxBarsLookback) || 600));
+    const startIdx = Math.max(2, bars.length - lookback);
+    const reclaimByWick = fvgConfig.reclaimMode === 'wick';
+    const hideReclaimed = fvgConfig.showReclaimed !== undefined
+      ? !Boolean(fvgConfig.showReclaimed)
+      : Boolean(fvgConfig.hideReclaimed);
+    const minGapPct = Math.max(0, Number(fvgConfig.minGapPercent) || 0);
+    const maxActive = Math.max(1, Number(fvgConfig.maxActiveFvgs) || 25);
+    const maxReclaimedHist = Math.max(0, Number(fvgConfig.showReclaimedHistoryCount ?? 15));
+
+    const tfLabel = formatCurrentResolutionLabel();
+    const symbolKey = getCurrentChartSymbolKey();
+    const bullTpl = resolveAutoFvgTemplate('bullish', tfLabel, fvgConfig);
+    const bearTpl = resolveAutoFvgTemplate('bearish', tfLabel, fvgConfig);
+
+    const detected = [];
+    const latestBar = bars[bars.length - 1];
+    const prevBar = bars.length > 1 ? bars[bars.length - 2] : latestBar;
+    const barIntervalSec = (bars.length > 1 && latestBar.timeSec > prevBar.timeSec)
+      ? (latestBar.timeSec - prevBar.timeSec)
+      : 300;
+    const rawFutureBars = Number(fvgConfig.extendFutureBars);
+    const futureBarsOffset = isFinite(rawFutureBars) ? Math.max(0, Math.min(200, Math.round(rawFutureBars))) : 0;
+    const unreclaimedEndBarIndex = latestBar.barIndex + futureBarsOffset;
+    const unreclaimedEndTimeSec = latestBar.timeSec + futureBarsOffset * barIntervalSec;
+
+    // Only confirm 3-candle FVGs where candle 3 (i) has closed (i <= bars.length - 2)
+    // so live wicks on the current forming candle don't falsely flash unclosed gaps.
+    const maxFormationIdx = Math.max(2, bars.length - 2);
+
+    for (let i = startIdx; i <= maxFormationIdx; i++) {
+      const c1 = bars[i - 2];
+      const c2 = bars[i - 1];
+      const c3 = bars[i];
+
+      // 1. Bullish FVG (BISI): c3.low > c1.high
+      // Full gap height is ALWAYS preserved from c3.low (top) down to c1.high (bottom) — never shrinks when touched!
+      if (c3.low > c1.high) {
+        const initialTop = c3.low;
+        const initialBottom = c1.high;
+        const gapSize = initialTop - initialBottom;
+        const gapPct = c1.high > 0 ? (gapSize / c1.high) * 100 : 0;
+
+        if (gapSize > 0 && gapPct >= minGapPct) {
+          let reclaimed = false;
+          let reclaimedBarIndex = null;
+          let reclaimedTimeSec = null;
+
+          for (let j = i + 1; j < bars.length; j++) {
+            const post = bars[j];
+            // If reclaimMode === 'close', only a CLOSED candle (j < bars.length - 1) closing below c1.high reclaims it,
+            // so the currently forming live bar never prematurely cuts off or shrinks the FVG before the candle closes!
+            if (!reclaimByWick && j === bars.length - 1) {
+              continue;
+            }
+            const testPrice = reclaimByWick ? post.low : post.close;
+            if (testPrice < initialBottom) {
+              reclaimed = true;
+              reclaimedBarIndex = post.barIndex;
+              reclaimedTimeSec = post.timeSec;
+              break;
+            }
+          }
+
+          if (!reclaimed || !hideReclaimed) {
+            detected.push({
+              key: `fvg_bull_${symbolKey}_${tfLabel}_${c1.timeSec}`,
+              legacyKey: `fvg_bull_${tfLabel}_${c1.timeSec}`,
+              symbol: symbolKey,
+              direction: 'bullish',
+              tfLabel,
+              template: bullTpl,
+              startBarIndex: c1.barIndex,
+              startTimeSec: c1.timeSec,
+              candle2BarIndex: c2.barIndex,
+              candle3BarIndex: c3.barIndex,
+              endBarIndex: reclaimed ? reclaimedBarIndex : unreclaimedEndBarIndex,
+              endTimeSec: reclaimed ? reclaimedTimeSec : unreclaimedEndTimeSec,
+              top: initialTop,
+              bottom: initialBottom,
+              mid: (initialTop + initialBottom) / 2,
+              initialTop,
+              initialBottom,
+              reclaimed,
+              reclaimedBarIndex,
+              reclaimedTimeSec
+            });
+          }
+        }
+      }
+
+      // 2. Bearish FVG (SIBI): c3.high < c1.low
+      // Full gap height is ALWAYS preserved from c1.low (top) down to c3.high (bottom) — never shrinks when touched!
+      if (c3.high < c1.low) {
+        const initialTop = c1.low;
+        const initialBottom = c3.high;
+        const gapSize = initialTop - initialBottom;
+        const gapPct = c1.low > 0 ? (gapSize / c1.low) * 100 : 0;
+
+        if (gapSize > 0 && gapPct >= minGapPct) {
+          let reclaimed = false;
+          let reclaimedBarIndex = null;
+          let reclaimedTimeSec = null;
+
+          for (let j = i + 1; j < bars.length; j++) {
+            const post = bars[j];
+            // If reclaimMode === 'close', only a CLOSED candle (j < bars.length - 1) closing above c1.low reclaims it!
+            if (!reclaimByWick && j === bars.length - 1) {
+              continue;
+            }
+            const testPrice = reclaimByWick ? post.high : post.close;
+            if (testPrice > initialTop) {
+              reclaimed = true;
+              reclaimedBarIndex = post.barIndex;
+              reclaimedTimeSec = post.timeSec;
+              break;
+            }
+          }
+
+          if (!reclaimed || !hideReclaimed) {
+            detected.push({
+              key: `fvg_bear_${symbolKey}_${tfLabel}_${c1.timeSec}`,
+              legacyKey: `fvg_bear_${tfLabel}_${c1.timeSec}`,
+              symbol: symbolKey,
+              direction: 'bearish',
+              tfLabel,
+              template: bearTpl,
+              startBarIndex: c1.barIndex,
+              startTimeSec: c1.timeSec,
+              candle2BarIndex: c2.barIndex,
+              candle3BarIndex: c3.barIndex,
+              endBarIndex: reclaimed ? reclaimedBarIndex : unreclaimedEndBarIndex,
+              endTimeSec: reclaimed ? reclaimedTimeSec : unreclaimedEndTimeSec,
+              top: initialTop,
+              bottom: initialBottom,
+              mid: (initialTop + initialBottom) / 2,
+              initialTop,
+              initialBottom,
+              reclaimed,
+              reclaimedBarIndex,
+              reclaimedTimeSec
+            });
+          }
+        }
+      }
+    }
+
+    // Filter to most recent N active (unreclaimed) FVGs and most recent M reclaimed FVGs so the chart stays clean
+    const activeList = detected.filter(f => !f.reclaimed).slice(-maxActive);
+    const reclaimedList = hideReclaimed ? [] : detected.filter(f => f.reclaimed).slice(-maxReclaimedHist);
+    return [...reclaimedList, ...activeList];
+  }
+
+  function normalizeEpochSec(rawTime) {
+    const n = Number(rawTime);
+    if (!isFinite(n) || n <= 0) return NaN;
+    return n > 1e11 ? Math.round(n / 1000) : n;
+  }
+
+  function extractPointsFromInternalLineSource(src) {
+    if (!src || typeof src !== 'object') return null;
+    try {
+      const pts = typeof src.points === 'function' ? src.points() : (src._points || src.m_points);
+      if (Array.isArray(pts) && pts.length >= 2) {
+        return pts.map(p => ({
+          time: p.time_t ?? (p.time && typeof p.time === 'object' ? p.time.value : p.time),
+          price: p.price ?? (p.value !== undefined ? p.value : undefined),
+          index: p.index
+        }));
+      }
+      if (typeof src.timeAxisPoints === 'function') {
+        const tap = src.timeAxisPoints();
+        if (Array.isArray(tap) && tap.length >= 2) {
+          return tap.map(p => ({
+            time: p.time_t ?? p.time,
+            price: p.price,
+            index: p.index
+          }));
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function getExistingChartRectangleBoundsList(bars = null) {
+    const results = [];
+    const seenIds = new Set();
+
+    const addRectEntry = (entityId, t0Raw, t1Raw, pr0Raw, pr1Raw, shapeRef = null) => {
+      const t0 = normalizeEpochSec(t0Raw);
+      const t1 = normalizeEpochSec(t1Raw);
+      const pr0 = Number(pr0Raw);
+      const pr1 = Number(pr1Raw);
+      if (!isFinite(t0) || !isFinite(t1) || !isFinite(pr0) || !isFinite(pr1)) return;
+      const key = entityId || `${Math.round(Math.min(t0, t1))}_${pr0.toFixed(4)}_${pr1.toFixed(4)}`;
+      if (seenIds.has(key)) return;
+      seenIds.add(key);
+      results.push({
+        entityId: entityId || key,
+        startTimeSec: Math.min(t0, t1),
+        endTimeSec: Math.max(t0, t1),
+        top: Math.max(pr0, pr1),
+        bottom: Math.min(pr0, pr1),
+        mid: (pr0 + pr1) / 2,
+        shape: shapeRef
+      });
+    };
+
+    // 1. Query activeChart.getAllShapes()
+    if (activeChart && typeof activeChart.getAllShapes === 'function') {
+      try {
+        const allShapes = activeChart.getAllShapes() || [];
+        for (const s of allShapes) {
+          if (!s || !s.id) continue;
+          const nameLower = String(s.name || '').toLowerCase();
+          if (nameLower && !nameLower.includes('rect')) continue;
+          const sh = activeChart.getShapeById(s.id);
+          if (!sh) continue;
+          let pts = null;
+          try {
+            if (typeof sh.getPoints === 'function') pts = sh.getPoints();
+          } catch (e) {}
+          if (!Array.isArray(pts) || pts.length < 2) {
+            const internalSrc = extractInternalSourceFromShape(sh, s.id);
+            pts = extractPointsFromInternalLineSource(internalSrc);
+          }
+          if (!Array.isArray(pts) || pts.length < 2) continue;
+          const p0 = pts[0] || {};
+          const p1 = pts[1] || {};
+          let t0 = p0.time ?? p0.time_t;
+          let t1 = p1.time ?? p1.time_t;
+          if ((!t0 || !t1) && Array.isArray(bars) && bars.length > 0) {
+            if (!t0 && typeof p0.index === 'number') {
+              const b0 = bars.find(b => b.barIndex === p0.index);
+              if (b0) t0 = b0.timeSec;
+            }
+            if (!t1 && typeof p1.index === 'number') {
+              const b1 = bars.find(b => b.barIndex === p1.index);
+              if (b1) t1 = b1.timeSec;
+            }
+          }
+          addRectEntry(s.id, t0, t1, p0.price, p1.price, sh);
+        }
+      } catch (e) {}
+    }
+
+    // 2. Also query internal ChartModel dataSources() directly (catches any rectangle source even if getAllShapes() lags on page load)
+    try {
+      const model = findChartModelForSessions() || getChartModel();
+      if (model) {
+        const dsList = typeof model.dataSources === 'function'
+          ? model.dataSources()
+          : (Array.isArray(model._dataSources) ? model._dataSources : []);
+        if (Array.isArray(dsList)) {
+          for (const src of dsList) {
+            if (!src || typeof src !== 'object') continue;
+            const toolName = String(
+              (typeof src.toolname === 'function' ? src.toolname() : src._toolname) ||
+              (typeof src.name === 'function' ? src.name() : src._name) ||
+              ''
+            ).toLowerCase();
+            if (!toolName.includes('rect')) continue;
+            const sid = typeof src.id === 'function' ? src.id() : src._id;
+            const pts = extractPointsFromInternalLineSource(src);
+            if (Array.isArray(pts) && pts.length >= 2) {
+              addRectEntry(sid, pts[0].time, pts[1].time, pts[0].price, pts[1].price, null);
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 3. Also inspect Vest's persisted localStorage drawing keys (`tv-chart-drawings-*` / `tv-drawings-flush:*`)
+    // so even during the first 1-2 seconds after a page refresh BEFORE Vest hydrates saved drawings into TradingView,
+    // we already know every rectangle that exists on the chart and NEVER create a duplicate!
+    try {
+      const storages = [window.localStorage];
+      try {
+        if (window.top && window.top !== window && window.top.localStorage) {
+          storages.push(window.top.localStorage);
+        }
+      } catch (e) {}
+
+      for (const stor of storages) {
+        for (let kIdx = 0; kIdx < stor.length; kIdx++) {
+          const key = stor.key(kIdx);
+          if (!key || (!key.startsWith('tv-chart-drawings-') && !key.startsWith('tv-drawings-flush:'))) continue;
+          const raw = stor.getItem(key);
+          if (!raw || !raw.includes('LineToolRectangle')) continue;
+          const parsed = JSON.parse(raw);
+          const sources = parsed && Array.isArray(parsed.sources) ? parsed.sources : null;
+          if (!sources) continue;
+          for (const entry of sources) {
+            const srcObj = Array.isArray(entry) ? entry[1] : entry;
+            if (!srcObj || typeof srcObj !== 'object') continue;
+            const tool = String(srcObj.toolName || srcObj.type || (srcObj.state && srcObj.state.type) || '').toLowerCase();
+            if (!tool.includes('rect')) continue;
+            const id = (Array.isArray(entry) ? entry[0] : srcObj.id) || null;
+            const pts = (srcObj.state && Array.isArray(srcObj.state.points))
+              ? srcObj.state.points
+              : (Array.isArray(srcObj.points) ? srcObj.points : null);
+            if (Array.isArray(pts) && pts.length >= 2) {
+              addRectEntry(
+                id,
+                pts[0].time_t ?? pts[0].time,
+                pts[1].time_t ?? pts[1].time,
+                pts[0].price,
+                pts[1].price,
+                null
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    return results;
+  }
+
+  function findAllMatchingExistingRectanglesOnChart(fvg, existingRects, barIntervalSec) {
+    if (!fvg || !Array.isArray(existingRects) || existingRects.length === 0) return [];
+    const matches = [];
+    const gapHeight = Math.max(1e-9, Math.abs(fvg.top - fvg.bottom));
+    // Generous price & time overlap matching so whether a box was drawn from candle 1, candle 2, or candle 3,
+    // or slightly off with magnet/freehand, we recognize that a box already exists for this FVG!
+    const priceTol = Math.max(gapHeight * 0.45, Math.abs(fvg.top) * 0.0003, 1e-6);
+    const interval = Math.max(60, barIntervalSec || 300);
+    const startTol = interval * 5; // Up to 5 bars difference in start anchor (covers candle 1, 2, 3, or adjacent bar)
+
+    for (const r of existingRects) {
+      const rHeight = Math.max(1e-9, Math.abs(r.top - r.bottom));
+      // Check vertical overlap between existing box [r.bottom, r.top] and FVG [fvg.bottom, fvg.top]
+      const overlapTop = Math.min(r.top, fvg.top);
+      const overlapBottom = Math.max(r.bottom, fvg.bottom);
+      const verticalOverlap = Math.max(0, overlapTop - overlapBottom);
+      const minHeight = Math.min(gapHeight, rHeight);
+
+      const topDiff = Math.abs(r.top - fvg.top);
+      const botDiff = Math.abs(r.bottom - fvg.bottom);
+      const midDiff = Math.abs((r.top + r.bottom) / 2 - fvg.mid);
+
+      // Price matches if either top & bottom are within tolerance OR vertical overlap is >= 55% of the box height (and similar size)
+      const priceMatches =
+        (topDiff <= priceTol && botDiff <= priceTol) ||
+        (verticalOverlap >= minHeight * 0.55 && rHeight <= gapHeight * 2.5 && midDiff <= gapHeight * 0.65);
+
+      if (!priceMatches) continue;
+
+      // Time matches if the existing box starts within 5 bars of the FVG start, OR horizontally spans across the FVG's formation candles
+      const startDiff = Math.abs(r.startTimeSec - fvg.startTimeSec);
+      const spansAcrossFvgStart =
+        r.startTimeSec <= fvg.startTimeSec + interval * 3 &&
+        r.endTimeSec >= fvg.startTimeSec - interval;
+
+      if (startDiff <= startTol || spansAcrossFvgStart) {
+        matches.push(r);
+      }
+    }
+    return matches;
+  }
+
+  function findMatchingExistingRectangleOnChart(fvg, existingRects, barIntervalSec) {
+    const matches = findAllMatchingExistingRectanglesOnChart(fvg, existingRects, barIntervalSec);
+    return matches.length > 0 ? matches[0] : null;
+  }
+
+  function cleanupNativeAutoFvgShapes(keepKeysSet = null) {
+    if (!activeChart) return;
+    for (const [key, entry] of nativeAutoFvgShapesMap.entries()) {
+      if (keepKeysSet && keepKeysSet.has(key)) continue;
+      try {
+        if (entry && entry.entityId && typeof activeChart.removeEntity === 'function') {
+          removeNativeAutoFvgShape(entry.entityId);
+        }
+      } catch (e) {}
+      nativeAutoFvgShapesMap.delete(key);
+    }
+  }
+
+  function removeNativeAutoFvgShape(entityId) {
+    if (!entityId || !activeChart || typeof activeChart.removeEntity !== 'function') return;
+    nativeAutoFvgRemovalSuppression.add(entityId);
+    try {
+      activeChart.removeEntity(entityId);
+    } catch (e) {
+      nativeAutoFvgRemovalSuppression.delete(entityId);
+      return;
+    }
+    setTimeout(() => nativeAutoFvgRemovalSuppression.delete(entityId), 1500);
+  }
+
+  function shouldExtendAutoFvgToFarRight(fvg, fvgConfig) {
+    if (!fvg || fvg.reclaimed) return false;
+    const mode = String((fvgConfig && fvgConfig.extendMode) || 'right').toLowerCase();
+    if (mode === 'current') return false;
+    if (mode === 'template') return Boolean(fvg.template && fvg.template.extendRight);
+    return true; // 'right' (default)
+  }
+
+  function syncNativeTradingViewAutoFvgShapes(fvgs, fvgConfig, barIntervalSec = 300, bars = null) {
+    if (!fvgConfig || !fvgConfig.enabled || !fvgConfig.syncNativeDrawings || !activeChart || typeof activeChart.createMultipointShape !== 'function') {
+      if (nativeAutoFvgShapesMap.size > 0) {
+        cleanupNativeAutoFvgShapes(null);
+      }
+      return;
+    }
+
+    const keepKeys = new Set(fvgs.map(f => f.key));
+    cleanupNativeAutoFvgShapes(keepKeys);
+
+    // 1. Load the persistent Created-FVG Log from localStorage so we know every FVG that has ALREADY been created across page refreshes!
+    const createdFvgsLog = loadCreatedFvgsLog();
+
+    // 2. Scan all existing rectangles on the chart (API + ChartModel + localStorage)
+    const existingChartRects = getExistingChartRectangleBoundsList(bars);
+    const claimedEntityIds = new Set();
+    for (const entry of nativeAutoFvgShapesMap.values()) {
+      if (entry && entry.entityId) claimedEntityIds.add(entry.entityId);
+    }
+
+    for (const fvg of fvgs) {
+      try {
+        if (isCreatedFvgDismissed(fvg)) continue;
+        let existing = nativeAutoFvgShapesMap.get(fvg.key);
+        const loggedEntry = findLoggedFvgEntry(fvg, createdFvgsLog, barIntervalSec);
+        const tpl = fvg.template;
+        const labelText = resolveAutoFvgDisplayText(fvg, fvgConfig);
+        const extendFarRight = shouldExtendAutoFvgToFarRight(fvg, fvgConfig);
+        const useCustomReclaimedColor = Boolean(fvg.reclaimed && (fvgConfig.reclaimedColorMode || 'custom') !== 'dim');
+        const fallbackRecHex = parseColorAndAlpha(fvgConfig.reclaimedColor || '#787b86', '#787b86').hex;
+        const customRecBoxHex = useCustomReclaimedColor
+          ? parseColorAndAlpha(fvgConfig.reclaimedBoxColor || fallbackRecHex, fallbackRecHex).hex
+          : null;
+        const customRecBoxOp = useCustomReclaimedColor
+          ? Math.max(0, Math.min(100, Number(fvgConfig.reclaimedBoxOpacity ?? fvgConfig.reclaimedOpacity ?? 18)))
+          : null;
+        const customRecBorderHex = useCustomReclaimedColor
+          ? parseColorAndAlpha(fvgConfig.reclaimedBorderColor || customRecBoxHex, customRecBoxHex).hex
+          : null;
+        const customRecBorderOp = useCustomReclaimedColor
+          ? Math.max(0, Math.min(100, Number(fvgConfig.reclaimedBorderOpacity ?? 65)))
+          : null;
+        const customRecMidHex = useCustomReclaimedColor
+          ? parseColorAndAlpha(fvgConfig.reclaimedMidlineColor || customRecBorderHex, customRecBorderHex).hex
+          : null;
+        const customRecMidOp = useCustomReclaimedColor
+          ? Math.max(0, Math.min(100, Number(fvgConfig.reclaimedMidlineOpacity ?? 60)))
+          : null;
+        // Extend right or to current time while unreclaimed according to user's setting; stop extending and anchor at the reclaim candle once reclaimed!
+        const effectiveTpl = {
+          ...tpl,
+          ...(useCustomReclaimedColor ? {
+            color: customRecBorderHex,
+            borderOpacity: customRecBorderOp,
+            backgroundColor: customRecBoxHex,
+            opacity: customRecBoxOp,
+            middleLineColor: customRecMidHex,
+            middleLineOpacity: customRecMidOp,
+            textColor: customRecBorderHex
+          } : {}),
+          extendRight: extendFarRight,
+          extendLeft: false,
+          showLabel: Boolean(labelText),
+          text: labelText
+        };
+
+        // Check if ANY existing rectangle(s) on the chart already cover this FVG
+        const candidates = existingChartRects.filter(r => !claimedEntityIds.has(r.entityId));
+        const allMatchesOnChart = findAllMatchingExistingRectanglesOnChart(fvg, candidates, barIntervalSec);
+        const matchedOnChart = allMatchesOnChart.length > 0 ? allMatchesOnChart[0] : null;
+
+        // If multiple identical duplicate rectangles exist on the chart for this same FVG (from earlier refreshes),
+        // clean up the extra duplicates automatically so only ONE rectangle remains!
+        if (allMatchesOnChart.length > 1 && typeof activeChart.removeEntity === 'function') {
+          for (let dIdx = 1; dIdx < allMatchesOnChart.length; dIdx++) {
+            const dup = allMatchesOnChart[dIdx];
+            if (dup && dup.entityId && Math.abs(dup.top - fvg.top) < 1e-4 && Math.abs(dup.bottom - fvg.bottom) < 1e-4) {
+              try {
+                removeNativeAutoFvgShape(dup.entityId);
+                claimedEntityIds.add(dup.entityId);
+              } catch (e) {}
+            }
+          }
+        }
+
+        // Case 1: Reuse a logged FVG only when its actual drawing is present on this chart.
+        // Vest may not have hydrated the saved drawing yet, or the old entity ID may be stale after refresh.
+        if (loggedEntry) {
+          const loggedShapeMatchesFvg = Boolean(
+            loggedEntry.entityId &&
+            findAllMatchingExistingRectanglesOnChart(
+              fvg,
+              existingChartRects.filter(rect => rect.entityId === loggedEntry.entityId),
+              barIntervalSec
+            ).length
+          );
+          const targetEntityId =
+            (existing && existing.entityId) ||
+            (matchedOnChart && matchedOnChart.entityId) ||
+            (loggedShapeMatchesFvg ? loggedEntry.entityId : null) ||
+            null;
+          let restoredFromLog = false;
+          if (targetEntityId) {
+            claimedEntityIds.add(targetEntityId);
+            const liveSh = activeChart.getShapeById(targetEntityId);
+            if (liveSh) {
+              restoredFromLog = true;
+              if (!existing) {
+                existing = {
+                  entityId: targetEntityId,
+                  lastEndTimeSec: fvg.endTimeSec,
+                  top: fvg.top,
+                  bottom: fvg.bottom,
+                  tplSig: JSON.stringify(effectiveTpl)
+                };
+                nativeAutoFvgShapesMap.set(fvg.key, existing);
+              }
+              if (loggedEntry.entityId !== targetEntityId) {
+                recordFvgInCreatedLog(fvg, targetEntityId, createdFvgsLog);
+              }
+              if (existing.lastEndTimeSec !== fvg.endTimeSec || existing.top !== fvg.top || existing.bottom !== fvg.bottom) {
+                if (typeof liveSh.setPoints === 'function') {
+                  liveSh.setPoints([
+                    { time: fvg.startTimeSec, price: fvg.top },
+                    { time: fvg.endTimeSec, price: fvg.bottom }
+                  ]);
+                }
+                existing.lastEndTimeSec = fvg.endTimeSec;
+                existing.top = fvg.top;
+                existing.bottom = fvg.bottom;
+              }
+              if (existing.tplSig !== JSON.stringify(effectiveTpl)) {
+                applyTemplateToShape(liveSh, effectiveTpl, targetEntityId, 'rectangle');
+                existing.tplSig = JSON.stringify(effectiveTpl);
+              }
+            }
+          }
+          if (restoredFromLog) continue;
+          if (existing && existing.entityId && !activeChart.getShapeById(existing.entityId)) {
+            nativeAutoFvgShapesMap.delete(fvg.key);
+            existing = null;
+          }
+          if (loggedEntry.entityId && !activeChart.getShapeById(loggedEntry.entityId)) {
+            loggedEntry.entityId = null;
+          }
+        }
+
+        // Case 2: Not in log yet, but a matching rectangle already exists on the chart — log it and do NOT create a duplicate!
+        if (!existing && matchedOnChart) {
+          if (matchedOnChart.entityId) {
+            claimedEntityIds.add(matchedOnChart.entityId);
+          }
+          recordFvgInCreatedLog(fvg, matchedOnChart.entityId || null, createdFvgsLog);
+          const liveSh = matchedOnChart.entityId && activeChart.getShapeById(matchedOnChart.entityId);
+          if (liveSh) {
+            existing = {
+              entityId: matchedOnChart.entityId,
+              lastEndTimeSec: fvg.endTimeSec,
+              top: fvg.top,
+              bottom: fvg.bottom,
+              tplSig: JSON.stringify(effectiveTpl)
+            };
+            nativeAutoFvgShapesMap.set(fvg.key, existing);
+          }
+          continue;
+        }
+
+        // Case 3: In-memory existing shape check
+        if (existing && existing.entityId) {
+          const sh = activeChart.getShapeById(existing.entityId);
+          if (sh) {
+            recordFvgInCreatedLog(fvg, existing.entityId, createdFvgsLog);
+            if (existing.lastEndTimeSec !== fvg.endTimeSec || existing.top !== fvg.top || existing.bottom !== fvg.bottom) {
+              if (typeof sh.setPoints === 'function') {
+                sh.setPoints([
+                  { time: fvg.startTimeSec, price: fvg.top },
+                  { time: fvg.endTimeSec, price: fvg.bottom }
+                ]);
+              }
+              existing.lastEndTimeSec = fvg.endTimeSec;
+              existing.top = fvg.top;
+              existing.bottom = fvg.bottom;
+            }
+            if (existing.tplSig !== JSON.stringify(effectiveTpl)) {
+              applyTemplateToShape(sh, effectiveTpl, existing.entityId, 'rectangle');
+              existing.tplSig = JSON.stringify(effectiveTpl);
+            }
+            continue;
+          }
+        }
+
+        // Case 4: FVG has NOT been created yet and does not exist on the chart — create it and log it in the persistent log!
+        const entityId = activeChart.createMultipointShape(
+          [
+            { time: fvg.startTimeSec, price: fvg.top },
+            { time: fvg.endTimeSec, price: fvg.bottom }
+          ],
+          {
+            shape: 'rectangle',
+            lock: false,
+            disableSelection: false,
+            disableSave: false
+          }
+        );
+
+        if (entityId) {
+          claimedEntityIds.add(entityId);
+          recordFvgInCreatedLog(fvg, entityId, createdFvgsLog);
+          const sh = activeChart.getShapeById(entityId);
+          if (sh) {
+            applyTemplateToShape(sh, effectiveTpl, entityId, 'rectangle');
+          }
+          nativeAutoFvgShapesMap.set(fvg.key, {
+            entityId,
+            lastEndTimeSec: fvg.endTimeSec,
+            top: fvg.top,
+            bottom: fvg.bottom,
+            tplSig: JSON.stringify(effectiveTpl)
+          });
+        }
+      } catch (e) {}
+    }
+  }
+
+  function resolveAutoFvgDisplayText(fvg, fvgConfig) {
+    const tpl = fvg.template || {};
+    if (tpl && !tpl.isDefaultFallback) {
+      // If user's matched template has explicit text, use it; otherwise if showLabel is enabled or template has a name like "5m FVG", use its text or name!
+      if (typeof tpl.text === 'string' && tpl.text.trim()) {
+        return tpl.text.trim();
+      }
+      if (tpl.showLabel === false && !tpl.text) {
+        // Still fall back to the template name (e.g. "5m FVG") if defaultShowLabel is on
+        if (fvgConfig.defaultShowLabel !== false && tpl.name) {
+          return String(tpl.name).trim();
+        }
+        return '';
+      }
+      if (tpl.name) {
+        return String(tpl.name).trim();
+      }
+    }
+
+    if (fvgConfig.defaultShowLabel === false) return '';
+    const rawFormat = (typeof fvgConfig.labelFormat === 'string' && fvgConfig.labelFormat.trim())
+      ? fvgConfig.labelFormat.trim()
+      : '{tf} FVG';
+    return rawFormat
+      .replace(/\{tf\}/gi, fvg.tfLabel || '')
+      .replace(/\{dir\}/gi, fvg.direction === 'bullish' ? 'Bull' : 'Bear')
+      .replace(/\{template\}/gi, tpl.name || `${fvg.tfLabel} FVG`)
+      .trim();
+  }
+
+  function renderAutoFvgsOnCanvas(ctx, fvgs, fvgConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec = 300, bars = null) {
+    if (!ctx || !fvgs || fvgs.length === 0) return;
+
+    // Check existing native rectangle shapes on the chart (from API, internal ChartModel, and localStorage)
+    // so we NEVER draw an Auto FVG when a box already exists at those coordinates!
+    const existingChartRects = getExistingChartRectangleBoundsList(bars);
+
+    for (let i = 0; i < fvgs.length; i++) {
+      const fvg = fvgs[i];
+      if (existingChartRects.length > 0 && findMatchingExistingRectangleOnChart(fvg, existingChartRects, barIntervalSec)) {
+        continue;
+      }
+      const tpl = fvg.template || {};
+
+      const rawStartX = barToX(fvg.startBarIndex, fvg.startTimeSec);
+      const rawEndX = barToX(fvg.endBarIndex, fvg.endTimeSec);
+      const topY = priceToY(fvg.top);
+      const bottomY = priceToY(fvg.bottom);
+      const midY = priceToY(fvg.mid);
+
+      if (rawStartX === null || rawEndX === null || topY === null || bottomY === null) continue;
+
+      const boxLeft = Math.min(rawStartX, rawEndX) - halfBarW;
+      // While unreclaimed, extend either to the far right edge of the chart ('right') or to the current candle ('current')
+      // based on the user's "Unreclaimed Extension Mode" setting; once reclaimed, cut it off at the candle that reclaimed it!
+      const extendToFarRight = shouldExtendAutoFvgToFarRight(fvg, fvgConfig);
+      const boxRight = extendToFarRight ? cssWidth : (Math.max(rawStartX, rawEndX) + halfBarW);
+
+      if (boxRight < -20 || boxLeft > cssWidth + 20) continue;
+
+      const boxTop = Math.min(topY, bottomY);
+      const boxBottom = Math.max(topY, bottomY);
+      if (boxBottom < -20 || boxTop > cssHeight + 20) continue;
+
+      const clampedLeft = Math.max(-4, boxLeft);
+      const clampedRight = Math.min(cssWidth + 4, boxRight);
+      const boxW = Math.max(2, clampedRight - clampedLeft);
+      const boxH = Math.max(2, boxBottom - boxTop);
+
+      const useCustomReclaimedColor = Boolean(fvg.reclaimed && (fvgConfig.reclaimedColorMode || 'custom') !== 'dim');
+      const fallbackReclaimedHex = parseColorAndAlpha(fvgConfig.reclaimedColor || '#787b86', '#787b86').hex;
+      const customReclaimedBoxHex = useCustomReclaimedColor
+        ? parseColorAndAlpha(fvgConfig.reclaimedBoxColor || fallbackReclaimedHex, fallbackReclaimedHex).hex
+        : null;
+      const customReclaimedBorderHex = useCustomReclaimedColor
+        ? parseColorAndAlpha(fvgConfig.reclaimedBorderColor || customReclaimedBoxHex, customReclaimedBoxHex).hex
+        : null;
+      const customReclaimedMidHex = useCustomReclaimedColor
+        ? parseColorAndAlpha(fvgConfig.reclaimedMidlineColor || customReclaimedBorderHex, customReclaimedBorderHex).hex
+        : null;
+
+      const borderHex = useCustomReclaimedColor
+        ? customReclaimedBorderHex
+        : parseColorAndAlpha(tpl.color, fvg.direction === 'bullish' ? '#26a69a' : '#ef4444').hex;
+      const bgHex = useCustomReclaimedColor
+        ? customReclaimedBoxHex
+        : parseColorAndAlpha(tpl.backgroundColor || borderHex, borderHex).hex;
+      const baseOpacity = typeof tpl.opacity === 'number' ? tpl.opacity : (Number(fvgConfig.defaultOpacity) || 22);
+      const effectiveOpacity = fvg.reclaimed
+        ? (useCustomReclaimedColor
+          ? Math.max(0, Math.min(100, Number(fvgConfig.reclaimedBoxOpacity ?? fvgConfig.reclaimedOpacity ?? 18)))
+          : Math.max(5, Math.round(baseOpacity * 0.55)))
+        : baseOpacity;
+      const effectiveBorderOpacity = fvg.reclaimed
+        ? (useCustomReclaimedColor
+          ? Math.max(0, Math.min(100, Number(fvgConfig.reclaimedBorderOpacity ?? 65)))
+          : 45)
+        : 82;
+      const effectiveMidlineOpacity = fvg.reclaimed
+        ? (useCustomReclaimedColor
+          ? Math.max(0, Math.min(100, Number(fvgConfig.reclaimedMidlineOpacity ?? 60)))
+          : 42)
+        : 78;
+
+      ctx.save();
+
+      // 1. Shaded FVG Rectangle Fill
+      if (effectiveOpacity > 0) {
+        ctx.fillStyle = hexToRgbaString(bgHex, effectiveOpacity);
+        ctx.fillRect(clampedLeft, boxTop, boxW, boxH);
+      }
+
+      // 2. FVG Border
+      const lineW = Number(tpl.linewidth) || 1;
+      const lineS = Number(tpl.linestyle ?? 0);
+      if (lineW > 0 && effectiveBorderOpacity > 0) {
+        ctx.strokeStyle = hexToRgbaString(borderHex, effectiveBorderOpacity);
+        ctx.lineWidth = lineW;
+        if (lineS === 1) ctx.setLineDash([2, 3]);
+        else if (lineS === 2) ctx.setLineDash([6, 4]);
+        else ctx.setLineDash([]);
+        ctx.strokeRect(clampedLeft + 0.5, boxTop + 0.5, Math.max(1, boxW - 1), Math.max(1, boxH - 1));
+      }
+
+      // 3. 50% Consequent Encroachment (Middle Line) if enabled in template or default settings
+      const showMid = tpl.showMiddleLine !== undefined ? Boolean(tpl.showMiddleLine) : (fvgConfig.defaultShowMidline !== false);
+      if (showMid && midY !== null && boxH >= 4 && effectiveMidlineOpacity > 0) {
+        const midHex = useCustomReclaimedColor
+          ? customReclaimedMidHex
+          : parseColorAndAlpha(tpl.middleLineColor || borderHex, borderHex).hex;
+        const midW = Number(tpl.middleLineWidth) || 1;
+        const midS = tpl.middleLineStyle !== undefined ? Number(tpl.middleLineStyle) : 2;
+        ctx.strokeStyle = hexToRgbaString(midHex, effectiveMidlineOpacity);
+        ctx.lineWidth = midW;
+        if (midS === 1) ctx.setLineDash([2, 3]);
+        else if (midS === 2) ctx.setLineDash([5, 4]);
+        else ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(clampedLeft, Math.round(midY) + 0.5);
+        ctx.lineTo(clampedRight, Math.round(midY) + 0.5);
+        ctx.stroke();
+      }
+
+      // 4. Template Label Text (e.g. "5m FVG")
+      const labelText = resolveAutoFvgDisplayText(fvg, fvgConfig);
+      if (labelText && boxW >= 22) {
+        const txtHex = useCustomReclaimedColor
+          ? customReclaimedBorderHex
+          : parseColorAndAlpha(tpl.textColor || borderHex, borderHex).hex;
+        const fontSz = Math.max(9, Math.min(20, Number(tpl.fontSize) || 11));
+        const fontBold = tpl.bold !== false ? '600' : '400';
+        const fontItalic = tpl.italic ? 'italic ' : '';
+        const hAlign = String(tpl.horzLabelsAlign || 'right').toLowerCase();
+        const vAlign = String(tpl.vertLabelsAlign || 'middle').toLowerCase();
+
+        ctx.font = `${fontItalic}${fontBold} ${fontSz}px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif`;
+        ctx.fillStyle = hexToRgbaString(txtHex, fvg.reclaimed ? (useCustomReclaimedColor ? Math.max(45, effectiveBorderOpacity) : 58) : 95);
+
+        let textX = clampedRight - 5;
+        if (hAlign === 'left') {
+          ctx.textAlign = 'left';
+          textX = clampedLeft + 5;
+        } else if (hAlign === 'center') {
+          ctx.textAlign = 'center';
+          textX = clampedLeft + boxW / 2;
+        } else {
+          ctx.textAlign = 'right';
+          textX = clampedRight - 5;
+        }
+
+        let textY = (boxTop + boxBottom) / 2;
+        if (vAlign === 'top') {
+          ctx.textBaseline = 'top';
+          textY = boxTop + 2;
+        } else if (vAlign === 'bottom') {
+          ctx.textBaseline = 'bottom';
+          textY = boxBottom - 2;
+        } else {
+          ctx.textBaseline = 'middle';
+          textY = (boxTop + boxBottom) / 2;
+        }
+
+        ctx.fillText(labelText, textX, textY);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Candle OHLC (Open, High, Low, Close) Values Overlay & Click-to-Toggle Engine
+  // -------------------------------------------------------------
+  const CANDLE_OHLC_STORAGE_KEY = '__trading_cortex_candle_ohlc_toggled_v1__';
+  let toggledCandleOhlcSet = new Set(); // Individually toggled ON when global "Show All Candles" is OFF
+  let mutedCandleOhlcSet = new Set();   // Individually toggled OFF when global "Show All Candles" is ON
+  let lastRenderedCandleOhlcHitBoxes = []; // [{ key, timeSec, left, top, right, bottom, barX }]
+
+  function loadClickedCandleOhlcState() {
+    try {
+      const raw =
+        window.localStorage.getItem(CANDLE_OHLC_STORAGE_KEY) ||
+        (window.top && window.top !== window ? window.top.localStorage.getItem(CANDLE_OHLC_STORAGE_KEY) : null);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          if (Array.isArray(parsed.toggled)) {
+            toggledCandleOhlcSet = new Set(parsed.toggled.slice(-500));
+          }
+          if (Array.isArray(parsed.muted)) {
+            mutedCandleOhlcSet = new Set(parsed.muted.slice(-500));
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  function saveClickedCandleOhlcState() {
+    try {
+      const payload = JSON.stringify({
+        toggled: Array.from(toggledCandleOhlcSet).slice(-500),
+        muted: Array.from(mutedCandleOhlcSet).slice(-500)
+      });
+      window.localStorage.setItem(CANDLE_OHLC_STORAGE_KEY, payload);
+      if (window.top && window.top !== window && window.top.localStorage) {
+        window.top.localStorage.setItem(CANDLE_OHLC_STORAGE_KEY, payload);
+      }
+    } catch (e) {}
+  }
+
+  function clearAllClickedCandleOhlcState() {
+    toggledCandleOhlcSet.clear();
+    mutedCandleOhlcSet.clear();
+    lastRenderedCandleOhlcHitBoxes = [];
+    saveClickedCandleOhlcState();
+  }
+
+  loadClickedCandleOhlcState();
+
+  function buildCandleOhlcKey(symbolKey, tfLabel, timeSec) {
+    return `${symbolKey || 'SYM'}::${tfLabel || 'TF'}::${Math.round(Number(timeSec) || 0)}`;
+  }
+
+  function isCandleOhlcVisibleForBar(candleKey, allCandlesEnabled) {
+    if (allCandlesEnabled) {
+      return !mutedCandleOhlcSet.has(candleKey);
+    }
+    return toggledCandleOhlcSet.has(candleKey);
+  }
+
+  function toggleSingleCandleOhlcByKey(candleKey, allCandlesEnabled) {
+    let nowVisible = false;
+    if (allCandlesEnabled) {
+      if (mutedCandleOhlcSet.has(candleKey)) {
+        mutedCandleOhlcSet.delete(candleKey);
+        nowVisible = true;
+      } else {
+        mutedCandleOhlcSet.add(candleKey);
+        nowVisible = false;
+      }
+    } else {
+      if (toggledCandleOhlcSet.has(candleKey)) {
+        toggledCandleOhlcSet.delete(candleKey);
+        nowVisible = false;
+      } else {
+        toggledCandleOhlcSet.add(candleKey);
+        nowVisible = true;
+      }
+    }
+    saveClickedCandleOhlcState();
+    return nowVisible;
+  }
+
+  function formatCandleOhlcPrice(price, decimalsSetting, refLastPriceStr) {
+    if (typeof price !== 'number' || !isFinite(price)) return '';
+    if (decimalsSetting && decimalsSetting !== 'auto' && isFinite(Number(decimalsSetting))) {
+      const d = Math.max(0, Math.min(6, Math.round(Number(decimalsSetting))));
+      return price.toLocaleString('en-US', {
+        minimumFractionDigits: d,
+        maximumFractionDigits: d
+      });
+    }
+    return formatChartPriceValue(price, refLastPriceStr);
+  }
+
+  function drawRoundedRectPath(ctx, x, y, w, h, r) {
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+
+  function renderCandleOhlcOnCanvas(ctx, bars, coCfg, barToX, priceToY, barSpacing, cssWidth, cssHeight, symbolKey, tfLabel) {
+    lastRenderedCandleOhlcHitBoxes = [];
+    if (!bars || bars.length === 0) return;
+
+    const cfg = coCfg || {};
+    const allEnabled = Boolean(cfg.enabled);
+    if (!allEnabled && toggledCandleOhlcSet.size === 0) return;
+
+    const showO = cfg.showOpen !== false;
+    const showH = cfg.showHigh !== false;
+    const showL = cfg.showLow !== false;
+    const showC = cfg.showClose !== false;
+    if (!showO && !showH && !showL && !showC) return;
+
+    const displayMode = cfg.displayMode === 'levels' ? 'levels' : 'badge';
+    const fontSize = Math.max(8, Math.min(15, Number(cfg.fontSize) || 10));
+    const decimalsSetting = cfg.decimals || 'auto';
+    const bgHex = cfg.bgColor || '#0f172a';
+    const bgOpacity = Math.max(20, Math.min(100, Number(cfg.bgOpacity ?? 88)));
+    const textHex = cfg.textColor || '#f8fafc';
+    const bullHex = cfg.bullColor || '#10b981';
+    const bearHex = cfg.bearColor || '#f23645';
+    const fontSpec = `600 ${fontSize}px "JetBrains Mono", Consolas, "SFMono-Regular", monospace`;
+
+    // Determine visible bars that should display OHLC
+    const activeBars = [];
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i];
+      const key = buildCandleOhlcKey(symbolKey, tfLabel, b.timeSec);
+      const isIndividuallyToggled = !allEnabled && toggledCandleOhlcSet.has(key);
+      if (!isCandleOhlcVisibleForBar(key, allEnabled)) continue;
+
+      const x = barToX(b.barIndex, b.timeSec);
+      if (x === null || x < -40 || x > cssWidth + 40) continue;
+
+      const highY = priceToY(b.high);
+      const lowY = priceToY(b.low);
+      const openY = priceToY(b.open);
+      const closeY = priceToY(b.close);
+      if (highY === null || lowY === null || openY === null || closeY === null) continue;
+
+      activeBars.push({
+        bar: b,
+        key,
+        isIndividuallyToggled,
+        x,
+        highY,
+        lowY,
+        openY,
+        closeY,
+        topY: Math.min(highY, lowY),
+        bottomY: Math.max(highY, lowY),
+        isBull: b.close >= b.open
+      });
+    }
+
+    if (activeBars.length === 0) return;
+
+    // When "Show All Candles" is ON and the user is zoomed out, stride auto-candles so cards don't overlap unreadable,
+    // while ALWAYS rendering any candle the user explicitly clicked or the latest candle!
+    let stride = 1;
+    if (allEnabled && barSpacing < 56) {
+      stride = Math.max(1, Math.ceil((displayMode === 'levels' ? 48 : 66) / Math.max(2, barSpacing)));
+    }
+
+    ctx.save();
+    ctx.font = fontSpec;
+
+    for (let idx = 0; idx < activeBars.length; idx++) {
+      const item = activeBars[idx];
+      const isLatestBar = item.bar.barIndex === bars[bars.length - 1].barIndex;
+      const ExplicitlyClicked = toggledCandleOhlcSet.has(item.key);
+      if (allEnabled && stride > 1 && !ExplicitlyClicked && !isLatestBar && (item.bar.barIndex % stride !== 0)) {
+        continue;
+      }
+
+      const b = item.bar;
+      const accentHex = item.isBull ? bullHex : bearHex;
+      const lines = [];
+      if (showO) lines.push({ tag: 'O', val: formatCandleOhlcPrice(b.open, decimalsSetting, lastTrackedPrice), y: item.openY, color: '#94a3b8' });
+      if (showH) lines.push({ tag: 'H', val: formatCandleOhlcPrice(b.high, decimalsSetting, lastTrackedPrice), y: item.highY, color: bullHex });
+      if (showL) lines.push({ tag: 'L', val: formatCandleOhlcPrice(b.low, decimalsSetting, lastTrackedPrice), y: item.lowY, color: bearHex });
+      if (showC) lines.push({ tag: 'C', val: formatCandleOhlcPrice(b.close, decimalsSetting, lastTrackedPrice), y: item.closeY, color: accentHex });
+
+      if (displayMode === 'levels') {
+        // Price Tags at Exact O/H/L/C Levels on the Candle
+        const tagH = fontSize + 5;
+        const padX = 4;
+        const placedYs = [];
+
+        for (let lIdx = 0; lIdx < lines.length; lIdx++) {
+          const ln = lines[lIdx];
+          const labelStr = `${ln.tag} ${ln.val}`;
+          const tw = Math.ceil(ctx.measureText(labelStr).width);
+          const boxW = tw + padX * 2;
+          let drawY = ln.y;
+          // Slight vertical collision nudge if two levels (e.g. O and L) are identical
+          for (const py of placedYs) {
+            if (Math.abs(drawY - py) < tagH - 1) {
+              drawY = drawY >= py ? py + tagH : py - tagH;
+            }
+          }
+          placedYs.push(drawY);
+
+          const isRightSide = (ln.tag === 'C' || ln.tag === 'H');
+          const offsetX = Math.max(5, barSpacing * 0.42);
+          let boxLeft = isRightSide ? (item.x + offsetX) : (item.x - offsetX - boxW);
+          boxLeft = Math.max(4, Math.min(cssWidth - boxW - 4, boxLeft));
+          const boxTop = Math.max(2, Math.min(cssHeight - tagH - 2, drawY - tagH / 2));
+
+          // Connector tick from candle to level tag
+          ctx.strokeStyle = hexToRgbaString(ln.color, 72);
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath();
+          ctx.moveTo(item.x, Math.round(ln.y) + 0.5);
+          ctx.lineTo(isRightSide ? boxLeft : (boxLeft + boxW), Math.round(boxTop + tagH / 2) + 0.5);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          drawRoundedRectPath(ctx, boxLeft, boxTop, boxW, tagH, 3);
+          ctx.fillStyle = hexToRgbaString(bgHex, bgOpacity);
+          ctx.fill();
+          ctx.strokeStyle = hexToRgbaString(ln.color, 85);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'left';
+          ctx.fillStyle = ln.color;
+          ctx.fillText(ln.tag, boxLeft + padX, boxTop + tagH / 2 + 0.5);
+          const tagCharW = ctx.measureText(`${ln.tag} `).width;
+          ctx.fillStyle = textHex;
+          ctx.fillText(ln.val, boxLeft + padX + tagCharW, boxTop + tagH / 2 + 0.5);
+
+          lastRenderedCandleOhlcHitBoxes.push({
+            key: item.key,
+            timeSec: b.timeSec,
+            left: boxLeft - 2,
+            top: boxTop - 2,
+            right: boxLeft + boxW + 2,
+            bottom: boxTop + tagH + 2,
+            barX: item.x
+          });
+        }
+      } else {
+        // Stacked OHLC Callout Card above (or below) the candle with a crisp connector line
+        const lineH = fontSize + 4;
+        const padX = 6;
+        const padY = 4;
+        let maxLineW = 0;
+        const tagPrefixW = Math.ceil(ctx.measureText('O ').width);
+        for (let lIdx = 0; lIdx < lines.length; lIdx++) {
+          const w = tagPrefixW + Math.ceil(ctx.measureText(lines[lIdx].val).width);
+          if (w > maxLineW) maxLineW = w;
+        }
+
+        const cardW = maxLineW + padX * 2 + 3;
+        const cardH = lines.length * lineH + padY * 2;
+        const gapFromWick = 12;
+
+        // Place above high wick by default; flip below low wick if near the top edge of the chart
+        let placeAbove = (item.topY - gapFromWick - cardH >= 6);
+        if (!placeAbove && (item.bottomY + gapFromWick + cardH > cssHeight - 6)) {
+          placeAbove = item.topY > (cssHeight - item.bottomY);
+        }
+
+        // If placed below the candle and Candle Numbering is active on this bar, offset below the number glow box
+        const isNumberedBar = Boolean(
+          cfg.showCandleNumbers &&
+          (bars.length - 1 - item.bar.barIndex) >= 0 &&
+          (bars.length - item.bar.barIndex) <= Math.max(10, Math.min(300, Math.round(Number(cfg.candleNumbersMax) || 100)))
+        );
+        const belowOffset = isNumberedBar ? (gapFromWick + Math.round((Number(cfg.candleNumberFontSize) || 9.5) + 12)) : gapFromWick;
+
+        let cardTop = placeAbove
+          ? Math.max(4, item.topY - gapFromWick - cardH)
+          : Math.min(cssHeight - cardH - 4, item.bottomY + belowOffset);
+        let cardLeft = Math.round(item.x - cardW / 2);
+        cardLeft = Math.max(4, Math.min(cssWidth - cardW - 4, cardLeft));
+
+        // Subtle highlight ring on the candle wick tip + dashed stem connecting candle to the OHLC card
+        const anchorY = placeAbove ? item.topY : item.bottomY;
+        const stemEndY = placeAbove ? (cardTop + cardH) : cardTop;
+        ctx.strokeStyle = hexToRgbaString(accentHex, 82);
+        ctx.lineWidth = 1.15;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.moveTo(Math.round(item.x) + 0.5, Math.round(anchorY));
+        ctx.lineTo(Math.round(item.x) + 0.5, Math.round(stemEndY));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Small dot at the candle wick anchor
+        ctx.fillStyle = accentHex;
+        ctx.beginPath();
+        ctx.arc(Math.round(item.x) + 0.5, Math.round(anchorY), 2.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Card background & border
+        drawRoundedRectPath(ctx, cardLeft, cardTop, cardW, cardH, 5);
+        ctx.fillStyle = hexToRgbaString(bgHex, bgOpacity);
+        ctx.fill();
+        ctx.strokeStyle = hexToRgbaString(accentHex, 78);
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+
+        // Left vertical accent bar inside the card
+        ctx.fillStyle = accentHex;
+        ctx.fillRect(cardLeft + 1, cardTop + 3, 2.5, Math.max(2, cardH - 6));
+
+        // Render O, H, L, C rows
+        ctx.textBaseline = 'middle';
+        for (let lIdx = 0; lIdx < lines.length; lIdx++) {
+          const ln = lines[lIdx];
+          const rowCenterY = cardTop + padY + lIdx * lineH + lineH / 2;
+          ctx.textAlign = 'left';
+          ctx.fillStyle = ln.color;
+          ctx.fillText(ln.tag, cardLeft + padX + 2, rowCenterY);
+
+          ctx.textAlign = 'right';
+          ctx.fillStyle = textHex;
+          ctx.fillText(ln.val, cardLeft + cardW - padX, rowCenterY);
+        }
+
+        lastRenderedCandleOhlcHitBoxes.push({
+          key: item.key,
+          timeSec: b.timeSec,
+          left: cardLeft - 2,
+          top: cardTop - 2,
+          right: cardLeft + cardW + 2,
+          bottom: cardTop + cardH + 2,
+          barX: item.x
+        });
+      }
+    }
+
+    ctx.restore();
+  }
+
+  let cachedDetectedCandlePalette = null;
+  let lastDetectedPaletteAt = 0;
+
+  function detectChartCandleColors(mainSeries) {
+    const now = Date.now();
+    if (cachedDetectedCandlePalette && (now - lastDetectedPaletteAt < 1500)) {
+      return cachedDetectedCandlePalette;
+    }
+
+    let upColor = '#eab308';
+    let downColor = '#f23645';
+    let borderUpColor = null;
+    let borderDownColor = null;
+    let wickUpColor = null;
+    let wickDownColor = null;
+
+    // 1. Inspect mainSeries.properties().childs().candleStyle
+    try {
+      if (mainSeries) {
+        const propsObj = typeof mainSeries.properties === 'function' ? mainSeries.properties() : mainSeries._properties;
+        const unwrapped = propsObj ? unwrapPropertyTree(propsObj) : null;
+        const cs = (unwrapped && (unwrapped.candleStyle || unwrapped.hollowCandleStyle || unwrapped.barStyle)) || null;
+        if (cs && typeof cs === 'object') {
+          if (typeof cs.upColor === 'string' && cs.upColor) upColor = cs.upColor;
+          if (typeof cs.downColor === 'string' && cs.downColor) downColor = cs.downColor;
+          if (typeof cs.borderUpColor === 'string' && cs.borderUpColor) borderUpColor = cs.borderUpColor;
+          if (typeof cs.borderDownColor === 'string' && cs.borderDownColor) borderDownColor = cs.borderDownColor;
+          if (typeof cs.wickUpColor === 'string' && cs.wickUpColor) wickUpColor = cs.wickUpColor;
+          if (typeof cs.wickDownColor === 'string' && cs.wickDownColor) wickDownColor = cs.wickDownColor;
+        }
+      }
+    } catch (e) {}
+
+    // 2. Fallback: check localStorage tradingview.chartproperties
+    try {
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && k.startsWith('tradingview.chartproperties')) {
+          const raw = window.localStorage.getItem(k);
+          if (raw && raw.includes('candleStyle')) {
+            const parsed = JSON.parse(raw);
+            const cs = parsed?.mainSeriesProperties?.candleStyle || parsed?.candleStyle;
+            if (cs && typeof cs === 'object') {
+              if (typeof cs.upColor === 'string' && cs.upColor) upColor = cs.upColor;
+              if (typeof cs.downColor === 'string' && cs.downColor) downColor = cs.downColor;
+              if (typeof cs.borderUpColor === 'string' && cs.borderUpColor) borderUpColor = cs.borderUpColor;
+              if (typeof cs.borderDownColor === 'string' && cs.borderDownColor) borderDownColor = cs.borderDownColor;
+              if (typeof cs.wickUpColor === 'string' && cs.wickUpColor) wickUpColor = cs.wickUpColor;
+              if (typeof cs.wickDownColor === 'string' && cs.wickDownColor) wickDownColor = cs.wickDownColor;
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    cachedDetectedCandlePalette = {
+      upColor,
+      downColor,
+      borderUpColor: borderUpColor || upColor,
+      borderDownColor: borderDownColor || downColor,
+      wickUpColor: wickUpColor || upColor,
+      wickDownColor: wickDownColor || downColor
+    };
+    lastDetectedPaletteAt = now;
+    return cachedDetectedCandlePalette;
+  }
+
+  let lastAppliedCustomCandleWidthScale = null;
+
+  function applyCustomCandleWidthToChart(rawWidthPx, forceApply = false) {
+    try {
+      const cfg = (currentSettings && currentSettings.candleOhlc) || {};
+      const isEnabled = forceApply ? Boolean(cfg.customCandleWidthEnabled !== false) : Boolean(cfg.customCandleWidthEnabled);
+      if (!isEnabled) {
+        lastAppliedCustomCandleWidthScale = null;
+        scheduleIctSessionsRender(false);
+        return;
+      }
+
+      const widthScalePct = Math.max(40, Math.min(260, Number(rawWidthPx ?? cfg.candleWidthPx) || 140));
+      if (!forceApply && lastAppliedCustomCandleWidthScale === widthScalePct) {
+        scheduleIctSessionsRender(false);
+        return;
+      }
+      lastAppliedCustomCandleWidthScale = widthScalePct;
+
+      // Map 40%..260% candle width scale to proportional horizontal barSpacing (px between candle centers)
+      // so increasing or decreasing candle width forces adjacent candles on the left & right to space out proportionally without overlapping!
+      const targetBarSpacing = Math.max(3.5, Math.round((8.5 * (widthScalePct / 100)) * 2) / 2);
+
+      const model = findChartModelForSessions() || getInternalChartModel();
+      const internalTs = model && typeof model.timeScale === 'function' ? model.timeScale() : (model ? model._timeScale : null);
+      const tsApi = (activeChart && typeof activeChart.getTimeScale === 'function') ? activeChart.getTimeScale() : null;
+
+      let preservedRightOffset = null;
+      try {
+        if (internalTs && typeof internalTs.rightOffset === 'function') {
+          const ro = internalTs.rightOffset();
+          if (typeof ro === 'number' && isFinite(ro)) preservedRightOffset = ro;
+        } else if (tsApi && typeof tsApi.rightOffset === 'function') {
+          const ro = tsApi.rightOffset();
+          if (typeof ro === 'number' && isFinite(ro)) preservedRightOffset = ro;
+        }
+      } catch (e) {}
+
+      let applied = false;
+      try {
+        if (tsApi && typeof tsApi.setBarSpacing === 'function') {
+          tsApi.setBarSpacing(targetBarSpacing);
+          applied = true;
+        }
+      } catch (e) {}
+      try {
+        if (internalTs && typeof internalTs.setBarSpacing === 'function') {
+          internalTs.setBarSpacing(targetBarSpacing);
+          applied = true;
+        }
+      } catch (e) {}
+
+      // Keep the rightmost forming candle (#1) anchored at the same right offset so spacing out candles expands cleanly leftward
+      if (applied && preservedRightOffset !== null) {
+        try {
+          if (tsApi && typeof tsApi.setRightOffset === 'function') {
+            tsApi.setRightOffset(preservedRightOffset);
+          } else if (internalTs && typeof internalTs.setRightOffset === 'function') {
+            internalTs.setRightOffset(preservedRightOffset);
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+
+    scheduleIctSessionsRender(false);
+  }
+
+  function renderCustomWidthCandlesOnCanvas(ctx, bars, coCfg, barToX, priceToY, barSpacing, cssWidth, cssHeight, mainSeries) {
+    if (!bars || bars.length === 0) return;
+    const cfg = coCfg || {};
+    if (!cfg.customCandleWidthEnabled) return;
+
+    const widthScalePct = Math.max(40, Math.min(260, Number(cfg.candleWidthPx) || 140));
+    const palette = detectChartCandleColors(mainSeries);
+
+    // Ensure candle bodies NEVER overlap adjacent candles on the left or right by always reserving a clean inter-candle gap!
+    const defaultBodyW = Math.max(1, barSpacing * 0.78);
+    const minGapPx = barSpacing >= 10 ? 2.5 : (barSpacing >= 6 ? 1.5 : 1);
+    const maxNonOverlappingBodyW = Math.max(1.5, barSpacing - minGapPx);
+    const desiredBodyW = Math.max(1.5, barSpacing * 0.78 * Math.min(1.05, Math.max(0.55, widthScalePct / 100)));
+    const targetBodyW = Math.min(maxNonOverlappingBodyW, desiredBodyW);
+    const halfBodyW = targetBodyW / 2;
+    const wickW = Math.max(1, Math.min(3.5, Math.round(targetBodyW * 0.14 * 2) / 2));
+
+    ctx.save();
+
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i];
+      const x = barToX(b.barIndex, b.timeSec);
+      if (x === null || x < -40 || x > cssWidth + 40) continue;
+
+      const openY = priceToY(b.open);
+      const highY = priceToY(b.high);
+      const lowY = priceToY(b.low);
+      const closeY = priceToY(b.close);
+      if (openY === null || highY === null || lowY === null || closeY === null) continue;
+
+      const isBull = b.close >= b.open;
+      const bodyFill = isBull ? palette.upColor : palette.downColor;
+      const borderStroke = isBull ? palette.borderUpColor : palette.borderDownColor;
+      const wickStroke = isBull ? palette.wickUpColor : palette.wickDownColor;
+
+      const topWickY = Math.min(highY, lowY);
+      const bottomWickY = Math.max(highY, lowY);
+      const bodyTop = Math.min(openY, closeY);
+      const bodyBottom = Math.max(openY, closeY);
+      const bodyH = Math.max(1.5, bodyBottom - bodyTop);
+      const crispX = Math.round(x) + 0.5;
+
+      // If user made candles narrower than TradingView's native candle (< 98%), mask out the sides of the native candle body with the pane background
+      if (widthScalePct < 98 && defaultBodyW > targetBodyW + 0.5) {
+        const eraseHalf = (defaultBodyW / 2) + 1;
+        ctx.fillStyle = '#0b0e14';
+        ctx.fillRect(Math.round(x - eraseHalf), Math.round(bodyTop) - 0.5, Math.max(0, (eraseHalf - halfBodyW)), bodyH + 1);
+        ctx.fillRect(Math.round(x + halfBodyW), Math.round(bodyTop) - 0.5, Math.max(0, (eraseHalf - halfBodyW)), bodyH + 1);
+      }
+
+      // 1. High-Low Wick
+      ctx.strokeStyle = wickStroke;
+      ctx.lineWidth = wickW;
+      ctx.beginPath();
+      ctx.moveTo(crispX, Math.round(topWickY));
+      ctx.lineTo(crispX, Math.round(bottomWickY));
+      ctx.stroke();
+
+      // 2. Resized Candle Body centered on the bar's X coordinate
+      const bodyLeft = Math.round((x - halfBodyW) * 2) / 2;
+      ctx.fillStyle = bodyFill;
+      ctx.fillRect(bodyLeft, Math.round(bodyTop), targetBodyW, bodyH);
+
+      if (targetBodyW >= 4 && borderStroke && borderStroke !== bodyFill) {
+        ctx.strokeStyle = borderStroke;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bodyLeft + 0.5, Math.round(bodyTop) + 0.5, Math.max(1, targetBodyW - 1), Math.max(1, bodyH - 1));
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function renderCandleNumbersOnCanvas(ctx, bars, coCfg, barToX, priceToY, barSpacing, cssWidth, cssHeight) {
+    if (!bars || bars.length === 0) return;
+    const cfg = coCfg || {};
+    if (!cfg.showCandleNumbers) return;
+
+    const maxCount = Math.max(10, Math.min(300, Math.round(Number(cfg.candleNumbersMax) || 100)));
+    const glowColorHex = cfg.candleNumberGlowColor || '#38bdf8';
+    const textColorHex = cfg.candleNumberTextColor || '#f8fafc';
+    const bgColorHex = cfg.candleNumberBgColor || '#0f172a';
+    const bgOpacity = Math.max(20, Math.min(100, Number(cfg.candleNumberBgOpacity ?? 90)));
+    const baseFontSize = Math.max(7, Math.min(14, Number(cfg.candleNumberFontSize) || 9.5));
+    // Auto-adapt font size slightly when candles are packed tightly so badges stay compact
+    const fontSize = barSpacing < 14
+      ? Math.max(7, Math.min(baseFontSize, Math.max(7.5, barSpacing * 0.72)))
+      : baseFontSize;
+    const fontSpec = `700 ${fontSize}px "JetBrains Mono", Consolas, "SFMono-Regular", monospace`;
+
+    ctx.save();
+    ctx.font = fontSpec;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const boxH = Math.round(fontSize + 5);
+    const padX = barSpacing < 14 ? 2.5 : 4;
+    const gapBelowWick = 5;
+
+    // Track left-most occupied X (since we iterate right-to-left from #1 to #maxCount) per vertical stagger lane
+    // so EVERY SINGLE CANDLE #1..#maxCount is labeled right below its low wick without ever skipping a candle!
+    const laneLeftEdges = [Infinity, Infinity, Infinity];
+    const minIdx = Math.max(0, bars.length - maxCount);
+
+    for (let i = bars.length - 1; i >= minIdx; i--) {
+      const b = bars[i];
+      const candleNum = bars.length - i; // #1 is current forming candle, #2 is previous, ..., up to #maxCount
+      const x = barToX(b.barIndex, b.timeSec);
+      if (x === null || x < -30 || x > cssWidth + 30) continue;
+
+      const lowY = priceToY(b.low);
+      const highY = priceToY(b.high);
+      const closeY = priceToY(b.close);
+      const anchorY = (lowY !== null && highY !== null)
+        ? Math.max(lowY, highY)
+        : (lowY !== null ? lowY : (closeY !== null ? closeY : cssHeight * 0.65));
+
+      const bottomWickY = Math.min(cssHeight - boxH - 6, Math.max(4, anchorY));
+      const labelText = String(candleNum);
+      const textW = Math.ceil(ctx.measureText(labelText).width);
+      const boxW = Math.max(boxH - 1, textW + padX * 2);
+      const boxLeft = Math.round(x - boxW / 2);
+      const boxRight = boxLeft + boxW;
+
+      // Pick the highest lane (0, 1, or 2) right below the candle where this glow box does not horizontally collide
+      let chosenLane = 0;
+      if (candleNum > 1 && boxRight + 1 > laneLeftEdges[0]) {
+        if (boxRight + 1 <= laneLeftEdges[1]) {
+          chosenLane = 1;
+        } else if (boxRight + 1 <= laneLeftEdges[2]) {
+          chosenLane = 2;
+        } else {
+          chosenLane = (candleNum - 1) % 2;
+        }
+      }
+      laneLeftEdges[chosenLane] = boxLeft;
+
+      const rawBoxTop = Math.round(bottomWickY + gapBelowWick + chosenLane * (boxH + 2));
+      const boxTop = Math.max(2, Math.min(Math.max(2, cssHeight - boxH - 3), rawBoxTop));
+
+      // Subtle connector tick if placed on lane 1 or 2
+      if (chosenLane > 0 && boxTop > bottomWickY + 2) {
+        ctx.save();
+        ctx.strokeStyle = hexToRgbaString(glowColorHex, 45);
+        ctx.lineWidth = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(Math.round(x) + 0.5, Math.round(bottomWickY + 2));
+        ctx.lineTo(Math.round(x) + 0.5, boxTop);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Crisp outlined box right below the candle's low wick (no glow/shadowBlur)
+      ctx.save();
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+
+      drawRoundedRectPath(ctx, boxLeft, boxTop, boxW, boxH, 3.5);
+      ctx.fillStyle = hexToRgbaString(bgColorHex, bgOpacity);
+      ctx.fill();
+
+      ctx.lineWidth = candleNum === 1 ? 1.4 : 1.05;
+      ctx.strokeStyle = hexToRgbaString(glowColorHex, candleNum === 1 ? 100 : 85);
+      ctx.stroke();
+      ctx.restore();
+
+      // Number label inside the glow box
+      ctx.fillStyle = textColorHex;
+      ctx.fillText(labelText, boxLeft + boxW / 2, boxTop + boxH / 2 + 0.5);
+    }
+
+    ctx.restore();
+  }
+
+  let lastChartPointerDownInfo = null;
+  let lastCandleClickToggleTimestamp = 0;
+
+  function isDrawingToolActivelySelectedOnChart() {
+    try {
+      const { detectedActiveTool } = scanDomSidebarGroupSlots();
+      if (detectedActiveTool && !['cursor', 'dot', 'arrow', 'eraser'].includes(detectedActiveTool)) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function handlePotentialCandleClickOnCanvas(e) {
+    if (!e || !lastChartPointerDownInfo) return;
+    if (typeof e.button === 'number' && e.button !== 0) return;
+
+    const now = Date.now();
+    // Prevent duplicate fire when both pointerup and mouseup trigger on the same click
+    if (now - lastCandleClickToggleTimestamp < 120) {
+      lastChartPointerDownInfo = null;
+      return;
+    }
+
+    const downInfo = lastChartPointerDownInfo;
+    lastChartPointerDownInfo = null;
+
+    const moveDist = Math.hypot((e.clientX || 0) - downInfo.clientX, (e.clientY || 0) - downInfo.clientY);
+    const elapsedMs = now - downInfo.time;
+    if (moveDist > 5 || elapsedMs > 500) return;
+
+    const coCfg = (currentSettings && currentSettings.candleOhlc) || {};
+    if (coCfg.clickCandleToToggle === false) return;
+
+    // Do not toggle a candle if the user is actively drawing with a line/shape tool or clicked a drawing shape
+    if (isDrawingToolActivelySelectedOnChart()) return;
+    if (getHoveredOrSelectedIdFromModel(true)) return;
+
+    const targetCanvas = findMainChartPaneCanvas();
+    if (!targetCanvas) return;
+
+    // Verify the click occurred inside the main chart pane canvas
+    const targetDoc = targetCanvas.ownerDocument || document;
+    const eventDoc = (e.target && e.target.ownerDocument) || document;
+    if (targetDoc !== eventDoc) return;
+
+    const rect = targetCanvas.getBoundingClientRect();
+    const localX = (e.clientX || 0) - rect.left;
+    const localY = (e.clientY || 0) - rect.top;
+    if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) return;
+
+    const allEnabled = Boolean(coCfg.enabled);
+
+    // 1. First check if the user clicked directly on an already-rendered OHLC card/tag on the canvas
+    for (let i = lastRenderedCandleOhlcHitBoxes.length - 1; i >= 0; i--) {
+      const box = lastRenderedCandleOhlcHitBoxes[i];
+      if (localX >= box.left && localX <= box.right && localY >= box.top && localY <= box.bottom) {
+        lastCandleClickToggleTimestamp = now;
+        toggleSingleCandleOhlcByKey(box.key, allEnabled);
+        scheduleIctSessionsRender(false);
+        return;
+      }
+    }
+
+    // 2. Otherwise hit-test the candle bodies and wicks on the chart
+    const extracted = extractSeriesBarsFromModel();
+    if (!extracted || !extracted.bars || extracted.bars.length === 0) return;
+
+    const { mainSeries, timeScale, bars } = extracted;
+    const tsApi = (activeChart && typeof activeChart.getTimeScale === 'function') ? activeChart.getTimeScale() : null;
+    let barSpacing = 6;
+    let rightOffset = null;
+    try {
+      if (timeScale && typeof timeScale.barSpacing === 'function') {
+        barSpacing = Number(timeScale.barSpacing()) || 6;
+      } else if (tsApi && typeof tsApi.barSpacing === 'function') {
+        barSpacing = Number(tsApi.barSpacing()) || 6;
+      }
+      if (timeScale && typeof timeScale.rightOffset === 'function') {
+        const ro = timeScale.rightOffset();
+        if (typeof ro === 'number' && isFinite(ro)) rightOffset = ro;
+      } else if (tsApi && typeof tsApi.rightOffset === 'function') {
+        const ro = tsApi.rightOffset();
+        if (typeof ro === 'number' && isFinite(ro)) rightOffset = ro;
+      }
+    } catch (err) {}
+
+    let visibleRange = null;
+    try {
+      if (activeChart && typeof activeChart.getVisibleRange === 'function') {
+        visibleRange = activeChart.getVisibleRange();
+      }
+    } catch (err) {}
+
+    const cssWidth = targetCanvas.clientWidth || Math.round(rect.width);
+    const cssHeight = targetCanvas.clientHeight || Math.round(rect.height);
+    const lastBar = bars[bars.length - 1];
+    const baseIndex = lastBar.barIndex;
+    const hasIndexToCoord = Boolean(timeScale && typeof timeScale.indexToCoordinate === 'function');
+    const hasTimeToCoord = Boolean(tsApi && typeof tsApi.timeToCoordinate === 'function');
+
+    const barToX = (barIndex, timeSec) => {
+      if (hasIndexToCoord && typeof barIndex === 'number') {
+        try {
+          const x = timeScale.indexToCoordinate(barIndex);
+          if (typeof x === 'number' && isFinite(x)) return x;
+        } catch (err) {}
+      }
+      if (hasTimeToCoord && typeof timeSec === 'number') {
+        try {
+          const x = tsApi.timeToCoordinate(timeSec);
+          if (typeof x === 'number' && isFinite(x)) return x;
+        } catch (err) {}
+      }
+      if (rightOffset !== null && typeof barIndex === 'number' && typeof baseIndex === 'number') {
+        const deltaFromRight = baseIndex + rightOffset - barIndex;
+        return cssWidth - (deltaFromRight + 0.5) * barSpacing - 1;
+      }
+      if (visibleRange && visibleRange.to > visibleRange.from && typeof timeSec === 'number') {
+        return ((timeSec - visibleRange.from) / (visibleRange.to - visibleRange.from)) * cssWidth;
+      }
+      return null;
+    };
+
+    const internalPs = (mainSeries && typeof mainSeries.priceScale === 'function') ? mainSeries.priceScale() : null;
+    const psApi = getPrimaryPriceScaleApi();
+    let firstValue = null;
+    try {
+      if (mainSeries && typeof mainSeries.firstValue === 'function') {
+        const fv = mainSeries.firstValue();
+        firstValue = (fv && typeof fv === 'object' && 'value' in fv) ? fv.value : fv;
+      }
+      if ((firstValue === null || firstValue === undefined) && internalPs && typeof internalPs.firstValue === 'function') {
+        const fv = internalPs.firstValue();
+        firstValue = (fv && typeof fv === 'object' && 'value' in fv) ? fv.value : fv;
+      }
+      if ((firstValue === null || firstValue === undefined) && bars.length > 0) {
+        firstValue = bars[0].close;
+      }
+    } catch (err) {}
+
+    let visiblePriceRange = null;
+    try {
+      if (internalPs && typeof internalPs.priceRange === 'function') {
+        const pr = internalPs.priceRange();
+        if (pr) {
+          const minV = typeof pr.minValue === 'function' ? pr.minValue() : pr.from;
+          const maxV = typeof pr.maxValue === 'function' ? pr.maxValue() : pr.to;
+          if (typeof minV === 'number' && typeof maxV === 'number' && maxV > minV) {
+            visiblePriceRange = { from: minV, to: maxV };
+          }
+        }
+      }
+      if (!visiblePriceRange && psApi && typeof psApi.getVisiblePriceRange === 'function') {
+        visiblePriceRange = psApi.getVisiblePriceRange();
+      }
+    } catch (err) {}
+
+    let psTopMargin = 0;
+    let psBottomMargin = 0;
+    try {
+      if (internalPs) {
+        if (typeof internalPs.topMarginPx === 'function') psTopMargin = Number(internalPs.topMarginPx()) || 0;
+        if (typeof internalPs.bottomMarginPx === 'function') psBottomMargin = Number(internalPs.bottomMarginPx()) || 0;
+      }
+    } catch (err) {}
+
+    const priceToY = (price) => {
+      try {
+        if (internalPs && typeof internalPs.priceToCoordinate === 'function') {
+          const y = internalPs.priceToCoordinate(price, firstValue);
+          if (typeof y === 'number' && isFinite(y)) return y;
+        }
+      } catch (err) {}
+      try {
+        if (psApi && typeof psApi.priceToCoordinate === 'function') {
+          const y = psApi.priceToCoordinate(price);
+          if (typeof y === 'number' && isFinite(y)) return y;
+        }
+      } catch (err) {}
+      if (visiblePriceRange && visiblePriceRange.to !== visiblePriceRange.from) {
+        const usableH = Math.max(1, cssHeight - psTopMargin - psBottomMargin);
+        return psTopMargin + usableH - ((price - visiblePriceRange.from) / (visiblePriceRange.to - visiblePriceRange.from)) * usableH;
+      }
+      return null;
+    };
+
+    const maxHorzTolerance = Math.max(6, barSpacing * 0.62);
+    let bestBar = null;
+    let bestDx = Infinity;
+
+    for (let i = bars.length - 1; i >= 0; i--) {
+      const b = bars[i];
+      const bx = barToX(b.barIndex, b.timeSec);
+      if (bx === null) continue;
+      const dx = Math.abs(localX - bx);
+      if (dx <= maxHorzTolerance && dx < bestDx) {
+        const highY = priceToY(b.high);
+        const lowY = priceToY(b.low);
+        if (highY === null || lowY === null) continue;
+        const minY = Math.min(highY, lowY) - 14;
+        const maxY = Math.max(highY, lowY) + 14;
+        if (localY >= minY && localY <= maxY) {
+          bestDx = dx;
+          bestBar = b;
+        }
+      }
+    }
+
+    if (!bestBar) return;
+
+    lastCandleClickToggleTimestamp = now;
+    const symbolKey = getCurrentChartSymbolKey();
+    const tfLabel = formatCurrentResolutionLabel();
+    const candleKey = buildCandleOhlcKey(symbolKey, tfLabel, bestBar.timeSec);
+    toggleSingleCandleOhlcByKey(candleKey, allEnabled);
+    scheduleIctSessionsRender(false);
   }
 
   let ictPriceScaleBadgeContainer = null;
@@ -5834,7 +8859,25 @@
     ictSessionsRafId = null;
 
     const config = currentSettings && currentSettings.sessionIndicators;
-    if (!config || !config.enabled || !isIntradayChartResolution()) {
+    const cortexConfig = currentSettings && currentSettings.cortexIndicator;
+    const fvgConfig = currentSettings && currentSettings.autoFvg;
+    const candleOhlcConfig = currentSettings && currentSettings.candleOhlc;
+    const failLinesEnabled = Boolean(currentSettings && currentSettings.failLines && currentSettings.failLines.enabled);
+    const cortexIndicatorEnabled = Boolean(cortexConfig && cortexConfig.enabled);
+    if (!failLinesEnabled) removeFailPriceLineButtons();
+    if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
+    const sessionsEnabled = Boolean(config && config.enabled && isIntradayChartResolution());
+    const autoFvgEnabled = Boolean(fvgConfig && fvgConfig.enabled);
+    const candleNumbersEnabled = Boolean(candleOhlcConfig && candleOhlcConfig.showCandleNumbers);
+    const customCandleWidthEnabled = Boolean(candleOhlcConfig && candleOhlcConfig.customCandleWidthEnabled);
+    const candleOhlcEnabled = Boolean((candleOhlcConfig && candleOhlcConfig.enabled) || toggledCandleOhlcSet.size > 0);
+
+    if (!autoFvgEnabled && nativeAutoFvgShapesMap.size > 0) {
+      cleanupNativeAutoFvgShapes(null);
+    }
+
+    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled) {
+      lastRenderedCandleOhlcHitBoxes = [];
       if (ictSessionsCanvas) {
         const ctx = ictSessionsCanvas.getContext('2d');
         if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
@@ -5859,20 +8902,49 @@
     const { mainSeries, timeScale, bars } = extracted;
 
     const lastBar = bars[bars.length - 1];
+    latestChartMarketPrice = Number(lastBar && lastBar.close);
     const prevBar = bars.length > 1 ? bars[bars.length - 2] : lastBar;
-    const barsSig = `${bars.length}_${bars[0].timeSec}_${prevBar.high}_${prevBar.low}_${lastBar.timeSec}_${lastBar.high}_${lastBar.low}_${lastBar.close}`;
-    const configSig = JSON.stringify(config);
+    const barIntervalSec = (bars.length > 1 && lastBar.timeSec > prevBar.timeSec)
+      ? (lastBar.timeSec - prevBar.timeSec)
+      : 300;
+    const symbolKey = getCurrentChartSymbolKey();
+    syncCortexManualBuyButton(cortexIndicatorEnabled, symbolKey, latestChartMarketPrice);
+    const barsSig = `${symbolKey}_${bars.length}_${bars[0].timeSec}_${bars[0].close}_${prevBar.high}_${prevBar.low}_${lastBar.timeSec}_${lastBar.high}_${lastBar.low}_${lastBar.close}`;
 
-    if (
-      ictSessionsNeedsFullRecompute ||
-      barsSig !== cachedIctBarsSignature ||
-      configSig !== cachedIctConfigSignature
-    ) {
-      cachedIctComputedSessions = computeIctSessionsFromBars(bars, config);
-      cachedIctBarsSignature = barsSig;
-      cachedIctConfigSignature = configSig;
-      ictSessionsNeedsFullRecompute = false;
+    if (sessionsEnabled) {
+      const configSig = JSON.stringify(config);
+      if (
+        ictSessionsNeedsFullRecompute ||
+        barsSig !== cachedIctBarsSignature ||
+        configSig !== cachedIctConfigSignature
+      ) {
+        cachedIctComputedSessions = computeIctSessionsFromBars(bars, config);
+        cachedIctBarsSignature = barsSig;
+        cachedIctConfigSignature = configSig;
+      }
+    } else {
+      cachedIctComputedSessions = [];
     }
+
+    if (autoFvgEnabled) {
+      const existingRectsSnap = getExistingChartRectangleBoundsList(bars);
+      const existingRectsSig = existingRectsSnap
+        .map(r => `${r.entityId}:${Math.round(r.startTimeSec)}:${r.top.toFixed(2)}:${r.bottom.toFixed(2)}`)
+        .join('|');
+      const autoFvgSig = `${barsSig}_${existingRectsSig}_${formatCurrentResolutionLabel()}_${JSON.stringify(fvgConfig)}_${JSON.stringify(currentTemplates)}`;
+      if (
+        ictSessionsNeedsFullRecompute ||
+        autoFvgSig !== cachedAutoFvgSignature
+      ) {
+        cachedComputedAutoFvgs = computeAutoFvgsFromBars(bars, fvgConfig);
+        cachedAutoFvgSignature = autoFvgSig;
+        syncNativeTradingViewAutoFvgShapes(cachedComputedAutoFvgs, fvgConfig, barIntervalSec, bars);
+      }
+    } else {
+      cachedComputedAutoFvgs = [];
+    }
+
+    ictSessionsNeedsFullRecompute = false;
 
     const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
     if (!overlay) return;
@@ -5892,7 +8964,9 @@
     ctx.clearRect(0, 0, overlay.width, overlay.height);
     ctx.scale(dpr, dpr);
 
-    if (cachedIctComputedSessions.length === 0) {
+    const hasCanvasFvgs = autoFvgEnabled && !fvgConfig.syncNativeDrawings && cachedComputedAutoFvgs.length > 0;
+    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
+      lastRenderedCandleOhlcHitBoxes = [];
       clearIctPriceScaleBadges();
       ctx.restore();
       return;
@@ -6017,19 +9091,317 @@
       return null;
     };
 
+    if (cortexIndicatorEnabled) {
+      const ci = cortexConfig;
+      const emaLen = Math.max(5, Math.min(200, Number(ci.emaLength) || 34));
+      const atrLen = Math.max(3, Math.min(100, Number(ci.atrLength) || 14));
+      const multiplier = Math.max(1, Math.min(6, Number(ci.trendMultiplier) || 2.6));
+      const points = [];
+      let ema = Number(bars[0].close);
+      let atr = 0;
+      let trSeed = 0;
+      let trCount = 0;
+      let priorClose = Number(bars[0].close);
+      let finalUpper = null;
+      let finalLower = null;
+      let direction = 1;
+      let priorDirection = 1;
+      const emaAlpha = 2 / (emaLen + 1);
+      const trueRanges = [];
+      for (let i = 0; i < bars.length; i++) {
+        const bar = bars[i];
+        const high = Number(bar.high), low = Number(bar.low), close = Number(bar.close);
+        if (![high, low, close].every(Number.isFinite)) continue;
+        ema = i === 0 ? close : close * emaAlpha + ema * (1 - emaAlpha);
+        const tr = i === 0 ? high - low : Math.max(high - low, Math.abs(high - priorClose), Math.abs(low - priorClose));
+        trueRanges.push(tr);
+        if (trCount < atrLen) {
+          trSeed += tr;
+          trCount++;
+          atr = trSeed / trCount;
+        } else {
+          atr = ((atr * (atrLen - 1)) + tr) / atrLen;
+        }
+        priorClose = close;
+        const mid = (high + low) / 2;
+        const basicUpper = mid + multiplier * atr;
+        const basicLower = mid - multiplier * atr;
+        const prev = points.length ? points[points.length - 1] : null;
+        const nextUpper = finalUpper === null || basicUpper < finalUpper || (prev && prev.close > finalUpper) ? basicUpper : finalUpper;
+        const nextLower = finalLower === null || basicLower > finalLower || (prev && prev.close < finalLower) ? basicLower : finalLower;
+        priorDirection = direction;
+        if (prev) {
+          if (direction < 0 && close > finalUpper) direction = 1;
+          else if (direction > 0 && close < finalLower) direction = -1;
+        }
+        finalUpper = nextUpper;
+        finalLower = nextLower;
+        const stop = direction > 0 ? finalLower : finalUpper;
+        points.push({
+          index: bar.barIndex,
+          timeSec: bar.timeSec,
+          high, low, close, ema, atr,
+          stop,
+          direction,
+          flip: prev && direction !== priorDirection ? direction : 0
+        });
+      }
+
+      const automationConfig = currentSettings && currentSettings.cortexIndicator;
+      const resolution = formatCurrentResolutionLabel();
+      if (automationConfig && automationConfig.enabled === true && points.length > 1 &&
+          (automationConfig.formingSignalVoiceAlert !== false || automationConfig.confirmedSignalVoiceAlert !== false)) {
+        const alertContextKey = `${symbolKey}:${resolution}`;
+        const currentPoint = points[points.length - 1];
+        if (automationConfig.formingSignalVoiceAlert !== false && currentPoint.flip) {
+          const side = currentPoint.flip > 0 ? 'long' : 'short';
+          const formingKey = `${symbolKey}:${resolution}:${currentPoint.timeSec}`;
+          if (formingKey !== lastCortexFormingAlertKey) {
+            lastCortexFormingAlertKey = formingKey;
+            postToIsolated({
+              type: 'VEST_TV_CI_SIGNAL_FORMING',
+              payload: { symbol: symbolKey, resolution, timeSec: currentPoint.timeSec, side }
+            });
+          }
+        }
+        const closedPoint = points[points.length - 2];
+        const closedBarKey = `${symbolKey}:${resolution}:${closedPoint.timeSec}`;
+        if (automationConfig.confirmedSignalVoiceAlert !== false && alertContextKey === lastCortexAlertContextKey &&
+            lastCortexAlertClosedBarKey && closedBarKey !== lastCortexAlertClosedBarKey && closedPoint.flip) {
+          postToIsolated({
+            type: 'VEST_TV_CI_SIGNAL_CONFIRMED',
+            payload: { symbol: symbolKey, resolution, timeSec: closedPoint.timeSec, side: closedPoint.flip > 0 ? 'long' : 'short' }
+          });
+        }
+        lastCortexAlertContextKey = alertContextKey;
+        lastCortexAlertClosedBarKey = closedBarKey;
+      } else {
+        lastCortexAlertClosedBarKey = '';
+        lastCortexAlertContextKey = '';
+        lastCortexFormingAlertKey = '';
+      }
+      if (automationConfig && automationConfig.enabled === true && automationConfig.executionEnabled === true && points.length > 1) {
+        const closedPoint = points[points.length - 2];
+        const contextKey = `${symbolKey}:${resolution}`;
+        const closedBarKey = `${symbolKey}:${resolution}:${closedPoint.timeSec}`;
+        const contextChanged = contextKey !== lastCortexAutomationContextKey;
+        if (!contextChanged && lastCortexAutomationClosedBarKey && closedBarKey !== lastCortexAutomationClosedBarKey) {
+          const side = closedPoint.flip > 0 ? 'long' : closedPoint.flip < 0 ? 'short' : null;
+          const signalId = side ? `${symbolKey}:${resolution}:${closedPoint.timeSec}:${side}` : '';
+          const sideSign = side === 'long' ? 1 : -1;
+          const fixedPointMode = automationConfig.levelDistanceMode !== 'atr';
+          const entryPrice = Number(closedPoint.close);
+          const stopDistance = Math.max(1, Math.min(20, Number(automationConfig.stopLossPoints) || 8));
+          const targetSpacing = Math.max(0.25, Math.min(20, Number(automationConfig.targetSpacingPoints) || 4));
+          const stopPrice = fixedPointMode ? entryPrice - sideSign * stopDistance : Number(closedPoint.stop);
+          const risk = Math.abs(entryPrice - stopPrice) || Number(closedPoint.atr) * (Number(automationConfig.trendMultiplier) || 2.6);
+          const targetMultipliers = Array.isArray(automationConfig.targetRiskMultipliers) ? automationConfig.targetRiskMultipliers : [1, 2, 3];
+          const targetPrices = [0, 1, 2].map(i => entryPrice + sideSign * (fixedPointMode ? targetSpacing * (i + 1) : risk * (Number(targetMultipliers[i]) || i + 1)));
+          postToIsolated({
+            type: 'VEST_TV_CI_BAR_CLOSED',
+            payload: {
+              symbol: symbolKey,
+              resolution,
+              bar: {
+                barIndex: points.length - 2,
+                timeSec: closedPoint.timeSec,
+                high: closedPoint.high,
+                low: closedPoint.low,
+                close: closedPoint.close
+              },
+              signal: side ? {
+                signalId,
+                side,
+                symbol: symbolKey,
+                resolution,
+                barIndex: points.length - 2,
+                timeSec: closedPoint.timeSec,
+                entryPrice,
+                stopPrice,
+                targetPrices
+              } : null
+            }
+          });
+        }
+        lastCortexAutomationContextKey = contextKey;
+        lastCortexAutomationClosedBarKey = closedBarKey;
+      } else {
+        lastCortexAutomationClosedBarKey = '';
+        lastCortexAutomationContextKey = '';
+      }
+
+      ctx.save();
+
+      // EMA centerline and ATR-trailing trend stop.
+      ctx.lineWidth = Math.max(1, barSpacing * 0.22);
+      ctx.strokeStyle = 'rgba(217, 70, 239, 0.85)';
+      ctx.beginPath();
+      let started = false;
+      points.forEach(point => {
+        const x = barToX(point.index, point.timeSec), y = priceToY(point.ema);
+        if (x === null || y === null || x < -barSpacing || x > cssWidth + barSpacing) return;
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.lineWidth = Math.max(1.3, barSpacing * 0.28);
+      ctx.strokeStyle = '#f04452';
+      ctx.beginPath();
+      started = false;
+      points.forEach((point, i) => {
+        const x = barToX(point.index, point.timeSec), y = priceToY(point.stop);
+        if (x === null || y === null || x < -barSpacing || x > cssWidth + barSpacing) return;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else {
+          const previousY = priceToY(points[i - 1]?.stop);
+          if (previousY !== null) ctx.lineTo(x, previousY);
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+
+      if (ci.showSignals !== false) {
+        points.forEach(point => {
+          if (!point.flip) return;
+          const x = barToX(point.index, point.timeSec);
+          const y = priceToY(point.flip > 0 ? point.low - point.atr * 0.2 : point.high + point.atr * 0.2);
+          if (x === null || y === null || x < -20 || x > cssWidth + 20) return;
+          const color = point.flip > 0 ? '#00d6a2' : '#ec3d72';
+          const text = point.flip > 0 ? 'Buy' : 'Sell';
+          ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
+          const w = ctx.measureText(text).width + 16;
+          const h = 22;
+          const boxY = point.flip > 0 ? y + 8 : y - h - 8;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.roundRect(x - w / 2, boxY, w, h, 3);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, x, boxY + h / 2);
+        });
+      }
+
+      const latestPoint = points[points.length - 1];
+      const latestX = latestPoint && barToX(latestPoint.index, latestPoint.timeSec);
+      if (latestPoint && ci.showTargets !== false && latestX !== null) {
+        const latestSignal = [...points].reverse().find(point => point.flip);
+        if (latestSignal) {
+          const longSide = latestSignal.flip > 0;
+          const entry = latestSignal.close;
+          const sideSign = longSide ? 1 : -1;
+          const fixedPointMode = ci.levelDistanceMode !== 'atr';
+          const stopDistance = Math.max(1, Math.min(20, Number(ci.stopLossPoints) || 8));
+          const targetSpacing = Math.max(0.25, Math.min(20, Number(ci.targetSpacingPoints) || 4));
+          const stop = fixedPointMode ? entry - sideSign * stopDistance : latestSignal.stop;
+          const risk = Math.abs(entry - stop) || latestSignal.atr * multiplier;
+          const labelFontSize = Math.max(8, Math.min(24, Number(ci.levelFontSize) || 11));
+          const boxScale = Math.max(75, Math.min(200, Number(ci.levelBoxScale) || 100)) / 100;
+          const endX = Math.min(cssWidth - 6, Math.max(latestX + 5 * barSpacing, latestX + 24));
+          const levels = [
+            { name: 'Entry', price: entry, color: '#f5aa00' },
+            { name: 'Stop loss', price: stop, color: '#ed3f65' },
+            ...((Array.isArray(ci.targetRiskMultipliers) ? ci.targetRiskMultipliers : [1, 2, 3]).slice(0, 3).map((multiple, i) => ({
+              name: `TP ${i + 1}`,
+              price: entry + sideSign * (fixedPointMode ? targetSpacing * (i + 1) : risk * Number(multiple)),
+              color: '#00c99a'
+            })))
+          ];
+          levels.forEach(level => {
+            const y = priceToY(level.price);
+            if (y === null || y < -15 || y > cssHeight + 15) return;
+            // Draw the guide leftward from the current label edge. Its left endpoint is
+            // the first later candle whose range reaches this price; untouched levels
+            // begin at the signal candle instead.
+            let leftEndpointX = barToX(latestSignal.index, latestSignal.timeSec);
+            const signalPointIndex = points.indexOf(latestSignal);
+            for (let i = signalPointIndex + 1; i < points.length; i++) {
+              const bar = points[i];
+              if (bar.low <= level.price && bar.high >= level.price) {
+                const hitX = barToX(bar.index, bar.timeSec);
+                if (hitX !== null) leftEndpointX = hitX;
+                break;
+              }
+            }
+            if (leftEndpointX === null) leftEndpointX = latestX;
+            ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = `${level.color}bb`;
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(leftEndpointX, y); ctx.lineTo(endX, y); ctx.stroke();
+            ctx.setLineDash([]);
+            const label = `${level.name}: ${formatChartPriceValue(level.price, lastTrackedPrice)}`;
+            ctx.font = `700 ${labelFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+            const padX = 7 * boxScale;
+            const boxHeight = 18 * boxScale;
+            const width = ctx.measureText(label).width + padX * 2;
+            const left = Math.max(2, Math.min(cssWidth - width - 2, endX + 5));
+            ctx.fillStyle = level.color;
+            ctx.beginPath(); ctx.roundRect(left, y - boxHeight / 2, width, boxHeight, 3 * boxScale); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+            ctx.fillText(label, left + padX, y);
+          });
+        }
+      }
+
+      if (ci.showTrendTable !== false) {
+        const timeframeRows = [
+          { label: '1m', sec: 60 }, { label: '5m', sec: 300 }, { label: '15m', sec: 900 },
+          { label: '30m', sec: 1800 }, { label: '1H', sec: 3600 }, { label: '1D', sec: 86400 }
+        ];
+        const available = timeframeRows.filter(row => row.sec >= barIntervalSec * 0.9);
+        const tableX = Math.max(4, cssWidth - 72), tableY = 10, rowH = 20;
+        ctx.font = '700 10px -apple-system, BlinkMacSystemFont, sans-serif';
+        const tableH = (available.length + 1) * rowH;
+        ctx.fillStyle = 'rgba(10, 16, 30, 0.86)';
+        ctx.beginPath(); ctx.roundRect(tableX, tableY, 68, tableH, 4); ctx.fill();
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#dbe4f0'; ctx.textAlign = 'center';
+        ctx.fillText('Trend  TF', tableX + 34, tableY + rowH / 2);
+        available.forEach((row, idx) => {
+          const buckets = new Map();
+          bars.forEach(bar => {
+            const bucket = Math.floor(bar.timeSec / row.sec);
+            const item = buckets.get(bucket);
+            if (!item) buckets.set(bucket, { open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close) });
+            else { item.high = Math.max(item.high, Number(bar.high)); item.low = Math.min(item.low, Number(bar.low)); item.close = Number(bar.close); }
+          });
+          const grouped = Array.from(buckets.values());
+          let trend = null;
+          if (grouped.length >= 2) {
+            const windowBars = grouped.slice(-Math.min(grouped.length, emaLen));
+            const avg = windowBars.reduce((sum, bar) => sum + bar.close, 0) / windowBars.length;
+            trend = grouped[grouped.length - 1].close >= avg;
+          }
+          const y = tableY + (idx + 1) * rowH;
+          ctx.fillStyle = trend === null ? '#475569' : trend ? '#07976f' : '#c72f58';
+          ctx.fillRect(tableX + 2, y + 2, 42, rowH - 4);
+          ctx.fillStyle = '#fff'; ctx.fillText(trend === null ? '—' : trend ? 'Up' : 'Dn', tableX + 23, y + rowH / 2);
+          ctx.fillStyle = '#e2e8f0'; ctx.fillText(row.label, tableX + 55, y + rowH / 2);
+          ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 0.5;
+          ctx.beginPath(); ctx.moveTo(tableX + 46, y); ctx.lineTo(tableX + 46, y + rowH); ctx.stroke();
+        });
+      }
+      ctx.restore();
+    }
+
     const halfBarW = Math.max(1, barSpacing * 0.5);
-    const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(config.boxOpacity) || 18) / 100));
-    const watermarkAlpha = Math.max(0.05, Math.min(1, (Number(config.watermarkOpacity) || 32) / 100));
-    const fontFamily = config.fontFamily || '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
-    const baseFontSize = Math.max(12, Math.min(76, Number(config.fontSize) || 40));
-    const fontWeight = config.fontBold ? '700' : '500';
-    const showWatermark = config.showWatermark !== false;
-    const showBorder = Boolean(config.showBoxBorder || config.showSessionBorder);
-    const extendHighLow = (config.extendHighLowLines ?? config.extendHighLow) !== false;
-    const showPermDotted = config.showPermanentDottedHighLow !== false;
-    const showHighLowLabels = config.showHighLowLabels !== false;
-    const showMidPoint = Boolean(config.showMidPoint);
-    const extendMidPoint = Boolean(config.extendMidPoint);
+    const sCfg = config || {};
+    const boxAlpha = Math.max(0.02, Math.min(0.65, (Number(sCfg.boxOpacity) || 18) / 100));
+    const watermarkAlpha = Math.max(0.05, Math.min(1, (Number(sCfg.watermarkOpacity) || 32) / 100));
+    const fontFamily = sCfg.fontFamily || '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+    const baseFontSize = Math.max(12, Math.min(76, Number(sCfg.fontSize) || 40));
+    const fontWeight = sCfg.fontBold ? '700' : '500';
+    const showWatermark = sCfg.showWatermark !== false;
+    const showBorder = Boolean(sCfg.showBoxBorder || sCfg.showSessionBorder);
+    const extendHighLow = (sCfg.extendHighLowLines ?? sCfg.extendHighLow) !== false;
+    const showPermDotted = sCfg.showPermanentDottedHighLow !== false;
+    const showHighLowLabels = sCfg.showHighLowLabels !== false;
+    const showMidPoint = Boolean(sCfg.showMidPoint);
+    const extendMidPoint = Boolean(sCfg.extendMidPoint);
+    const sessionLineExtensionMode = sCfg.highLowLineExtensionMode === 'all' || sCfg.highLowLineExtensionMode === 'right'
+      ? 'all'
+      : 'uncleared';
 
     // 7-day cutoff in seconds relative to latest bar on chart
     const latestBarTimeSec = bars[bars.length - 1].timeSec;
@@ -6056,18 +9428,36 @@
       const boxW = Math.max(2, boxRight - boxLeft);
       const boxH = Math.max(2, boxBottom - boxTop);
 
+      const getFirstClearPoint = (sweptBarIndex, sweptTimeSec, closeBarIndex, closeTimeSec) => {
+        const candidates = [
+          sweptBarIndex !== null ? { barIndex: sweptBarIndex, timeSec: sweptTimeSec } : null,
+          closeBarIndex !== null ? { barIndex: closeBarIndex, timeSec: closeTimeSec } : null
+        ].filter(Boolean).sort((a, b) => Number(a.barIndex) - Number(b.barIndex));
+        return candidates[0] || null;
+      };
+      const highClearPoint = getFirstClearPoint(
+        sess.highSweptBarIndex, sess.highSweptTimeSec,
+        sess.highCloseThroughBarIndex, sess.highCloseThroughTimeSec
+      );
+      const lowClearPoint = getFirstClearPoint(
+        sess.lowSweptBarIndex, sess.lowSweptTimeSec,
+        sess.lowCloseThroughBarIndex, sess.lowCloseThroughTimeSec
+      );
+      const highCleared = Boolean(highClearPoint);
+      const lowCleared = Boolean(lowClearPoint);
+
       let highEndX = boxRight;
       let lowEndX = boxRight;
       let midEndX = boxRight;
       if (!sess.isStillInSession) {
         if (extendHighLow) {
-          const hTargetBar = sess.highSweptBarIndex !== null ? sess.highSweptBarIndex : sess.latestBarIndex;
-          const hTargetTime = sess.highSweptTimeSec !== null ? sess.highSweptTimeSec : sess.latestTimeSec;
+          const hTargetBar = highClearPoint ? highClearPoint.barIndex : sess.latestBarIndex;
+          const hTargetTime = highClearPoint ? highClearPoint.timeSec : sess.latestTimeSec;
           const hx = barToX(hTargetBar, hTargetTime);
           if (hx !== null) highEndX = Math.max(boxRight, hx);
 
-          const lTargetBar = sess.lowSweptBarIndex !== null ? sess.lowSweptBarIndex : sess.latestBarIndex;
-          const lTargetTime = sess.lowSweptTimeSec !== null ? sess.lowSweptTimeSec : sess.latestTimeSec;
+          const lTargetBar = lowClearPoint ? lowClearPoint.barIndex : sess.latestBarIndex;
+          const lTargetTime = lowClearPoint ? lowClearPoint.timeSec : sess.latestTimeSec;
           const lx = barToX(lTargetBar, lTargetTime);
           if (lx !== null) lowEndX = Math.max(boxRight, lx);
         }
@@ -6079,8 +9469,14 @@
         }
       }
 
+      const highRightEndX = sessionLineExtensionMode === 'all' || !highCleared ? cssWidth : highEndX;
+      const lowRightEndX = sessionLineExtensionMode === 'all' || !lowCleared ? cssWidth : lowEndX;
+
       const isWithin7Days = sess.endTimeSec >= sevenDaysSecCutoff;
-      const maxRightReach = (showPermDotted && isWithin7Days) ? cssWidth : Math.max(boxRight, highEndX, lowEndX, midEndX);
+      const hasRightExtendedLevel = sessionLineExtensionMode === 'all' || !highCleared || !lowCleared;
+      const maxRightReach = (showPermDotted && isWithin7Days && hasRightExtendedLevel)
+        ? cssWidth
+        : Math.max(boxRight, highEndX, lowEndX, midEndX);
       if (maxRightReach < -50 || boxLeft > cssWidth + 50) continue;
 
       const colorHex = def.color || '#3b82f6';
@@ -6108,7 +9504,7 @@
         ctx.setLineDash([]); // Always solid for the swept line!
 
         const hLineStart = Math.max(-10, boxLeft);
-        const hLineEnd = Math.min(cssWidth + 10, extendHighLow ? highEndX : boxRight);
+        const hLineEnd = Math.min(cssWidth + 10, extendHighLow ? highRightEndX : boxRight);
         if (hLineEnd > hLineStart && highY >= -20 && highY <= cssHeight + 20) {
           ctx.beginPath();
           ctx.moveTo(hLineStart, Math.round(highY) + 0.5);
@@ -6117,7 +9513,7 @@
         }
 
         const lLineStart = Math.max(-10, boxLeft);
-        const lLineEnd = Math.min(cssWidth + 10, extendHighLow ? lowEndX : boxRight);
+        const lLineEnd = Math.min(cssWidth + 10, extendHighLow ? lowRightEndX : boxRight);
         if (lLineEnd > lLineStart && lowY >= -20 && lowY <= cssHeight + 20) {
           ctx.beginPath();
           ctx.moveTo(lLineStart, Math.round(lowY) + 0.5);
@@ -6169,9 +9565,10 @@
           ? config.permLabelCustomColor
           : colorHex;
 
-        const drawPermLineWithLabel = (lineY, lineStartX, labelText, isHighLine) => {
-          if (lineY < 0 || lineY > cssHeight || cssWidth <= lineStartX) return;
+        const drawPermLineWithLabel = (lineY, lineStartX, lineEndX, labelText, isHighLine) => {
+          if (lineY < 0 || lineY > cssHeight || lineEndX < lineStartX) return;
           const yCoord = Math.round(lineY) + 0.5;
+          const boundedEndX = Math.min(cssWidth, lineEndX);
 
           ctx.font = permFontSpec;
           const textW = ctx.measureText(labelText).width;
@@ -6184,42 +9581,42 @@
           }
 
           // Determine label X anchor and gap bounds [gapStart, gapEnd] when inline
-          let textX = cssWidth - 6;
+          let textX = boundedEndX - 6;
           let textAlign = 'right';
-          let gapStart = cssWidth;
-          let gapEnd = cssWidth;
+          let gapStart = boundedEndX;
+          let gapEnd = boundedEndX;
 
           if (permHorzAlign === 'left') {
             textAlign = 'left';
-            textX = Math.min(cssWidth - textW - 6, lineStartX + 6);
+            textX = Math.min(boundedEndX - textW - 6, lineStartX + 6);
             gapStart = Math.max(lineStartX, textX - padX);
-            gapEnd = Math.min(cssWidth, textX + textW + padX);
+            gapEnd = Math.min(boundedEndX, textX + textW + padX);
           } else if (permHorzAlign === 'center') {
             textAlign = 'center';
-            textX = (lineStartX + cssWidth) / 2;
+            textX = (lineStartX + boundedEndX) / 2;
             gapStart = Math.max(lineStartX, textX - textW / 2 - padX);
-            gapEnd = Math.min(cssWidth, textX + textW / 2 + padX);
+            gapEnd = Math.min(boundedEndX, textX + textW / 2 + padX);
           } else {
             textAlign = 'right';
-            textX = cssWidth - 6;
-            gapStart = Math.max(lineStartX, cssWidth - 6 - textW - padX);
-            gapEnd = cssWidth;
+            textX = boundedEndX - 6;
+            gapStart = Math.max(lineStartX, boundedEndX - 6 - textW - padX);
+            gapEnd = boundedEndX;
           }
 
           // Draw line (breaking around the label if vMode === 'inline' so the line never strikes through the text!)
           ctx.beginPath();
-          if (vMode === 'inline' && cssWidth - lineStartX > textW + 16) {
+          if (vMode === 'inline' && boundedEndX - lineStartX > textW + 16) {
             if (gapStart > lineStartX) {
               ctx.moveTo(lineStartX, yCoord);
               ctx.lineTo(gapStart, yCoord);
             }
-            if (cssWidth > gapEnd) {
+            if (boundedEndX > gapEnd) {
               ctx.moveTo(gapEnd, yCoord);
-              ctx.lineTo(cssWidth, yCoord);
+              ctx.lineTo(boundedEndX, yCoord);
             }
           } else {
             ctx.moveTo(lineStartX, yCoord);
-            ctx.lineTo(cssWidth, yCoord);
+            ctx.lineTo(boundedEndX, yCoord);
           }
           ctx.stroke();
 
@@ -6240,29 +9637,35 @@
         };
 
         const hPermStart = Math.max(0, extendHighLow ? Math.min(highEndX, cssWidth) : Math.max(0, boxLeft));
-        if (highY >= 0 && highY <= cssHeight && cssWidth > hPermStart) {
+        const hPermEnd = Math.min(cssWidth, highRightEndX);
+        const highStoppedByBar = sessionLineExtensionMode === 'uncleared' && highCleared;
+        if (highY >= 0 && highY <= cssHeight && hPermEnd >= hPermStart) {
           const highLabelText = `${dateStr} ${sessionDisplayName} High`;
-          drawPermLineWithLabel(highY, hPermStart, highLabelText, true);
-
-          priceScaleBadges.push({
-            y: highY,
-            price: sess.high,
-            color: colorHex,
-            label: highLabelText
-          });
+          if (!highStoppedByBar) {
+            drawPermLineWithLabel(highY, hPermStart, hPermEnd, highLabelText, true);
+            priceScaleBadges.push({
+              y: highY,
+              price: sess.high,
+              color: colorHex,
+              label: highLabelText
+            });
+          }
         }
 
         const lPermStart = Math.max(0, extendHighLow ? Math.min(lowEndX, cssWidth) : Math.max(0, boxLeft));
-        if (lowY >= 0 && lowY <= cssHeight && cssWidth > lPermStart) {
+        const lPermEnd = Math.min(cssWidth, lowRightEndX);
+        const lowStoppedByBar = sessionLineExtensionMode === 'uncleared' && lowCleared;
+        if (lowY >= 0 && lowY <= cssHeight && lPermEnd >= lPermStart) {
           const lowLabelText = `${dateStr} ${sessionDisplayName} Low`;
-          drawPermLineWithLabel(lowY, lPermStart, lowLabelText, false);
-
-          priceScaleBadges.push({
-            y: lowY,
-            price: sess.low,
-            color: colorHex,
-            label: lowLabelText
-          });
+          if (!lowStoppedByBar) {
+            drawPermLineWithLabel(lowY, lPermStart, lPermEnd, lowLabelText, false);
+            priceScaleBadges.push({
+              y: lowY,
+              price: sess.low,
+              color: colorHex,
+              label: lowLabelText
+            });
+          }
         }
 
         ctx.restore();
@@ -6318,10 +9721,188 @@
       }
     }
 
+    // 5. Render Auto Fair Value Gaps (FVGs) on canvas when enabled and not using native TradingView shapes
+    if (hasCanvasFvgs) {
+      renderAutoFvgsOnCanvas(ctx, cachedComputedAutoFvgs, fvgConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+    }
+
+    // 5B. Render Custom-Sized Candles in-place without zooming or resizing the chart time axis!
+    if (customCandleWidthEnabled) {
+      renderCustomWidthCandlesOnCanvas(ctx, bars, candleOhlcConfig, barToX, priceToY, barSpacing, cssWidth, cssHeight, mainSeries);
+    }
+
+    // 6. Render Candle Numbers (#1 = current forming candle backward up to N candles) in a small glow box below each candle
+    if (candleNumbersEnabled) {
+      renderCandleNumbersOnCanvas(ctx, bars, candleOhlcConfig, barToX, priceToY, barSpacing, cssWidth, cssHeight);
+    }
+
+    // 7. Render Candle OHLC (Open, High, Low, Close) values on canvas for all visible candles or individually clicked candles
+    if (candleOhlcEnabled) {
+      const tfLabel = formatCurrentResolutionLabel();
+      renderCandleOhlcOnCanvas(ctx, bars, candleOhlcConfig, barToX, priceToY, barSpacing, cssWidth, cssHeight, symbolKey, tfLabel);
+    } else {
+      lastRenderedCandleOhlcHitBoxes = [];
+    }
+
+    if (failLinesEnabled) {
+      const failLineConfig = currentSettings && currentSettings.failLines || {};
+      const labelScale = Math.max(0.75, Math.min(1.5, (Number(failLineConfig.labelSize) || 100) / 100));
+      const fontSize = Math.max(8, Math.min(18, Number(failLineConfig.fontSize) || 11));
+      const drawFailLine = (price, label, color, side) => {
+        if (!Number.isFinite(price)) {
+          removeFailPriceLineButton(side);
+          return;
+        }
+        const y = priceToY(price);
+        if (y === null || !Number.isFinite(y)) return;
+        const isOffscreen = y < 0 || y > cssHeight;
+        const displayY = Math.max(13, Math.min(cssHeight - 4, y));
+        const formattedPrice = price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.font = `600 ${fontSize}px Arial, sans-serif`;
+        if (isOffscreen) {
+          const direction = y < 0 ? '↑ Above chart' : '↓ Below chart';
+          const text = `${direction} · ${label} Fail Price $${formattedPrice}`;
+          const textWidth = ctx.measureText(text).width;
+          const labelHeight = 19 * labelScale;
+          const labelPadX = 9 * labelScale;
+          const labelY = y < 0 ? 2 : cssHeight - labelHeight - 3;
+          const labelWidth = textWidth + labelPadX * 2;
+          const buttonWidth = 88 * labelScale;
+          const labelX = Math.max(buttonWidth + 12, cssWidth - labelWidth - 10);
+          ctx.globalAlpha = 0.94;
+          ctx.beginPath();
+          ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 5 * labelScale);
+          ctx.fill();
+          ctx.fillStyle = '#0b0e11';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, labelX + labelPadX, labelY + labelHeight / 2);
+          positionFailPriceLineButton(side, labelX - buttonWidth - 4, labelY, buttonWidth, labelHeight, fontSize - 1);
+        } else {
+          ctx.lineWidth = 2;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(0, displayY);
+          ctx.lineTo(cssWidth, displayY);
+          ctx.stroke();
+          const text = `${label} Fail Price $${formattedPrice}`;
+          const tagHeight = 19 * labelScale;
+          const tagPadX = 7 * labelScale;
+          const tagWidth = ctx.measureText(text).width + tagPadX * 2;
+          const buttonWidth = 88 * labelScale;
+          const tagX = Math.max(buttonWidth + 12, cssWidth - tagWidth - 10);
+          const tagY = Math.max(2, Math.min(cssHeight - tagHeight - 2, displayY - tagHeight / 2));
+          ctx.globalAlpha = 0.96;
+          ctx.beginPath();
+          ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 5 * labelScale);
+          ctx.fillStyle = '#0b0e11';
+          ctx.fill();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = color;
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, tagX + tagPadX, tagY + tagHeight / 2);
+          positionFailPriceLineButton(side, tagX - buttonWidth - 4, tagY, buttonWidth, tagHeight, fontSize - 1);
+        }
+        ctx.restore();
+      };
+      drawFailLine(liveFailPrices.long, 'Long', '#10d69a', 'long');
+      drawFailLine(liveFailPrices.short, 'Short', '#f2365b', 'short');
+
+      if (liveEstimatedStopLoss.side && Number.isFinite(latestChartMarketPrice)) {
+        const failPrice = liveFailPrices[liveEstimatedStopLoss.side];
+        if (Number.isFinite(failPrice)) {
+          const midpoint = (latestChartMarketPrice + failPrice) / 2;
+          const tickMap = { ES: 0.25, MES: 0.25, NQ: 0.25, MNQ: 0.25, RTY: 0.1, M2K: 0.1, YM: 1, MYM: 1, CL: 0.01, MCL: 0.01, GC: 0.1, MGC: 0.1 };
+          const symbolText = String(symbolKey || '').toUpperCase();
+          const tickSymbol = Object.keys(tickMap).sort((a, b) => b.length - a.length).find(symbol => symbolText === symbol || symbolText.startsWith(`${symbol}!`) || symbolText.startsWith(`${symbol}1`) || symbolText.includes(`:${symbol}`));
+          const tick = tickSymbol ? tickMap[tickSymbol] : null;
+          const estimate = tick ? Number((Math.round(midpoint / tick) * tick).toFixed(8)) : Number(midpoint.toFixed(8));
+          liveEstimatedStopLoss.price = estimate;
+          const signature = JSON.stringify({ side: liveEstimatedStopLoss.side, price: estimate, marketPrice: latestChartMarketPrice, failPrice });
+          if (signature !== lastStopLossEstimateMessage) {
+            lastStopLossEstimateMessage = signature;
+            try {
+              window.top.postMessage({
+                type: 'VEST_TV_STOP_LOSS_PRICE_UPDATE',
+                payload: { side: liveEstimatedStopLoss.side, price: estimate, marketPrice: latestChartMarketPrice, failPrice }
+              }, '*');
+            } catch (e) {}
+          }
+        }
+      }
+
+      const stopEstimate = liveEstimatedStopLoss;
+      if (stopEstimate.side && Number.isFinite(stopEstimate.price)) {
+        const stopColor = stopEstimate.side === 'long' ? '#10d69a' : '#f2365b';
+        const y = priceToY(stopEstimate.price);
+        if (y !== null && Number.isFinite(y)) {
+          const isOffscreen = y < 0 || y > cssHeight;
+          const displayY = Math.max(13, Math.min(cssHeight - 4, y));
+          const formattedPrice = stopEstimate.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+          const sideLabel = stopEstimate.side === 'long' ? 'Long' : 'Short';
+          const text = `${sideLabel} Stop Loss $${formattedPrice}`;
+          ctx.save();
+          ctx.strokeStyle = stopColor;
+          ctx.fillStyle = stopColor;
+          ctx.font = `700 ${fontSize}px Arial, sans-serif`;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(0, displayY);
+          ctx.lineTo(cssWidth, displayY);
+          ctx.stroke();
+          const tagHeight = 19 * labelScale;
+          const tagPadX = 7 * labelScale;
+          const direction = y < 0 ? '↑ Above chart · ' : y > cssHeight ? '↓ Below chart · ' : '';
+          const tagText = `${direction}${text}`;
+          const tagWidth = ctx.measureText(tagText).width + tagPadX * 2;
+          const tagX = Math.max(8, cssWidth - tagWidth - 10);
+          const tagY = isOffscreen
+            ? (y < 0 ? 2 : cssHeight - tagHeight - 3)
+            : Math.max(2, Math.min(cssHeight - tagHeight - 2, displayY - tagHeight / 2));
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.97;
+          ctx.beginPath();
+          ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 5 * labelScale);
+          ctx.fillStyle = '#0b0e11';
+          ctx.fill();
+          ctx.strokeStyle = stopColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = stopColor;
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tagText, tagX + tagPadX, tagY + tagHeight / 2);
+          if (Number.isFinite(liveEstimatedPnl)) {
+            const pnlColor = liveEstimatedPnl > 0 ? '#10d69a' : liveEstimatedPnl < 0 ? '#f2365b' : '#cbd5e1';
+            const pnlSign = liveEstimatedPnl > 0 ? '+' : liveEstimatedPnl < 0 ? '−' : '';
+            const pnlAmount = Math.abs(liveEstimatedPnl).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const pnlText = `Est. PnL ${pnlSign}$${pnlAmount}`;
+            const pnlWidth = ctx.measureText(pnlText).width + tagPadX * 2;
+            const pnlX = Math.max(4, tagX - pnlWidth - 4);
+            ctx.beginPath();
+            ctx.roundRect(pnlX, tagY, pnlWidth, tagHeight, 5 * labelScale);
+            ctx.fillStyle = '#0b0e11';
+            ctx.fill();
+            ctx.strokeStyle = pnlColor;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillStyle = pnlColor;
+            ctx.fillText(pnlText, pnlX + tagPadX, tagY + tagHeight / 2);
+          }
+          ctx.restore();
+        }
+      }
+    }
+
     ctx.restore();
 
     // Render the price tags on the right-hand price scale axis!
-    if (showPermDotted && priceScaleBadges.length > 0) {
+    if (sessionsEnabled && showPermDotted && priceScaleBadges.length > 0) {
       renderIctPriceScaleBadges(targetCanvas, priceScaleBadges, cssHeight);
     } else {
       clearIctPriceScaleBadges();
@@ -6373,6 +9954,89 @@
 
   const hookedTimeScaleInstances = new WeakSet();
   const hookedPriceScaleInstances = new WeakSet();
+  const hookedMainSeriesInstances = new WeakSet();
+  const hookedChartApiInstances = new WeakSet();
+  const hookedDragDocs = new WeakSet();
+  let windowResizeHookedForSessions = false;
+  let instrumentSwitchTimers = [];
+
+  function handleInstrumentOrChartSwitch(reason = 'symbol_change') {
+    log(`Resetting chart & session state on instrument/chart switch (${reason})`);
+
+    // 1. Re-acquire live activeChart / activeChartApi / activeWidget in case the widget or chart instance was recreated
+    try {
+      const found = findTradingViewApi();
+      if (found && found.api) {
+        activeChartApi = found.api;
+        if (found.widget) activeWidget = found.widget;
+        if (typeof activeChartApi.activeChart === 'function') {
+          activeChart = activeChartApi.activeChart();
+        } else if (typeof activeChartApi.chart === 'function') {
+          activeChart = activeChartApi.chart();
+        }
+      }
+    } catch (e) {}
+
+    // 2. Clear all cached model, series, bar, signature, and canvas references
+    // Note: Clear nativeAutoFvgShapesMap in-memory without calling removeEntity on the previous symbol's saved drawings
+    nativeAutoFvgShapesMap.clear();
+    cachedSessionsChartModel = null;
+    cachedExtractedBarsObj = null;
+    cachedQuickPlotSig = '';
+    cachedIctBarsSignature = '';
+    cachedIctConfigSignature = '';
+    cachedIctComputedSessions = [];
+    cachedAutoFvgSignature = '';
+    cachedComputedAutoFvgs = [];
+    cachedTargetChartCanvas = null;
+    cachedPriceAxisHost = null;
+    cachedPriceAxisTargetCanvas = null;
+    lastPriceAxisBadgesHtml = '';
+    ictSessionsNeedsFullRecompute = true;
+
+    // 3. Ensure the new symbol's price scale is in autoScale mode if the user hasn't explicitly locked this symbol's price range
+    try {
+      const currentSym = getCurrentChartSymbolKey();
+      const saved = currentSettings && currentSettings.lastChartSettings;
+      const hasExplicitLockedRangeForSymbol = Boolean(
+        currentSym &&
+        saved &&
+        saved.viewportsBySymbol &&
+        saved.viewportsBySymbol[currentSym] &&
+        saved.viewportsBySymbol[currentSym].isAutoScale === false
+      );
+      if (!hasExplicitLockedRangeForSymbol) {
+        const psApi = getPrimaryPriceScaleApi();
+        if (psApi && typeof psApi.setAutoScale === 'function') {
+          psApi.setAutoScale(true);
+        }
+        const model = findChartModelForSessions();
+        const ms = model ? findMainSeriesFromModel(model) : null;
+        const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+        if (internalPs && typeof internalPs.setAutoScale === 'function') {
+          internalPs.setAutoScale(true);
+        }
+      }
+    } catch (e) {}
+
+    // 4. Re-bind listeners on any newly mounted iframe, activeChart, model, series, or priceScale
+    setupContextMenuHandler();
+    setupSidebarObserver();
+    setupIctSessionIndicators();
+
+    // 5. Schedule immediate + staggered full recomputations as the new instrument's historical bars finish streaming in
+    instrumentSwitchTimers.forEach(t => clearTimeout(t));
+    instrumentSwitchTimers = [];
+    [0, 120, 300, 650, 1200, 2200, 3500].forEach(delay => {
+      const tid = setTimeout(() => {
+        cachedSessionsChartModel = null;
+        cachedExtractedBarsObj = null;
+        cachedQuickPlotSig = '';
+        scheduleIctSessionsRender(true);
+      }, delay);
+      instrumentSwitchTimers.push(tid);
+    });
+  }
 
   function attachDirectScaleListeners(model) {
     if (!model) return;
@@ -6393,10 +10057,28 @@
         });
       }
       const ms = findMainSeriesFromModel(model);
+      if (ms && !hookedMainSeriesInstances.has(ms)) {
+        hookedMainSeriesInstances.add(ms);
+        const msEvents = ['dataUpdated', 'barsReceived', 'symbolResolved', 'onSymbolIntervalChanged', 'timeframeChanged'];
+        msEvents.forEach(evName => {
+          try {
+            if (typeof ms[evName] === 'function') {
+              const sub = ms[evName]();
+              if (sub && typeof sub.subscribe === 'function') {
+                sub.subscribe(null, () => {
+                  cachedExtractedBarsObj = null;
+                  cachedQuickPlotSig = '';
+                  scheduleIctSessionsRender(true);
+                });
+              }
+            }
+          } catch (e) {}
+        });
+      }
       const ps = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
       if (ps && !hookedPriceScaleInstances.has(ps)) {
         hookedPriceScaleInstances.add(ps);
-        const psEvents = ['marksChanged', 'priceRangeChanged'];
+        const psEvents = ['marksChanged', 'priceRangeChanged', 'modeChanged'];
         psEvents.forEach(evName => {
           try {
             if (typeof ps[evName] === 'function') {
@@ -6416,11 +10098,10 @@
     if (model) {
       attachDirectScaleListeners(model);
     }
-    scheduleIctSessionsRender(true);
-    if (ictSessionsObserverInitialized) return;
 
     try {
-      if (activeChart) {
+      if (activeChart && !hookedChartApiInstances.has(activeChart)) {
+        hookedChartApiInstances.add(activeChart);
         if (typeof activeChart.onVisibleRangeChanged === 'function') {
           const sub = activeChart.onVisibleRangeChanged();
           if (sub && typeof sub.subscribe === 'function') {
@@ -6431,15 +10112,20 @@
           const sub = activeChart.onIntervalChanged();
           if (sub && typeof sub.subscribe === 'function') {
             sub.subscribe(null, () => {
-              cachedSessionsChartModel = null;
-              cachedExtractedBarsObj = null;
-              cachedQuickPlotSig = '';
-              scheduleIctSessionsRender(true);
+              handleInstrumentOrChartSwitch('interval_changed');
             });
           }
         }
         if (typeof activeChart.onSymbolChanged === 'function') {
           const sub = activeChart.onSymbolChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => {
+              handleInstrumentOrChartSwitch('onSymbolChanged');
+            });
+          }
+        }
+        if (typeof activeChart.onDataLoaded === 'function') {
+          const sub = activeChart.onDataLoaded();
           if (sub && typeof sub.subscribe === 'function') {
             sub.subscribe(null, () => {
               cachedSessionsChartModel = null;
@@ -6460,15 +10146,31 @@
     });
 
     docs.forEach(doc => {
+      if (!doc || hookedDragDocs.has(doc)) return;
+      hookedDragDocs.add(doc);
       try {
         // Use capture phase (true) because TradingView calls e.stopPropagation() on canvas mousedown/pointerdown/mousemove during chart panning!
         doc.addEventListener('pointerdown', (e) => {
           if (e.target && e.target.tagName === 'CANVAS') {
+            if (e.button === 0 || e.button === undefined) {
+              lastChartPointerDownInfo = {
+                clientX: e.clientX || 0,
+                clientY: e.clientY || 0,
+                time: Date.now()
+              };
+            }
             startChartDragSyncLoop();
           }
         }, { capture: true, passive: true });
         doc.addEventListener('mousedown', (e) => {
           if (e.target && e.target.tagName === 'CANVAS') {
+            if ((e.button === 0 || e.button === undefined) && !lastChartPointerDownInfo) {
+              lastChartPointerDownInfo = {
+                clientX: e.clientX || 0,
+                clientY: e.clientY || 0,
+                time: Date.now()
+              };
+            }
             startChartDragSyncLoop();
           }
         }, { capture: true, passive: true });
@@ -6484,8 +10186,14 @@
             else scheduleIctSessionsRender(false);
           }
         }, { capture: true, passive: true });
-        doc.addEventListener('pointerup', () => stopChartDragSyncLoop(), { capture: true, passive: true });
-        doc.addEventListener('mouseup', () => stopChartDragSyncLoop(), { capture: true, passive: true });
+        doc.addEventListener('pointerup', (e) => {
+          stopChartDragSyncLoop();
+          handlePotentialCandleClickOnCanvas(e);
+        }, { capture: true, passive: true });
+        doc.addEventListener('mouseup', (e) => {
+          stopChartDragSyncLoop();
+          handlePotentialCandleClickOnCanvas(e);
+        }, { capture: true, passive: true });
         doc.addEventListener('wheel', () => {
           scheduleIctSessionsRender(false);
         }, { capture: true, passive: true });
@@ -6495,8 +10203,12 @@
       } catch (e) {}
     });
 
-    window.addEventListener('resize', () => scheduleIctSessionsRender(false), { passive: true });
+    if (!windowResizeHookedForSessions) {
+      windowResizeHookedForSessions = true;
+      window.addEventListener('resize', () => scheduleIctSessionsRender(false), { passive: true });
+    }
     ictSessionsObserverInitialized = true;
+    scheduleIctSessionsRender(false);
   }
 
   // -------------------------------------------------------------
@@ -6737,6 +10449,12 @@
       lastTrackedInstrument = currentInst;
 
       log(`[INSTRUMENT CHANGED] from "${prevInst}" to "${currentInst}"`);
+      if (prevInst) {
+        handleInstrumentOrChartSwitch(`instrument_poll:${prevInst}->${currentInst}`);
+      } else {
+        scheduleIctSessionsRender(true);
+      }
+
       dispatchActionLog({
         timestamp,
         type: 'instrument',
@@ -6851,9 +10569,277 @@
     }
   }
 
+  // -------------------------------------------------------------
+  // Passive Trade History & Closed Position Interceptor (Main World)
+  // -------------------------------------------------------------
+  function extractTradesFromApiPayload(payload, urlHint = '') {
+    if (!payload || typeof payload !== 'object') return [];
+    const results = [];
+    const isExplicitHistoryUrl = /history|closed|realized/i.test(String(urlHint || ''));
+
+    const visitArray = (arr, parentKeyHint = '') => {
+      if (!Array.isArray(arr)) return;
+      const isExplicitHistoryKey = isExplicitHistoryUrl || /history|closed/i.test(String(parentKeyHint || ''));
+
+      for (const item of arr) {
+        if (!item || typeof item !== 'object') continue;
+
+        // Ignore active/open positions that have unrealized PnL and no closed timestamp
+        const statusStr = String(item.status || item.state || '').toUpperCase();
+        if (statusStr === 'OPEN' || statusStr === 'ACTIVE' || statusStr === 'WORKING') continue;
+
+        const hasExplicitCloseTime = Boolean(
+          item.exitTime ??
+          item.closeTime ??
+          item.closedAt ??
+          item.closed_at ??
+          item.settledAt ??
+          item.settled_at
+        );
+        const hasRealizedPnlField = Boolean(
+          item.realizedPnl !== undefined ||
+          item.realized_pnl !== undefined ||
+          item.closedPnl !== undefined ||
+          item.closed_pnl !== undefined
+        );
+
+        // Must be from a closed/history collection OR have an explicit close timestamp / realizedPnl on a closed position
+        if (!isExplicitHistoryKey && !hasExplicitCloseTime && !(hasRealizedPnlField && statusStr === 'CLOSED')) {
+          continue;
+        }
+        // If item has non-zero open size and no close time, it is an open position — skip!
+        if (!hasExplicitCloseTime && item.unrealizedPnl !== undefined && item.closedAt === undefined && item.closeTime === undefined) {
+          continue;
+        }
+
+        const rawPnl =
+          item.realizedPnl ??
+          item.realized_pnl ??
+          item.closedPnl ??
+          item.closed_pnl ??
+          item.pnl ??
+          item.profit ??
+          null;
+        if (rawPnl === null || rawPnl === undefined || rawPnl === '') continue;
+        const pnlNum = Number(String(rawPnl).replace(/[^0-9.-]/g, ''));
+        if (!isFinite(pnlNum)) continue;
+
+        const sym =
+          item.symbol ||
+          item.market ||
+          item.instrument ||
+          item.ticker ||
+          item.pair ||
+          lastTrackedInstrument ||
+          null;
+        if (!sym) continue;
+
+        const entryT =
+          item.entryTime ??
+          item.openTime ??
+          item.openedAt ??
+          item.opened_at ??
+          item.createdAt ??
+          item.created_at ??
+          null;
+        const exitT =
+          item.exitTime ??
+          item.closeTime ??
+          item.closedAt ??
+          item.closed_at ??
+          item.settledAt ??
+          item.settled_at ??
+          item.updatedAt ??
+          item.updated_at ??
+          item.timestamp ??
+          item.time ??
+          null;
+
+        // Strictly require BOTH an open/entry timestamp AND a closed/exit timestamp so open positions or single-timestamp fills are never misclassified as Position History trades!
+        if (!entryT || !exitT) continue;
+
+        const sideRaw = String(item.side || item.direction || item.positionSide || 'LONG').toUpperCase();
+        const side = sideRaw.includes('SHORT') || sideRaw.includes('SELL') ? 'SHORT' : 'LONG';
+
+        results.push({
+          id: item.id ? `api_${item.id}` : undefined,
+          symbol: String(sym),
+          side,
+          pnl: pnlNum,
+          entryTime: entryT,
+          exitTime: exitT,
+          durationMs: item.durationMs ?? item.duration ?? undefined,
+          entryPrice: item.entryPrice ?? item.avgEntryPrice ?? item.openPrice,
+          exitPrice: item.exitPrice ?? item.avgExitPrice ?? item.closePrice ?? item.price,
+          source: 'positions_history',
+          verifiedHistory: true,
+          verifiedBothTimes: true
+        });
+      }
+    };
+
+    if (Array.isArray(payload)) {
+      visitArray(payload, urlHint);
+    } else {
+      const candidateKeys = ['closedPositions', 'positionHistory', 'positionsHistory', 'history', 'trades', 'fills', 'positions', 'data', 'items', 'results', 'rows'];
+      for (const k of candidateKeys) {
+        if (Array.isArray(payload[k])) {
+          visitArray(payload[k], k);
+        } else if (payload[k] && typeof payload[k] === 'object') {
+          for (const subK of candidateKeys) {
+            if (Array.isArray(payload[k][subK])) {
+              visitArray(payload[k][subK], `${k}.${subK}`);
+            }
+          }
+        }
+      }
+    }
+
+    return results;
+  }
+
+  function scanReactFiberForPositionHistory() {
+    const found = [];
+    try {
+      const candidates = Array.from(document.querySelectorAll('button, [role="tab"], table, [role="table"], [role="grid"]'));
+      const visitedFibers = new Set();
+
+      for (const el of candidates) {
+        const txt = (el.innerText || el.textContent || '').trim();
+        if (el.tagName === 'BUTTON' && !/positions?\s+history|active\s+positions/i.test(txt)) continue;
+
+        const fiberKey = Object.keys(el).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+        if (!fiberKey) continue;
+
+        let curr = el[fiberKey];
+        let depth = 0;
+        while (curr && depth < 25) {
+          if (visitedFibers.has(curr)) break;
+          visitedFibers.add(curr);
+
+          // Check memoizedProps
+          if (curr.memoizedProps && typeof curr.memoizedProps === 'object') {
+            const extracted = extractTradesFromApiPayload(curr.memoizedProps, 'fiber_props');
+            if (extracted.length > 0) found.push(...extracted);
+          }
+
+          // Check memoizedState chain (hooks)
+          let st = curr.memoizedState;
+          let hookDepth = 0;
+          while (st && hookDepth < 20) {
+            const val = st.memoizedState;
+            if (val && typeof val === 'object') {
+              const extracted = extractTradesFromApiPayload(val, 'fiber_state');
+              if (extracted.length > 0) found.push(...extracted);
+            }
+            st = st.next;
+            hookDepth++;
+          }
+
+          curr = curr.return;
+          depth++;
+        }
+      }
+    } catch (e) {}
+    return found;
+  }
+
+  function scanPlatformTradesInMainWorld(notifyToast = false) {
+    try {
+      const found = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (!k || k.startsWith('__trading_cortex_') || k.startsWith('tv-chart-drawings-')) continue;
+        if (/trade|position|fill|history|pnl/i.test(k)) {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(k));
+            const extracted = extractTradesFromApiPayload(parsed, k);
+            if (extracted.length > 0) {
+              found.push(...extracted);
+            }
+          } catch (e) {}
+        }
+      }
+
+      const fiberTrades = scanReactFiberForPositionHistory();
+      if (fiberTrades.length > 0) {
+        found.push(...fiberTrades);
+      }
+
+      if (found.length > 0) {
+        postToIsolated({
+          type: 'VEST_TRADES_CAPTURED',
+          trades: found,
+          notifyToast
+        });
+      }
+    } catch (e) {}
+  }
+
+  function setupPassiveTradeNetworkListener() {
+    if (window.top !== window) return;
+    if (window.__TRADING_CORTEX_TRADE_NET_HOOKED__) return;
+    window.__TRADING_CORTEX_TRADE_NET_HOOKED__ = true;
+
+    try {
+      const origFetch = window.fetch;
+      if (typeof origFetch === 'function') {
+        window.fetch = async function (...args) {
+          const response = await origFetch.apply(this, args);
+          try {
+            const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+            if (/trade|fill|position|history|pnl|closed/i.test(url)) {
+              const clone = response.clone();
+              clone.json().then(data => {
+                const trades = extractTradesFromApiPayload(data, url);
+                if (trades.length > 0) {
+                  postToIsolated({
+                    type: 'VEST_TRADES_CAPTURED',
+                    trades
+                  });
+                }
+              }).catch(() => {});
+            }
+          } catch (e) {}
+          return response;
+        };
+      }
+    } catch (e) {}
+
+    try {
+      const origOpen = XMLHttpRequest.prototype.open;
+      const origSend = XMLHttpRequest.prototype.send;
+      if (typeof origOpen === 'function' && typeof origSend === 'function') {
+        XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+          this.__tcUrl = typeof url === 'string' ? url : '';
+          return origOpen.call(this, method, url, ...rest);
+        };
+        XMLHttpRequest.prototype.send = function (...args) {
+          this.addEventListener('load', function () {
+            try {
+              const url = this.__tcUrl || '';
+              if (/trade|fill|position|history|pnl|closed/i.test(url) && this.responseText) {
+                const data = JSON.parse(this.responseText);
+                const trades = extractTradesFromApiPayload(data, url);
+                if (trades.length > 0) {
+                  postToIsolated({
+                    type: 'VEST_TRADES_CAPTURED',
+                    trades
+                  });
+                }
+              }
+            } catch (e) {}
+          });
+          return origSend.apply(this, args);
+        };
+      }
+    } catch (e) {}
+  }
+
   // Initialize context menu listener immediately
   setupContextMenuHandler();
   setupActionLogging();
+  setupPassiveTradeNetworkListener();
 
   let pollCount = 0;
   const pollTimer = setInterval(() => {
@@ -6871,13 +10857,40 @@
     }
   }, 300);
 
-  // Keep a lightweight maintenance interval only to hook the chart if it hasn't loaded yet
+  // Keep a lightweight maintenance interval to hook or re-hook the chart if Vest replaces the widget/iframe
   setInterval(() => {
     setupContextMenuHandler();
+    enhanceTimeframeControls();
+    restoreGlobalDrawings();
     if (!activeChart) {
       hookChart();
+    } else {
+      try {
+        const found = findTradingViewApi();
+        if (found && found.api && found.api !== activeChartApi) {
+          hookChart();
+          handleInstrumentOrChartSwitch('chart_api_replaced');
+        } else if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
+          const liveAc = activeChartApi.activeChart();
+          if (liveAc && liveAc !== activeChart) {
+            activeChart = liveAc;
+            handleInstrumentOrChartSwitch('active_chart_replaced');
+          }
+        }
+      } catch (e) {}
     }
-    if (currentSettings && currentSettings.sessionIndicators && currentSettings.sessionIndicators.enabled) {
+    if (
+      currentSettings &&
+      ((currentSettings.sessionIndicators && currentSettings.sessionIndicators.enabled) ||
+        (currentSettings.autoFvg && currentSettings.autoFvg.enabled) ||
+        !currentSettings.candleOhlc ||
+        currentSettings.candleOhlc.enabled ||
+        currentSettings.candleOhlc.showCandleNumbers ||
+        currentSettings.candleOhlc.customCandleWidthEnabled ||
+        currentSettings.candleOhlc.clickCandleToToggle !== false ||
+        toggledCandleOhlcSet.size > 0 ||
+        (currentSettings.cortexIndicator && currentSettings.cortexIndicator.enabled))
+    ) {
       setupIctSessionIndicators();
     }
   }, 1500);

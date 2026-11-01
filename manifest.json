@@ -1,7 +1,7 @@
-﻿{
+{
   "manifest_version": 3,
   "name": "Trading Cortex",
-  "version": "1.1.7",
+  "version": "1.1.43",
   "description": "Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges.",
   "icons": {
     "16": "icons/icon16.png",
@@ -31,7 +31,9 @@
     "https://vest.exchange/*",
     "https://api.github.com/*",
     "https://github.com/*",
-    "https://*.githubusercontent.com/*"
+    "https://*.githubusercontent.com/*",
+    "https://nfs.faireconomy.media/*",
+    "https://*.faireconomy.media/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js"
@@ -61,6 +63,7 @@
         "https://vest.exchange/*"
       ],
       "js": [
+        "content/cortex-execution.js",
         "content/content-isolated.js"
       ],
       "css": [

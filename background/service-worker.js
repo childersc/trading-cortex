@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   rememberSidebarTools: true,
   rememberLastChartSettings: true,
   lastChartSettings: {},
+  favoriteTimeframes: [],
   enablePanelManagement: true,
   panelLayout: {},
   sidebarState: {
@@ -42,7 +43,7 @@ const DEFAULT_SETTINGS = {
 // Schema-Versioned Local File System JSON Database & Migrations
 // File path inside linked extension folder: user-data/cortex-db.json
 // -------------------------------------------------------------
-const CURRENT_DB_SCHEMA_VERSION = 2;
+const CURRENT_DB_SCHEMA_VERSION = 3;
 const IDB_NAME = "vest_studio_updater_db";
 const IDB_STORE = "handles";
 const IDB_KEY = "extension_dir_handle";
@@ -114,6 +115,7 @@ function runDatabaseMigrations(rawDb) {
   const db = rawDb && typeof rawDb === "object" ? { ...rawDb } : {};
   const fromVersion = Number(db.schemaVersion) || 0;
   const history = Array.isArray(db.migrations) ? [...db.migrations] : [];
+  db.globalDrawings = Array.isArray(db.globalDrawings) ? db.globalDrawings : [];
 
   // Migration v0 -> v1
   if (fromVersion < 1) {
@@ -160,6 +162,15 @@ function runDatabaseMigrations(rawDb) {
     db.templates = sanitizeUserTemplates(db.templates);
   }
 
+  if (fromVersion < 3) {
+    db.globalDrawings = Array.isArray(db.globalDrawings) ? db.globalDrawings : [];
+    history.push({
+      version: 3,
+      migratedAt: new Date().toISOString(),
+      description: "Added persistent globally synced chart drawings"
+    });
+  }
+
   db.schemaVersion = CURRENT_DB_SCHEMA_VERSION;
   db.migrations = history;
   db.updatedAt = db.updatedAt || Date.now();
@@ -190,7 +201,7 @@ async function readLocalDiskDatabase(dirHandleOverride = null) {
 }
 
 let diskWriteTimer = null;
-async function writeLocalDiskDatabase(templates, settings, dirHandleOverride = null) {
+async function writeLocalDiskDatabase(templates, settings, globalDrawings = null, dirHandleOverride = null) {
   try {
     const dirHandle = dirHandleOverride || (await getSavedFolderHandle());
     if (!dirHandle) return false;
@@ -207,7 +218,8 @@ async function writeLocalDiskDatabase(templates, settings, dirHandleOverride = n
       extensionVersion: chrome.runtime.getManifest().version || "1.1.0",
       migrations: existingDiskDb ? existingDiskDb.migrations : [],
       templates: Array.isArray(templates) ? templates : (existingDiskDb?.templates || DEFAULT_TEMPLATES),
-      settings: settings || existingDiskDb?.settings || DEFAULT_SETTINGS
+      settings: settings || existingDiskDb?.settings || DEFAULT_SETTINGS,
+      globalDrawings: Array.isArray(globalDrawings) ? globalDrawings : (existingDiskDb?.globalDrawings || [])
     });
 
     const userDataDir = await dirHandle.getDirectoryHandle(DB_FOLDER_NAME, { create: true });
@@ -224,15 +236,15 @@ async function writeLocalDiskDatabase(templates, settings, dirHandleOverride = n
 // Automatically sync any template or settings changes in chrome.storage.local to user-data/cortex-db.json
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (!changes.templates && !changes.settings) return;
+  if (!changes.templates && !changes.settings && !changes.globalDrawings) return;
 
   if (diskWriteTimer) clearTimeout(diskWriteTimer);
   diskWriteTimer = setTimeout(async () => {
     diskWriteTimer = null;
     try {
-      const data = await chrome.storage.local.get(["templates", "settings"]).catch(() => ({}));
-      if (data.templates !== undefined || data.settings !== undefined) {
-        await writeLocalDiskDatabase(data.templates, data.settings);
+      const data = await chrome.storage.local.get(["templates", "settings", "globalDrawings"]).catch(() => ({}));
+      if (data.templates !== undefined || data.settings !== undefined || data.globalDrawings !== undefined) {
+        await writeLocalDiskDatabase(data.templates, data.settings, data.globalDrawings);
       }
     } catch (e) {}
   }, 600);
@@ -240,7 +252,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   try {
-    const localData = await chrome.storage.local.get(["templates", "settings", "dbSchemaVersion"]).catch(() => ({}));
+    const localData = await chrome.storage.local.get(["templates", "settings", "globalDrawings", "dbSchemaVersion"]).catch(() => ({}));
     const syncData = await chrome.storage.sync.get(["templates", "settings"]).catch(() => ({}));
     const diskDb = await readLocalDiskDatabase();
 
@@ -266,16 +278,20 @@ chrome.runtime.onInstalled.addListener(async () => {
 
     const finalTemplates = migrated.templates;
     const finalSettings = migrated.settings;
+    const finalGlobalDrawings = Array.isArray(localData.globalDrawings)
+      ? localData.globalDrawings
+      : ((diskDb && Array.isArray(diskDb.globalDrawings)) ? diskDb.globalDrawings : []);
 
     // Always store in chrome.storage.local (unlimited write quota)
     await chrome.storage.local.set({
       templates: finalTemplates,
       settings: finalSettings,
+      globalDrawings: finalGlobalDrawings,
       dbSchemaVersion: migrated.schemaVersion
     }).catch(() => {});
 
     // Persist migrated state back to disk if folder is linked
-    await writeLocalDiskDatabase(finalTemplates, finalSettings);
+    await writeLocalDiskDatabase(finalTemplates, finalSettings, finalGlobalDrawings);
 
     // Sync cleaned templates & settings to chrome.storage.sync
     await chrome.storage.sync.set({
@@ -374,9 +390,63 @@ async function checkGitHubForUpdatesInBackground() {
   }
 }
 
+// -------------------------------------------------------------
+// Economic Calendar / ForexFactory Live News Feed Fetcher
+// -------------------------------------------------------------
+const ECON_CALENDAR_URLS = [
+  "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+  "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json"
+];
+const ECON_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+async function fetchEconomicCalendarFeed(forceRefresh = false) {
+  try {
+    const cached = await chrome.storage.local.get(["econCalendarCache"]).catch(() => ({}));
+    const cacheObj = cached && cached.econCalendarCache;
+    if (
+      !forceRefresh &&
+      cacheObj &&
+      Array.isArray(cacheObj.events) &&
+      cacheObj.events.length > 0 &&
+      Date.now() - (Number(cacheObj.fetchedAt) || 0) < ECON_CACHE_TTL_MS
+    ) {
+      return cacheObj;
+    }
+
+    for (const url of ECON_CALENDAR_URLS) {
+      try {
+        const resp = await fetch(url, {
+          headers: { Accept: "application/json" },
+          cache: "no-store"
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (Array.isArray(data)) {
+            const payload = {
+              fetchedAt: Date.now(),
+              source: "ForexFactory",
+              events: data
+            };
+            await chrome.storage.local.set({ econCalendarCache: payload }).catch(() => {});
+            return payload;
+          }
+        }
+      } catch (innerErr) {}
+    }
+
+    if (cacheObj && Array.isArray(cacheObj.events)) {
+      return cacheObj;
+    }
+  } catch (e) {}
+  return { fetchedAt: Date.now(), source: "fallback", events: [] };
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm && alarm.name === "vest_studio_update_check") {
     checkGitHubForUpdatesInBackground();
+  }
+  if (alarm && alarm.name === "vest_studio_news_refresh") {
+    fetchEconomicCalendarFeed(true);
   }
 });
 
@@ -385,17 +455,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!request) return;
 
   if (request.action === "getTemplatesAndSettings") {
-    chrome.storage.local.get(["templates", "settings"]).then(async (data) => {
+    chrome.storage.local.get(["templates", "settings", "globalDrawings"]).then(async (data) => {
       if (data && data.templates && data.templates.length > 0 && data.settings) {
         sendResponse({
           templates: data.templates,
-          settings: data.settings
+          settings: data.settings,
+          globalDrawings: Array.isArray(data.globalDrawings) ? data.globalDrawings : []
         });
       } else {
         const diskDb = await readLocalDiskDatabase();
         sendResponse({
           templates: (diskDb && diskDb.templates) || data.templates || DEFAULT_TEMPLATES,
-          settings: (diskDb && diskDb.settings) || data.settings || DEFAULT_SETTINGS
+          settings: (diskDb && diskDb.settings) || data.settings || DEFAULT_SETTINGS,
+          globalDrawings: Array.isArray(data.globalDrawings) ? data.globalDrawings : ((diskDb && diskDb.globalDrawings) || [])
         });
       }
     }).catch(() => {
@@ -408,7 +480,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "syncDiskDatabaseNow") {
-    chrome.storage.local.get(["templates", "settings"]).then(async (data) => {
+    chrome.storage.local.get(["templates", "settings", "globalDrawings"]).then(async (data) => {
       const diskDb = await readLocalDiskDatabase();
       // If disk has custom templates and chrome.storage only has defaults or is empty, hydrate from disk
       const templatesToUse =
@@ -416,7 +488,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (diskDb && Array.isArray(diskDb.templates) && diskDb.templates.length > 0 ? diskDb.templates : DEFAULT_TEMPLATES);
       const settingsToUse = data.settings || (diskDb && diskDb.settings) || DEFAULT_SETTINGS;
 
-      const wrote = await writeLocalDiskDatabase(templatesToUse, settingsToUse);
+      const globalDrawingsToUse = Array.isArray(data.globalDrawings)
+        ? data.globalDrawings
+        : ((diskDb && Array.isArray(diskDb.globalDrawings)) ? diskDb.globalDrawings : []);
+      const wrote = await writeLocalDiskDatabase(templatesToUse, settingsToUse, globalDrawingsToUse);
       sendResponse({ ok: wrote, schemaVersion: CURRENT_DB_SCHEMA_VERSION });
     }).catch(() => {
       sendResponse({ ok: false });
@@ -445,6 +520,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const updaterUrl = chrome.runtime.getURL("update/update.html");
     chrome.tabs.create({ url: updaterUrl });
     sendResponse({ ok: true });
+    return true;
+  }
+
+    if (request.action === "fetchEconomicCalendar") {
+    fetchEconomicCalendarFeed(Boolean(request.forceRefresh)).then((feed) => {
+      sendResponse({ ok: true, feed });
+    }).catch(() => {
+      sendResponse({ ok: false, feed: { fetchedAt: Date.now(), events: [] } });
+    });
     return true;
   }
 

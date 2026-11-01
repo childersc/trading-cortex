@@ -1436,6 +1436,38 @@ body.vest-popout-body #vest-action-log-box {
 /* Top-Left Market Bar "Vest Studio" Dropdown Pill & Menu        */
 /* ============================================================= */
 
+#vest-cortex-top-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Keep other extensions' higher-level overlays visible above this bar. */
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 50px;
+  min-height: 50px;
+  padding: 0 28px;
+  background: #05070b;
+  border-top: 1px solid rgba(59, 130, 246, 0.95);
+  box-shadow: 0 -5px 20px rgba(37, 99, 235, 0.68), 0 -1px 14px rgba(56, 189, 248, 0.62);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+
+html.vest-cortex-bottom-bar-active {
+  min-height: calc(100vh + 50px) !important;
+  overflow-y: auto !important;
+}
+
+body.vest-cortex-bottom-bar-active {
+  height: auto !important;
+  min-height: calc(100vh + 50px) !important;
+  overflow-y: visible !important;
+  box-sizing: border-box;
+}
+
 #vest-studio-header-pill {
   position: relative;
   display: inline-flex;
@@ -2002,7 +2034,8 @@ body.vest-popout-body #vest-action-log-box {
 }
 
 /* Toggle Box Card Row */
-.vest-tvs-toggle-box {
+.vest-tvs-toggle-box,
+.vest-tvs-toggle-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2052,7 +2085,8 @@ body.vest-popout-body #vest-action-log-box {
   position: absolute;
 }
 
-.vest-tvs-switch-slider {
+.vest-tvs-switch-slider,
+.vest-tvs-slider {
   position: absolute;
   inset: 0;
   background-color: rgba(51, 65, 85, 0.75);
@@ -2061,7 +2095,8 @@ body.vest-popout-body #vest-action-log-box {
   transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.vest-tvs-switch-slider::before {
+.vest-tvs-switch-slider::before,
+.vest-tvs-slider::before {
   content: "";
   position: absolute;
   height: 18px;
@@ -2074,13 +2109,15 @@ body.vest-popout-body #vest-action-log-box {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
-.vest-tvs-switch input:checked + .vest-tvs-switch-slider {
+.vest-tvs-switch input:checked + .vest-tvs-switch-slider,
+.vest-tvs-switch input:checked + .vest-tvs-slider {
   background-color: #10b981;
   border-color: #059669;
   box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
 }
 
-.vest-tvs-switch input:checked + .vest-tvs-switch-slider::before {
+.vest-tvs-switch input:checked + .vest-tvs-switch-slider::before,
+.vest-tvs-switch input:checked + .vest-tvs-slider::before {
   transform: translateX(22px);
   background-color: #ffffff;
 }
@@ -2232,4 +2269,867 @@ body.vest-popout-body #vest-action-log-box {
   background: #e0e3eb;
 }
 
+/* ============================================================= */
+/* TradingView Default Color Picker Popover                      */
+/* ============================================================= */
 
+.vest-tv-color-popover {
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  width: 244px;
+  padding: 12px;
+  background: #1e222d;
+  border: 1px solid #363a45;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.68), 0 2px 6px rgba(0, 0, 0, 0.45);
+  color: #d1d4dc;
+  font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.vest-tv-color-popover * {
+  box-sizing: border-box;
+}
+
+.vest-tvcp-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 18px);
+  gap: 4px;
+  justify-content: space-between;
+}
+
+.vest-tvcp-grid-group-gap {
+  margin-top: 8px;
+}
+
+.vest-tvcp-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.08s ease;
+  outline: none;
+}
+
+.vest-tvcp-swatch.is-dark-swatch {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.vest-tvcp-swatch:hover {
+  transform: scale(1.14);
+  z-index: 2;
+}
+
+.vest-tvcp-swatch.active::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border: 2px solid #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px #131722;
+  pointer-events: none;
+}
+
+.vest-tvcp-divider {
+  height: 1px;
+  background: #363a45;
+  margin: 10px 0;
+}
+
+.vest-tvcp-custom-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.vest-tvcp-add-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: #9598a1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.vest-tvcp-add-btn:hover {
+  background: #2a2e39;
+  color: #ffffff;
+}
+
+.vest-tvcp-opacity-section {
+  margin-top: 10px;
+}
+
+.vest-tvcp-opacity-label {
+  font-size: 12px;
+  color: #787b86;
+  margin-bottom: 6px;
+}
+
+.vest-tvcp-opacity-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vest-tvcp-opacity-track-wrap {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background-image:
+    linear-gradient(45deg, #363a45 25%, transparent 25%),
+    linear-gradient(-45deg, #363a45 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #363a45 75%),
+    linear-gradient(-45deg, transparent 75%, #363a45 75%);
+  background-size: 6px 6px;
+  background-position: 0 0, 0 3px, 3px -3px, -3px 0;
+  background-color: #131722;
+  display: flex;
+  align-items: center;
+}
+
+.vest-tvcp-opacity-gradient {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.vest-tvcp-opacity-range {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 10px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vest-tvcp-opacity-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #1e222d;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+}
+
+.vest-tvcp-opacity-box {
+  display: flex;
+  align-items: center;
+  width: 54px;
+  height: 26px;
+  background: #131722;
+  border: 1px solid #363a45;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 12px;
+  color: #d1d4dc;
+}
+
+.vest-tvcp-opacity-box:focus-within {
+  border-color: #2962ff;
+}
+
+.vest-tvcp-opacity-num {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #d1d4dc;
+  font-size: 12px;
+  text-align: right;
+  padding: 0 2px 0 0;
+  -moz-appearance: textfield;
+}
+
+.vest-tvcp-opacity-num::-webkit-outer-spin-button,
+.vest-tvcp-opacity-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ============================================================= */
+/* Moveable Economic News Box on Chart                           */
+/* ============================================================= */
+
+#vest-chart-news-box {
+  position: fixed !important;
+  z-index: 2147483635 !important;
+  background: rgba(19, 23, 34, 0.90);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.45);
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  user-select: none;
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
+}
+
+#vest-chart-news-box * {
+  box-sizing: border-box;
+}
+
+#vest-chart-news-box.dragging {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.85), 0 0 16px rgba(56, 189, 248, 0.35);
+  border-color: rgba(56, 189, 248, 0.75) !important;
+}
+
+.vest-cnb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  cursor: grab;
+  gap: 8px;
+}
+
+.vest-cnb-header:active {
+  cursor: grabbing;
+}
+
+.vest-cnb-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.vest-cnb-title-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f23645;
+  box-shadow: 0 0 8px rgba(242, 54, 69, 0.8);
+  flex-shrink: 0;
+}
+
+.vest-cnb-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #f8fafc;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vest-cnb-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.vest-cnb-icon-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.vest-cnb-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.vest-cnb-icon-btn.is-pinned {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.45);
+}
+
+.vest-cnb-icon-btn.is-pinned:hover {
+  background: rgba(56, 189, 248, 0.28);
+  color: #7dd3fc;
+}
+
+#vest-chart-news-box.is-pinned .vest-cnb-header,
+#vest-chart-trades-box.is-pinned .vest-cnb-header {
+  cursor: default !important;
+}
+
+#vest-chart-news-box.is-minimized-pill,
+#vest-chart-trades-box.is-minimized-pill {
+  cursor: pointer !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(56, 189, 248, 0.25) !important;
+}
+
+#vest-chart-news-box.is-minimized-pill:hover,
+#vest-chart-trades-box.is-minimized-pill:hover {
+  border-color: rgba(56, 189, 248, 0.85) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.82), 0 0 12px rgba(56, 189, 248, 0.28) !important;
+}
+
+.vest-cnb-min-pill-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vest-cnb-min-pill-bar:hover .vest-cnb-restore-hint {
+  color: #38bdf8;
+  transform: translateY(-1px);
+}
+
+.vest-cnb-restore-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  transition: color 0.14s ease, transform 0.14s ease;
+}
+
+.vest-cnb-restore-hint svg {
+  width: 13px;
+  height: 13px;
+}
+
+.vest-cnb-icon-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.vest-cnb-body {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px 6px 6px;
+  gap: 3px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.vest-cnb-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.vest-cnb-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+}
+
+.vest-cnb-row {
+  display: grid;
+  grid-template-columns: 58px 46px 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.12s ease;
+}
+
+.vest-cnb-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.vest-cnb-row.is-imminent {
+  background: rgba(242, 54, 69, 0.12);
+  border-color: rgba(242, 54, 69, 0.35);
+}
+
+.vest-cnb-row.is-past {
+  opacity: 0.55;
+}
+
+.vest-cnb-time {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
+.vest-cnb-country {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  white-space: nowrap;
+}
+
+.vest-cnb-folder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+}
+
+.vest-cnb-folder svg {
+  width: 16px;
+  height: 15px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+.vest-cnb-event-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vest-cnb-countdown {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  white-space: nowrap;
+}
+
+.vest-cnb-countdown.imminent {
+  background: rgba(242, 54, 69, 0.22);
+  color: #fca5a5;
+}
+
+.vest-cnb-empty {
+  padding: 12px 8px;
+  text-align: center;
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+/* ============================================================= */
+/* Moveable Instrument Trades Box on Chart                       */
+/* ============================================================= */
+
+#vest-chart-trades-box {
+  position: fixed !important;
+  z-index: 2147483636 !important;
+  background: rgba(19, 23, 34, 0.90);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.45);
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif;
+  user-select: none;
+  overflow: hidden;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
+}
+
+#vest-chart-trades-box * {
+  box-sizing: border-box;
+}
+
+#vest-chart-trades-box.dragging {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.85), 0 0 16px rgba(56, 189, 248, 0.35);
+  border-color: rgba(56, 189, 248, 0.75) !important;
+}
+
+.vest-ctb-col-header {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.72);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.45px;
+  color: #94a3b8;
+}
+
+.vest-ctb-col-header.no-side {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.vest-ctb-col-header-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.12fr) minmax(0, 1.12fr) minmax(0, 0.78fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px 0 11px;
+  min-width: 0;
+}
+
+.vest-ctb-body {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px 7px 8px;
+  gap: 5px;
+  max-height: 310px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.vest-ctb-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.vest-ctb-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+}
+
+.vest-ctb-row-outer {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.vest-ctb-row-outer.no-side {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.vest-ctb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.12fr) minmax(0, 1.12fr) minmax(0, 0.78fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left-width: 3px;
+  font-variant-numeric: tabular-nums;
+  transition: filter 0.12s ease, transform 0.1s ease;
+  min-width: 0;
+}
+
+.vest-ctb-row:hover {
+  filter: brightness(1.12);
+}
+
+.vest-ctb-row.is-win {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.42);
+  border-left-color: #10b981;
+}
+
+.vest-ctb-row.is-loss {
+  background: rgba(242, 54, 69, 0.22);
+  border-color: rgba(242, 54, 69, 0.42);
+  border-left-color: #f23645;
+}
+
+.vest-ctb-side-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 24px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 5px;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.vest-ctb-side-badge.long {
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  box-shadow: inset 0 0 8px rgba(56, 189, 248, 0.12);
+}
+
+.vest-ctb-side-badge.short {
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  box-shadow: inset 0 0 8px rgba(251, 191, 36, 0.12);
+}
+
+.vest-ctb-date-cell {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #cbd5e1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.vest-ctb-time-cell {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #f8fafc;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.vest-ctb-duration {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-align: center;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.38);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.vest-ctb-pnl {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.vest-ctb-pnl.win {
+  color: #4ade80;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.vest-ctb-pnl.loss {
+  color: #fca5a5;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.vest-ctb-pnl.flat {
+  color: #cbd5e1;
+}
+
+.vest-ctb-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: rgba(15, 23, 42, 0.72);
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10.5px;
+  color: #cbd5e1;
+  gap: 8px;
+}
+
+/* ============================================================= */
+/* Active Position Chart HUD & Quick Flatten Overlay Styles      */
+/* ============================================================= */
+.vest-chart-position-hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 12;
+  overflow: visible;
+  user-select: none;
+}
+
+/* Box running on current price line: [ PnL Box ] [ ✕ Flatten ] */
+.vest-price-line-hud {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: top 0.06s ease-out;
+  will-change: top, left;
+  z-index: 14;
+}
+
+.vest-plh-pnl-box {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55), 0 0 1px rgba(255, 255, 255, 0.15);
+  user-select: none;
+  cursor: default;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.vest-plh-pnl-box.profit {
+  background: rgba(6, 78, 59, 0.94);
+  border: 1px solid #10b981;
+  color: #34d399;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.25);
+}
+
+.vest-plh-pnl-box.loss {
+  background: rgba(127, 29, 29, 0.94);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.25);
+}
+
+.vest-plh-pnl-box.even {
+  background: rgba(30, 41, 59, 0.94);
+  border: 1px solid #eab308;
+  color: #fde047;
+}
+
+.vest-plh-pnl-tag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  opacity: 0.85;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.vest-plh-pnl-val {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
+/* ✕ Quick Flatten Button */
+.vest-plh-flatten-btn {
+  pointer-events: auto;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.92);
+  border: 1px solid #f87171;
+  color: #ffffff;
+  font-family: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 10px rgba(239, 68, 68, 0.3);
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.vest-plh-flatten-btn:hover {
+  background: #b91c1c;
+  border-color: #fca5a5;
+  box-shadow: 0 2px 12px rgba(239, 68, 68, 0.55);
+  transform: scale(1.04);
+}
+
+.vest-plh-flatten-btn:active {
+  transform: scale(0.96);
+}
+
+.vest-plh-x {
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.vest-plh-flatten-label {
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+}
+
+/* PnL Badge to Immediate Left of Chart Entry Box */
+.vest-entry-pnl-badge {
+  position: absolute;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  user-select: none;
+  transform: translateY(-50%);
+  z-index: 15;
+  transition: top 0.06s ease-out, left 0.06s ease-out, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.vest-entry-pnl-badge.profit {
+  background: rgba(6, 78, 59, 0.95);
+  border: 1px solid #10b981;
+  color: #34d399;
+  box-shadow: 0 2px 12px rgba(16, 185, 129, 0.3);
+}
+
+.vest-entry-pnl-badge.loss {
+  background: rgba(127, 29, 29, 0.95);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  box-shadow: 0 2px 12px rgba(239, 68, 68, 0.3);
+}
+
+.vest-entry-pnl-badge.even {
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid #94a3b8;
+  color: #f8fafc;
+}
+
+.vest-epb-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  opacity: 0.85;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.vest-epb-val {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
