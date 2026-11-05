@@ -4,6 +4,14 @@ All notable changes, new features, and bug fixes through the current release (`v
 
 ---
 
+## [v1.1.45-Alpha] — In-Development (Bleeding Edge)
+
+### ⚡ Bleeding Edge
+- Active development branch tracking upcoming v1.1.45 release.
+- Live Alpha version metadata (`1.1.45 Alpha`) across manifest, popup, and Update Center.
+
+---
+
 ## [v1.1.44] — Cortex Top Bar Relocation, Diagnostics Suite & Dev Channel Updater
 
 ### ✨ Features
