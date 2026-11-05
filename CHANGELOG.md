@@ -4,11 +4,11 @@ All notable changes, new features, and bug fixes through the current release (`v
 
 ---
 
-## [v1.1.46-Alpha] — In-Development (Bleeding Edge)
+## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
 ### ⚡ Bleeding Edge
-- Active development branch tracking upcoming v1.1.46 release.
-- Live Alpha version metadata (`1.1.46 Alpha`) across manifest, popup, and Update Center.
+- Active development branch tracking upcoming v1.1.47 release.
+- Live Alpha version metadata (`1.1.47 Alpha`) across manifest, popup, and Update Center.
 
 ---
 
