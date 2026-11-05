@@ -12,6 +12,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     autoApplyToNew: false,
     hotkeysEnabled: true
   };
+  let updateChannelPref = 'stable';
+
+  function applyUpdaterBadge(updaterState) {
+    if (!updaterState || !popupVersionLabel || !btnOpenUpdater) return;
+    if (updaterState.updateAvailable) {
+      const isDev = updaterState.channel === 'dev';
+      popupVersionLabel.textContent = isDev
+        ? (updaterState.latestVersion || `Dev (${updaterState.latestSha || 'ready'})`)
+        : `Update v${updaterState.latestVersion}`;
+      btnOpenUpdater.style.background = isDev ? 'rgba(245, 158, 11, 0.25)' : 'rgba(34, 197, 94, 0.2)';
+      btnOpenUpdater.style.borderColor = isDev ? 'rgba(245, 158, 11, 0.6)' : 'rgba(34, 197, 94, 0.55)';
+      btnOpenUpdater.style.color = isDev ? '#fbbf24' : '#4ade80';
+      btnOpenUpdater.title = isDev
+        ? `Dev build ready (${updaterState.latestVersion || ''}) — Click to open Update Center`
+        : `Update ready (v${updaterState.latestVersion}) — Click to open Update Center`;
+    }
+  }
 
   let editingTemplateId = null;
 
@@ -70,6 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settingHotkeys = document.getElementById('setting-hotkeys');
   const settingRememberSidebar = document.getElementById('setting-remember-sidebar');
   const settingPanelManagement = document.getElementById('setting-panel-management');
+  const settingUpdateChannel = document.getElementById('setting-update-channel');
   const btnResetDefaults = document.getElementById('btn-reset-defaults');
 
   // Export / Import / Updater
@@ -96,9 +114,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // -------------------------------------------------------------
   async function loadData() {
     try {
-      let data = await chrome.storage.local.get(['templates', 'settings', 'updaterState', 'installedVersionOverride']).catch(() => ({}));
+      let data = await chrome.storage.local.get(['templates', 'settings', 'updaterState', 'installedVersionOverride', 'updateChannel']).catch(() => ({}));
       if (!data.templates && chrome.storage.sync) {
         data = await chrome.storage.sync.get(['templates', 'settings']).catch(() => ({}));
+      }
+      if (data && data.updateChannel) {
+        updateChannelPref = data.updateChannel;
       }
       if (data.templates && Array.isArray(data.templates)) {
         templates = data.templates;
@@ -111,15 +132,15 @@ document.addEventListener('DOMContentLoaded', async () => {
           ? data.installedVersionOverride
           : `v${data.installedVersionOverride}`;
       }
-      if (data.updaterState && data.updaterState.updateAvailable && popupVersionLabel && btnOpenUpdater) {
-        const isDev = data.updaterState.channel === 'dev';
-        popupVersionLabel.textContent = isDev
-          ? (data.updaterState.latestVersion || `Dev (${data.updaterState.latestSha || 'ready'})`)
-          : `Update v${data.updaterState.latestVersion}`;
-        btnOpenUpdater.style.background = isDev ? 'rgba(245, 158, 11, 0.2)' : 'rgba(34, 197, 94, 0.2)';
-        btnOpenUpdater.style.borderColor = isDev ? 'rgba(245, 158, 11, 0.55)' : 'rgba(34, 197, 94, 0.55)';
-        btnOpenUpdater.style.color = isDev ? '#fbbf24' : '#4ade80';
+      if (data.updaterState) {
+        applyUpdaterBadge(data.updaterState);
       }
+      // Query fresh update check in background upon popup open
+      chrome.runtime.sendMessage({ action: 'checkForUpdatesNow' }, (resp) => {
+        if (resp && resp.updaterState) {
+          applyUpdaterBadge(resp.updaterState);
+        }
+      });
       renderTemplates();
       renderSettings();
     } catch (err) {
@@ -300,6 +321,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (settingPanelManagement) {
       settingPanelManagement.checked = settings.enablePanelManagement !== false;
     }
+    if (settingUpdateChannel) {
+      const activeChan = updateChannelPref || settings.updateChannel || (/alpha/i.test(chrome.runtime.getManifest().version_name || '') ? 'dev' : 'stable');
+      settingUpdateChannel.value = activeChan === 'dev' ? 'dev' : 'stable';
+    }
   }
 
   settingFloatingBar.addEventListener('change', async () => {
@@ -328,6 +353,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     settingPanelManagement.addEventListener('change', async () => {
       settings.enablePanelManagement = settingPanelManagement.checked;
       await saveData();
+    });
+  }
+
+  if (settingUpdateChannel) {
+    settingUpdateChannel.addEventListener('change', async () => {
+      const val = settingUpdateChannel.value === 'dev' ? 'dev' : 'stable';
+      updateChannelPref = val;
+      settings.updateChannel = val;
+      await chrome.storage.local.set({ updateChannel: val });
+      await saveData();
+      chrome.runtime.sendMessage({ action: 'checkForUpdatesNow' }, (resp) => {
+        if (resp && resp.updaterState) {
+          applyUpdaterBadge(resp.updaterState);
+        }
+      });
     });
   }
 

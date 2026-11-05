@@ -349,6 +349,11 @@
   transform: translateY(0);
 }
 
+.vest-toast.dev-toast {
+  border-color: #f59e0b;
+  box-shadow: 0 10px 30px rgba(245, 158, 11, 0.35);
+}
+
 /* =============================================================
    Vest Trading Window Panel Controls (Collapse & Float/Move)
    ============================================================= */

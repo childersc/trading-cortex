@@ -1639,6 +1639,10 @@
             renderStudioHeaderPill();
           }
         }
+        if (changes.updateChannel && isTopWindow) {
+          latestUpdateChannel = changes.updateChannel.newValue || 'stable';
+          triggerQuickUpdateCheck();
+        }
         if (changes.updaterState && changes.updaterState.newValue && isTopWindow) {
           const newState = changes.updaterState.newValue;
           const wasAvailable = isUpdateAvailable;
@@ -1652,6 +1656,17 @@
           latestAvailableVersion = newState.latestVersion || null;
           if (wasAvailable !== isUpdateAvailable) {
             renderStudioHeaderPill();
+          }
+          if (isUpdateAvailable && !updateNotificationToastShown) {
+            updateNotificationToastShown = true;
+            const verLabel = isDev
+              ? (latestAvailableVersion || 'New build')
+              : `v${cleanSemver(latestAvailableVersion || 'latest')}`;
+            showToast(
+              `⚡ Trading Cortex ${isDev ? 'Dev build' : 'update'} ready (${verLabel})! Click CORTEX in top bar to deploy.`,
+              4500,
+              isDev
+            );
           }
         }
 
@@ -3340,6 +3355,7 @@
   let latestAvailableVersion = null;
   let latestUpdateChannel = 'stable';
   let isCheckingForUpdate = false;
+  let updateNotificationToastShown = false;
 
   function cleanSemver(v) {
     return String(v || '').trim().replace(/^v/i, '');
@@ -3390,8 +3406,8 @@
         let installedDevSha = null;
         if (isExtensionValid() && chrome.storage && chrome.storage.local) {
           try {
-            const stored = await chrome.storage.local.get(['updateChannel', 'installedDevSha']);
-            if (stored.updateChannel) channelPref = stored.updateChannel;
+            const stored = await chrome.storage.local.get(['updateChannel', 'installedDevSha', 'settings']);
+            channelPref = stored.updateChannel || (stored.settings && stored.settings.updateChannel) || (/alpha/i.test(installedVer) ? 'dev' : 'stable');
             if (stored.installedDevSha) installedDevSha = stored.installedDevSha;
           } catch (e) {}
         }
@@ -3406,14 +3422,19 @@
             const latestCommit = Array.isArray(commits) && commits.length > 0 ? commits[0] : null;
             if (latestCommit && latestCommit.sha) {
               const latestSha = latestCommit.sha;
-              const isDifferent = installedDevSha ? (latestSha.toLowerCase() !== installedDevSha.toLowerCase()) : true;
+              const shortSha = latestSha.slice(0, 7);
+              const isDifferent = installedDevSha ? (latestSha.toLowerCase() !== installedDevSha.toLowerCase() && shortSha.toLowerCase() !== installedDevSha.toLowerCase()) : true;
               const upcomingDevVer = getUpcomingDevVersion(installedVer);
               state = {
                 channel: 'dev',
                 latestVersion: upcomingDevVer,
+                latestSha: shortSha,
                 latestCommitSha: latestSha,
                 updateAvailable: isDifferent
               };
+              if (isExtensionValid() && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ updaterState: state, updateChannel: 'dev' }).catch(() => {});
+              }
             }
           }
         } else {
@@ -3429,6 +3450,9 @@
               latestVersion: latestVer,
               updateAvailable: compareSemver(latestVer, installedVer) > 0
             };
+            if (isExtensionValid() && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.set({ updaterState: state, updateChannel: 'stable' }).catch(() => {});
+            }
           }
         }
       }
@@ -3437,11 +3461,23 @@
         const wasAvailable = isUpdateAvailable;
         const prevVer = latestAvailableVersion;
         const prevChan = latestUpdateChannel;
+        const isDev = state.channel === 'dev';
         isUpdateAvailable = Boolean(state.updateAvailable);
         latestAvailableVersion = state.latestVersion || null;
         latestUpdateChannel = state.channel || 'stable';
         if (wasAvailable !== isUpdateAvailable || prevVer !== latestAvailableVersion || prevChan !== latestUpdateChannel) {
           renderStudioHeaderPill();
+        }
+        if (isUpdateAvailable && !updateNotificationToastShown) {
+          updateNotificationToastShown = true;
+          const verLabel = isDev
+            ? (latestAvailableVersion || 'New build')
+            : `v${cleanSemver(latestAvailableVersion || 'latest')}`;
+          showToast(
+            `⚡ Trading Cortex ${isDev ? 'Dev build' : 'update'} ready (${verLabel})! Click CORTEX in top bar to deploy.`,
+            4500,
+            isDev
+          );
         }
       }
     } catch (e) {
@@ -4105,6 +4141,13 @@
               <div class="vest-tvs-about-meta-row">
                 <span>Target Engine</span>
                 <span style="color:#e2e8f0;">TradingView Charting Library Platforms</span>
+              </div>
+              <div class="vest-tvs-about-meta-row" style="margin-top:6px;">
+                <span>Update Channel</span>
+                <select class="vest-ed-select" id="vest-tvs-update-channel-select" style="width:175px; padding:3px 6px; font-size:11.5px; background:rgba(15,23,42,0.85); color:#f8fafc; border:1px solid rgba(148,163,184,0.3); border-radius:6px; cursor:pointer;" title="Choose whether to receive Official Releases or Bleeding-Edge Dev updates">
+                  <option value="stable" ${latestUpdateChannel === 'stable' ? 'selected' : ''}>Stable (Official Releases)</option>
+                  <option value="dev" ${latestUpdateChannel === 'dev' ? 'selected' : ''}>Dev Branch (Bleeding Edge)</option>
+                </select>
               </div>
               <div class="vest-tvs-about-meta-row" style="margin-top:6px;">
                 <span>Update Center</span>
@@ -7056,6 +7099,20 @@
           chrome.runtime.sendMessage({ action: 'openUpdaterPage' });
         }
       });
+
+      overlay.querySelector('#vest-tvs-update-channel-select')?.addEventListener('change', async (e) => {
+        const val = e.target.value === 'dev' ? 'dev' : 'stable';
+        latestUpdateChannel = val;
+        draftSettings.updateChannel = val;
+        settings.updateChannel = val;
+        await safeStorageSet({ updateChannel: val, settings });
+        triggerQuickUpdateCheck();
+        showToast(
+          `Update channel set to ${val === 'dev' ? 'Dev Branch (Bleeding Edge)' : 'Stable Releases'}`,
+          2500,
+          val === 'dev'
+        );
+      });
     }
 
     renderDialog();
@@ -9872,7 +9929,7 @@
   let toastEl = null;
   let toastTimer = null;
 
-  function showToast(msg) {
+  function showToast(msg, duration = 2200, isDev = false) {
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.className = 'vest-toast';
@@ -9880,12 +9937,20 @@
     }
 
     toastEl.textContent = msg;
+    if (isDev) {
+      toastEl.classList.add('dev-toast');
+    } else {
+      toastEl.classList.remove('dev-toast');
+    }
     toastEl.classList.add('show');
 
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
-      if (toastEl) toastEl.classList.remove('show');
-    }, 2200);
+      if (toastEl) {
+        toastEl.classList.remove('show');
+        toastEl.classList.remove('dev-toast');
+      }
+    }, duration);
   }
 
   // -------------------------------------------------------------
