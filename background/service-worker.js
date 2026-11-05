@@ -236,6 +236,9 @@ async function writeLocalDiskDatabase(templates, settings, globalDrawings = null
 // Automatically sync any template or settings changes in chrome.storage.local to user-data/cortex-db.json
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes.updateChannel) {
+    checkGitHubForUpdatesInBackground();
+  }
   if (!changes.templates && !changes.settings && !changes.globalDrawings) return;
 
   if (diskWriteTimer) clearTimeout(diskWriteTimer);
@@ -343,9 +346,18 @@ function compareSemver(a, b) {
 
 async function checkGitHubForUpdatesInBackground() {
   try {
-    const stored = await chrome.storage.local.get(["installedVersionOverride", "updateChannel", "installedDevSha"]).catch(() => ({}));
-    const updateChannel = stored.updateChannel || "stable";
-    let installedVer = chrome.runtime.getManifest().version || "1.1.0";
+    const stored = await chrome.storage.local.get(["installedVersionOverride", "updateChannel", "installedDevSha", "settings"]).catch(() => ({}));
+    const m = chrome.runtime.getManifest();
+    const manifestVer = m.version_name || m.version || "1.1.44";
+    const isDevBuild = Boolean(/alpha/i.test(manifestVer) || /alpha/i.test(m.version_name || "") || stored.installedDevSha);
+    
+    // Channel preference resolution: explicit storage -> settings -> build type
+    let updateChannel = stored.updateChannel || (stored.settings && stored.settings.updateChannel);
+    if (!updateChannel) {
+      updateChannel = isDevBuild ? "dev" : "stable";
+    }
+
+    let installedVer = m.version || "1.1.0";
     if (
       stored &&
       stored.installedVersionOverride &&
@@ -364,9 +376,9 @@ async function checkGitHubForUpdatesInBackground() {
         if (Array.isArray(commits) && commits.length > 0) {
           const topCommit = commits[0];
           const shortSha = topCommit.sha.slice(0, 7);
-          const hasUpdate = Boolean(!stored.installedDevSha || (stored.installedDevSha !== shortSha && stored.installedDevSha !== topCommit.sha));
-          const m = chrome.runtime.getManifest();
-          const manifestVer = m.version_name || m.version || "1.1.44";
+          const topSha = topCommit.sha.toLowerCase();
+          const localSha = String(stored.installedDevSha || "").toLowerCase().trim();
+          const hasUpdate = Boolean(!localSha || (localSha !== shortSha.toLowerCase() && localSha !== topSha));
           const upcomingDevVer = getUpcomingDevVersion(installedVer || manifestVer);
           const updaterState = {
             channel: "dev",
@@ -377,12 +389,14 @@ async function checkGitHubForUpdatesInBackground() {
             updateAvailable: hasUpdate,
             htmlUrl: `https://github.com/${GITHUB_REPO}/commits/dev`
           };
-          await chrome.storage.local.set({ updaterState }).catch(() => {});
+          await chrome.storage.local.set({ updaterState, updateChannel: "dev" }).catch(() => {});
           if (hasUpdate) {
             await chrome.action.setBadgeText({ text: "DEV" }).catch(() => {});
             await chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" }).catch(() => {});
+            await chrome.action.setTitle({ title: `Trading Cortex · Dev Build Ready (${upcomingDevVer} - ${shortSha})` }).catch(() => {});
           } else {
             await chrome.action.setBadgeText({ text: "" }).catch(() => {});
+            await chrome.action.setTitle({ title: `Trading Cortex ${upcomingDevVer} (dev channel · synchronized)` }).catch(() => {});
           }
           return updaterState;
         }
@@ -427,13 +441,15 @@ async function checkGitHubForUpdatesInBackground() {
       htmlUrl: release.html_url
     };
 
-    await chrome.storage.local.set({ updaterState }).catch(() => {});
+    await chrome.storage.local.set({ updaterState, updateChannel: "stable" }).catch(() => {});
 
     if (hasUpdate) {
       await chrome.action.setBadgeText({ text: "NEW" }).catch(() => {});
       await chrome.action.setBadgeBackgroundColor({ color: "#2563eb" }).catch(() => {});
+      await chrome.action.setTitle({ title: `Trading Cortex · Update Available (v${latestVer})` }).catch(() => {});
     } else {
       await chrome.action.setBadgeText({ text: "" }).catch(() => {});
+      await chrome.action.setTitle({ title: `Trading Cortex v${installedVer}` }).catch(() => {});
     }
 
     return updaterState;

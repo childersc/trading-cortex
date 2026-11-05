@@ -374,7 +374,12 @@
 
   async function setChannel(channel, triggerCheck = true) {
     updateChannelUI(channel);
-    await chrome.storage.local.set({ updateChannel: currentChannel }).catch(() => {});
+    const data = await chrome.storage.local.get(['settings']).catch(() => ({}));
+    const nextSettings = { ...(data.settings || {}), updateChannel: currentChannel };
+    await chrome.storage.local.set({ updateChannel: currentChannel, settings: nextSettings }).catch(() => {});
+    if (chrome.storage.sync) {
+      chrome.storage.sync.set({ settings: nextSettings }).catch(() => {});
+    }
     logTerm(`Switched to ${currentChannel === 'dev' ? 'Bleeding Edge (dev branch)' : 'Official Stable Releases'} channel.`, 'info');
     if (triggerCheck) {
       await checkCurrentChannelUpdates(false);
@@ -1151,7 +1156,7 @@
     if (data.installedDevSha) {
       installedDevSha = data.installedDevSha;
     }
-    if (data.updateChannel === 'dev') {
+    if (data.updateChannel === 'dev' || (!data.updateChannel && (/alpha/i.test(installedVersion) || data.installedDevSha))) {
       currentChannel = 'dev';
     } else {
       currentChannel = 'stable';
