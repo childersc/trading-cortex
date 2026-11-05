@@ -128,7 +128,8 @@
     rememberLastChartSettings: true,
     lastChartSettings: {},
     favoriteTimeframes: [],
-    cortexIndicator: { enabled: false }
+    cortexIndicator: { enabled: false },
+    debugMode: false
   };
   let currentGlobalDrawings = [];
   const globalDrawingEntityMap = new Map(); // chart entity id -> persistent global drawing id
@@ -188,6 +189,7 @@
   }
 
   function selectFavoriteTimeframe(resolution) {
+    cortexDebugLog('Timeframe selected via favorites bar', { resolution });
     try {
       const chart = activeChart || (activeChartApi && typeof activeChartApi.activeChart === 'function' ? activeChartApi.activeChart() : null);
       if (chart && typeof chart.setResolution === 'function') {
@@ -499,8 +501,24 @@
   let lastRectangleId = null;
   let rightClickedShapeId = null;
   let rightClickedDrawingType = null;
+  let lastIctRenderDurationMs = 0;
+  let currentBrowserTabId = null;
+
+  function cortexDebugLog(action, ...details) {
+    if (!currentSettings || !currentSettings.debugMode) return;
+    const prefix = `[CORTEX DEBUG MODE] - ${action}`;
+    if (details.length > 0) {
+      console.log(prefix, ...details);
+    } else {
+      console.log(prefix);
+    }
+  }
 
   function log(...args) {
+    if (currentSettings && currentSettings.debugMode) {
+      cortexDebugLog(args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' '));
+      return;
+    }
     console.log('[VestTemplates:Main]', ...args);
   }
 
@@ -1402,6 +1420,7 @@
     setupChartSettingsObserver();
     setupContextMenuHandler();
     enhanceTimeframeControls();
+    hookActiveChartResetMethods();
     if (!hasCompletedInitialSidebarRestore) {
       restoreSidebarSelections();
     }
@@ -3101,11 +3120,13 @@
       // Immediately record which drawing is hovered/selected when right-click happens
       getRightClickedOrSelectedShapeInfo(true);
 
+      scanAndHookResetChartViewMenuItems(doc);
       if (tryInjectTemplatesMenu(doc)) return;
 
       let attempts = 0;
       const checkInterval = setInterval(() => {
         attempts++;
+        scanAndHookResetChartViewMenuItems(doc);
         if (tryInjectTemplatesMenu(doc) || attempts >= 25) {
           clearInterval(checkInterval);
         }
@@ -3134,7 +3155,32 @@
     }, true);
     doc.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeAllContextMenus();
+      if (e.altKey && !e.ctrlKey && !e.metaKey && (e.code === 'KeyR' || e.key === 'r' || e.key === 'R')) {
+        handleResetChartViewTrigger('hotkey_alt_r');
+      }
     }, true);
+
+    const captureResetViewClickOnDoc = (e) => {
+      const target = e.target;
+      if (!target) return;
+      const item = target.closest && target.closest('tr, div[data-role="menuitem"], div[role="menuitem"], div[class*="item-"], button, div[role="button"]');
+      if (item) {
+        const text = (item.innerText || item.textContent || '').trim().toLowerCase();
+        const aria = (item.getAttribute('aria-label') || item.getAttribute('title') || '').toLowerCase();
+        if (
+          text.includes('reset chart view') ||
+          text.includes('reset price scale') ||
+          text.includes('reset view') ||
+          aria.includes('reset chart view') ||
+          aria.includes('reset price scale') ||
+          aria.includes('reset view')
+        ) {
+          handleResetChartViewTrigger('doc_click_interceptor');
+        }
+      }
+    };
+    doc.addEventListener('pointerdown', captureResetViewClickOnDoc, true);
+    doc.addEventListener('click', captureResetViewClickOnDoc, true);
 
     const attachMenuObserver = () => {
       if (!doc.body) return;
@@ -3148,6 +3194,7 @@
                 if (node && node.nodeType === 1) {
                   if (node.getAttribute && node.getAttribute('data-vest-cmi') === 'true') continue;
                   if (node.classList && node.classList.contains('vest-tv-floating-submenu')) continue;
+                  scanAndHookResetChartViewMenuItems(doc);
                   tryInjectTemplatesMenu(doc);
                   return;
                 }
@@ -3188,6 +3235,31 @@
     const { type, payload } = event.data;
 
     switch (type) {
+      case 'VEST_TV_RESET_CHART_VIEW': {
+        handleResetChartViewTrigger('isolated_message');
+        break;
+      }
+      case 'VEST_TV_TAB_INFO': {
+        const p = payload || event.data.payload || {};
+        if (p.tabId !== undefined && p.tabId !== null) {
+          currentBrowserTabId = p.tabId;
+        }
+        break;
+      }
+      case 'VEST_TV_SET_DEBUG_MODE': {
+        const nextVal = Boolean(payload && payload.debugMode !== undefined ? payload.debugMode : event.data.debugMode);
+        currentSettings.debugMode = nextVal;
+        cortexDebugLog(`Debug Mode updated to ${nextVal ? 'ON' : 'OFF'} in main world frame`);
+        break;
+      }
+      case 'VEST_TV_REQUEST_DIAGNOSTICS': {
+        const telemetry = typeof buildDiagnosticsTelemetrySnapshot === 'function' ? buildDiagnosticsTelemetrySnapshot() : {};
+        postToIsolated({
+          type: 'VEST_TV_DIAGNOSTICS_TELEMETRY',
+          telemetry
+        });
+        break;
+      }
       case 'VEST_TV_FAIL_PRICES_UPDATE': {
         const next = payload || {};
         const longPrice = Number(next.long);
@@ -3264,6 +3336,12 @@
               }
             }
           };
+          if (payload.settings.debugMode !== undefined) {
+            currentSettings.debugMode = Boolean(payload.settings.debugMode);
+          }
+          if (currentSettings.debugMode) {
+            cortexDebugLog('Configuration update applied', { activeTemplate: currentSettings.activeTemplateId, debugMode: currentSettings.debugMode });
+          }
           if (!currentSettings.cortexIndicator || currentSettings.cortexIndicator.enabled !== true) {
             lastCortexAutomationClosedBarKey = '';
             lastCortexAutomationContextKey = '';
@@ -4886,6 +4964,8 @@
   let chartSettingsRestoreAttempts = 0;
   let chartSettingsCaptureDebounceTimer = null;
   const chartViewportAppliedAt = new Map();
+  const lastKnownChartConfigs = new Map();
+  let isResettingChartView = false;
   let chartMemoryTabId = '';
   let chartMemoryTabFocused = false;
   try {
@@ -4964,7 +5044,7 @@
   }
 
   function scheduleSaveCurrentChartSettings(delayMs = 280) {
-    if (isRestoringChartSettings) return;
+    if (isRestoringChartSettings || isResettingChartView) return;
     if (currentSettings.rememberLastChartSettings === false) return;
     if (!chartMemoryTabFocused) return;
     if (chartSettingsCaptureDebounceTimer) {
@@ -5409,7 +5489,29 @@
         updatedAt: savedAt
       };
       viewportsBySymbol[symKey] = chartState;
-      if (chartKey) viewportsByChart[chartKey] = chartState;
+      if (chartKey) {
+        viewportsByChart[chartKey] = chartState;
+        const ro = typeof viewport.rightOffset === 'number' ? viewport.rightOffset : 6;
+        const isAtLiveEdge = Number.isFinite(ro) && ro >= -2 && ro <= 30;
+        const existingKnown = lastKnownChartConfigs.get(chartKey) || {};
+        const updatedKnown = {
+          ...existingKnown,
+          symbol,
+          resolution,
+          chartType: chartType !== null ? chartType : (existingKnown.chartType !== undefined ? existingKnown.chartType : 1),
+          barSpacing: (typeof viewport.barSpacing === 'number' && viewport.barSpacing > 0)
+            ? viewport.barSpacing
+            : (existingKnown.barSpacing || 12),
+          rightOffset: isAtLiveEdge ? ro : (existingKnown.rightOffset !== undefined ? existingKnown.rightOffset : 6),
+          isAutoScale: viewport.isAutoScale !== undefined ? viewport.isAutoScale : true,
+          priceScaleMode: typeof viewport.priceScaleMode === 'number' ? viewport.priceScaleMode : 0,
+          isInverted: Boolean(viewport.isInverted),
+          candleWidthPx: (currentSettings.candleOhlc && currentSettings.candleOhlc.candleWidthPx) || 140,
+          customCandleWidthEnabled: Boolean(currentSettings.candleOhlc && currentSettings.candleOhlc.customCandleWidthEnabled),
+          updatedAt: savedAt
+        };
+        lastKnownChartConfigs.set(chartKey, updatedKnown);
+      }
     }
 
     const localEntries = collectTvChartLocalStorage();
@@ -5569,6 +5671,290 @@
   }
 
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Reset Chart View & Last Known Chart Configuration Engine
+  // -------------------------------------------------------------
+  function getLastKnownChartConfiguration() {
+    try {
+      const context = typeof getActiveChartMemoryContext === 'function' ? getActiveChartMemoryContext() : null;
+      const currentSym = context ? context.symbol : ((typeof getCurrentChartSymbolKey === 'function' ? getCurrentChartSymbolKey() : null) || lastTrackedInstrument || '');
+      const currentRes = context ? context.resolution : ((typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : null) || '5');
+      const chartKey = currentSym && currentRes ? `${String(currentSym).toUpperCase()}|${String(currentRes).toUpperCase()}` : null;
+
+      // 1. Check in-memory live tracker for this specific instrument + interval
+      if (chartKey && lastKnownChartConfigs && typeof lastKnownChartConfigs.has === 'function' && lastKnownChartConfigs.has(chartKey)) {
+        return { ...lastKnownChartConfigs.get(chartKey) };
+      }
+
+      // 2. Check saved viewportsByChart / viewportsBySymbol / viewport
+      const saved = (currentSettings && currentSettings.lastChartSettings) || {};
+      const chartState = (chartKey && saved.viewportsByChart && saved.viewportsByChart[chartKey])
+        || (saved.viewportsBySymbol && currentSym && saved.viewportsBySymbol[currentSym])
+        || (saved.viewport ? saved : null);
+
+      const vp = (chartState && (chartState.viewport || chartState)) || {};
+      const savedBarSpacing = typeof vp.barSpacing === 'number' && vp.barSpacing > 0 ? vp.barSpacing : null;
+      const savedRightOffset = typeof vp.rightOffset === 'number' && isFinite(vp.rightOffset) && vp.rightOffset >= -2 && vp.rightOffset <= 30
+        ? vp.rightOffset
+        : 6;
+
+      // 3. Fallback: inspect live activeChart parameters if missing
+      let liveBarSpacing = null;
+      try {
+        const ts = activeChart && typeof activeChart.getTimeScale === 'function' ? activeChart.getTimeScale() : null;
+        if (ts && typeof ts.barSpacing === 'function') {
+          const bs = ts.barSpacing();
+          if (typeof bs === 'number' && bs > 0) liveBarSpacing = bs;
+        }
+      } catch (e) {}
+
+      let liveChartType = null;
+      try {
+        if (activeChart && typeof activeChart.chartType === 'function') {
+          const ct = activeChart.chartType();
+          if (typeof ct === 'number') liveChartType = ct;
+        }
+      } catch (e) {}
+
+      const resolved = {
+        symbol: currentSym,
+        resolution: currentRes,
+        chartType: liveChartType !== null ? liveChartType : (typeof saved.chartType === 'number' ? saved.chartType : 1),
+        barSpacing: savedBarSpacing || liveBarSpacing || 12,
+        rightOffset: savedRightOffset,
+        isAutoScale: vp.isAutoScale !== undefined ? vp.isAutoScale : true,
+        priceScaleMode: typeof vp.priceScaleMode === 'number' ? vp.priceScaleMode : 0,
+        isInverted: Boolean(vp.isInverted),
+        candleWidthPx: (currentSettings && currentSettings.candleOhlc && currentSettings.candleOhlc.candleWidthPx) || 140,
+        customCandleWidthEnabled: Boolean(currentSettings && currentSettings.candleOhlc && currentSettings.candleOhlc.customCandleWidthEnabled),
+        localStorageEntries: saved.localStorageEntries || null,
+        updatedAt: Date.now()
+      };
+
+      if (chartKey && lastKnownChartConfigs && typeof lastKnownChartConfigs.set === 'function') {
+        lastKnownChartConfigs.set(chartKey, { ...resolved });
+      }
+      return resolved;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function applyLastKnownChartConfiguration(customConfig = null) {
+    if (!activeChart) return false;
+    const config = customConfig || getLastKnownChartConfiguration();
+    if (!config) return false;
+
+    cortexDebugLog(`Applying last known chart configuration for ${config.symbol || 'chart'} (${config.resolution || 'current'}):`, {
+      barSpacing: config.barSpacing,
+      rightOffset: config.rightOffset,
+      chartType: config.chartType,
+      isAutoScale: config.isAutoScale,
+      candleWidthPx: config.candleWidthPx
+    });
+
+    const model = getInternalChartModel();
+    const tsApi = typeof activeChart.getTimeScale === 'function' ? activeChart.getTimeScale() : null;
+    const internalTs = model && typeof model.timeScale === 'function' ? model.timeScale() : null;
+    const psApi = getPrimaryPriceScaleApi();
+
+    // 1. Reset horizontal scroll to real-time & restore rightOffset
+    try {
+      if (model && typeof model.resetScroll === 'function') {
+        model.resetScroll();
+      } else if (model && typeof model.scrollToRealtime === 'function') {
+        model.scrollToRealtime();
+      } else if (tsApi && typeof tsApi.resetScroll === 'function') {
+        tsApi.resetScroll();
+      } else if (tsApi && typeof tsApi.scrollToRealtime === 'function') {
+        tsApi.scrollToRealtime();
+      }
+    } catch (e) {}
+
+    const targetOffset = (typeof config.rightOffset === 'number' && isFinite(config.rightOffset))
+      ? Math.max(2, Math.min(25, config.rightOffset))
+      : 6;
+
+    try {
+      if (tsApi && typeof tsApi.setRightOffset === 'function') {
+        tsApi.setRightOffset(targetOffset);
+      } else if (internalTs && typeof internalTs.setRightOffset === 'function') {
+        internalTs.setRightOffset(targetOffset);
+      }
+    } catch (e) {}
+
+    // 2. Restore horizontal zoom (barSpacing)
+    if (typeof config.barSpacing === 'number' && config.barSpacing > 0) {
+      try {
+        if (tsApi && typeof tsApi.setBarSpacing === 'function') {
+          tsApi.setBarSpacing(config.barSpacing);
+        } else if (internalTs && typeof internalTs.setBarSpacing === 'function') {
+          internalTs.setBarSpacing(config.barSpacing);
+        }
+      } catch (e) {}
+    }
+
+    // 3. Restore vertical price scale (autoScale = true)
+    if (psApi) {
+      try {
+        if (typeof psApi.setAutoScale === 'function') {
+          psApi.setAutoScale(config.isAutoScale !== false);
+        }
+        if (typeof config.priceScaleMode === 'number' && typeof psApi.setMode === 'function') {
+          psApi.setMode(config.priceScaleMode);
+        }
+        if (typeof config.isInverted === 'boolean' && typeof psApi.setInverted === 'function') {
+          psApi.setInverted(config.isInverted);
+        }
+      } catch (e) {}
+    }
+
+    if (model) {
+      try {
+        const ms = typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+        const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+        if (internalPs && typeof internalPs.setAutoScale === 'function') {
+          internalPs.setAutoScale(config.isAutoScale !== false);
+        }
+      } catch (e) {}
+    }
+
+    // 4. Restore chart type (candle style) if specified
+    if (typeof config.chartType === 'number' && typeof activeChart.setChartType === 'function') {
+      try {
+        const curType = typeof activeChart.chartType === 'function' ? activeChart.chartType() : null;
+        if (curType !== config.chartType) {
+          activeChart.setChartType(config.chartType);
+        }
+      } catch (e) {}
+    }
+
+    // 5. Restore custom candle width if enabled
+    if (config.customCandleWidthEnabled && typeof applyCustomCandleWidthToChart === 'function') {
+      try {
+        applyCustomCandleWidthToChart(config.candleWidthPx || 140, true);
+      } catch (e) {}
+    }
+
+    // 6. Restore chart properties / overrides if available
+    if (config.localStorageEntries && config.localStorageEntries['tradingview.chartproperties'] && typeof activeChart.applyOverrides === 'function') {
+      try {
+        const parsed = JSON.parse(config.localStorageEntries['tradingview.chartproperties']);
+        if (parsed && parsed.paneProperties) {
+          const flat = {};
+          Object.entries(parsed.paneProperties).forEach(([pk, pv]) => {
+            if (pv !== null && typeof pv !== 'object') flat[`paneProperties.${pk}`] = pv;
+          });
+          if (Object.keys(flat).length > 0) activeChart.applyOverrides(flat);
+        }
+      } catch (e) {}
+    }
+
+    return true;
+  }
+
+  let resetChartViewDebounceTimer = null;
+  function handleResetChartViewTrigger(source = 'context_menu') {
+    cortexDebugLog(`Reset chart view triggered via '${source}' -> Setting chart to last known chart configuration`);
+    isResettingChartView = true;
+    isRestoringChartSettings = true;
+
+    // Capture the last known chart configuration immediately before any asynchronous resets
+    const config = getLastKnownChartConfiguration();
+
+    // Multi-pass enforcement over TradingView's asynchronous layout/paint cycles
+    applyLastKnownChartConfiguration(config);
+
+    if (resetChartViewDebounceTimer) {
+      clearTimeout(resetChartViewDebounceTimer);
+    }
+
+    setTimeout(() => {
+      applyLastKnownChartConfiguration(config);
+    }, 40);
+
+    setTimeout(() => {
+      applyLastKnownChartConfiguration(config);
+    }, 120);
+
+    resetChartViewDebounceTimer = setTimeout(() => {
+      applyLastKnownChartConfiguration(config);
+      isResettingChartView = false;
+      isRestoringChartSettings = false;
+      resetChartViewDebounceTimer = null;
+      cortexDebugLog('Reset chart view sequence finalized', config);
+      scheduleSaveCurrentChartSettings(120);
+    }, 280);
+
+    postToIsolated({
+      type: 'VEST_TV_CHART_VIEW_RESET_COMPLETED',
+      config
+    });
+  }
+
+  function scanAndHookResetChartViewMenuItems(rootDoc = document) {
+    const docs = [rootDoc];
+    if (rootDoc !== document && !docs.includes(document)) docs.push(document);
+    document.querySelectorAll('iframe').forEach(iframe => {
+      try {
+        if (iframe.contentDocument && !docs.includes(iframe.contentDocument)) {
+          docs.push(iframe.contentDocument);
+        }
+      } catch (e) {}
+    });
+
+    for (const doc of docs) {
+      if (!doc || !doc.body) continue;
+      const items = doc.querySelectorAll('tr, div[data-role="menuitem"], div[role="menuitem"], div[class*="item-"]');
+      for (const item of items) {
+        if (!item || item.getAttribute('data-vest-rcv-hooked') === 'true') continue;
+        const text = (item.innerText || item.textContent || '').trim().toLowerCase();
+        if (text.includes('reset chart view') || text.includes('reset price scale') || text.includes('reset view')) {
+          item.setAttribute('data-vest-rcv-hooked', 'true');
+          const onResetItemActivated = (e) => {
+            cortexDebugLog(`User activated '${text}' in menu`);
+            handleResetChartViewTrigger('context_menu_item');
+          };
+          item.addEventListener('pointerdown', onResetItemActivated, true);
+          item.addEventListener('click', onResetItemActivated, true);
+        }
+      }
+    }
+  }
+
+  function hookActiveChartResetMethods() {
+    if (!activeChart) return;
+    try {
+      if (typeof activeChart.executeActionById === 'function' && !activeChart.__trading_cortex_exec_hooked) {
+        activeChart.__trading_cortex_exec_hooked = true;
+        const origExec = activeChart.executeActionById.bind(activeChart);
+        activeChart.executeActionById = function(actionId, ...args) {
+          if (actionId === 'chartReset' || actionId === 'resetPriceScale' || actionId === 'timeScaleReset') {
+            cortexDebugLog(`executeActionById('${actionId}') intercepted`);
+            const res = origExec(actionId, ...args);
+            handleResetChartViewTrigger(`executeActionById_${actionId}`);
+            return res;
+          }
+          return origExec(actionId, ...args);
+        };
+      }
+    } catch (e) {}
+
+    try {
+      const model = getInternalChartModel();
+      if (model && typeof model.resetScroll === 'function' && !model.__trading_cortex_reset_hooked) {
+        model.__trading_cortex_reset_hooked = true;
+        const origResetScroll = model.resetScroll.bind(model);
+        model.resetScroll = function(...args) {
+          cortexDebugLog('model.resetScroll() intercepted');
+          const res = origResetScroll(...args);
+          handleResetChartViewTrigger('model_resetScroll');
+          return res;
+        };
+      }
+    } catch (e) {}
+  }
+
   // ICT Session Indicators ("Killzones") Canvas Overlay Engine
   // -------------------------------------------------------------
   let ictSessionsCanvas = null;
@@ -6585,6 +6971,17 @@
       });
     });
 
+    if (currentSettings && currentSettings.debugMode && results.length > 0) {
+      const activeSess = results.find(s => s && s.isStillInSession);
+      const activeName = activeSess && activeSess.def ? (activeSess.def.name || 'Active') : 'None';
+      if (results[0] && results[0].top !== undefined && results[0].bottom !== undefined) {
+        cortexDebugLog('Existing chart rectangles scanned', { count: results.length });
+      } else if (results[0] && (results[0].pnl !== undefined || results[0].entryTime !== undefined)) {
+        cortexDebugLog('Positions history trades extracted from API', { count: results.length });
+      } else {
+        cortexDebugLog('ICT sessions computed', { totalSessions: results.length, activeKillzone: activeName });
+      }
+    }
     return results;
   }
 
@@ -6666,6 +7063,28 @@
       if (msSym) return String(msSym).trim().toUpperCase();
     } catch (e) {}
     return String(lastTrackedInstrument || 'DEFAULT').trim().toUpperCase();
+  }
+
+  function getCurrentChartResolutionKey() {
+    try {
+      if (activeChart && typeof activeChart.resolution === 'function') {
+        const r = activeChart.resolution();
+        if (r && String(r).trim()) return String(r).trim().toUpperCase();
+      }
+      const model = cachedSessionsChartModel || getInternalChartModel();
+      const ms = model ? findMainSeriesFromModel(model) : null;
+      if (ms) {
+        if (typeof ms.resolution === 'function') {
+          const r = ms.resolution();
+          if (r && String(r).trim()) return String(r).trim().toUpperCase();
+        }
+        if (ms._interval) return String(ms._interval).trim().toUpperCase();
+      }
+      if (currentSettings && currentSettings.lastChartSettings && currentSettings.lastChartSettings.resolution) {
+        return String(currentSettings.lastChartSettings.resolution).trim().toUpperCase();
+      }
+    } catch (e) {}
+    return '5';
   }
 
   function loadCreatedFvgsLog() {
@@ -6868,6 +7287,60 @@
       aliases.add('week');
     }
     return Array.from(aliases);
+  }
+
+  function buildDiagnosticsTelemetrySnapshot() {
+    const chartCanvas = typeof findMainChartPaneCanvas === 'function' ? findMainChartPaneCanvas() : null;
+    const cssW = chartCanvas ? (chartCanvas.clientWidth || chartCanvas.width) : 0;
+    const cssH = chartCanvas ? (chartCanvas.clientHeight || chartCanvas.height) : 0;
+    const dpr = window.devicePixelRatio || 1;
+    const bars = (cachedExtractedBarsObj && cachedExtractedBarsObj.bars) ? cachedExtractedBarsObj.bars.length : 0;
+    const instrument = (typeof getLiveInstrument === 'function' ? getLiveInstrument() : null) || lastTrackedInstrument || 'Unknown';
+    const price = (typeof getLivePrice === 'function' ? getLivePrice() : null) || lastTrackedPrice || '--';
+    const isHooked = Boolean(activeChart || activeChartApi);
+    const candleOhlc = (currentSettings && currentSettings.candleOhlc) || {};
+    const autoFvg = (currentSettings && currentSettings.autoFvg) || {};
+    const sessions = (currentSettings && currentSettings.sessionIndicators) || {};
+    const posHud = (currentSettings && currentSettings.positionHud) || {};
+
+    let activeKillzone = 'None';
+    if (Array.isArray(cachedIctComputedSessions)) {
+      const activeSess = cachedIctComputedSessions.find(s => s && s.isStillInSession);
+      if (activeSess && activeSess.def) {
+        activeKillzone = typeof formatSessionDisplayTitle === 'function'
+          ? formatSessionDisplayTitle(activeSess.def)
+          : (activeSess.def.name || 'Active Session');
+      }
+    }
+
+    const bullFvgs = Array.isArray(cachedComputedAutoFvgs) ? cachedComputedAutoFvgs.filter(f => f && f.direction === 'bullish').length : 0;
+    const bearFvgs = Array.isArray(cachedComputedAutoFvgs) ? cachedComputedAutoFvgs.filter(f => f && f.direction === 'bearish').length : 0;
+
+    return {
+      tabId: currentBrowserTabId,
+      isHooked,
+      apiStatus: isHooked ? 'Hooked (Active)' : 'Searching Chart API',
+      instrument,
+      price,
+      canvasWidth: cssW,
+      canvasHeight: cssH,
+      dpr,
+      visibleBars: bars,
+      lastRenderMs: typeof lastIctRenderDurationMs !== 'undefined' ? lastIctRenderDurationMs : 0,
+      candleNumbersActive: Boolean(candleOhlc.enabled || candleOhlc.showCandleNumbers),
+      candleNumbersCount: bars,
+      candleWidth: candleOhlc.customCandleWidthEnabled ? `${candleOhlc.candleWidthPx || 140}%` : 'Auto',
+      positionHudActive: Boolean(posHud.enabled !== false),
+      sessionsActive: Boolean(sessions.enabled),
+      activeKillzone,
+      autoFvgActive: Boolean(autoFvg.enabled),
+      bullFvgs,
+      bearFvgs,
+      failPrices: { long: (liveFailPrices && liveFailPrices.long) || null, short: (liveFailPrices && liveFailPrices.short) || null },
+      debugMode: Boolean(currentSettings && currentSettings.debugMode),
+      lastKnownConfig: (typeof getLastKnownChartConfiguration === 'function' ? getLastKnownChartConfiguration() : null),
+      timestamp: Date.now()
+    };
   }
 
   function resolveAutoFvgTemplate(direction, tfLabel, fvgConfig) {
@@ -7124,7 +7597,13 @@
     // Filter to most recent N active (unreclaimed) FVGs and most recent M reclaimed FVGs so the chart stays clean
     const activeList = detected.filter(f => !f.reclaimed).slice(-maxActive);
     const reclaimedList = hideReclaimed ? [] : detected.filter(f => f.reclaimed).slice(-maxReclaimedHist);
-    return [...reclaimedList, ...activeList];
+    const combinedFvgs = [...reclaimedList, ...activeList];
+    if (currentSettings && currentSettings.debugMode && combinedFvgs.length > 0) {
+      const bull = combinedFvgs.filter(f => f.direction === 'bullish').length;
+      const bear = combinedFvgs.filter(f => f.direction === 'bearish').length;
+      cortexDebugLog(`Auto FVG computed on ${tfLabel} timeframe`, { total: combinedFvgs.length, bullish: bull, bearish: bear });
+    }
+    return combinedFvgs;
   }
 
   function normalizeEpochSec(rawTime) {
@@ -7832,6 +8311,11 @@
     mutedCandleOhlcSet.clear();
     lastRenderedCandleOhlcHitBoxes = [];
     saveClickedCandleOhlcState();
+    if (typeof candleKey !== 'undefined') {
+      cortexDebugLog('Candle OHLC toggled by user click', { candleKey, visible: nowVisible });
+    } else {
+      cortexDebugLog('All clicked candle OHLC states cleared');
+    }
   }
 
   loadClickedCandleOhlcState();
@@ -8856,6 +9340,7 @@
   }
 
   function renderIctSessionIndicators() {
+    const renderStartTime = performance.now();
     ictSessionsRafId = null;
 
     const config = currentSettings && currentSettings.sessionIndicators;
@@ -9901,6 +10386,8 @@
 
     ctx.restore();
 
+    lastIctRenderDurationMs = Math.round((performance.now() - renderStartTime) * 10) / 10;
+
     // Render the price tags on the right-hand price scale axis!
     if (sessionsEnabled && showPermDotted && priceScaleBadges.length > 0) {
       renderIctPriceScaleBadges(targetCanvas, priceScaleBadges, cssHeight);
@@ -10853,6 +11340,10 @@
       clearInterval(pollTimer);
       if (hooked) {
         log('TradingView chart successfully hooked on attempt #' + pollCount);
+        cortexDebugLog(`Chart successfully hooked on attempt #${pollCount}`, {
+          symbol: typeof getCurrentChartSymbolKey === 'function' ? getCurrentChartSymbolKey() : 'Unknown',
+          hasChartApi: Boolean(activeChartApi)
+        });
       }
     }
   }, 300);

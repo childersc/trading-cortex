@@ -73,21 +73,27 @@
         </div>
       </div>
 
-      <!-- Tile 2: Remote GitHub Release -->
-      <div class="telemetry-tile tile-accent">
+      <!-- Tile 2: Remote GitHub Channel (Stable vs Dev) -->
+      <div class="telemetry-tile tile-accent" id="telemetry-channel-tile">
         <div class="tile-top">
-          <span class="tile-label">GITHUB RELEASE CHANNEL</span>
-          <a class="tile-ext-link" id="all-releases-link" href="https://github.com/childersc/trading-cortex/releases" target="_blank" rel="noopener noreferrer">
-            <code id="repo-slug-display">childersc/trading-cortex</code> ↗
-          </a>
+          <span class="tile-label" id="channel-tile-label">UPDATE CHANNEL</span>
+          <div class="channel-toggle-group" role="tablist" aria-label="Update Channel">
+            <button type="button" class="channel-btn active" id="btn-channel-stable" data-channel="stable" title="Official stable releases from main branch">Stable</button>
+            <button type="button" class="channel-btn" id="btn-channel-dev" data-channel="dev" title="Bleeding-edge development branch (dev)">Dev Branch</button>
+          </div>
         </div>
         <div class="tile-metric-row">
           <span class="tile-metric highlight" id="vbox-latest">v1.1.0</span>
           <span class="delta-pill" id="vbox-changes-pill"><strong id="vbox-changes">0</strong> changelog items</span>
         </div>
         <div class="tile-footer">
-          <span class="asset-label">Package: <code id="notes-zip-name">trading-cortex-1.1.0.zip</code></span>
-          <a class="tile-link-btn" id="release-github-link" href="https://github.com/childersc/trading-cortex/releases" target="_blank" rel="noopener noreferrer">Release Page</a>
+          <span class="asset-label" id="package-asset-label">Package: <code id="notes-zip-name">trading-cortex-1.1.0.zip</code></span>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <a class="tile-link-btn" id="release-github-link" href="https://github.com/childersc/trading-cortex/releases" target="_blank" rel="noopener noreferrer">Release Page</a>
+            <a class="tile-ext-link" id="all-releases-link" href="https://github.com/childersc/trading-cortex/releases" target="_blank" rel="noopener noreferrer">
+              <code id="repo-slug-display">childersc/trading-cortex</code> ↗
+            </a>
+          </div>
         </div>
       </div>
 
@@ -163,8 +169,8 @@
       <div class="workspace-card">
         <div class="wcard-header">
           <div class="wcard-title-group">
-            <span class="wcard-dot"></span>
-            <h2 class="wcard-title">Release Notes <span id="notes-version-title">v1.1.0</span></h2>
+            <span class="wcard-dot" id="wcard-channel-dot"></span>
+            <h2 class="wcard-title"><span id="notes-card-title">Release Notes</span> <span id="notes-version-title">v1.1.0</span></h2>
           </div>
         </div>
         <p class="notes-lead" id="notes-summary">

@@ -16,13 +16,22 @@
   const manifest = chrome.runtime.getManifest();
   let installedVersion = manifest.version || '1.1.0';
 
-  let savedDirHandle = null;
+    let savedDirHandle = null;
   let latestRelease = null;
+  let latestDevCommit = null;
+  let devCommitsList = [];
+  let installedDevSha = null;
+  let currentChannel = 'stable'; // 'stable' | 'dev'
   let isUpdating = false;
 
   // DOM References
   const allReleasesLink = document.getElementById('all-releases-link');
   const releaseGithubLink = document.getElementById('release-github-link');
+  const btnChannelStable = document.getElementById('btn-channel-stable');
+  const btnChannelDev = document.getElementById('btn-channel-dev');
+  const notesCardTitle = document.getElementById('notes-card-title');
+  const wcardChannelDot = document.getElementById('wcard-channel-dot');
+  const channelTileLabel = document.getElementById('channel-tile-label');
 
   const statusEyebrow = document.getElementById('status-eyebrow');
   const statusHeading = document.getElementById('status-heading');
@@ -246,6 +255,9 @@
   }
 
   const DEFAULT_RELEASE_NOTES_ITEMS = [
+    '**Dev Branch Update Channel (`v1.1.44`)**: Switch between Stable and Dev (Bleeding Edge) channels in the Update Center. Dev mode polls branch commits, previews recent commit history, and unpacks the latest dev zipball directly into your workspace.',
+    '**Header-Docked Cortex Toolbar (`v1.1.44`)**: Moved the Trading Cortex toolbar to sit directly below Vest\'s main navigation header and above the market ticker row and chart/order box. Minimized pills dock into this top bar and vertical chart space is preserved.',
+    '**Updater Folder Access Diagnostics (`v1.1.44`)**: Show folder-picker and deployment errors in the Update Center, terminal, and browser console. Provide guidance when Chrome blocks access to a protected directory.',
     '**Chart Paper Stats Overlay (`v1.1.43`)**: Display the active instrument’s saved paper entry, TP1/TP2/TP3, and stop-first counters in a compact chart overlay. Refresh on paper bar completion and instrument change.',
     '**Irish Browser Voice (`v1.1.42`)**: Add an Irish English preset when the browser supplies an `en-IE` voice, with a slightly higher pitch and the existing test button. Browser voices do not expose gender.',
     '**Cortex Voice Alerts (`v1.1.41`)**: Add an Alerts & Voice Settings pane below About with independent once-per-bar forming and confirmed signal voice alerts, browser voice selection, and a test button.',
@@ -329,7 +341,178 @@
   }
 
   // -------------------------------------------------------------
-  // Check GitHub Releases
+  // -------------------------------------------------------------
+  // Channel Switching & Dev Branch Logic
+  // -------------------------------------------------------------
+  function updateChannelUI(channel) {
+    currentChannel = channel === 'dev' ? 'dev' : 'stable';
+    if (btnChannelStable && btnChannelDev) {
+      btnChannelStable.classList.toggle('active', currentChannel === 'stable');
+      btnChannelDev.classList.toggle('active', currentChannel === 'dev');
+      btnChannelDev.classList.toggle('dev-active', currentChannel === 'dev');
+    }
+    if (wcardChannelDot) {
+      wcardChannelDot.classList.toggle('dev-dot', currentChannel === 'dev');
+    }
+    if (channelTileLabel) {
+      channelTileLabel.textContent = currentChannel === 'dev' ? 'DEV BRANCH CHANNEL' : 'RELEASE CHANNEL';
+    }
+  }
+
+  async function setChannel(channel, triggerCheck = true) {
+    updateChannelUI(channel);
+    await chrome.storage.local.set({ updateChannel: currentChannel }).catch(() => {});
+    logTerm(`Switched to ${currentChannel === 'dev' ? 'Bleeding Edge (dev branch)' : 'Official Stable Releases'} channel.`, 'info');
+    if (triggerCheck) {
+      await checkCurrentChannelUpdates(false);
+    }
+  }
+
+  async function checkDevChannelUpdates(isManualClick = false) {
+    showError(null);
+    statusEyebrow.textContent = 'POLLING DEV';
+    statusHeading.textContent = 'Checking GitHub dev branch commits...';
+    if (btnCheckNow) {
+      btnCheckNow.classList.add('checking');
+      btnCheckNow.disabled = true;
+    }
+    if (btnCheckNowLabel) {
+      btnCheckNowLabel.textContent = 'Checking Dev...';
+    }
+    logTerm(`Polling https://api.github.com/repos/${DEFAULT_REPO}/commits?sha=dev ...`, 'info');
+
+    try {
+      const resp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/commits?sha=dev&per_page=12`, {
+        headers: { 'Accept': 'application/vnd.github+json' },
+        cache: 'no-store'
+      });
+
+      if (!resp.ok) {
+        throw new Error(`GitHub API HTTP ${resp.status}`);
+      }
+
+      const commits = await resp.json();
+      if (!Array.isArray(commits) || commits.length === 0) {
+        throw new Error('No commits found on dev branch.');
+      }
+
+      devCommitsList = commits;
+      const topCommit = commits[0];
+      latestDevCommit = topCommit;
+      const shortSha = topCommit.sha.slice(0, 7);
+      const commitMsg = (topCommit.commit?.message || '').split(/\r?\n/)[0].trim();
+      const authorName = topCommit.commit?.author?.name || 'Developer';
+      const commitDate = topCommit.commit?.committer?.date || topCommit.commit?.author?.date;
+
+      vboxLatest.textContent = `dev@${shortSha}`;
+      vboxChanges.textContent = String(commits.length);
+
+      if (notesCardTitle) notesCardTitle.textContent = 'Dev Branch Commits';
+      if (notesVersionTitle) notesVersionTitle.textContent = `dev@${shortSha}`;
+      if (notesZipName) notesZipName.textContent = `zipball/dev (${shortSha})`;
+      if (releaseGithubLink) {
+        releaseGithubLink.href = `https://github.com/${DEFAULT_REPO}/commits/dev`;
+        releaseGithubLink.textContent = 'Dev Commits';
+      }
+      if (allReleasesLink) {
+        allReleasesLink.href = `https://github.com/${DEFAULT_REPO}/tree/dev`;
+      }
+
+      if (notesSummary) {
+        notesSummary.textContent = `Bleeding-edge commits from the 'dev' branch of ${DEFAULT_REPO}. Features may be in-flight before official release tagging.`;
+      }
+
+      if (notesBody) {
+        notesBody.innerHTML = `
+          <ul class="notes-list">
+            ${commits.map(c => {
+              const sSha = c.sha.slice(0, 7);
+              const firstLine = (c.commit?.message || '').split(/\r?\n/)[0].trim();
+              const auth = c.commit?.author?.name || 'dev';
+              const dStr = c.commit?.committer?.date ? new Date(c.commit.committer.date).toLocaleDateString() : '';
+              const link = c.html_url || `https://github.com/${DEFAULT_REPO}/commit/${c.sha}`;
+              return `
+                <li>
+                  <a href="${link}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+                    <span class="commit-sha-badge">${sSha}</span>
+                  </a>
+                  <strong>${escapeHtml(firstLine)}</strong>
+                  <span class="commit-meta">— ${escapeHtml(auth)}${dStr ? `, ${escapeHtml(dStr)}` : ''}</span>
+                </li>
+              `;
+            }).join('')}
+          </ul>
+        `;
+      }
+
+      const checkedAt = Date.now();
+      updateLastCheckedUI(checkedAt);
+
+      // Check if current installed build is already this dev commit
+      const isUpToDate = Boolean(
+        (installedDevSha && (installedDevSha === shortSha || installedDevSha === topCommit.sha)) ||
+        (installedVersion && installedVersion.includes(shortSha))
+      );
+
+      await chrome.storage.local.set({
+        updaterState: {
+          channel: 'dev',
+          lastCheckedAt: checkedAt,
+          latestVersion: `dev-${shortSha}`,
+          latestSha: shortSha,
+          commitMessage: commitMsg,
+          updateAvailable: !isUpToDate,
+          htmlUrl: `https://github.com/${DEFAULT_REPO}/commits/dev`
+        }
+      });
+
+      if (!isUpToDate) {
+        statusEyebrow.textContent = 'DEV BUILD READY';
+        statusHeading.textContent = `New bleeding-edge dev commit available (${shortSha})`;
+        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Deploy Dev (${shortSha})`;
+        btnRunUpdate.disabled = false;
+        chrome.action.setBadgeText({ text: 'DEV' });
+        chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
+        logTerm(`Dev build available: commit ${shortSha} ("${commitMsg}")`, 'ok');
+        if (isManualClick) {
+          showSuccess(`⚡ Bleeding-edge commit ${shortSha} is ready to deploy from dev branch.`);
+        }
+      } else {
+        statusEyebrow.textContent = 'SYNCHRONIZED';
+        statusHeading.textContent = `Trading Cortex is up to date with dev branch (${shortSha})`;
+        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync Dev (${shortSha})`;
+        btnRunUpdate.disabled = false;
+        chrome.action.setBadgeText({ text: '' });
+        logTerm(`Local build matches latest dev branch commit (${shortSha}).`, 'ok');
+        if (isManualClick) {
+          showSuccess(`✓ You are on the latest dev commit (${shortSha})!`);
+        }
+      }
+    } catch (err) {
+      statusEyebrow.textContent = 'STANDBY';
+      statusHeading.textContent = `Installed Build v${installedVersion}`;
+      showError(`GitHub dev channel check (${DEFAULT_REPO}): ${err.message}`);
+    } finally {
+      if (btnCheckNow) {
+        btnCheckNow.classList.remove('checking');
+        btnCheckNow.disabled = false;
+      }
+      if (btnCheckNowLabel) {
+        btnCheckNowLabel.textContent = 'Check for Update';
+      }
+    }
+  }
+
+  async function checkCurrentChannelUpdates(isManualClick = false) {
+    if (currentChannel === 'dev') {
+      return await checkDevChannelUpdates(isManualClick);
+    } else {
+      if (notesCardTitle) notesCardTitle.textContent = 'Release Notes';
+      return await checkGitHubRelease(isManualClick);
+    }
+  }
+
+    // Check GitHub Releases
   // -------------------------------------------------------------
   async function checkGitHubRelease(isManualClick = false) {
     showError(null);
@@ -406,6 +589,7 @@
 
       await chrome.storage.local.set({
         updaterState: {
+          channel: 'stable',
           lastCheckedAt: checkedAt,
           latestVersion: latestVer,
           updateAvailable: cmp > 0,
@@ -675,19 +859,30 @@
     if (isUpdating) return;
     showError(null);
 
-    if (!latestRelease) {
-      await checkGitHubRelease();
-      if (!latestRelease) return;
+    if (currentChannel === 'dev') {
+      if (!latestDevCommit) {
+        await checkDevChannelUpdates();
+        if (!latestDevCommit) return;
+      }
+    } else {
+      if (!latestRelease) {
+        await checkGitHubRelease();
+        if (!latestRelease) return;
+      }
     }
 
     isUpdating = true;
     btnRunUpdate.disabled = true;
 
     try {
-      const targetVer = cleanVersion(latestRelease.tag_name || installedVersion);
+      const isDevDeploy = currentChannel === 'dev';
+      const devSha = isDevDeploy && latestDevCommit ? latestDevCommit.sha.slice(0, 7) : null;
+      const targetVer = isDevDeploy ? `dev-${devSha}` : cleanVersion(latestRelease?.tag_name || installedVersion);
       statusEyebrow.textContent = 'DEPLOYING';
-      statusHeading.textContent = `Deploying Trading Cortex v${targetVer}...`;
-      logTerm(`Starting update to v${targetVer}...`, 'info');
+      statusHeading.textContent = isDevDeploy
+        ? `Deploying Trading Cortex dev@${devSha}...`
+        : `Deploying Trading Cortex v${targetVer}...`;
+      logTerm(isDevDeploy ? `Starting update to dev commit ${devSha}...` : `Starting update to v${targetVer}...`, 'info');
 
       // STAGE 01: Workspace Link
       updateStepState(step1Row, step1Badge, 'active', 1);
@@ -718,10 +913,17 @@
       progressLabelLeft.textContent = 'Downloading release archive...';
       progressFill.style.width = '15%';
 
-      const zipAsset = (latestRelease.assets || []).find(a => a.name && a.name.endsWith('.zip'));
-      const downloadUrl = zipAsset ? zipAsset.browser_download_url : latestRelease.zipball_url;
-      if (!downloadUrl) {
-        throw new Error('No downloadable ZIP archive found on this GitHub release.');
+      let downloadUrl = null;
+      let zipAsset = null;
+      if (isDevDeploy) {
+        downloadUrl = `https://api.github.com/repos/${DEFAULT_REPO}/zipball/dev`;
+        logTerm(`Fetching latest dev branch archive from ${downloadUrl} ...`, 'info');
+      } else {
+        zipAsset = (latestRelease?.assets || []).find(a => a.name && a.name.endsWith('.zip'));
+        downloadUrl = zipAsset ? zipAsset.browser_download_url : latestRelease?.zipball_url;
+        if (!downloadUrl) {
+          throw new Error('No downloadable ZIP archive found on this GitHub release.');
+        }
       }
 
       logTerm(`Downloading ${zipAsset ? zipAsset.name : 'release zipball'}...`, 'info');
@@ -779,8 +981,14 @@
       await chrome.action.setBadgeText({ text: '' });
 
       // Update installedVersion in memory and storage so UI immediately reflects the deployed release
-      installedVersion = targetVer;
-      vboxInstalled.textContent = `v${targetVer}`;
+      if (isDevDeploy) {
+        installedDevSha = devSha;
+        installedVersion = `v${manifest.version || '1.1.44'}-dev.${devSha}`;
+      } else {
+        installedDevSha = null;
+        installedVersion = `v${targetVer}`;
+      }
+      vboxInstalled.textContent = installedVersion.startsWith('v') ? installedVersion : `v${installedVersion}`;
 
       let tradingTabsCount = 0;
       let vestTabs = [];
@@ -796,13 +1004,17 @@
       } catch (e) {}
 
       await chrome.storage.local.set({
-        installedVersionOverride: targetVer,
+        installedVersionOverride: installedVersion,
+        installedDevSha: isDevDeploy ? devSha : null,
+        updateChannel: currentChannel,
         reloadRuntimeOnUpdaterClose: true,
         updaterState: {
+          channel: currentChannel,
           lastCheckedAt: Date.now(),
           latestVersion: targetVer,
+          latestSha: devSha,
           updateAvailable: false,
-          htmlUrl: latestRelease.html_url
+          htmlUrl: isDevDeploy ? `https://github.com/${DEFAULT_REPO}/commits/dev` : latestRelease.html_url
         }
       }).catch(() => {});
 
@@ -816,16 +1028,20 @@
 
       updateStepState(step4Row, step4Badge, 'done', 4);
       statusEyebrow.textContent = 'UPDATED';
-      statusHeading.textContent = `Trading Cortex successfully updated to v${targetVer}!`;
-      progressLabelLeft.textContent = `Update complete · v${targetVer} active`;
-      if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync v${targetVer}`;
+      statusHeading.textContent = isDevDeploy
+        ? `Trading Cortex successfully updated to dev@${devSha}!`
+        : `Trading Cortex successfully updated to v${targetVer}!`;
+      progressLabelLeft.textContent = `Update complete · ${targetVer} active`;
+      if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = isDevDeploy ? `Re-Sync Dev (${devSha})` : `Re-Sync v${targetVer}`;
       btnRunUpdate.disabled = false;
 
       showSuccess(
-        `✓ Trading Cortex has been successfully updated to v${targetVer}! Your trading browser windows (${tradingTabsCount} tab${tradingTabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
+        isDevDeploy
+          ? `✓ Trading Cortex has been updated to bleeding-edge dev branch commit (${devSha})! Your trading browser windows (${tradingTabsCount} tab${tradingTabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
+          : `✓ Trading Cortex has been successfully updated to v${targetVer}! Your trading browser windows (${tradingTabsCount} tab${tradingTabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
       );
       logTerm(
-        `Update to v${targetVer} complete (${total} files synced). Reloaded ${tradingTabsCount} trading tab(s) cleanly without closing Update Center.`,
+        `Update to ${targetVer} complete (${total} files synced). Reloaded ${tradingTabsCount} trading tab(s) cleanly without closing Update Center.`,
         'ok'
       );
     } catch (err) {
@@ -862,9 +1078,25 @@
     logTerm('Unlinked local workspace folder.', 'info');
   });
 
+  if (btnChannelStable) {
+    btnChannelStable.addEventListener('click', () => {
+      if (currentChannel !== 'stable') {
+        setChannel('stable', true);
+      }
+    });
+  }
+
+  if (btnChannelDev) {
+    btnChannelDev.addEventListener('click', () => {
+      if (currentChannel !== 'dev') {
+        setChannel('dev', true);
+      }
+    });
+  }
+
   btnCheckNow.addEventListener('click', () => {
     showSuccess(null);
-    checkGitHubRelease(true);
+    checkCurrentChannelUpdates(true);
   });
 
   btnRunUpdate.addEventListener('click', () => {
@@ -891,19 +1123,36 @@
   });
 
   async function init() {
-    const data = await chrome.storage.local.get(['settings', 'installedVersionOverride', 'updaterState']).catch(() => ({}));
-    if (data.installedVersionOverride && compareVersions(data.installedVersionOverride, installedVersion) > 0) {
+    const data = await chrome.storage.local.get([
+      'settings',
+      'installedVersionOverride',
+      'installedDevSha',
+      'updateChannel',
+      'updaterState'
+    ]).catch(() => ({}));
+
+    if (data.installedDevSha) {
+      installedDevSha = data.installedDevSha;
+    }
+    if (data.updateChannel === 'dev') {
+      currentChannel = 'dev';
+    } else {
+      currentChannel = 'stable';
+    }
+    updateChannelUI(currentChannel);
+
+    if (data.installedVersionOverride) {
       installedVersion = data.installedVersionOverride;
     }
     if (data.updaterState && data.updaterState.lastCheckedAt) {
       updateLastCheckedUI(data.updaterState.lastCheckedAt);
     }
 
-    vboxInstalled.textContent = `v${installedVersion}`;
+    vboxInstalled.textContent = installedVersion.startsWith('v') ? installedVersion : `v${installedVersion}`;
     repoSlugDisplay.textContent = DEFAULT_REPO;
     allReleasesLink.href = `https://github.com/${DEFAULT_REPO}/releases`;
 
-    logTerm(`Trading Cortex Update Center initialized (Local v${installedVersion})`);
+    logTerm(`Trading Cortex Update Center initialized (Local ${installedVersion}, Channel: ${currentChannel.toUpperCase()})`);
 
     if (data.settings && data.settings.autoCheckUpdates === false) {
       toggleAutoCheck.checked = false;
@@ -917,7 +1166,7 @@
       await syncLocalJsonDatabase(savedDirHandle);
     }
 
-    await checkGitHubRelease();
+    await checkCurrentChannelUpdates();
   }
 
   try {

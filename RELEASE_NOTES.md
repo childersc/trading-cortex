@@ -1,3 +1,9 @@
+Trading Cortex v1.1.44 — Cortex Top Bar Relocation, Diagnostics Suite & Dev Channel Updater
+
+- **Dev Branch Update Channel (`v1.1.44`)**: Switch between Stable and Dev (Bleeding Edge) channels in the Update Center. Dev mode polls branch commits, previews recent commit history, and unpacks the latest dev zipball directly into your workspace.
+- **Header-Docked Cortex Toolbar (`v1.1.44`)**: Moved the Trading Cortex toolbar to sit directly below Vest's main navigation header and above the market ticker row and chart/order box. Minimized pills dock into this top bar and vertical chart space is preserved.
+- **Updater diagnostics (`v1.1.44`)**: Surface folder-picker and deployment errors in the Update Center, terminal, and browser console. Explain Chrome security-policy blocks and identify the expected unpacked extension source folder.
+
 Trading Cortex v1.1.43 — Chart Paper Stats Overlay
 
 - **Chart Paper Stats (`v1.1.43`)**: Show the per-instrument paper entry, TP1/TP2/TP3, and stop-first counters in a compact chart overlay. The counts update on paper bar completion and when the chart instrument changes.

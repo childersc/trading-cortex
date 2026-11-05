@@ -533,6 +533,8 @@
     };
   }
 
+  const DEFAULT_DIAGNOSTICS_BOX = { enabled: false, collapsed: false, pinned: false, pinnedLeft: null, pinnedTop: null, relX: 0.72, relY: 0.12, boxWidth: 360, bgColor: '#0f172a', bgOpacity: 94, borderColor: '#38bdf8' };
+
   const DEFAULT_POSITION_HUD = {
     enabled: true,           // Master toggle: enable active position overlay HUD
     showPriceLineHud: true,  // Rectangle box on current yellow price line displaying live PnL
@@ -890,6 +892,31 @@
     };
   }
 
+  function normalizeDiagnosticsBoxConfig(rawCfg) {
+    { const base = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    const relX = isFinite(Number(rawCfg.relX)) ? Math.max(0, Math.min(1, Number(rawCfg.relX))) : base.relX;
+    const relY = isFinite(Number(rawCfg.relY)) ? Math.max(0, Math.min(1, Number(rawCfg.relY))) : base.relY;
+    const pinnedLeft = rawCfg.pinnedLeft !== null && rawCfg.pinnedLeft !== undefined && isFinite(Number(rawCfg.pinnedLeft)) ? Math.round(Number(rawCfg.pinnedLeft)) : null;
+    const pinnedTop = rawCfg.pinnedTop !== null && rawCfg.pinnedTop !== undefined && isFinite(Number(rawCfg.pinnedTop)) ? Math.round(Number(rawCfg.pinnedTop)) : null;
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: Boolean(rawCfg.enabled),
+      collapsed: Boolean(rawCfg.collapsed),
+      pinned: Boolean(rawCfg.pinned),
+      pinnedLeft,
+      pinnedTop,
+      relX,
+      relY,
+      boxWidth: Math.max(280, Math.min(560, Number(rawCfg.boxWidth) || base.boxWidth)),
+      bgColor: normalizeHexColor(rawCfg.bgColor || base.bgColor, base.bgColor),
+      bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 94))),
+      borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor)
+    };
+    };
+  }
+
   /**
    * Computes the current Trading Session window in America/New_York (ET):
    * Starts at 6:00 PM ET (18:00:00) the previous night and runs to 4:59:59 PM ET (16:59:59) of the session day.
@@ -1238,6 +1265,8 @@
     positionHud: JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD)),
     failLines: JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES)),
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
+    debugMode: false,
+    diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
     enablePanelManagement: true,
     panelLayout: {},
     sidebarState: {
@@ -1600,9 +1629,11 @@
           const newState = changes.updaterState.newValue;
           const wasAvailable = isUpdateAvailable;
           const currentVer = getSafeExtVersion();
+          const isDev = newState.channel === 'dev';
+          latestUpdateChannel = newState.channel || 'stable';
           isUpdateAvailable = Boolean(
             newState.updateAvailable &&
-            (!newState.latestVersion || compareSemver(newState.latestVersion, currentVer) > 0)
+            (isDev || !newState.latestVersion || compareSemver(newState.latestVersion, currentVer) > 0)
           );
           latestAvailableVersion = newState.latestVersion || null;
           if (wasAvailable !== isUpdateAvailable) {
@@ -2455,9 +2486,24 @@
         }
         handleIncomingActionLog(event.data.event);
       }
+    } else if (type === 'VEST_TV_DIAGNOSTICS_TELEMETRY') {
+      if (isTopWindow && event.data.telemetry) {
+        handleIncomingDiagnosticsTelemetry(event.data.telemetry);
+      }
+    } else if (type === 'VEST_TV_CORTEX_DEBUG_LOG') {
+      if (settings.debugMode && event.data.logPayload) {
+        handleIncomingCortexDebugLog(event.data.logPayload);
+      }
     } else if (type === 'VEST_EXECUTE_FLATTEN_POSITION') {
       if (isTopWindow && typeof executeTopWindowFlatten === 'function') {
         executeTopWindowFlatten(event.data.payload || {});
+      }
+    } else if (type === 'VEST_TV_CHART_VIEW_RESET_COMPLETED') {
+      const cfg = event.data.config || {};
+      showToast(`Chart View Reset: Restored ${cfg.resolution ? cfg.resolution + ' ' : ''}${cfg.symbol || 'chart'} view`);
+      cortexDebugLog('Chart View Reset completed with configuration:', cfg);
+      if (chartDiagnosticsBoxEl && chartDiagnosticsBoxEl.style.display !== 'none') {
+        updateChartDiagnosticsBoxTelemetryOnly();
       }
     }
   });
@@ -2912,38 +2958,136 @@
   let studioPillHeartbeat = null;
   let studioPillEl = null;
   const CORTEX_TOP_BAR_ID = 'vest-cortex-top-bar';
+  const CORTEX_BAR_HEIGHT = 44;
+  const CORTEX_BAR_MARGIN_BOTTOM = 8;
+  let lastAdjustedContentEl = null;
 
-  function reserveBottomBarSpace() {
+  function getMainHeaderElement() {
+    // 1. Direct semantic header or nav elements
+    const semanticHeaders = Array.from(document.querySelectorAll('header, nav, [role="banner"]')).filter(el => {
+      if (el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-') || el.closest('#' + CORTEX_TOP_BAR_ID)) return false;
+      const r = el.getBoundingClientRect();
+      return r.top >= -5 && r.top <= 5 && r.width >= window.innerWidth * 0.5 && r.height >= 30 && r.height <= 85;
+    });
+    if (semanticHeaders.length > 0) return semanticHeaders[0];
+
+    // 2. High-level elements at top containing primary navigation keywords
+    const topDivs = Array.from(document.querySelectorAll('body > div, body > div > div, body > div > header, body > header')).filter(el => {
+      if (el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-') || el.closest('#' + CORTEX_TOP_BAR_ID)) return false;
+      const r = el.getBoundingClientRect();
+      if (r.top > 5 || r.top < -5 || r.width < window.innerWidth * 0.5 || r.height < 30 || r.height > 85) return false;
+      const txt = el.textContent || '';
+      return (txt.includes('Trade') && txt.includes('Markets')) || txt.includes('Portfolio');
+    });
+    if (topDivs.length > 0) return topDivs[0];
+
+    return null;
+  }
+
+  function getMainHeaderBottom() {
+    const header = getMainHeaderElement();
+    if (header) {
+      const r = header.getBoundingClientRect();
+      if (r.bottom >= 32 && r.bottom <= 90) {
+        return Math.round(r.bottom);
+      }
+    }
+    const market = typeof findMarketSelectorElement === 'function' ? findMarketSelectorElement() : null;
+    if (market && market.rowEl) {
+      const mr = market.rowEl.getBoundingClientRect();
+      if (mr.top >= 32 && mr.top <= 90) {
+        return Math.round(mr.top);
+      }
+    }
+    return 48;
+  }
+
+  function adjustLayoutForTopBar(headerBottom, barHeight, barMarginBottom = CORTEX_BAR_MARGIN_BOTTOM) {
     const root = document.documentElement;
     const body = document.body;
     if (!root || !body) return;
-    root.classList.add('vest-cortex-bottom-bar-active');
-    body.classList.add('vest-cortex-bottom-bar-active');
 
-    // Vest's app root commonly fills the whole viewport with overflow hidden. Cap that
-    // flow root so its final 50px remain reachable above the fixed Cortex bar.
+    if (root.classList.contains('vest-cortex-bottom-bar-active')) {
+      root.classList.remove('vest-cortex-bottom-bar-active');
+    }
+    if (body.classList.contains('vest-cortex-bottom-bar-active')) {
+      body.classList.remove('vest-cortex-bottom-bar-active');
+    }
+    root.classList.add('vest-cortex-top-bar-active');
+    body.classList.add('vest-cortex-top-bar-active');
+
     const candidates = Array.from(body.children).filter(el => {
       if (el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-')) return false;
       const style = window.getComputedStyle(el);
       const rect = el.getBoundingClientRect();
       return style.position !== 'fixed' && style.position !== 'absolute' &&
-        rect.top <= 2 && rect.width >= window.innerWidth * 0.7 &&
-        rect.height >= window.innerHeight - 2;
+        rect.top <= 5 && rect.width >= window.innerWidth * 0.7;
     });
     const appRoot = candidates.sort((a, b) =>
       (b.getBoundingClientRect().width * b.getBoundingClientRect().height) -
       (a.getBoundingClientRect().width * a.getBoundingClientRect().height)
     )[0];
-    if (appRoot) {
-      appRoot.style.setProperty('box-sizing', 'border-box', 'important');
-      appRoot.style.setProperty('max-height', 'calc(100vh - 50px)', 'important');
-      appRoot.style.setProperty('overflow-y', 'auto', 'important');
+
+    if (appRoot && appRoot.style.maxHeight && appRoot.style.maxHeight.includes('calc(100vh - 50px)')) {
+      appRoot.style.removeProperty('max-height');
+      appRoot.style.removeProperty('overflow-y');
+    }
+
+    const header = getMainHeaderElement();
+    if (header) {
+      const hStyle = window.getComputedStyle(header);
+      if (hStyle.position === 'static') {
+        header.style.setProperty('position', 'relative', 'important');
+      }
+      if (hStyle.zIndex === 'auto' || Number(hStyle.zIndex) < 1001) {
+        header.style.setProperty('z-index', '1005', 'important');
+      }
+    }
+
+    let contentEl = null;
+    if (header && header.nextElementSibling && header.nextElementSibling.id !== CORTEX_TOP_BAR_ID) {
+      contentEl = header.nextElementSibling;
+    } else {
+      const market = typeof findMarketSelectorElement === 'function' ? findMarketSelectorElement() : null;
+      if (market && market.rowEl) {
+        let curr = market.rowEl;
+        while (
+          curr &&
+          curr.parentElement &&
+          curr.parentElement !== document.body &&
+          curr.parentElement.id !== '__next' &&
+          curr.parentElement.id !== 'root'
+        ) {
+          if (header && curr.parentElement.contains(header) && curr.parentElement.children.length > 1) {
+            break;
+          }
+          curr = curr.parentElement;
+        }
+        contentEl = curr;
+      }
+    }
+
+    const totalTopOffset = (barHeight || CORTEX_BAR_HEIGHT) + (typeof barMarginBottom === 'number' ? barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM);
+
+    if (contentEl && contentEl !== header) {
+      if (lastAdjustedContentEl && lastAdjustedContentEl !== contentEl) {
+        lastAdjustedContentEl.style.removeProperty('margin-top');
+        lastAdjustedContentEl.style.removeProperty('max-height');
+      }
+      lastAdjustedContentEl = contentEl;
+      contentEl.style.setProperty('margin-top', `${totalTopOffset}px`, 'important');
+      contentEl.style.setProperty('box-sizing', 'border-box', 'important');
+      if (contentEl.offsetHeight > 200 || (header && contentEl === header.nextElementSibling)) {
+        contentEl.style.setProperty('max-height', `calc(100vh - ${headerBottom + totalTopOffset}px)`, 'important');
+      }
     }
   }
 
   function ensureCortexTopBar() {
     if (!document.body) return null;
-    reserveBottomBarSpace();
+    const headerBottom = getMainHeaderBottom();
+    adjustLayoutForTopBar(headerBottom, CORTEX_BAR_HEIGHT, CORTEX_BAR_MARGIN_BOTTOM);
+
     let bar = document.getElementById(CORTEX_TOP_BAR_ID);
     if (!bar) {
       bar = document.createElement('div');
@@ -2951,15 +3095,18 @@
       bar.setAttribute('role', 'region');
       bar.setAttribute('aria-label', 'Trading Cortex toolbar');
     }
-    if (bar.parentElement !== document.body || document.body.lastElementChild !== bar) {
+    if (bar.parentElement !== document.body) {
       document.body.appendChild(bar);
     }
+    bar.style.top = `${headerBottom}px`;
+    bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
     return bar;
   }
 
   function initPanelManager() {
     if (!isTopWindow) return;
 
+    ensureCortexTopBar();
     renderStudioHeaderPill();
     if (settings.enablePanelManagement !== false) {
       scheduleScanPanels(true);
@@ -2967,6 +3114,7 @@
 
     if (!studioPillHeartbeat) {
       studioPillHeartbeat = setInterval(() => {
+        ensureCortexTopBar();
         if (!studioPillEl || !studioPillEl.isConnected) {
           renderStudioHeaderPill();
         } else {
@@ -2986,6 +3134,45 @@
             clampAndPositionChartTradesBox();
           }
         }
+        if (settings.diagnosticsBox && settings.diagnosticsBox.enabled) {
+          if (!chartDiagnosticsBoxEl || !chartDiagnosticsBoxEl.isConnected) {
+            renderChartDiagnosticsBox();
+          } else {
+            clampAndPositionChartDiagnosticsBox();
+          }
+        }
+        /* [HEARTBEAT_CLEANUP_BLOCK]
+        if (!studioPillEl || !studioPillEl.isConnected) {
+          renderStudioHeaderPill();
+        } else {
+          dockStudioPillNextToMarketSelector(studioPillEl);
+        }
+        if (settings.newsBox && settings.newsBox.enabled) {
+          if (!chartNewsBoxEl || !chartNewsBoxEl.isConnected) {
+            renderChartNewsBox();
+          } else {
+            clampAndPositionChartNewsBox();
+          }
+        }
+        if (settings.tradesBox && settings.tradesBox.enabled) { // resize-trades
+          if (!chartTradesBoxEl || !chartTradesBoxEl.isConnected) {
+            renderChartTradesBox();
+          } else {
+            clampAndPositionChartTradesBox();
+      }
+      if (settings.diagnosticsBox && settings.diagnosticsBox.enabled) {
+        clampAndPositionChartDiagnosticsBox();
+          }
+        }
+        if (settings.diagnosticsBox && settings.diagnosticsBox.enabled) {
+          if (!chartDiagnosticsBoxEl || !chartDiagnosticsBoxEl.isConnected) {
+            renderChartDiagnosticsBox();
+          } else {
+            clampAndPositionChartDiagnosticsBox();
+          }
+          }
+        }
+        */
       }, 900);
     }
 
@@ -3004,6 +3191,7 @@
               targetEl.id === 'vest-action-log-box' ||
               targetEl.id === 'vest-chart-news-box' ||
               targetEl.id === 'vest-chart-trades-box' ||
+              targetEl.id === 'vest-chart-diagnostics-box' ||
               targetEl.classList.contains('vest-panel-header-bar') ||
               targetEl.classList.contains('vest-minimized-chip') ||
               targetEl.closest('#vest-minimized-dock') ||
@@ -3013,6 +3201,7 @@
               targetEl.closest('#vest-action-log-box') ||
               targetEl.closest('#vest-chart-news-box') ||
               targetEl.closest('#vest-chart-trades-box') ||
+              targetEl.closest('#vest-chart-diagnostics-box') ||
               targetEl.closest('.vest-panel-header-bar')
             ) {
               continue;
@@ -3135,6 +3324,7 @@
   let studioDropdownEl = null;
   let isUpdateAvailable = false;
   let latestAvailableVersion = null;
+  let latestUpdateChannel = 'stable';
   let isCheckingForUpdate = false;
 
   function cleanSemver(v) {
@@ -3180,27 +3370,62 @@
         } catch (e) {}
       }
 
-      // 2. Direct fallback fetch to GitHub Releases API in case service worker was asleep or unreachable
+      // 2. Direct fallback fetch to GitHub in case service worker was asleep or unreachable
       if (!state) {
-        const res = await fetch('https://api.github.com/repos/childersc/trading-cortex/releases/latest', {
-          headers: { Accept: 'application/vnd.github+json' },
-          cache: 'no-store'
-        });
-        if (res.ok) {
-          const release = await res.json();
-          const latestVer = cleanSemver(release.tag_name || release.name || installedVer);
-          state = {
-            latestVersion: latestVer,
-            updateAvailable: compareSemver(latestVer, installedVer) > 0
-          };
+        let channelPref = 'stable';
+        let installedDevSha = null;
+        if (isExtensionValid() && chrome.storage && chrome.storage.local) {
+          try {
+            const stored = await chrome.storage.local.get(['updateChannel', 'installedDevSha']);
+            if (stored.updateChannel) channelPref = stored.updateChannel;
+            if (stored.installedDevSha) installedDevSha = stored.installedDevSha;
+          } catch (e) {}
+        }
+
+        if (channelPref === 'dev') {
+          const res = await fetch('https://api.github.com/repos/childersc/trading-cortex/commits?sha=dev&per_page=1', {
+            headers: { Accept: 'application/vnd.github+json' },
+            cache: 'no-store'
+          });
+          if (res.ok) {
+            const commits = await res.json();
+            const latestCommit = Array.isArray(commits) && commits.length > 0 ? commits[0] : null;
+            if (latestCommit && latestCommit.sha) {
+              const latestSha = latestCommit.sha;
+              const isDifferent = installedDevSha ? (latestSha.toLowerCase() !== installedDevSha.toLowerCase()) : true;
+              state = {
+                channel: 'dev',
+                latestVersion: 'dev@' + latestSha.substring(0, 7),
+                latestCommitSha: latestSha,
+                updateAvailable: isDifferent
+              };
+            }
+          }
+        } else {
+          const res = await fetch('https://api.github.com/repos/childersc/trading-cortex/releases/latest', {
+            headers: { Accept: 'application/vnd.github+json' },
+            cache: 'no-store'
+          });
+          if (res.ok) {
+            const release = await res.json();
+            const latestVer = cleanSemver(release.tag_name || release.name || installedVer);
+            state = {
+              channel: 'stable',
+              latestVersion: latestVer,
+              updateAvailable: compareSemver(latestVer, installedVer) > 0
+            };
+          }
         }
       }
 
       if (state) {
         const wasAvailable = isUpdateAvailable;
+        const prevVer = latestAvailableVersion;
+        const prevChan = latestUpdateChannel;
         isUpdateAvailable = Boolean(state.updateAvailable);
         latestAvailableVersion = state.latestVersion || null;
-        if (wasAvailable !== isUpdateAvailable) {
+        latestUpdateChannel = state.channel || 'stable';
+        if (wasAvailable !== isUpdateAvailable || prevVer !== latestAvailableVersion || prevChan !== latestUpdateChannel) {
           renderStudioHeaderPill();
         }
       }
@@ -3220,7 +3445,9 @@
     const rect = triggerBtn.getBoundingClientRect();
     menuEl.style.position = 'fixed';
     const menuHeight = menuEl.offsetHeight || 440;
-    const opensAbove = rect.bottom + menuHeight + 6 > window.innerHeight;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const opensAbove = spaceBelow < menuHeight && spaceAbove > spaceBelow;
     const top = opensAbove
       ? Math.max(8, rect.top - menuHeight - 6)
       : rect.bottom + 6;
@@ -3243,13 +3470,19 @@
     studioPillEl = pill;
 
     const extVersion = getSafeExtVersion();
-    const subText = isUpdateAvailable ? 'Update ready' : `v${extVersion}`;
+    const isDev = latestUpdateChannel === 'dev';
+    const subText = isUpdateAvailable
+      ? (isDev ? 'Dev ready' : 'Update ready')
+      : (isDev ? 'dev' : `v${extVersion}`);
     const pillTitle = isUpdateAvailable
-      ? `Trading Cortex · Update ready (v${latestAvailableVersion || 'new'})`
-      : `Trading Cortex v${extVersion}`;
+      ? `Trading Cortex · ${isDev ? 'Dev build' : 'Update'} ready (${latestAvailableVersion || 'new'})`
+      : `Trading Cortex v${extVersion}${isDev ? ' (dev channel)' : ''}`;
+
+    const updateClass = isUpdateAvailable ? (isDev ? 'dev-update-ready' : 'update-ready') : '';
+    const updateTextClass = isUpdateAvailable ? (isDev ? 'dev-update-ready-text' : 'update-ready-text') : '';
 
     pill.innerHTML = `
-      <button type="button" class="vest-studio-pill-trigger ${studioMenuOpen ? 'open' : ''} ${isUpdateAvailable ? 'update-ready' : ''}" id="vest-studio-pill-btn" title="${pillTitle}">
+      <button type="button" class="vest-studio-pill-trigger ${studioMenuOpen ? 'open' : ''} ${updateClass}" id="vest-studio-pill-btn" title="${pillTitle}">
         <div class="vest-studio-pill-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -3261,7 +3494,7 @@
           <div class="vest-studio-pill-title-row">
             <span class="vest-studio-pill-title">CORTEX</span>
           </div>
-          <span class="vest-studio-pill-sub ${isUpdateAvailable ? 'update-ready-text' : ''}">${subText}</span>
+          <span class="vest-studio-pill-sub ${updateTextClass}">${subText}</span>
         </div>
         <svg class="vest-studio-pill-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <polyline points="6 9 12 15 18 9"></polyline>
@@ -3282,7 +3515,19 @@
     studioDropdownEl = menuEl;
 
     const updateItemHtml = isUpdateAvailable
-      ? `
+      ? (isDev
+        ? `
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-updater-btn" style="padding: 8px 10px; margin-bottom: 6px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.22), rgba(217, 119, 6, 0.14)); border: 1px solid rgba(251, 191, 36, 0.55); box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="color:#fbbf24;">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
+            </svg>
+            <span style="font-weight:700; color:#fde68a;">Dev Update Ready (${latestAvailableVersion ? escapeHtml(latestAvailableVersion) : 'Open Updater'})</span>
+          </div>
+          <span class="vest-sdm-hotkey" style="color:#fbbf24; border-color:rgba(251,191,36,0.4);">↗</span>
+        </div>
+      `
+        : `
         <div class="vest-sdm-menu-item" id="vest-sdm-open-updater-btn" style="padding: 8px 10px; margin-bottom: 6px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.14)); border: 1px solid rgba(52, 211, 153, 0.55); box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="color:#34d399;">
@@ -3292,7 +3537,7 @@
           </div>
           <span class="vest-sdm-hotkey" style="color:#34d399; border-color:rgba(52,211,153,0.4);">↗</span>
         </div>
-      `
+      `)
       : '';
 
     menuEl.style.display = studioMenuOpen ? 'flex' : 'none';
@@ -3368,6 +3613,15 @@
             <span style="font-weight:600; color:#f8fafc;">Candle OHLC Values...</span>
           </div>
           <span class="vest-sdm-badge-pill ${(settings.candleOhlc && (settings.candleOhlc.enabled || settings.candleOhlc.showCandleNumbers || settings.candleOhlc.clickCandleToToggle !== false)) ? 'on' : ''}">${settings.candleOhlc && settings.candleOhlc.enabled ? 'ALL ON' : (settings.candleOhlc && settings.candleOhlc.showCandleNumbers ? 'BAR #s' : (settings.candleOhlc && settings.candleOhlc.clickCandleToToggle !== false ? 'CLICK' : 'OFF'))}</span>
+        </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-diagnostics-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#06b6d4;">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Diagnostics &amp; Debug...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.debugMode ? 'on' : (settings.diagnosticsBox && settings.diagnosticsBox.enabled ? 'on' : '')}">${settings.debugMode ? 'DEBUG ON' : (settings.diagnosticsBox && settings.diagnosticsBox.enabled ? 'ON' : 'OFF')}</span>
         </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
@@ -3460,6 +3714,12 @@
     menuEl.querySelector('#vest-sdm-open-candleohlc-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('candleohlc');
+    });
+
+    // Diagnostics & Debug Button -> opens Settings Dialog directly on Diagnostics tab
+    menuEl.querySelector('#vest-sdm-open-diagnostics-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('diagnostics');
     });
 
     // Top Settings Button -> opens Settings Dialog on About tab
@@ -3612,7 +3872,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    let activeTab = ['about', 'alertsvoice', 'memory', 'sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator'].includes(initialTab) ? initialTab : 'about';
+    let activeTab = ['about', 'alertsvoice', 'memory', 'sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'diagnostics'].includes(initialTab) ? initialTab : 'about';
     let voicesChangedHandler = null;
 
     // Working draft so "Cancel" discards or "Save Settings" commits
@@ -3631,6 +3891,7 @@
     draftSettings.positionHud = normalizePositionHudConfig(draftSettings.positionHud);
     draftSettings.failLines = normalizeFailLinesConfig(draftSettings.failLines);
     draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+    draftSettings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
     if (!draftSettings.sidebarState) {
       draftSettings.sidebarState = {
         magnet: false,
@@ -3703,6 +3964,11 @@
         id: 'cortexindicator',
         label: 'Cortex Indicator',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l5-6 4 3 7-9"/><path d="M3 21h18"/><path d="M5 7h4M15 17h4"/></svg>`
+      },
+      {
+        id: 'diagnostics',
+        label: 'Diagnostics & Debug',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`
       }
     ];
 
@@ -3731,6 +3997,12 @@
       if (draftSettings.cortexIndicator) {
         settings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
       }
+      if (draftSettings.diagnosticsBox) {
+        settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
+      }
+      if (typeof draftSettings.debugMode === 'boolean') {
+        settings.debugMode = draftSettings.debugMode;
+      }
       queueSettingsSave({
         sessionIndicators: settings.sessionIndicators,
         autoFvg: settings.autoFvg,
@@ -3739,7 +4011,9 @@
         candleOhlc: settings.candleOhlc,
         positionHud: settings.positionHud,
         failLines: settings.failLines,
-        cortexIndicator: settings.cortexIndicator
+        cortexIndicator: settings.cortexIndicator,
+        diagnosticsBox: settings.diagnosticsBox,
+        debugMode: settings.debugMode
       });
       renderStudioHeaderPill();
       if (typeof renderChartNewsBox === 'function') {
@@ -3747,6 +4021,9 @@
       }
       if (typeof renderChartTradesBox === 'function') {
         renderChartTradesBox();
+      }
+      if (typeof renderChartDiagnosticsBox === 'function') {
+        renderChartDiagnosticsBox();
       }
       postToMainWorlds({
         type: 'VEST_TV_CONFIG_UPDATE',
@@ -5320,6 +5597,91 @@
         `;
       }
 
+      if (activeTab === 'diagnostics') {
+        const db = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
+        draftSettings.diagnosticsBox = db;
+        const isDebug = Boolean(draftSettings.debugMode);
+        return `
+          <div class="vest-tvs-section-title">DIAGNOSTICS &amp; DEBUG MODE</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">
+            Configure the on-chart diagnostics window and developer debug mode. When Debug Mode is enabled, all chart engine events, modules, actions, and logs are echoed out to the browser console with <code>[CORTEX DEBUG MODE] -</code>.
+          </p>
+
+          <div class="vest-tvs-toggle-box" style="margin-bottom:12px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Debug Mode (Console Echo)</div>
+              <div class="vest-tvs-toggle-desc">Logs all chart hooks, session events, FVG computations, trades, and position events with <code>[CORTEX DEBUG MODE] -</code>.</div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle Developer Debug Mode">
+              <input type="checkbox" id="vest-dbg-master-toggle" ${isDebug ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-tvs-toggle-box" style="margin-bottom:14px;">
+            <div class="vest-tvs-toggle-info">
+              <div class="vest-tvs-toggle-title">Show On-Chart Diagnostics Window</div>
+              <div class="vest-tvs-toggle-desc">Displays a floating, moveable HUD showing chart API hook status, canvas resolution, visible bar count, render latency, active killzones, and auto FVGs.</div>
+            </div>
+            <label class="vest-tvs-switch" title="Toggle On-Chart Diagnostics Window">
+              <input type="checkbox" id="vest-dbg-box-enabled" ${db.enabled ? 'checked' : ''} />
+              <span class="vest-tvs-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:14px;">
+            <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Diagnostics Window Appearance &amp; Position
+            </div>
+            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Window Width: <span id="vest-dbg-box-width-val" style="color:#38bdf8; font-weight:700;">${db.boxWidth}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-dbg-box-width" min="280" max="520" step="10" value="${db.boxWidth}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Background Opacity: <span id="vest-dbg-bg-op-val" style="color:#38bdf8; font-weight:700;">${db.bgOpacity}%</span></label>
+                <input type="range" class="vest-ed-range" id="vest-dbg-bg-op" min="30" max="100" step="5" value="${db.bgOpacity}" />
+              </div>
+            </div>
+            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Background Color</label>
+                <input type="color" class="vest-ed-color" id="vest-dbg-bg-color" value="${db.bgColor || '#0f172a'}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Border Accent Color</label>
+                <input type="color" class="vest-ed-color" id="vest-dbg-border-color" value="${db.borderColor || '#38bdf8'}" />
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button type="button" class="vest-ed-btn" id="vest-dbg-reset-pos-btn" style="flex:1; padding:6px 10px; font-size:11px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; border-radius:6px; cursor:pointer;">
+                Reset Window Position
+              </button>
+              <button type="button" class="vest-ed-btn" id="vest-dbg-reset-defaults-btn" style="flex:1; padding:6px 10px; font-size:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#cbd5e1; border-radius:6px; cursor:pointer;">
+                Reset to Defaults
+              </button>
+            </div>
+          </div>
+
+          <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Developer Tools &amp; Actions
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="vest-ed-btn" id="vest-dbg-test-echo-btn" style="flex:1; padding:7px 10px; font-size:11px; font-weight:600; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); color:#34d399; border-radius:6px; cursor:pointer;">
+                Send Test Echo Log
+              </button>
+              <button type="button" class="vest-ed-btn" id="vest-dbg-copy-state-btn" style="flex:1; padding:7px 10px; font-size:11px; font-weight:600; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.35); color:#7dd3fc; border-radius:6px; cursor:pointer;">
+                Copy Diagnostics JSON
+              </button>
+              <button type="button" class="vest-ed-btn" id="vest-dbg-clear-console-btn" style="flex:1; padding:7px 10px; font-size:11px; font-weight:600; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:6px; cursor:pointer;">
+                Clear Console
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
       return '';
     }
 
@@ -5339,6 +5701,7 @@
       window.removeEventListener('mouseup', onModalMouseUp, true);
       overlay.remove();
       // Restore committed settings to main world in case user cancelled after previewing
+      if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       notifyMainWorldConfig();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
@@ -5885,6 +6248,26 @@
         if (alertVoice) ci.signalAlertVoiceURI = alertVoice.value;
         draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(ci);
       }
+      if (activeTab === 'diagnostics') {
+        const dbMaster = overlay.querySelector('#vest-dbg-master-toggle');
+        if (dbMaster) draftSettings.debugMode = Boolean(dbMaster.checked);
+        const dbBox = overlay.querySelector('#vest-dbg-box-enabled');
+        if (dbBox) {
+          if (!draftSettings.diagnosticsBox) draftSettings.diagnosticsBox = normalizeDiagnosticsBoxConfig(null);
+          draftSettings.diagnosticsBox.enabled = Boolean(dbBox.checked);
+        }
+        const w = overlay.querySelector('#vest-dbg-box-width');
+        if (w && draftSettings.diagnosticsBox) draftSettings.diagnosticsBox.boxWidth = Number(w.value) || 360;
+        const op = overlay.querySelector('#vest-dbg-bg-op');
+        if (op && draftSettings.diagnosticsBox) draftSettings.diagnosticsBox.bgOpacity = Number(op.value) || 94;
+        const bg = overlay.querySelector('#vest-dbg-bg-color');
+        if (bg && draftSettings.diagnosticsBox) draftSettings.diagnosticsBox.bgColor = bg.value;
+        const bc = overlay.querySelector('#vest-dbg-border-color');
+        if (bc && draftSettings.diagnosticsBox) draftSettings.diagnosticsBox.borderColor = bc.value;
+      }
+      if (false && 'vest_dummy_ci_close') {
+        draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(ci);
+      }
     }
 
     function commitDraftAndClose() {
@@ -5913,6 +6296,7 @@
       renderStudioHeaderPill();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
+      if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       showToast('Settings saved');
       if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
       overlay.remove();
@@ -6570,6 +6954,81 @@
         });
       }
 
+      if (activeTab === 'diagnostics') {
+        const wRange = overlay.querySelector('#vest-dbg-box-width');
+        const wVal = overlay.querySelector('#vest-dbg-box-width-val');
+        if (wRange && wVal) {
+          wRange.addEventListener('input', () => {
+            wVal.textContent = `${wRange.value}px`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+        const bgOpRange = overlay.querySelector('#vest-dbg-bg-op');
+        const bgOpVal = overlay.querySelector('#vest-dbg-bg-op-val');
+        if (bgOpRange && bgOpVal) {
+          bgOpRange.addEventListener('input', () => {
+            bgOpVal.textContent = `${bgOpRange.value}%`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        }
+        overlay.querySelector('#vest-dbg-master-toggle')?.addEventListener('change', (e) => {
+          draftSettings.debugMode = Boolean(e.target.checked);
+          setCortexDebugMode(draftSettings.debugMode, 'Settings Modal');
+          broadcastLiveSessionDraft();
+        });
+        overlay.querySelector('#vest-dbg-box-enabled')?.addEventListener('change', () => {
+          syncCurrentPaneToDraft();
+          broadcastLiveSessionDraft();
+        });
+        overlay.querySelector('#vest-dbg-reset-pos-btn')?.addEventListener('click', () => {
+          draftSettings.diagnosticsBox.relX = 0.72;
+          draftSettings.diagnosticsBox.relY = 0.12;
+          draftSettings.diagnosticsBox.pinned = false;
+          draftSettings.diagnosticsBox.pinnedLeft = null;
+          draftSettings.diagnosticsBox.pinnedTop = null;
+          draftSettings.diagnosticsBox.collapsed = false;
+          broadcastLiveSessionDraft();
+          showToast('Diagnostics window position reset to top right');
+        });
+        overlay.querySelector('#vest-dbg-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.diagnosticsBox = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
+          draftSettings.diagnosticsBox.enabled = true;
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Diagnostics Window styling to defaults');
+        });
+        overlay.querySelector('#vest-dbg-test-echo-btn')?.addEventListener('click', () => {
+          cortexDebugLog('Manual Test Echo triggered from settings dialog', {
+            timestamp: new Date().toISOString(),
+            debugMode: settings.debugMode
+          });
+          showToast(settings.debugMode ? 'Echoed test to console [CORTEX DEBUG MODE]' : 'Turn Debug Mode ON to see console echo');
+        });
+        overlay.querySelector('#vest-dbg-copy-state-btn')?.addEventListener('click', () => {
+          copyDiagnosticsStateToClipboard();
+        });
+        overlay.querySelector('#vest-dbg-clear-console-btn')?.addEventListener('click', () => {
+          console.clear();
+          showToast('Browser console cleared');
+        });
+
+        const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (rightPane) {
+          rightPane.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+          rightPane.addEventListener('input', (e) => {
+            if (e.target && (e.target.type === 'color' || e.target.type === 'text')) {
+              syncCurrentPaneToDraft();
+              broadcastLiveSessionDraft();
+            }
+          });
+        }
+      }
+
       // Close / Cancel / Save Settings
       overlay.querySelector('#vest-tvs-close')?.addEventListener('click', closeSettingsOverlay);
       overlay.querySelector('#vest-tvs-cancel')?.addEventListener('click', closeSettingsOverlay);
@@ -6700,30 +7159,48 @@
     return liveEconomicNewsEvents;
   }
 
-  /** Available full-screen area, reserving the bottom 50px for the Cortex bar. */
+  /** Available full-screen area, reserving space for the top header & Cortex bar. */
   function getScreenBoundsRect() {
     const left = 0;
-    const top = 0;
+    const headerBottom = typeof getMainHeaderBottom === 'function' ? getMainHeaderBottom() : 48;
+    const barEl = document.getElementById(CORTEX_TOP_BAR_ID);
+    const barH = barEl ? barEl.offsetHeight : CORTEX_BAR_HEIGHT;
+    const top = Math.round(headerBottom + barH + CORTEX_BAR_MARGIN_BOTTOM);
     const right = Math.max(1, window.innerWidth);
-    const bottom = Math.max(1, window.innerHeight - 50);
+    const bottom = Math.max(top + 50, window.innerHeight);
     return { left, top, right, bottom, width: right - left, height: bottom - top };
   }
 
   /**
-   * Places minimized News and Trades pills inside the Cortex bottom bar.
+   * Places minimized News, Trades, and Diagnostics pills inside the Cortex top bar.
    */
   function getMinimizedCortexBarCoords(boxType, boxEl) {
-    const boxW = (boxEl && boxEl.offsetWidth) || (boxType === 'trades' ? 235 : 210);
-    const boxH = (boxEl && boxEl.offsetHeight) || 32;
+    const defaultBoxWidth = boxType === 'trades' ? 235 : (boxType === 'diagnostics' ? 240 : 210);
+    const boxW = (boxEl && boxEl.offsetWidth) || defaultBoxWidth;
+    const boxH = (boxEl && boxEl.offsetHeight) || 30;
     const pill = document.getElementById('vest-studio-pill-btn');
-    const pillRect = pill ? pill.getBoundingClientRect() : { right: 28 };
+    const headerBottom = typeof getMainHeaderBottom === 'function' ? getMainHeaderBottom() : 48;
+    const pillRect = pill ? pill.getBoundingClientRect() : { right: 28, top: headerBottom };
     let targetLeft = pillRect.right + 12;
     if (boxType === 'trades' && settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
       const newsW = (chartNewsBoxEl && chartNewsBoxEl.offsetWidth) || 215;
       targetLeft += newsW + 8;
     }
+    if (boxType === 'diagnostics') {
+      if (settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
+        const newsW = (chartNewsBoxEl && chartNewsBoxEl.offsetWidth) || 215;
+        targetLeft += newsW + 8;
+      }
+      if (settings.tradesBox && settings.tradesBox.enabled && settings.tradesBox.collapsed) {
+        const tradesW = (chartTradesBoxEl && chartTradesBoxEl.offsetWidth) || 235;
+        targetLeft += tradesW + 8;
+      }
+    }
     targetLeft = Math.min(Math.max(8, targetLeft), Math.max(8, window.innerWidth - boxW - 8));
-    const targetTop = Math.round(window.innerHeight - 50 + (50 - boxH) / 2);
+    const bar = document.getElementById(CORTEX_TOP_BAR_ID);
+    const barRect = bar ? bar.getBoundingClientRect() : { top: headerBottom, height: CORTEX_BAR_HEIGHT };
+    const barH = barRect.height || CORTEX_BAR_HEIGHT;
+    const targetTop = Math.round(barRect.top + (barH - boxH) / 2);
     return {
       left: Math.round(targetLeft),
       top: Math.round(targetTop)
@@ -6732,7 +7209,7 @@
 
   /**
    * Performs a smooth FLIP (First, Last, Invert, Play) window minimize/restore animation
-   * between the box's last saved position and its place in the Cortex bottom bar.
+   * between the box's last saved position and its place in the Cortex top bar.
    */
   function animateChartBoxMinimizeOrRestore(boxEl, prevRect, isMinimizing) {
     if (!boxEl || !prevRect || typeof boxEl.animate !== 'function') return;
@@ -7028,7 +7505,7 @@
                 <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
               </svg>
             </button>
-            <button type="button" class="vest-cnb-icon-btn" id="vest-cnb-collapse-btn" title="Minimize to the Cortex bottom bar">
+            <button type="button" class="vest-cnb-icon-btn" id="vest-cnb-collapse-btn" title="Minimize to the Cortex bar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
               </svg>
@@ -7130,7 +7607,7 @@
           const rawLeft = ev.clientX - activeNewsBoxDrag.offsetX;
           const rawTop = ev.clientY - activeNewsBoxDrag.offsetY;
 
-          // Keep the whole box inside the usable screen area above the Cortex bottom bar.
+          // Keep the whole box inside the usable screen area below the Cortex top bar.
           const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
           const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
 
@@ -7218,7 +7695,8 @@
   }
 
   if (isTopWindow) {
-    window.addEventListener('resize', () => {
+    window.addEventListener('resize', () => { // tv-chart-resize
+      ensureCortexTopBar();
       if (settings.newsBox && settings.newsBox.enabled) {
         clampAndPositionChartNewsBox();
       }
@@ -8079,7 +8557,7 @@
                 <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
               </svg>
             </button>
-            <button type="button" class="vest-cnb-icon-btn" id="vest-ctb-collapse-btn" title="Minimize to the Cortex bottom bar">
+            <button type="button" class="vest-cnb-icon-btn" id="vest-ctb-collapse-btn" title="Minimize to the Cortex bar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
                 <line x1="5" y1="12" x2="19" y2="12"></line>
               </svg>
@@ -8211,7 +8689,7 @@
           const rawLeft = ev.clientX - activeTradesBoxDrag.offsetX;
           const rawTop = ev.clientY - activeTradesBoxDrag.offsetY;
 
-          // Keep the whole box inside the usable screen area above the Cortex bottom bar.
+          // Keep the whole box inside the usable screen area below the Cortex top bar.
           const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
           const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
 
@@ -8299,6 +8777,658 @@
       settings.tradesBox.collapsed = true;
       queueSettingsSave({ tradesBox: settings.tradesBox });
       renderChartTradesBox(prevRect);
+    });
+  }
+
+  // -------------------------------------------------------------
+  // Cortex Debug Logger & Mode Control
+  // -------------------------------------------------------------
+  function cortexDebugLog(action, ...details) {
+    if (!settings || !settings.debugMode) return;
+    const prefix = `[CORTEX DEBUG MODE] - ${action}`;
+    if (details.length > 0) {
+      console.log(prefix, ...details);
+    } else {
+      console.log(prefix);
+    }
+  }
+
+  function setCortexDebugMode(enable, sourceHint = '') {
+    const nextVal = Boolean(enable);
+    if (settings.debugMode === nextVal) return;
+    settings.debugMode = nextVal;
+    queueSettingsSave({ debugMode: nextVal });
+    notifyMainWorldConfig();
+    postToMainWorlds({
+      type: 'VEST_TV_SET_DEBUG_MODE',
+      debugMode: nextVal
+    });
+    cortexDebugLog(`Debug Mode switched to ${nextVal ? 'ON' : 'OFF'}${sourceHint ? ` via ${sourceHint}` : ''}`);
+    renderChartDiagnosticsBox();
+    renderStudioHeaderPill();
+    showToast(`Debug Mode: ${nextVal ? 'ON (Echoing to console)' : 'OFF'}`);
+  }
+
+  // -------------------------------------------------------------
+  // Moveable On-Chart Diagnostics Window
+  // -------------------------------------------------------------
+  let chartDiagnosticsBoxEl = null;
+  let activeDiagnosticsBoxDrag = null;
+  let latestDiagnosticsTelemetry = null;
+  let diagnosticsBoxPollTimer = null;
+  let currentBrowserTabId = null;
+  let currentBrowserWindowId = null;
+  let currentBrowserTabIndex = null;
+  let isResolvingTabInfo = false;
+
+  function resolveCurrentTabInfo() {
+    if (isResolvingTabInfo) return Promise.resolve(currentBrowserTabId);
+    if (!isExtensionValid() || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') {
+      return Promise.resolve(null);
+    }
+    isResolvingTabInfo = true;
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ action: 'getCurrentTabInfo' }, (res) => {
+          isResolvingTabInfo = false;
+          if (chrome.runtime.lastError || !res) {
+            resolve(null);
+            return;
+          }
+          if (res.tabId !== null && res.tabId !== undefined) {
+            currentBrowserTabId = res.tabId;
+            currentBrowserWindowId = res.windowId !== undefined ? res.windowId : null;
+            currentBrowserTabIndex = res.tabIndex !== undefined ? res.tabIndex : null;
+            cortexDebugLog(`Tab identity resolved: Tab #${currentBrowserTabId}`, { windowId: currentBrowserWindowId, tabIndex: currentBrowserTabIndex });
+            postToMainWorlds({
+              type: 'VEST_TV_TAB_INFO',
+              payload: { tabId: currentBrowserTabId, windowId: currentBrowserWindowId }
+            });
+            if (chartDiagnosticsBoxEl && chartDiagnosticsBoxEl.style.display !== 'none') {
+              updateChartDiagnosticsBoxTelemetryOnly();
+            }
+          }
+          resolve(res);
+        });
+      } catch (e) {
+        isResolvingTabInfo = false;
+        resolve(null);
+      }
+    });
+  }
+
+  function handleIncomingDiagnosticsTelemetry(telemetry) {
+    if (!telemetry || typeof telemetry !== 'object') return;
+    latestDiagnosticsTelemetry = telemetry;
+    if (chartDiagnosticsBoxEl && chartDiagnosticsBoxEl.style.display !== 'none') {
+      updateChartDiagnosticsBoxTelemetryOnly();
+    }
+  }
+
+  function handleIncomingCortexDebugLog(payload) {
+    if (!settings.debugMode || !payload) return;
+    const msg = payload.message || '';
+    const details = Array.isArray(payload.details) ? payload.details : [];
+    console.log(msg, ...details);
+  }
+
+  function copyDiagnosticsStateToClipboard() {
+    try {
+      const diagData = {
+        title: 'Trading Cortex Diagnostics Snapshot',
+        generatedAt: new Date().toISOString(),
+        version: getSafeExtVersion(),
+        tabId: currentBrowserTabId,
+        windowId: currentBrowserWindowId,
+        tabIndex: currentBrowserTabIndex,
+        url: window.location.href,
+        currentInstrument: currentInstrument || 'Unknown',
+        currentPrice: currentPrice || '--',
+        debugMode: Boolean(settings.debugMode),
+        diagnosticsBox: settings.diagnosticsBox,
+        newsBoxEnabled: Boolean(settings.newsBox && settings.newsBox.enabled),
+        tradesBoxEnabled: Boolean(settings.tradesBox && settings.tradesBox.enabled),
+        positionHudEnabled: Boolean(settings.positionHud && settings.positionHud.enabled),
+        candleOhlcEnabled: Boolean(settings.candleOhlc && settings.candleOhlc.enabled),
+        candleNumbersEnabled: Boolean(settings.candleOhlc && settings.candleOhlc.showCandleNumbers),
+        customCandleWidth: settings.candleOhlc && settings.candleOhlc.customCandleWidthEnabled ? `${settings.candleOhlc.candleWidthPx}%` : 'Auto',
+        sessionsEnabled: Boolean(settings.sessionIndicators && settings.sessionIndicators.enabled),
+        autoFvgEnabled: Boolean(settings.autoFvg && settings.autoFvg.enabled),
+        failLinesEnabled: Boolean(settings.failLines && settings.failLines.enabled),
+        cortexIndicatorEnabled: Boolean(settings.cortexIndicator && settings.cortexIndicator.enabled),
+        telemetry: latestDiagnosticsTelemetry || 'No telemetry received yet from chart frame'
+      };
+      const text = JSON.stringify(diagData, null, 2);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast('Diagnostics snapshot copied to clipboard!');
+        }).catch(() => {
+          showToast('Failed to copy snapshot to clipboard');
+        });
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        showToast('Diagnostics snapshot copied to clipboard!');
+      }
+      cortexDebugLog('Diagnostics snapshot copied to clipboard');
+    } catch (e) {
+      console.warn('[TradingCortex:DiagCopy]', e);
+    }
+  }
+
+  function clampAndPositionChartDiagnosticsBox() {
+    if (!chartDiagnosticsBoxEl || chartDiagnosticsBoxEl.style.display === 'none' || activeDiagnosticsBoxDrag) return;
+    const db = normalizeDiagnosticsBoxConfig(settings.diagnosticsBox);
+    const vp = getScreenBoundsRect();
+
+    if (db.collapsed) {
+      const minPos = getMinimizedCortexBarCoords('diagnostics', chartDiagnosticsBoxEl);
+      chartDiagnosticsBoxEl.style.left = `${minPos.left}px`;
+      chartDiagnosticsBoxEl.style.top = `${minPos.top}px`;
+      return;
+    }
+
+    const boxW = chartDiagnosticsBoxEl.offsetWidth || db.boxWidth || 360;
+    const boxH = chartDiagnosticsBoxEl.offsetHeight || 320;
+
+    let targetLeft;
+    let targetTop;
+    if (db.pinned && db.pinnedLeft !== null && db.pinnedTop !== null) {
+      targetLeft = db.pinnedLeft;
+      targetTop = db.pinnedTop;
+    } else {
+      const maxOffsetX = Math.max(0, vp.width - boxW);
+      const maxOffsetY = Math.max(0, vp.height - boxH);
+      targetLeft = Math.round(vp.left + db.relX * maxOffsetX);
+      targetTop = Math.round(vp.top + db.relY * maxOffsetY);
+    }
+
+    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
+    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
+
+    chartDiagnosticsBoxEl.style.left = `${clampedLeft}px`;
+    chartDiagnosticsBoxEl.style.top = `${clampedTop}px`;
+  }
+
+  function renderChartDiagnosticsBox(animateFromRect = null) {
+    if (!isTopWindow) return;
+
+    const db = normalizeDiagnosticsBoxConfig(settings.diagnosticsBox);
+    settings.diagnosticsBox = db;
+
+    if (!db.enabled) {
+      if (chartDiagnosticsBoxEl) {
+        chartDiagnosticsBoxEl.style.display = 'none';
+      }
+      if (diagnosticsBoxPollTimer) {
+        clearInterval(diagnosticsBoxPollTimer);
+        diagnosticsBoxPollTimer = null;
+      }
+      return;
+    }
+
+    if (!chartDiagnosticsBoxEl || !chartDiagnosticsBoxEl.isConnected) {
+      chartDiagnosticsBoxEl = document.getElementById('vest-chart-diagnostics-box');
+      if (!chartDiagnosticsBoxEl) {
+        chartDiagnosticsBoxEl = document.createElement('div');
+        chartDiagnosticsBoxEl.id = 'vest-chart-diagnostics-box';
+        document.body.appendChild(chartDiagnosticsBoxEl);
+      }
+    }
+
+    // Start periodic telemetry poll if not already running
+    if (!diagnosticsBoxPollTimer) {
+      postToMainWorlds({ type: 'VEST_TV_REQUEST_DIAGNOSTICS' });
+      diagnosticsBoxPollTimer = setInterval(() => {
+        if (settings.diagnosticsBox && settings.diagnosticsBox.enabled) {
+          postToMainWorlds({ type: 'VEST_TV_REQUEST_DIAGNOSTICS' });
+        }
+      }, 1200);
+    }
+
+    chartDiagnosticsBoxEl.style.display = 'block';
+    chartDiagnosticsBoxEl.classList.toggle('is-pinned', Boolean(db.pinned && !db.collapsed));
+    chartDiagnosticsBoxEl.classList.toggle('is-minimized-pill', Boolean(db.collapsed));
+    chartDiagnosticsBoxEl.style.width = db.collapsed ? 'auto' : `${db.boxWidth}px`;
+    chartDiagnosticsBoxEl.style.background = hexToRgba(db.bgColor || '#0f172a', (Number(db.bgOpacity ?? 94)) / 100);
+    chartDiagnosticsBoxEl.style.borderColor = hexToRgba(db.borderColor || '#38bdf8', db.pinned ? 0.75 : 0.45);
+    if (currentBrowserTabId === null) {
+      resolveCurrentTabInfo();
+    }
+
+    const isDebug = Boolean(settings.debugMode);
+    const telem = latestDiagnosticsTelemetry || {};
+    const isHooked = telem.isHooked !== undefined ? telem.isHooked : Boolean(currentInstrument);
+    const apiLabel = isHooked ? 'Hooked (Active)' : 'Searching...';
+    const symLabel = telem.instrument || currentInstrument || 'Unknown';
+    const prcLabel = telem.price ? `${telem.price}` : (currentPrice ? `${currentPrice}` : '--');
+    const canvasRes = (telem.canvasWidth && telem.canvasHeight) ? `${telem.canvasWidth}×${telem.canvasHeight} @ ${telem.dpr || 1}x` : 'Detecting...';
+    const visibleBars = telem.visibleBars ? `${telem.visibleBars} bars` : 'Scanning...';
+    const renderLatency = (telem.lastRenderMs !== undefined && telem.lastRenderMs !== null) ? `${Number(telem.lastRenderMs).toFixed(1)} ms` : '-- ms';
+    const candleWidthStr = telem.candleWidth || (settings.candleOhlc?.customCandleWidthEnabled ? `${settings.candleOhlc.candleWidthPx}%` : 'Auto');
+    const activeKz = telem.activeKillzone || 'None';
+    const fvgCounts = (telem.bullFvgs !== undefined && telem.bearFvgs !== undefined) ? `${telem.bullFvgs} Bull / ${telem.bearFvgs} Bear` : (settings.autoFvg?.enabled ? 'Active' : 'Inactive');
+
+    if (db.collapsed) {
+      chartDiagnosticsBoxEl.innerHTML = `
+        <div class="vest-cdb-min-pill-bar" id="vest-cdb-restore-bar" title="Click to restore Diagnostics Window">
+          <div class="vest-cdb-title-group">
+            <span class="vest-cdb-title-dot ${isHooked ? '' : 'searching'}"></span>
+            <span class="vest-cdb-title">Cortex Diag</span>
+            ${currentBrowserTabId !== null ? `
+              <span class="vest-cdb-tab-pill" style="font-size:8px; padding:1px 4px;" title="Current Tab ID: ${currentBrowserTabId}">#${currentBrowserTabId}</span>
+            ` : ''}
+            <span class="vest-cdb-mode-badge ${isDebug ? 'debug-on' : 'debug-off'}">
+              ${isDebug ? 'DEBUG: ON' : 'DEBUG: OFF'}
+            </span>
+          </div>
+          <span class="vest-cnb-restore-hint" title="Restore Window" style="color:#7dd3fc; display:flex; align-items:center;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:13px; height:13px;">
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+          </span>
+        </div>
+      `;
+    } else {
+      chartDiagnosticsBoxEl.innerHTML = `
+        <div class="vest-cdb-header" id="vest-cdb-drag-handle" title="${db.pinned ? 'Window is pinned to screen position (click pin to unlock)' : 'Drag to move anywhere on screen'}">
+          <div class="vest-cdb-title-group">
+            <span class="vest-cdb-title-dot ${isHooked ? '' : 'searching'}"></span>
+            <span class="vest-cdb-title">Trading Cortex Diagnostics</span>
+            <span class="vest-cdb-tab-pill" id="vest-cdb-tab-header-pill" title="Current Browser Tab ID: ${currentBrowserTabId !== null ? currentBrowserTabId : 'Resolving...'}">
+              ${currentBrowserTabId !== null ? `TAB #${currentBrowserTabId}` : 'TAB ...'}
+            </span>
+            <span class="vest-cdb-mode-badge ${isDebug ? 'debug-on' : 'debug-off'}" id="vest-cdb-badge-indicator">
+              ${isDebug ? 'DEBUG ON' : 'DEBUG OFF'}
+            </span>
+          </div>
+          <div class="vest-cdb-actions">
+            <label class="vest-cdb-toggle-label" title="Toggle Debug Mode (echoes all operations to console)">
+              <span>Debug</span>
+              <label class="vest-cdb-switch">
+                <input type="checkbox" id="vest-cdb-debug-toggle" ${isDebug ? 'checked' : ''} />
+                <span class="vest-cdb-slider"></span>
+              </label>
+            </label>
+            <button type="button" class="vest-cdb-icon-btn" id="vest-cdb-settings-btn" title="Customize Diagnostics Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px;">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+            <button type="button" class="vest-cdb-icon-btn ${db.pinned ? 'is-pinned' : ''}" id="vest-cdb-pin-btn" title="${db.pinned ? 'Pinned to screen position (click to unpin)' : 'Pin window in place'}">
+              <svg viewBox="0 0 24 24" fill="${db.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" style="width:13px; height:13px;">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+              </svg>
+            </button>
+            <button type="button" class="vest-cdb-icon-btn" id="vest-cdb-collapse-btn" title="Minimize to Cortex bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:13px; height:13px;">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="vest-cdb-body">
+          <div class="vest-cdb-sec-title">
+            <span>Chart Engine &amp; Canvas</span>
+            <span style="font-size:8.5px; color:#64748b; font-weight:500;">LIVE METRICS</span>
+          </div>
+          <div class="vest-cdb-grid">
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Tab ID</span>
+              <span class="vest-cdb-tile-val cyan" id="vest-cdb-val-tab">${currentBrowserTabId !== null ? `Tab #${currentBrowserTabId}` : 'Resolving...'}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Window / Frame</span>
+              <span class="vest-cdb-tile-val" id="vest-cdb-val-frame">${currentBrowserWindowId !== null ? `Win #${currentBrowserWindowId}` : (isTopWindow ? 'Top Frame' : 'Iframe')}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">API Hook</span>
+              <span class="vest-cdb-tile-val ${isHooked ? 'ok' : 'warn'}" id="vest-cdb-val-hook">${escapeHtml(apiLabel)}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Instrument</span>
+              <span class="vest-cdb-tile-val cyan" id="vest-cdb-val-inst">${escapeHtml(symLabel)}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Market Price</span>
+              <span class="vest-cdb-tile-val" id="vest-cdb-val-price">${escapeHtml(prcLabel)}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Canvas Res</span>
+              <span class="vest-cdb-tile-val" id="vest-cdb-val-canvas">${escapeHtml(canvasRes)}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Visible Bars</span>
+              <span class="vest-cdb-tile-val" id="vest-cdb-val-bars">${escapeHtml(visibleBars)}</span>
+            </div>
+            <div class="vest-cdb-tile">
+              <span class="vest-cdb-tile-label">Render Latency</span>
+              <span class="vest-cdb-tile-val ok" id="vest-cdb-val-latency">${escapeHtml(renderLatency)}</span>
+            </div>
+          </div>
+
+          <div class="vest-cdb-sec-title" style="margin-top:4px;">
+            <span>Modules &amp; Status</span>
+            <span style="font-size:8.5px; color:#64748b; font-weight:500;">ACTIVE HOOKS</span>
+          </div>
+          <div class="vest-cdb-module-list">
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Candle Numbers</span>
+              <span class="vest-cdb-mod-status ${(settings.candleOhlc?.enabled || settings.candleOhlc?.showCandleNumbers) ? 'active' : 'inactive'}" id="vest-cdb-mod-candlenum">
+                ${(settings.candleOhlc?.enabled || settings.candleOhlc?.showCandleNumbers) ? 'Active (#1–#' + (settings.candleOhlc?.candleNumbersMax || 100) + ')' : 'Inactive'}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Candle Width</span>
+              <span class="vest-cdb-mod-status ${settings.candleOhlc?.customCandleWidthEnabled ? 'active' : 'info'}" id="vest-cdb-mod-width">
+                ${escapeHtml(candleWidthStr)}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Chart View Memory</span>
+              <span class="vest-cdb-mod-status active" id="vest-cdb-mod-viewmem">
+                ${telem.lastKnownConfig ? `Ready (${telem.lastKnownConfig.barSpacing ? Number(telem.lastKnownConfig.barSpacing).toFixed(1) + 'px zoom' : 'Auto'})` : 'Ready'}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Position HUD Overlay</span>
+              <span class="vest-cdb-mod-status ${settings.positionHud?.enabled !== false ? 'active' : 'inactive'}" id="vest-cdb-mod-hud">
+                ${settings.positionHud?.enabled !== false ? 'Active (Line + Flatten)' : 'Inactive'}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Sessions &amp; Killzones</span>
+              <span class="vest-cdb-mod-status ${settings.sessionIndicators?.enabled ? 'active' : 'inactive'}" id="vest-cdb-mod-sessions">
+                ${settings.sessionIndicators?.enabled ? `Active (${escapeHtml(activeKz)})` : 'Inactive'}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Auto FVG Engine</span>
+              <span class="vest-cdb-mod-status ${settings.autoFvg?.enabled ? 'active' : 'inactive'}" id="vest-cdb-mod-fvg">
+                ${escapeHtml(fvgCounts)}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Economic News Box</span>
+              <span class="vest-cdb-mod-status ${settings.newsBox?.enabled ? 'active' : 'inactive'}" id="vest-cdb-mod-news">
+                ${settings.newsBox?.enabled ? `Active (${liveEconomicNewsEvents.length} events)` : 'Inactive'}
+              </span>
+            </div>
+            <div class="vest-cdb-module-row">
+              <span class="vest-cdb-mod-name">Instrument Trades Box</span>
+              <span class="vest-cdb-mod-status ${settings.tradesBox?.enabled ? 'active' : 'inactive'}" id="vest-cdb-mod-trades">
+                ${settings.tradesBox?.enabled ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+          </div>
+
+          <div class="vest-cdb-actions-row">
+            <button type="button" class="vest-cdb-act-btn btn-reset" id="vest-cdb-act-reset-view" title="Reset Chart View to Last Known Configuration">
+              🔄 Reset View
+            </button>
+            <button type="button" class="vest-cdb-act-btn" id="vest-cdb-act-toggle-debug" title="Toggle Debug Mode">
+              ⚡ Debug: ${isDebug ? 'ON' : 'OFF'}
+            </button>
+            <button type="button" class="vest-cdb-act-btn" id="vest-cdb-act-copy" title="Copy Diagnostic JSON to Clipboard">
+              📋 Copy Info
+            </button>
+            <button type="button" class="vest-cdb-act-btn" id="vest-cdb-act-clear" title="Clear Developer Console">
+              🧹 Clear
+            </button>
+            <button type="button" class="vest-cdb-act-btn btn-warn" id="vest-cdb-act-echo" title="Send a Test Echo log to Console">
+              🔊 Echo
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    wireChartDiagnosticsBoxEvents();
+    clampAndPositionChartDiagnosticsBox();
+
+    if (animateFromRect) {
+      animateChartBoxMinimizeOrRestore(chartDiagnosticsBoxEl, animateFromRect, Boolean(db.collapsed));
+    }
+  }
+
+  function updateChartDiagnosticsBoxTelemetryOnly() {
+    if (!chartDiagnosticsBoxEl || chartDiagnosticsBoxEl.style.display === 'none') return;
+    const db = settings.diagnosticsBox || {};
+    if (db.collapsed) return;
+
+    const telem = latestDiagnosticsTelemetry || {};
+    const isHooked = telem.isHooked !== undefined ? telem.isHooked : Boolean(currentInstrument);
+    const symLabel = telem.instrument || currentInstrument || 'Unknown';
+    const prcLabel = telem.price ? `${telem.price}` : (currentPrice ? `${currentPrice}` : '--');
+    const canvasRes = (telem.canvasWidth && telem.canvasHeight) ? `${telem.canvasWidth}×${telem.canvasHeight} @ ${telem.dpr || 1}x` : 'Detecting...';
+    const visibleBars = telem.visibleBars ? `${telem.visibleBars} bars` : 'Scanning...';
+    const renderLatency = (telem.lastRenderMs !== undefined && telem.lastRenderMs !== null) ? `${Number(telem.lastRenderMs).toFixed(1)} ms` : '-- ms';
+    const candleWidthStr = telem.candleWidth || (settings.candleOhlc?.customCandleWidthEnabled ? `${settings.candleOhlc.candleWidthPx}%` : 'Auto');
+    const activeKz = telem.activeKillzone || 'None';
+    const fvgCounts = (telem.bullFvgs !== undefined && telem.bearFvgs !== undefined) ? `${telem.bullFvgs} Bull / ${telem.bearFvgs} Bear` : (settings.autoFvg?.enabled ? 'Active' : 'Inactive');
+
+    const setTxt = (id, txt) => {
+      const el = chartDiagnosticsBoxEl.querySelector(id);
+      if (el && el.textContent !== txt) el.textContent = txt;
+    };
+
+    if (currentBrowserTabId === null) {
+      resolveCurrentTabInfo();
+    }
+    const tabTxt = currentBrowserTabId !== null ? `Tab #${currentBrowserTabId}` : 'Resolving...';
+    setTxt('#vest-cdb-val-tab', tabTxt);
+    const frameTxt = currentBrowserWindowId !== null ? `Win #${currentBrowserWindowId}` : (isTopWindow ? 'Top Frame' : 'Iframe');
+    setTxt('#vest-cdb-val-frame', frameTxt);
+    const headerPill = chartDiagnosticsBoxEl.querySelector('#vest-cdb-tab-header-pill');
+    if (headerPill && currentBrowserTabId !== null) {
+      headerPill.textContent = `TAB #${currentBrowserTabId}`;
+      headerPill.title = `Current Browser Tab ID: ${currentBrowserTabId}`;
+    }
+
+    setTxt('#vest-cdb-val-hook', isHooked ? 'Hooked (Active)' : 'Searching...');
+    setTxt('#vest-cdb-val-inst', symLabel);
+    setTxt('#vest-cdb-val-price', prcLabel);
+    setTxt('#vest-cdb-val-canvas', canvasRes);
+    setTxt('#vest-cdb-val-bars', visibleBars);
+    setTxt('#vest-cdb-val-latency', renderLatency);
+    setTxt('#vest-cdb-mod-width', candleWidthStr);
+    if (telem.lastKnownConfig) {
+      const zoomStr = telem.lastKnownConfig.barSpacing ? `${Number(telem.lastKnownConfig.barSpacing).toFixed(1)}px zoom` : 'Auto';
+      setTxt('#vest-cdb-mod-viewmem', `Ready (${zoomStr})`);
+    }
+    setTxt('#vest-cdb-mod-fvg', fvgCounts);
+    if (settings.sessionIndicators?.enabled) {
+      setTxt('#vest-cdb-mod-sessions', `Active (${activeKz})`);
+    }
+  }
+
+  function wireChartDiagnosticsBoxEvents() {
+    if (!chartDiagnosticsBoxEl) return;
+
+    const restoreBar = chartDiagnosticsBoxEl.querySelector('#vest-cdb-restore-bar');
+    if (restoreBar) {
+      restoreBar.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const prevRect = chartDiagnosticsBoxEl.getBoundingClientRect();
+        if (!settings.diagnosticsBox) settings.diagnosticsBox = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
+        settings.diagnosticsBox.collapsed = false;
+        queueSettingsSave({ diagnosticsBox: settings.diagnosticsBox });
+        renderChartDiagnosticsBox(prevRect);
+        cortexDebugLog('Diagnostics window restored from Cortex bar');
+      });
+      return;
+    }
+
+    const dragHandle = chartDiagnosticsBoxEl.querySelector('#vest-cdb-drag-handle');
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button, input, label')) return;
+        if (settings.diagnosticsBox && settings.diagnosticsBox.pinned) {
+          showToast('Diagnostics window is pinned — click pin icon to move');
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = chartDiagnosticsBoxEl.getBoundingClientRect();
+        activeDiagnosticsBoxDrag = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        chartDiagnosticsBoxEl.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+          if (!activeDiagnosticsBoxDrag || !chartDiagnosticsBoxEl) return;
+          const vp = getScreenBoundsRect();
+          const boxW = chartDiagnosticsBoxEl.offsetWidth || 360;
+          const boxH = chartDiagnosticsBoxEl.offsetHeight || 320;
+
+          const rawLeft = ev.clientX - activeDiagnosticsBoxDrag.offsetX;
+          const rawTop = ev.clientY - activeDiagnosticsBoxDrag.offsetY;
+
+          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
+          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
+
+          chartDiagnosticsBoxEl.style.left = `${Math.round(clampedLeft)}px`;
+          chartDiagnosticsBoxEl.style.top = `${Math.round(clampedTop)}px`;
+
+          const maxOffsetX = Math.max(1, vp.width - boxW);
+          const maxOffsetY = Math.max(1, vp.height - boxH);
+          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
+          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
+
+          if (!settings.diagnosticsBox) settings.diagnosticsBox = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
+          settings.diagnosticsBox.relX = Math.round(relX * 10000) / 10000;
+          settings.diagnosticsBox.relY = Math.round(relY * 10000) / 10000;
+          settings.diagnosticsBox.pinnedLeft = Math.round(clampedLeft);
+          settings.diagnosticsBox.pinnedTop = Math.round(clampedTop);
+        };
+
+        const onUp = () => {
+          if (!activeDiagnosticsBoxDrag) return;
+          activeDiagnosticsBoxDrag = null;
+          if (chartDiagnosticsBoxEl) chartDiagnosticsBoxEl.classList.remove('dragging');
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove, true);
+          window.removeEventListener('mouseup', onUp, true);
+          queueSettingsSave({ diagnosticsBox: settings.diagnosticsBox });
+          cortexDebugLog('Diagnostics window repositioned', {
+            relX: settings.diagnosticsBox.relX,
+            relY: settings.diagnosticsBox.relY
+          });
+        };
+
+        window.addEventListener('mousemove', onMove, true);
+        window.addEventListener('mouseup', onUp, true);
+      });
+    }
+
+    // Header Debug Toggle
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-debug-toggle')?.addEventListener('change', (e) => {
+      e.stopPropagation();
+      setCortexDebugMode(e.target.checked, 'Diagnostics Header Switch');
+    });
+
+    // Settings Button
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-settings-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openStudioSettingsModal('diagnostics');
+    });
+
+    // Pin Button
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-pin-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!settings.diagnosticsBox) settings.diagnosticsBox = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
+      const nextPinned = !settings.diagnosticsBox.pinned;
+      settings.diagnosticsBox.pinned = nextPinned;
+      if (nextPinned && chartDiagnosticsBoxEl) {
+        const rect = chartDiagnosticsBoxEl.getBoundingClientRect();
+        const vp = getScreenBoundsRect();
+        const boxW = chartDiagnosticsBoxEl.offsetWidth || 360;
+        const boxH = chartDiagnosticsBoxEl.offsetHeight || 320;
+        settings.diagnosticsBox.pinnedLeft = Math.round(rect.left);
+        settings.diagnosticsBox.pinnedTop = Math.round(rect.top);
+        settings.diagnosticsBox.relX = Math.round(Math.max(0, Math.min(1, (rect.left - vp.left) / Math.max(1, vp.width - boxW))) * 10000) / 10000;
+        settings.diagnosticsBox.relY = Math.round(Math.max(0, Math.min(1, (rect.top - vp.top) / Math.max(1, vp.height - boxH))) * 10000) / 10000;
+      }
+      queueSettingsSave({ diagnosticsBox: settings.diagnosticsBox });
+      renderChartDiagnosticsBox();
+      showToast(nextPinned ? 'Diagnostics window pinned in place' : 'Diagnostics window unpinned');
+      cortexDebugLog(`Diagnostics window ${nextPinned ? 'pinned' : 'unpinned'}`);
+    });
+
+    // Collapse (Minimize) Button
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-collapse-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const prevRect = chartDiagnosticsBoxEl.getBoundingClientRect();
+      if (!settings.diagnosticsBox) settings.diagnosticsBox = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
+      const vp = getScreenBoundsRect();
+      const boxW = prevRect.width || settings.diagnosticsBox.boxWidth || 360;
+      const boxH = prevRect.height || 320;
+      settings.diagnosticsBox.relX = Math.round(Math.max(0, Math.min(1, (prevRect.left - vp.left) / Math.max(1, vp.width - boxW))) * 10000) / 10000;
+      settings.diagnosticsBox.relY = Math.round(Math.max(0, Math.min(1, (prevRect.top - vp.top) / Math.max(1, vp.height - boxH))) * 10000) / 10000;
+      if (settings.diagnosticsBox.pinned) {
+        settings.diagnosticsBox.pinnedLeft = Math.round(prevRect.left);
+        settings.diagnosticsBox.pinnedTop = Math.round(prevRect.top);
+      }
+      settings.diagnosticsBox.collapsed = true;
+      queueSettingsSave({ diagnosticsBox: settings.diagnosticsBox });
+      renderChartDiagnosticsBox(prevRect);
+      cortexDebugLog('Diagnostics window minimized to Cortex top bar');
+    });
+
+    // Quick Action: Reset Chart View
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-act-reset-view')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      postToMainWorlds({ type: 'VEST_TV_RESET_CHART_VIEW' });
+      showToast('Resetting chart view to last known configuration...');
+      cortexDebugLog('Reset View button clicked in Diagnostics Box');
+    });
+
+    // Quick Action: Toggle Debug
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-act-toggle-debug')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setCortexDebugMode(!settings.debugMode, 'Diagnostics Quick Button');
+    });
+
+    // Quick Action: Copy Info
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-act-copy')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyDiagnosticsStateToClipboard();
+    });
+
+    // Quick Action: Clear Console
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-act-clear')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      console.clear();
+      showToast('Browser console cleared');
+      cortexDebugLog('Console cleared by user action');
+    });
+
+    // Quick Action: Test Echo
+    chartDiagnosticsBoxEl.querySelector('#vest-cdb-act-echo')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cortexDebugLog('Diagnostics Test Echo: Chart engine operational', {
+        timestamp: new Date().toISOString(),
+        currentInstrument: currentInstrument || 'Unknown',
+        currentPrice: currentPrice || '--',
+        debugMode: settings.debugMode
+      });
+      showToast(settings.debugMode ? 'Echoed test to console [CORTEX DEBUG MODE]' : 'Debug Mode is OFF — enable it to see console logs');
     });
   }
 
@@ -10826,6 +11956,8 @@
           candleOhlc: normalizeCandleOhlcConfig(data.settings.candleOhlc),
           failLines: normalizeFailLinesConfig(data.settings.failLines),
           cortexIndicator: normalizeCortexIndicatorConfig(data.settings.cortexIndicator),
+          diagnosticsBox: normalizeDiagnosticsBoxConfig(data.settings.diagnosticsBox),
+          debugMode: Boolean(data.settings.debugMode),
           favoriteTimeframes: normalizeFavoriteTimeframes(data.settings.favoriteTimeframes)
         };
         if (settings.activeTemplateId && LEGACY_PRESET_IDS.has(String(settings.activeTemplateId))) {
@@ -10842,6 +11974,8 @@
         settings.candleOhlc = normalizeCandleOhlcConfig(settings.candleOhlc);
         settings.failLines = normalizeFailLinesConfig(settings.failLines);
         settings.cortexIndicator = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+        settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(settings.diagnosticsBox);
+        settings.debugMode = Boolean(settings.debugMode);
         settings.favoriteTimeframes = normalizeFavoriteTimeframes(settings.favoriteTimeframes);
       }
       // Persist cleaned templates & settings so legacy defaults are permanently removed
@@ -10849,9 +11983,11 @@
 
       if (data.updaterState) {
         const currentVer = getSafeExtVersion();
+        const isDev = data.updaterState.channel === 'dev';
+        latestUpdateChannel = data.updaterState.channel || 'stable';
         isUpdateAvailable = Boolean(
           data.updaterState.updateAvailable &&
-          (!data.updaterState.latestVersion || compareSemver(data.updaterState.latestVersion, currentVer) > 0)
+          (isDev || !data.updaterState.latestVersion || compareSemver(data.updaterState.latestVersion, currentVer) > 0)
         );
         latestAvailableVersion = data.updaterState.latestVersion || null;
       }
@@ -10867,9 +12003,11 @@
       }
 
       if (isTopWindow) {
+        resolveCurrentTabInfo();
         initPanelManager();
         renderChartNewsBox();
         renderChartTradesBox();
+        renderChartDiagnosticsBox();
         setupIsolatedActionTracking();
         // Run background update check on page refresh / load
         triggerQuickUpdateCheck();

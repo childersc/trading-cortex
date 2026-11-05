@@ -106,13 +106,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         settings = { ...settings, ...data.settings };
       }
       if (data.installedVersionOverride && popupVersionLabel) {
-        popupVersionLabel.textContent = `v${data.installedVersionOverride}`;
+        popupVersionLabel.textContent = data.installedVersionOverride.startsWith('v')
+          ? data.installedVersionOverride
+          : `v${data.installedVersionOverride}`;
       }
       if (data.updaterState && data.updaterState.updateAvailable && popupVersionLabel && btnOpenUpdater) {
-        popupVersionLabel.textContent = `Update v${data.updaterState.latestVersion}`;
-        btnOpenUpdater.style.background = 'rgba(34, 197, 94, 0.2)';
-        btnOpenUpdater.style.borderColor = 'rgba(34, 197, 94, 0.55)';
-        btnOpenUpdater.style.color = '#4ade80';
+        const isDev = data.updaterState.channel === 'dev';
+        popupVersionLabel.textContent = isDev
+          ? `Dev (${data.updaterState.latestSha || 'ready'})`
+          : `Update v${data.updaterState.latestVersion}`;
+        btnOpenUpdater.style.background = isDev ? 'rgba(245, 158, 11, 0.2)' : 'rgba(34, 197, 94, 0.2)';
+        btnOpenUpdater.style.borderColor = isDev ? 'rgba(245, 158, 11, 0.55)' : 'rgba(34, 197, 94, 0.55)';
+        btnOpenUpdater.style.color = isDev ? '#fbbf24' : '#4ade80';
       }
       renderTemplates();
       renderSettings();

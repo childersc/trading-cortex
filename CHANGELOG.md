@@ -1,6 +1,22 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.43`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.44`) are documented in this file.
+
+---
+
+## [v1.1.44] — Cortex Top Bar Relocation, Diagnostics Suite & Dev Channel Updater
+
+### ✨ Features
+- **Dev Branch (Bleeding Edge) Update Channel**: Added a channel switcher in the Update Center letting users toggle between Stable (Release) and Dev channels. Dev channel inspects recent branch commits, displays commit hashes and messages, downloads `zipball/dev`, and seamlessly unpacks/installs the latest bleeding-edge commits with dedicated amber badges and toolbar indicators.
+- **Header-Docked Cortex Toolbar**: Relocated the Trading Cortex toolbar from the bottom of the screen to directly below Vest's main navigation header and above the market ticker row / chart / order box.
+- **Top Bar Minimized Dock**: Minimized News, Trades, and Diagnostics pills now dock cleanly inside the top bar beside the Cortex Studio pill.
+- **Dynamic Header & Viewport Management**: Automatically measures main navigation header height and adjusts chart container margins, removing bottom constraints to maximize vertical chart real estate.
+- **On-Chart Diagnostics Box**: Live telemetry overlay displaying current Chrome Tab ID, chart engine status, TradingView canvas detection, DOM health, and quick actions.
+- **Reset Chart View**: Restores the last known resolution, symbol, and viewport configuration via Diagnostics Box quick action or Alt+R.
+
+### 🐛 Fixes
+- Report folder-picker and deployment failures in the Update Center, terminal, and browser console instead of silently swallowing them.
+- Explain the Chrome security-policy denial and direct users to link the unpacked extension source folder when the browser blocks a protected directory.
 
 ---
 

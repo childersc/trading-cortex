@@ -330,16 +330,51 @@ function compareSemver(a, b) {
 
 async function checkGitHubForUpdatesInBackground() {
   try {
+    const stored = await chrome.storage.local.get(["installedVersionOverride", "updateChannel", "installedDevSha"]).catch(() => ({}));
+    const updateChannel = stored.updateChannel || "stable";
     let installedVer = chrome.runtime.getManifest().version || "1.1.0";
-    const storedOverride = await chrome.storage.local.get(["installedVersionOverride"]).catch(() => ({}));
     if (
-      storedOverride &&
-      storedOverride.installedVersionOverride &&
-      compareSemver(storedOverride.installedVersionOverride, installedVer) > 0
+      stored &&
+      stored.installedVersionOverride &&
+      compareSemver(stored.installedVersionOverride, installedVer) > 0
     ) {
-      installedVer = storedOverride.installedVersionOverride;
+      installedVer = stored.installedVersionOverride;
     }
 
+    if (updateChannel === "dev") {
+      const devResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/commits?sha=dev&per_page=1`, {
+        headers: { "Accept": "application/vnd.github+json" },
+        cache: "no-store"
+      });
+      if (devResp.ok) {
+        const commits = await devResp.json();
+        if (Array.isArray(commits) && commits.length > 0) {
+          const topCommit = commits[0];
+          const shortSha = topCommit.sha.slice(0, 7);
+          const hasUpdate = Boolean(!stored.installedDevSha || (stored.installedDevSha !== shortSha && stored.installedDevSha !== topCommit.sha));
+          const updaterState = {
+            channel: "dev",
+            lastCheckedAt: Date.now(),
+            latestVersion: `dev-${shortSha}`,
+            latestSha: shortSha,
+            commitMessage: (topCommit.commit?.message || "").split("\n")[0],
+            updateAvailable: hasUpdate,
+            htmlUrl: `https://github.com/${GITHUB_REPO}/commits/dev`
+          };
+          await chrome.storage.local.set({ updaterState }).catch(() => {});
+          if (hasUpdate) {
+            await chrome.action.setBadgeText({ text: "DEV" }).catch(() => {});
+            await chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" }).catch(() => {});
+          } else {
+            await chrome.action.setBadgeText({ text: "" }).catch(() => {});
+          }
+          return updaterState;
+        }
+      }
+      return null;
+    }
+
+    // Stable channel check
     let release = null;
     const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
       headers: { "Accept": "application/vnd.github+json" },
@@ -369,6 +404,7 @@ async function checkGitHubForUpdatesInBackground() {
     const hasUpdate = compareSemver(latestVer, installedVer) > 0;
 
     const updaterState = {
+      channel: "stable",
       lastCheckedAt: Date.now(),
       latestVersion: latestVer,
       updateAvailable: hasUpdate,
@@ -453,6 +489,34 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Listen for messages from popup, updater page, or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!request) return;
+
+  if (request.action === "getCurrentTabInfo" || request.action === "getTabId") {
+    const tabId = (sender && sender.tab && sender.tab.id !== undefined) ? sender.tab.id : null;
+    const windowId = (sender && sender.tab && sender.tab.windowId !== undefined) ? sender.tab.windowId : null;
+    const tabIndex = (sender && sender.tab && sender.tab.index !== undefined) ? sender.tab.index : null;
+    const frameId = sender ? sender.frameId : 0;
+
+    if (tabId !== null) {
+      sendResponse({ ok: true, tabId, windowId, tabIndex, frameId });
+    } else if (chrome.tabs && typeof chrome.tabs.query === "function") {
+      chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        const t = tabs && tabs[0];
+        sendResponse({
+          ok: true,
+          tabId: t ? t.id : null,
+          windowId: t ? t.windowId : null,
+          tabIndex: t ? t.index : null,
+          frameId
+        });
+      }).catch(() => {
+        sendResponse({ ok: false, tabId: null, windowId: null, tabIndex: null, frameId });
+      });
+      return true;
+    } else {
+      sendResponse({ ok: false, tabId: null, windowId: null, tabIndex: null, frameId });
+    }
+    return true;
+  }
 
   if (request.action === "getTemplatesAndSettings") {
     chrome.storage.local.get(["templates", "settings", "globalDrawings"]).then(async (data) => {
