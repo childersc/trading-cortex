@@ -31,6 +31,8 @@
     "https://vest.exchange/*",
     "https://api.github.com/*",
     "https://github.com/*",
+    "https://*.github.com/*",
+    "https://codeload.github.com/*",
     "https://*.githubusercontent.com/*",
     "https://nfs.faireconomy.media/*",
     "https://*.faireconomy.media/*"
