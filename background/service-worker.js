@@ -315,6 +315,19 @@ function cleanSemver(v) {
   return String(v || "").trim().replace(/^v/i, "");
 }
 
+function getUpcomingDevVersion(baseVer) {
+  const raw = String(baseVer || "1.1.44").trim();
+  if (/alpha/i.test(raw)) {
+    return raw.startsWith("v") ? raw : `v${raw}`;
+  }
+  const clean = raw.replace(/^v/i, "");
+  const parts = clean.split(".").map(n => parseInt(n, 10) || 0);
+  const major = parts[0] || 1;
+  const minor = parts[1] || 1;
+  const patch = (parts[2] || 0) + 1;
+  return `v${major}.${minor}.${patch} Alpha`;
+}
+
 function compareSemver(a, b) {
   const pa = cleanSemver(a).split(".").map(n => parseInt(n, 10) || 0);
   const pb = cleanSemver(b).split(".").map(n => parseInt(n, 10) || 0);
@@ -352,10 +365,13 @@ async function checkGitHubForUpdatesInBackground() {
           const topCommit = commits[0];
           const shortSha = topCommit.sha.slice(0, 7);
           const hasUpdate = Boolean(!stored.installedDevSha || (stored.installedDevSha !== shortSha && stored.installedDevSha !== topCommit.sha));
+          const m = chrome.runtime.getManifest();
+          const manifestVer = m.version_name || m.version || "1.1.44";
+          const upcomingDevVer = getUpcomingDevVersion(installedVer || manifestVer);
           const updaterState = {
             channel: "dev",
             lastCheckedAt: Date.now(),
-            latestVersion: `dev-${shortSha}`,
+            latestVersion: upcomingDevVer,
             latestSha: shortSha,
             commitMessage: (topCommit.commit?.message || "").split("\n")[0],
             updateAvailable: hasUpdate,

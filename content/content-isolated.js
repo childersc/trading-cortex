@@ -1304,13 +1304,27 @@
     let manifestVer = '1.1.0';
     try {
       if (isExtensionValid() && chrome.runtime.getManifest) {
-        manifestVer = chrome.runtime.getManifest().version || '1.1.0';
+        const m = chrome.runtime.getManifest();
+        manifestVer = m.version_name || m.version || '1.1.0';
       }
     } catch (e) {}
     if (installedVersionOverride && compareSemver(installedVersionOverride, manifestVer) > 0) {
       return installedVersionOverride;
     }
     return manifestVer;
+  }
+
+  function getUpcomingDevVersion(baseVer) {
+    const raw = String(baseVer || '1.1.44').trim();
+    if (/alpha/i.test(raw)) {
+      return raw.startsWith('v') ? raw : `v${raw}`;
+    }
+    const clean = raw.replace(/^v/i, '');
+    const parts = clean.split('.').map(n => parseInt(n, 10) || 0);
+    const major = parts[0] || 1;
+    const minor = parts[1] || 1;
+    const patch = (parts[2] || 0) + 1;
+    return `v${major}.${minor}.${patch} Alpha`;
   }
 
   const DOMAIN_VAULT_KEY = '__trading_cortex_vault_db_v1__';
@@ -3393,9 +3407,10 @@
             if (latestCommit && latestCommit.sha) {
               const latestSha = latestCommit.sha;
               const isDifferent = installedDevSha ? (latestSha.toLowerCase() !== installedDevSha.toLowerCase()) : true;
+              const upcomingDevVer = getUpcomingDevVersion(installedVer);
               state = {
                 channel: 'dev',
-                latestVersion: 'dev@' + latestSha.substring(0, 7),
+                latestVersion: upcomingDevVer,
                 latestCommitSha: latestSha,
                 updateAvailable: isDifferent
               };

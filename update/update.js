@@ -185,6 +185,19 @@
     return String(v || '').trim().replace(/^v/i, '');
   }
 
+  function getUpcomingDevVersion(baseVer = installedVersion) {
+    const raw = String(baseVer || '1.1.44').trim();
+    if (/alpha/i.test(raw)) {
+      return raw.startsWith('v') ? raw : `v${raw}`;
+    }
+    const clean = raw.replace(/^v/i, '');
+    const parts = clean.split('.').map(n => parseInt(n, 10) || 0);
+    const major = parts[0] || 1;
+    const minor = parts[1] || 1;
+    const patch = (parts[2] || 0) + 1;
+    return `v${major}.${minor}.${patch} Alpha`;
+  }
+
   function compareVersions(a, b) {
     const pa = cleanVersion(a).split('.').map(n => parseInt(n, 10) || 0);
     const pb = cleanVersion(b).split('.').map(n => parseInt(n, 10) || 0);
@@ -404,11 +417,13 @@
       const authorName = topCommit.commit?.author?.name || 'Developer';
       const commitDate = topCommit.commit?.committer?.date || topCommit.commit?.author?.date;
 
-      vboxLatest.textContent = `dev@${shortSha}`;
+      const upcomingDevVer = getUpcomingDevVersion(latestRelease ? latestRelease.tag_name : installedVersion);
+
+      vboxLatest.textContent = upcomingDevVer;
       vboxChanges.textContent = String(commits.length);
 
       if (notesCardTitle) notesCardTitle.textContent = 'Dev Branch Commits';
-      if (notesVersionTitle) notesVersionTitle.textContent = `dev@${shortSha}`;
+      if (notesVersionTitle) notesVersionTitle.textContent = `${upcomingDevVer} (${shortSha})`;
       if (notesZipName) notesZipName.textContent = `zipball/dev (${shortSha})`;
       if (releaseGithubLink) {
         releaseGithubLink.href = `https://github.com/${DEFAULT_REPO}/commits/dev`;
@@ -454,11 +469,12 @@
         (installedVersion && installedVersion.includes(shortSha))
       );
 
+      const upcomingDevVerState = upcomingDevVer;
       await chrome.storage.local.set({
         updaterState: {
           channel: 'dev',
           lastCheckedAt: checkedAt,
-          latestVersion: `dev-${shortSha}`,
+          latestVersion: upcomingDevVerState,
           latestSha: shortSha,
           commitMessage: commitMsg,
           updateAvailable: !isUpToDate,
@@ -468,24 +484,24 @@
 
       if (!isUpToDate) {
         statusEyebrow.textContent = 'DEV BUILD READY';
-        statusHeading.textContent = `New bleeding-edge dev commit available (${shortSha})`;
-        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Deploy Dev (${shortSha})`;
+        statusHeading.textContent = `New ${upcomingDevVerState} build available (${shortSha})`;
+        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Deploy ${upcomingDevVerState} (${shortSha})`;
         btnRunUpdate.disabled = false;
         chrome.action.setBadgeText({ text: 'DEV' });
         chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
-        logTerm(`Dev build available: commit ${shortSha} ("${commitMsg}")`, 'ok');
+        logTerm(`Dev build available: ${upcomingDevVerState} (commit ${shortSha}: "${commitMsg}")`, 'ok');
         if (isManualClick) {
-          showSuccess(`⚡ Bleeding-edge commit ${shortSha} is ready to deploy from dev branch.`);
+          showSuccess(`⚡ ${upcomingDevVerState} (${shortSha}) is ready to deploy from dev branch.`);
         }
       } else {
         statusEyebrow.textContent = 'SYNCHRONIZED';
-        statusHeading.textContent = `Trading Cortex is up to date with dev branch (${shortSha})`;
-        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync Dev (${shortSha})`;
+        statusHeading.textContent = `Trading Cortex is up to date with ${upcomingDevVerState} (${shortSha})`;
+        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync ${upcomingDevVerState} (${shortSha})`;
         btnRunUpdate.disabled = false;
         chrome.action.setBadgeText({ text: '' });
-        logTerm(`Local build matches latest dev branch commit (${shortSha}).`, 'ok');
+        logTerm(`Local build matches latest dev branch ${upcomingDevVerState} (${shortSha}).`, 'ok');
         if (isManualClick) {
-          showSuccess(`✓ You are on the latest dev commit (${shortSha})!`);
+          showSuccess(`✓ You are on the latest dev commit ${upcomingDevVerState} (${shortSha})!`);
         }
       }
     } catch (err) {
@@ -878,11 +894,12 @@
       const isDevDeploy = currentChannel === 'dev';
       const devSha = isDevDeploy && latestDevCommit ? latestDevCommit.sha.slice(0, 7) : null;
       const targetVer = isDevDeploy ? `dev-${devSha}` : cleanVersion(latestRelease?.tag_name || installedVersion);
+      const upcomingDevDeployVer = isDevDeploy ? getUpcomingDevVersion(latestRelease ? latestRelease.tag_name : installedVersion) : null;
       statusEyebrow.textContent = 'DEPLOYING';
       statusHeading.textContent = isDevDeploy
-        ? `Deploying Trading Cortex dev@${devSha}...`
+        ? `Deploying Trading Cortex ${upcomingDevDeployVer} (dev@${devSha})...`
         : `Deploying Trading Cortex v${targetVer}...`;
-      logTerm(isDevDeploy ? `Starting update to dev commit ${devSha}...` : `Starting update to v${targetVer}...`, 'info');
+      logTerm(isDevDeploy ? `Starting update to dev branch ${upcomingDevDeployVer} (${devSha})...` : `Starting update to v${targetVer}...`, 'info');
 
       // STAGE 01: Workspace Link
       updateStepState(step1Row, step1Badge, 'active', 1);
@@ -1029,10 +1046,10 @@
       updateStepState(step4Row, step4Badge, 'done', 4);
       statusEyebrow.textContent = 'UPDATED';
       statusHeading.textContent = isDevDeploy
-        ? `Trading Cortex successfully updated to dev@${devSha}!`
+        ? `Trading Cortex successfully updated to ${upcomingDevDeployVer} (${devSha})!`
         : `Trading Cortex successfully updated to v${targetVer}!`;
-      progressLabelLeft.textContent = `Update complete · ${targetVer} active`;
-      if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = isDevDeploy ? `Re-Sync Dev (${devSha})` : `Re-Sync v${targetVer}`;
+      progressLabelLeft.textContent = `Update complete · ${isDevDeploy ? upcomingDevDeployVer : `v${targetVer}`} active`;
+      if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = isDevDeploy ? `Re-Sync ${upcomingDevDeployVer} (${devSha})` : `Re-Sync v${targetVer}`;
       btnRunUpdate.disabled = false;
 
       showSuccess(

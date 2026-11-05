@@ -80,8 +80,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const popupVersionLabel = document.getElementById('popup-version-label');
 
   if (popupVersionLabel) {
-    const ver = chrome.runtime.getManifest().version || '1.1.0';
-    popupVersionLabel.textContent = `v${ver}`;
+    const m = chrome.runtime.getManifest();
+    const ver = m.version_name || m.version || '1.1.0';
+    popupVersionLabel.textContent = ver.startsWith('v') ? ver : `v${ver}`;
   }
 
   if (btnOpenUpdater) {
@@ -113,7 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (data.updaterState && data.updaterState.updateAvailable && popupVersionLabel && btnOpenUpdater) {
         const isDev = data.updaterState.channel === 'dev';
         popupVersionLabel.textContent = isDev
-          ? `Dev (${data.updaterState.latestSha || 'ready'})`
+          ? (data.updaterState.latestVersion || `Dev (${data.updaterState.latestSha || 'ready'})`)
           : `Update v${data.updaterState.latestVersion}`;
         btnOpenUpdater.style.background = isDev ? 'rgba(245, 158, 11, 0.2)' : 'rgba(34, 197, 94, 0.2)';
         btnOpenUpdater.style.borderColor = isDev ? 'rgba(245, 158, 11, 0.55)' : 'rgba(34, 197, 94, 0.55)';
