@@ -935,36 +935,91 @@
       progressLabelLeft.textContent = 'Downloading release archive...';
       progressFill.style.width = '15%';
 
-      let downloadUrl = null;
-      let zipAsset = null;
+      let extractedFiles = [];
+
       if (isDevDeploy) {
-        downloadUrl = `https://api.github.com/repos/${DEFAULT_REPO}/zipball/dev`;
-        logTerm(`Fetching latest dev branch archive from ${downloadUrl} ...`, 'info');
+        // Dev Branch Deployment:
+        // Try direct zipball fetch first; if browser blocks redirect to codeload.github.com due to CORS,
+        // seamlessly stream the dev file tree directly via GitHub Git Trees & raw.githubusercontent.com!
+        let zipBuffer = null;
+        try {
+          const zipballUrl = `https://api.github.com/repos/${DEFAULT_REPO}/zipball/dev`;
+          logTerm(`Fetching dev branch archive from ${zipballUrl} ...`, 'info');
+          const zipResp = await fetch(zipballUrl, { cache: 'no-store' });
+          if (zipResp.ok) {
+            zipBuffer = await zipResp.arrayBuffer();
+            logTerm(`Downloaded ${(zipBuffer.byteLength / 1024).toFixed(1)} KB zipball`, 'ok');
+            extractedFiles = await extractZipBuffer(zipBuffer);
+          }
+        } catch (fetchErr) {
+          logTerm(`Zipball download blocked by CORS (${fetchErr.message}); streaming dev files directly...`, 'warn');
+        }
+
+        if (!extractedFiles || extractedFiles.length === 0) {
+          logTerm(`Streaming dev tree from GitHub Git API...`, 'info');
+          progressLabelLeft.textContent = 'Fetching dev branch file tree...';
+          const treeResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/git/trees/dev?recursive=1`, {
+            headers: { 'Accept': 'application/vnd.github+json' },
+            cache: 'no-store'
+          });
+          if (!treeResp.ok) {
+            throw new Error(`Failed to fetch dev branch tree (HTTP ${treeResp.status})`);
+          }
+          const treeData = await treeResp.json();
+          const blobs = (treeData.tree || []).filter(item => item.type === 'blob' && !item.path.startsWith('.git/'));
+          if (blobs.length === 0) {
+            throw new Error('No files found on dev branch tree.');
+          }
+
+          logTerm(`Found ${blobs.length} dev files. Streaming directly...`, 'info');
+          extractedFiles = [];
+          for (let b = 0; b < blobs.length; b++) {
+            const blobItem = blobs[b];
+            progressLabelRight.textContent = `${b + 1} / ${blobs.length} files`;
+            const pct = Math.round(((b + 1) / blobs.length) * 35);
+            progressFill.style.width = `${pct}%`;
+
+            const rawUrl = `https://raw.githubusercontent.com/${DEFAULT_REPO}/dev/${blobItem.path}`;
+            const fileResp = await fetch(rawUrl, { cache: 'no-store' });
+            if (!fileResp.ok) {
+              throw new Error(`Failed to download ${blobItem.path} (HTTP ${fileResp.status})`);
+            }
+            const arrayBuf = await fileResp.arrayBuffer();
+            extractedFiles.push({
+              path: blobItem.path,
+              data: new Uint8Array(arrayBuf),
+              size: arrayBuf.byteLength
+            });
+          }
+          logTerm(`Successfully downloaded all ${extractedFiles.length} dev files directly!`, 'ok');
+        }
       } else {
-        zipAsset = (latestRelease?.assets || []).find(a => a.name && a.name.endsWith('.zip'));
-        downloadUrl = zipAsset ? zipAsset.browser_download_url : latestRelease?.zipball_url;
+        const zipAsset = (latestRelease?.assets || []).find(a => a.name && a.name.endsWith('.zip'));
+        const downloadUrl = zipAsset ? zipAsset.browser_download_url : latestRelease?.zipball_url;
         if (!downloadUrl) {
           throw new Error('No downloadable ZIP archive found on this GitHub release.');
         }
-      }
 
-      logTerm(`Downloading ${zipAsset ? zipAsset.name : 'release zipball'}...`, 'info');
-      const zipResp = await fetch(downloadUrl, { cache: 'no-store' });
-      if (!zipResp.ok) {
-        throw new Error(`Failed to download release archive (HTTP ${zipResp.status})`);
-      }
-
-      const zipBuffer = await zipResp.arrayBuffer();
-      logTerm(`Downloaded ${(zipBuffer.byteLength / 1024).toFixed(1)} KB`, 'ok');
-
-      if (zipAsset && zipAsset.digest && zipAsset.digest.startsWith('sha256:')) {
-        const expectedHex = zipAsset.digest.slice('sha256:'.length).toLowerCase();
-        const hashBuf = await crypto.subtle.digest('SHA-256', zipBuffer);
-        const actualHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-        if (actualHex !== expectedHex) {
-          throw new Error('SHA-256 digest mismatch! Aborting deployment.');
+        logTerm(`Downloading ${zipAsset ? zipAsset.name : 'release zipball'}...`, 'info');
+        const zipResp = await fetch(downloadUrl, { cache: 'no-store' });
+        if (!zipResp.ok) {
+          throw new Error(`Failed to download release archive (HTTP ${zipResp.status})`);
         }
-        logTerm(`Verified SHA-256 digest (${actualHex.slice(0, 12)}...)`, 'ok');
+
+        const zipBuffer = await zipResp.arrayBuffer();
+        logTerm(`Downloaded ${(zipBuffer.byteLength / 1024).toFixed(1)} KB`, 'ok');
+
+        if (zipAsset && zipAsset.digest && zipAsset.digest.startsWith('sha256:')) {
+          const expectedHex = zipAsset.digest.slice('sha256:'.length).toLowerCase();
+          const hashBuf = await crypto.subtle.digest('SHA-256', zipBuffer);
+          const actualHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+          if (actualHex !== expectedHex) {
+            throw new Error('SHA-256 digest mismatch! Aborting deployment.');
+          }
+          logTerm(`Verified SHA-256 digest (${actualHex.slice(0, 12)}...)`, 'ok');
+        }
+
+        extractedFiles = await extractZipBuffer(zipBuffer);
       }
 
       updateStepState(step2Row, step2Badge, 'done', 2);
@@ -973,8 +1028,6 @@
       // STAGE 03: In-Place Sync
       updateStepState(step3Row, step3Badge, 'active', 3);
       progressLabelLeft.textContent = 'Streaming updated files to disk...';
-
-      const extractedFiles = await extractZipBuffer(zipBuffer);
       if (!extractedFiles.some(f => f.path === 'manifest.json')) {
         throw new Error('Archive does not contain a valid manifest.json at its root.');
       }
