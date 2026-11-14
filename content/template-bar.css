@@ -1710,7 +1710,7 @@ body.vest-cortex-top-bar-active {
   position: fixed !important;
   top: 72px;
   left: 44px;
-  width: 210px;
+  width: 272px;
   background: #131722;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
@@ -1969,6 +1969,11 @@ body.vest-cortex-top-bar-active {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.vest-sdm-item-left span {
+  white-space: nowrap;
 }
 
 .vest-sdm-item-left svg {
