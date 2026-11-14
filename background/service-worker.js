@@ -531,66 +531,116 @@ async function checkGitHubForUpdatesInBackground() {
     }
 
     if (updateChannel === "dev") {
-      const devResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/commits?sha=dev&per_page=1`, {
-        headers: { "Accept": "application/vnd.github+json" },
-        cache: "no-store"
-      });
-      if (devResp.ok) {
-        const commits = await devResp.json();
-        if (Array.isArray(commits) && commits.length > 0) {
-          const topCommit = commits[0];
-          const shortSha = topCommit.sha.slice(0, 7);
-          const topSha = topCommit.sha.toLowerCase();
-          const localSha = String(stored.installedDevSha || "").toLowerCase().trim();
-          const hasUpdate = Boolean(!localSha || (localSha !== shortSha.toLowerCase() && localSha !== topSha));
-          const upcomingDevVer = getUpcomingDevVersion(installedVer || manifestVer);
+      let commits = null;
+      try {
+        const devResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/commits?sha=dev&per_page=1`, {
+          headers: { "Accept": "application/vnd.github+json" },
+          cache: "no-store"
+        });
+        if (devResp.ok) {
+          commits = await devResp.json();
+        }
+      } catch (e) {}
+
+      if (Array.isArray(commits) && commits.length > 0) {
+        const topCommit = commits[0];
+        const shortSha = topCommit.sha.slice(0, 7);
+        const topSha = topCommit.sha.toLowerCase();
+        const localSha = String(stored.installedDevSha || "").toLowerCase().trim();
+        const hasUpdate = Boolean(!localSha || (localSha !== shortSha.toLowerCase() && localSha !== topSha));
+        const upcomingDevVer = getUpcomingDevVersion(installedVer || manifestVer);
+        const updaterState = {
+          channel: "dev",
+          lastCheckedAt: Date.now(),
+          latestVersion: upcomingDevVer,
+          latestSha: shortSha,
+          commitMessage: (topCommit.commit?.message || "").split("\n")[0],
+          updateAvailable: hasUpdate,
+          htmlUrl: `https://github.com/${GITHUB_REPO}/commits/dev`
+        };
+        await chrome.storage.local.set({ updaterState, updateChannel: "dev" }).catch(() => {});
+        if (hasUpdate) {
+          await chrome.action.setBadgeText({ text: "DEV" }).catch(() => {});
+          await chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" }).catch(() => {});
+          await chrome.action.setTitle({ title: `Trading Cortex · Dev Build Ready (${upcomingDevVer} - ${shortSha})` }).catch(() => {});
+        } else {
+          await chrome.action.setBadgeText({ text: "" }).catch(() => {});
+          await chrome.action.setTitle({ title: `Trading Cortex ${upcomingDevVer} (dev channel · synchronized)` }).catch(() => {});
+        }
+        return updaterState;
+      }
+
+      // Raw CDN fallback (unthrottled, bypasses GitHub API 403 rate limits)
+      try {
+        const rawResp = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/dev/manifest.json`, { cache: "no-store" });
+        if (rawResp.ok) {
+          const rawData = await rawResp.json();
+          const devVer = cleanSemver(rawData.version || "1.1.62");
+          const hasUpdate = compareSemver(devVer, installedVer) > 0;
           const updaterState = {
             channel: "dev",
             lastCheckedAt: Date.now(),
-            latestVersion: upcomingDevVer,
-            latestSha: shortSha,
-            commitMessage: (topCommit.commit?.message || "").split("\n")[0],
+            latestVersion: `v${devVer}`,
+            latestSha: "latest",
+            commitMessage: `Dev build v${devVer}`,
             updateAvailable: hasUpdate,
-            htmlUrl: `https://github.com/${GITHUB_REPO}/commits/dev`
+            htmlUrl: `https://github.com/${GITHUB_REPO}/tree/dev`
           };
           await chrome.storage.local.set({ updaterState, updateChannel: "dev" }).catch(() => {});
           if (hasUpdate) {
             await chrome.action.setBadgeText({ text: "DEV" }).catch(() => {});
             await chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" }).catch(() => {});
-            await chrome.action.setTitle({ title: `Trading Cortex · Dev Build Ready (${upcomingDevVer} - ${shortSha})` }).catch(() => {});
+            await chrome.action.setTitle({ title: `Trading Cortex · Dev Build Ready (v${devVer})` }).catch(() => {});
           } else {
             await chrome.action.setBadgeText({ text: "" }).catch(() => {});
-            await chrome.action.setTitle({ title: `Trading Cortex ${upcomingDevVer} (dev channel · synchronized)` }).catch(() => {});
+            await chrome.action.setTitle({ title: `Trading Cortex v${devVer} (dev channel · synchronized)` }).catch(() => {});
           }
           return updaterState;
         }
-      }
+      } catch (e) {}
       return null;
     }
 
     // Stable channel check
     let release = null;
-    const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-      headers: { "Accept": "application/vnd.github+json" },
-      cache: "no-store"
-    });
-    if (resp.ok) {
-      release = await resp.json();
-    } else if (resp.status === 404) {
-      const tagsResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=5`, {
+    try {
+      const resp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
         headers: { "Accept": "application/vnd.github+json" },
         cache: "no-store"
       });
-      if (tagsResp.ok) {
-        const tags = await tagsResp.json();
-        if (Array.isArray(tags) && tags.length > 0) {
-          release = {
-            tag_name: tags[0].name,
-            name: tags[0].name,
-            html_url: `https://github.com/${GITHUB_REPO}/releases/tag/${tags[0].name}`
-          };
+      if (resp.ok) {
+        release = await resp.json();
+      } else if (resp.status === 404 || resp.status === 403 || resp.status === 429) {
+        const tagsResp = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=5`, {
+          headers: { "Accept": "application/vnd.github+json" },
+          cache: "no-store"
+        });
+        if (tagsResp.ok) {
+          const tags = await tagsResp.json();
+          if (Array.isArray(tags) && tags.length > 0) {
+            release = {
+              tag_name: tags[0].name,
+              name: tags[0].name,
+              html_url: `https://github.com/${GITHUB_REPO}/releases/tag/${tags[0].name}`
+            };
+          }
         }
       }
+    } catch (e) {}
+
+    if (!release) {
+      try {
+        const rawResp = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/main/manifest.json`, { cache: "no-store" });
+        if (rawResp.ok) {
+          const rawData = await rawResp.json();
+          const topVer = cleanSemver(rawData.version || "1.1.62");
+          release = {
+            tag_name: `v${topVer}`,
+            name: `Trading Cortex v${topVer}`,
+            html_url: `https://github.com/${GITHUB_REPO}/releases`
+          };
+        }
+      } catch (e) {}
     }
     if (!release) return null;
 
