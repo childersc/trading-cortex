@@ -1,10 +1,10 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.44`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.60`) are documented in this file.
 
 ---
 
-## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
+## [v1.1.60] — 2026-11-14
 
 ### 🚀 New Features & Enhancements
 - **Dev Branch Red Glow, Version Number Display & Bleeding Edge Title Bar**:
