@@ -1072,7 +1072,9 @@
           url: [
             'https://next.vestmarkets.com/*',
             'https://*.vest.exchange/*',
-            'https://vest.exchange/*'
+            'https://vest.exchange/*',
+            'https://*.myfundedperpetuals.com/*',
+            'https://myfundedperpetuals.com/*'
           ]
         });
         tradingTabsCount = vestTabs.length;

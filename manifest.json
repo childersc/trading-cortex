@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trading Cortex",
-  "version": "1.1.46",
+  "version": "1.1.47",
   "description": "Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges.",
   "icons": {
     "16": "icons/icon16.png",
@@ -25,6 +25,8 @@
     "tabs"
   ],
   "host_permissions": [
+    "https://myfundedperpetuals.com/*",
+    "https://*.myfundedperpetuals.com/*",
     "https://*.vestmarkets.com/*",
     "https://vestmarkets.com/*",
     "https://*.vest.exchange/*",
@@ -46,7 +48,9 @@
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
         "https://*.vest.exchange/*",
-        "https://vest.exchange/*"
+        "https://vest.exchange/*",
+        "https://*.myfundedperpetuals.com/*",
+        "https://myfundedperpetuals.com/*"
       ],
       "js": [
         "content/content-main.js"
@@ -62,7 +66,9 @@
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
         "https://*.vest.exchange/*",
-        "https://vest.exchange/*"
+        "https://vest.exchange/*",
+        "https://*.myfundedperpetuals.com/*",
+        "https://myfundedperpetuals.com/*"
       ],
       "js": [
         "content/cortex-execution.js",
@@ -87,8 +93,11 @@
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
         "https://*.vest.exchange/*",
-        "https://vest.exchange/*"
+        "https://vest.exchange/*",
+        "https://*.myfundedperpetuals.com/*",
+        "https://myfundedperpetuals.com/*"
       ]
     }
-  ]
+  ],
+  "version_name": "1.1.47 Alpha"
 }

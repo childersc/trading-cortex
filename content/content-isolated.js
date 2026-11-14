@@ -2993,20 +2993,20 @@
 
   function getMainHeaderElement() {
     // 1. Direct semantic header or nav elements
-    const semanticHeaders = Array.from(document.querySelectorAll('header, nav, [role="banner"]')).filter(el => {
+    const semanticHeaders = Array.from(document.querySelectorAll('header, nav, [role="banner"], [role="navigation"]')).filter(el => {
       if (el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-') || el.closest('#' + CORTEX_TOP_BAR_ID)) return false;
       const r = el.getBoundingClientRect();
-      return r.top >= -5 && r.top <= 5 && r.width >= window.innerWidth * 0.5 && r.height >= 30 && r.height <= 85;
+      return r.top >= -5 && r.top <= 5 && r.width >= window.innerWidth * 0.5 && r.height >= 26 && r.height <= 95;
     });
     if (semanticHeaders.length > 0) return semanticHeaders[0];
 
     // 2. High-level elements at top containing primary navigation keywords
-    const topDivs = Array.from(document.querySelectorAll('body > div, body > div > div, body > div > header, body > header')).filter(el => {
+    const topDivs = Array.from(document.querySelectorAll('body > div, body > div > div, body > div > header, body > header, #__next > header, #__next > div > header, #root > header')).filter(el => {
       if (el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-') || el.closest('#' + CORTEX_TOP_BAR_ID)) return false;
       const r = el.getBoundingClientRect();
-      if (r.top > 5 || r.top < -5 || r.width < window.innerWidth * 0.5 || r.height < 30 || r.height > 85) return false;
+      if (r.top > 5 || r.top < -5 || r.width < window.innerWidth * 0.5 || r.height < 26 || r.height > 95) return false;
       const txt = el.textContent || '';
-      return (txt.includes('Trade') && txt.includes('Markets')) || txt.includes('Portfolio');
+      return (txt.includes('Trade') && (txt.includes('Markets') || txt.includes('Dashboard') || txt.includes('Competitions') || txt.includes('Portfolio'))) || txt.includes('My Funded');
     });
     if (topDivs.length > 0) return topDivs[0];
 
@@ -3017,14 +3017,14 @@
     const header = getMainHeaderElement();
     if (header) {
       const r = header.getBoundingClientRect();
-      if (r.bottom >= 32 && r.bottom <= 90) {
+      if (r.bottom >= 26 && r.bottom <= 100) {
         return Math.round(r.bottom);
       }
     }
     const market = typeof findMarketSelectorElement === 'function' ? findMarketSelectorElement() : null;
     if (market && market.rowEl) {
       const mr = market.rowEl.getBoundingClientRect();
-      if (mr.top >= 32 && mr.top <= 90) {
+      if (mr.top >= 26 && mr.top <= 100) {
         return Math.round(mr.top);
       }
     }
@@ -3265,17 +3265,18 @@
    */
   function findMarketSelectorElement() {
     // 1. Direct detection of the instrument selector pill in the top-left market bar
-    //    (e.g., contains leverage badge like "5x", "10x", "20x", "50x" or star/chevron SVGs at top: 38..115, left: 28..240)
+    //    (e.g., contains leverage badge like "5x", "10x", "20x", "50x", pair format like "HYPE-USD", or star/chevron SVGs at top: 36..135, left: 10..260)
     const allInteractive = document.querySelectorAll('button, div[role="button"], a, div');
     for (let i = 0; i < allInteractive.length; i++) {
       const el = allInteractive[i];
       if (el.id === 'vest-studio-header-pill' || el.closest('#vest-studio-header-pill')) continue;
       const r = el.getBoundingClientRect();
-      if (r.top >= 38 && r.top <= 115 && r.left >= 28 && r.left <= 240 && r.width >= 75 && r.width <= 290 && r.height >= 26 && r.height <= 54) {
+      if (r.top >= 36 && r.top <= 135 && r.left >= 10 && r.left <= 260 && r.width >= 60 && r.width <= 320 && r.height >= 24 && r.height <= 56) {
         const txt = (el.textContent || '').trim();
         const hasLeverage = /\b\d+(\.\d+)?x\b/i.test(txt);
+        const hasPairFormat = /\b[A-Z0-9]{2,10}(?:-[A-Z0-9]{2,10}|_PERP|\/USD)\b/i.test(txt);
         const hasSvg = el.querySelectorAll('svg').length >= 1;
-        if (hasLeverage && hasSvg && el.parentElement && el.parentElement !== document.body) {
+        if ((hasLeverage || hasPairFormat) && el.parentElement && el.parentElement !== document.body) {
           // Walk up if parent is just a tight single-child wrapper around the button
           let targetPill = el;
           while (
@@ -3284,7 +3285,7 @@
             targetPill.parentElement.children.length === 1
           ) {
             const pr = targetPill.parentElement.getBoundingClientRect();
-            if (pr.width <= 320 && pr.height <= 64) {
+            if (pr.width <= 340 && pr.height <= 64) {
               targetPill = targetPill.parentElement;
             } else {
               break;
@@ -3297,14 +3298,22 @@
       }
     }
 
-    // 2. Locate the "Mid Price", "Index Price", or "24h Change" stat label in the top market header
+    // 2. Locate the "Mid Price", "Index Price", "Mark / Mid", "Open Interest", or "24h Change" stat label in the top market header
     const allEls = document.querySelectorAll('span, div, p, button');
     let midPriceEl = null;
     for (let i = 0; i < allEls.length; i++) {
       const el = allEls[i];
       if (el.children.length > 2) continue;
       const txt = (el.textContent || '').trim();
-      if (txt === 'Mid Price' || txt === 'Index Price' || txt === '24h Change') {
+      if (
+        txt === 'Mid Price' ||
+        txt === 'Index Price' ||
+        txt === '24h Change' ||
+        txt === 'Mark / Mid' ||
+        txt.includes('Mark / Mid') ||
+        txt === 'Open Interest' ||
+        txt === '24h Volume'
+      ) {
         const r = el.getBoundingClientRect();
         if (r.top >= 25 && r.top <= 145) {
           midPriceEl = el;
