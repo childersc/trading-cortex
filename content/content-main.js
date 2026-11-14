@@ -4507,6 +4507,20 @@
     return direct;
   }
 
+  function isElementVisible(el) {
+    if (!el) return false;
+    try {
+      if (el.offsetParent === null && el.style?.position !== 'fixed') return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const win = el.ownerDocument ? el.ownerDocument.defaultView : window;
+      const style = win.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    } catch (e) {
+      return false;
+    }
+  }
+
   function getDrawingToolbarContainer(doc = null) {
     try {
       const docs = doc ? [doc] : (typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document]);
@@ -4516,14 +4530,16 @@
           '[data-name="drawing-toolbar"]',
           'div[class*="drawingToolbar"]',
           'div[class*="drawing-toolbar"]',
-          'div[class*="chart-controls-bar"]',
           'div[class*="tv-side-toolbar"]',
           'div[class*="side-toolbar"]',
-          'div[class*="sideToolbar"]'
+          'div[class*="sideToolbar"]',
+          'div[class*="drawingTools"]',
+          'div[class*="drawing-tools"]'
         ].join(', '));
         if (container) {
           const rect = container.getBoundingClientRect();
-          if (rect.width > 20 && rect.height > 50) {
+          // Drawing toolbar is a vertical strip on the left-hand side of the chart
+          if (rect.width > 20 && rect.width < 120 && rect.height > 80 && isElementVisible(container)) {
             return container;
           }
         }
@@ -4535,12 +4551,14 @@
   function isDrawingToolbarVisibleNow() {
     // 1. Direct ground-truth DOM container check
     const container = getDrawingToolbarContainer();
-    if (container) return true;
+    if (container && isElementVisible(container)) return true;
 
-    // 2. Direct DOM check for magnet or group tools
+    // 2. Direct DOM check for visible magnet or group tools
     const magnetBtn = getMagnetButton();
+    if (magnetBtn && isElementVisible(magnetBtn)) return true;
+
     const { detectedGroups } = scanDomSidebarGroupSlots();
-    if (magnetBtn || Object.keys(detectedGroups).length > 0) return true;
+    if (Object.keys(detectedGroups).length > 0) return true;
 
     // 3. TradingView Charting Library widget/chart API
     const targets = [activeWidget, activeChart, activeChartApi, activeWidget?.activeChart?.()];
@@ -4690,6 +4708,25 @@
           } catch (e) {}
         }
       }
+
+      // 5. Unconditional API Action Fallback: If still confirmed NOT visible in DOM, trigger drawingToolbarAction
+      if (!isDrawingToolbarVisibleNow()) {
+        for (const target of targets) {
+          if (!target) continue;
+          if (typeof target.executeActionById === 'function') {
+            try {
+              if (typeof target.getCheckableActionState === 'function') {
+                const isVis = target.getCheckableActionState('drawingToolbarAction');
+                if (isVis === true) continue;
+              }
+              log('Restoring toolbar visibility via executeActionById drawingToolbarAction final fallback...');
+              target.executeActionById('drawingToolbarAction');
+              setTimeout(reportDrawingToolbarVisibility, 150);
+              return true;
+            } catch (e) {}
+          }
+        }
+      }
     } catch (err) {
       log('Error ensuring drawing toolbar visible:', err);
     }
@@ -4783,7 +4820,7 @@
             return;
           }
           // Only consider buttons on the left-hand drawing sidebar
-          const inToolbarContainer = Boolean(el.closest('[data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="chart-controls-bar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
+          const inToolbarContainer = Boolean(el.closest('[data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
           if (!inToolbarContainer) {
             const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
             const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
@@ -4792,6 +4829,8 @@
               return;
             }
           }
+
+          if (!isElementVisible(el)) return;
 
           let toolId = normalizeToolId(el.getAttribute('data-name'));
           if (!toolId) {
@@ -5042,13 +5081,15 @@
           if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
             continue;
           }
-          const inToolbarContainer = Boolean(el.closest('[data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="chart-controls-bar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
+          const inToolbarContainer = Boolean(el.closest('[data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
           if (!inToolbarContainer) {
             const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
             const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
             const rect = el.getBoundingClientRect();
             if (rect.width > 0 && (rect.left - hostLeft) > 120) continue;
           }
+
+          if (!isElementVisible(el)) continue;
 
           const tId =
             normalizeToolId(el.getAttribute('data-name')) ||

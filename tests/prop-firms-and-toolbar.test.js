@@ -18,7 +18,11 @@ assert.strictEqual(
   true,
   'ensureDrawingToolbarVisible must only toggle if checkable state explicitly confirms false'
 );
-console.log('✓ ensureDrawingToolbarVisible toggle guard verified');
+assert.strictEqual(mainContent.includes('function isElementVisible(el)'), true, 'isElementVisible helper must exist');
+assert.strictEqual(mainContent.includes('isElementVisible(container)'), true, 'drawing toolbar container must check isElementVisible');
+assert.strictEqual(mainContent.includes('isElementVisible(magnetBtn)'), true, 'magnet button must check isElementVisible');
+assert.strictEqual(mainContent.includes('Restoring toolbar visibility via executeActionById drawingToolbarAction final fallback...'), true, 'final fallback to restore drawing toolbar must exist');
+console.log('✓ ensureDrawingToolbarVisible toggle guard and strict element visibility verified');
 
 // 2. Verify content-isolated.js Prop Firms configuration and deletion logic
 const isolatedContent = fs.readFileSync(path.join(__dirname, '../content/content-isolated.js'), 'utf8');
