@@ -20,13 +20,15 @@ function isSafeTradingViewStorageKey(key) {
     return false;
   }
   return (
-    key.startsWith('tradingview.') ||
-    key.startsWith('tvlocalstorage.') ||
-    key.startsWith('tv.') ||
     key === 'properties_toolbar.position' ||
+    key === 'ChartDrawingToolbarWidget.visible' ||
+    key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
+    key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+    key === 'tradingview.IntervalWidget.quicks' ||
+    key === 'tradingview.StyleWidget.quicks' ||
+    key.startsWith('tradingview.chartproperties') ||
     key.startsWith('linetool.') ||
     key.startsWith('combobox.') ||
-    key.startsWith('ChartDrawingToolbarWidget.') ||
     key.startsWith('drawingToolbar.') ||
     key.startsWith('drawingFavorites') ||
     key.startsWith('side_toolbar.') ||
@@ -34,21 +36,26 @@ function isSafeTradingViewStorageKey(key) {
   );
 }
 
-// 1. Positive tests (valid TradingView keys)
+// 1. Positive tests (valid safe TradingView keys)
 assert.strictEqual(isSafeTradingViewStorageKey('tradingview.chartproperties'), true);
-assert.strictEqual(isSafeTradingViewStorageKey('tradingview.favoriteDrawings'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('tradingview.chartproperties.something'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('tradingview.IntervalWidget.quicks'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('tradingview.StyleWidget.quicks'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('properties_toolbar.position'), true);
-assert.strictEqual(isSafeTradingViewStorageKey('tvlocalstorage.available'), true);
-assert.strictEqual(isSafeTradingViewStorageKey('tv.toolbar.drawings'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('ChartDrawingToolbarWidget.visible'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('tvlocalstorage.ChartDrawingToolbarWidget.visible'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('tradingview.ChartDrawingToolbarWidget.visible'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('linetool.cursor'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('combobox.tradingview'), true);
-assert.strictEqual(isSafeTradingViewStorageKey('ChartDrawingToolbarWidget.visible'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('drawingToolbar.visible'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('drawingFavorites'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('side_toolbar.state'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('sideToolbar.state'), true);
+
+// 2. Negative tests: broad/unvetted tv/tradingview keys (prevent capturing session or unknown platform state)
+assert.strictEqual(isSafeTradingViewStorageKey('tv.logger.logHighRate'), false);
+assert.strictEqual(isSafeTradingViewStorageKey('tvlocalstorage.available'), false);
+assert.strictEqual(isSafeTradingViewStorageKey('tradingview.unknownState'), false);
 
 // 2. Negative tests: Web3, Auth, Session, Wallet, Account, Platform Layout keys
 assert.strictEqual(isSafeTradingViewStorageKey('user-state-layout-base:e3cd52e5-5f3e-5259-a7b5-b28416a1d7da'), false);

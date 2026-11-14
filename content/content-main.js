@@ -454,19 +454,43 @@
       return false;
     }
     return (
-      key.startsWith('tradingview.') ||
-      key.startsWith('tvlocalstorage.') ||
-      key.startsWith('tv.') ||
       key === 'properties_toolbar.position' ||
+      key === 'ChartDrawingToolbarWidget.visible' ||
+      key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
+      key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+      key === 'tradingview.IntervalWidget.quicks' ||
+      key === 'tradingview.StyleWidget.quicks' ||
+      key.startsWith('tradingview.chartproperties') ||
       key.startsWith('linetool.') ||
       key.startsWith('combobox.') ||
-      key.startsWith('ChartDrawingToolbarWidget.') ||
       key.startsWith('drawingToolbar.') ||
       key.startsWith('drawingFavorites') ||
       key.startsWith('side_toolbar.') ||
       key.startsWith('sideToolbar.')
     );
   }
+
+  // Active cleanup of legacy leaked/corrupted snapshot keys from earlier versions that cause session invalidation on DEX platforms
+  try {
+    const storagesToClean = [window.localStorage];
+    if (window.top && window.top !== window && window.top.localStorage) {
+      storagesToClean.push(window.top.localStorage);
+    }
+    for (const store of storagesToClean) {
+      if (!store) continue;
+      for (let i = store.length - 1; i >= 0; i--) {
+        const k = store.key(i);
+        if (!k) continue;
+        if (
+          k.includes('e3cd52e5-5f3e-5259-a7b5-b28416a1d7da') ||
+          k.startsWith('tv-drawings-flush:') ||
+          k.startsWith('tv-layout-flush:')
+        ) {
+          store.removeItem(k);
+        }
+      }
+    }
+  } catch (e) {}
 
   // Ensure left drawing toolbar visibility flag is not suppressed or set to hidden in localStorage
   try {
