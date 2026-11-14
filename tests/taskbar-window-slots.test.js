@@ -7,7 +7,14 @@ let settings = {
   newsBox: { enabled: true, collapsed: false },
   tradesBox: { enabled: true, collapsed: false },
   diagnosticsBox: { enabled: true, collapsed: false },
+  bottomPanelStates: {},
+  bottomPanelState: { isMinimized: false, isDetached: false },
   minimizedWindowOrder: []
+};
+
+let activeFirm = {
+  id: 'myfundedperpetuals',
+  managePositionsPanel: true
 };
 
 let minimizedWindowOrder = [];
@@ -18,27 +25,23 @@ const mockPill = {
   getBoundingClientRect: () => ({ left: 16, right: 111, top: 48, bottom: 92 })
 };
 
-const mockPositionsPill = {
-  isConnected: false,
-  style: { display: 'none' },
-  offsetWidth: 140,
-  getBoundingClientRect: () => ({ left: 119, right: 259, top: 48, bottom: 92 })
-};
-
 const mockElements = {
+  positions: { offsetWidth: 195, offsetHeight: 30, isConnected: true, style: { left: '', top: '', display: 'none' } },
   news: { offsetWidth: 215, offsetHeight: 30, isConnected: true, style: { left: '', top: '', display: 'block' } },
   trades: { offsetWidth: 240, offsetHeight: 30, isConnected: true, style: { left: '', top: '', display: 'block' } },
   diagnostics: { offsetWidth: 245, offsetHeight: 30, isConnected: true, style: { left: '', top: '', display: 'block' } }
 };
 
+function getActiveFirmBottomPanelState() {
+  const firmId = activeFirm?.id || 'default';
+  if (settings.bottomPanelStates[firmId]) return settings.bottomPanelStates[firmId];
+  return settings.bottomPanelState || { isMinimized: false, isDetached: false };
+}
+
 function getTaskbarStartLeft() {
   let startX = 16;
   if (mockPill) {
     const r = mockPill.getBoundingClientRect();
-    if (r.right > startX) startX = r.right;
-  }
-  if (mockPositionsPill.isConnected && mockPositionsPill.style.display !== 'none') {
-    const r = mockPositionsPill.getBoundingClientRect();
     if (r.right > startX) startX = r.right;
   }
   return Math.round(startX + 8);
@@ -49,7 +52,13 @@ function getActiveMinimizedWindowOrder() {
     ? [...settings.minimizedWindowOrder]
     : (Array.isArray(minimizedWindowOrder) ? [...minimizedWindowOrder] : []);
 
+  const isPositionsManaged = !activeFirm || activeFirm.managePositionsPanel !== false;
+  const st = getActiveFirmBottomPanelState();
+
   const activeCollapsed = [];
+  if (isPositionsManaged && (st.isMinimized || st.isDetached)) {
+    activeCollapsed.push('positions');
+  }
   if (settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
     activeCollapsed.push('news');
   }
@@ -143,52 +152,56 @@ function repositionAllMinimizedBoxes() {
 const baseStart = getTaskbarStartLeft();
 assert.strictEqual(baseStart, 111 + 8, 'Taskbar start should be 8px after CORTEX pill');
 
-// Test 2: Minimize Diagnostics first
-settings.diagnosticsBox.collapsed = true;
-markWindowAsMinimized('diagnostics');
+// Test 2: Docked State - Positions pill is hidden and NOT in activeCollapsed order
+assert.strictEqual(mockElements.positions.style.display, 'none', 'Docked positions panel must be hidden from top bar');
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), [], 'Docked positions must NOT occupy taskbar slot');
 
-assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['diagnostics']);
-const diagCoords = getMinimizedCortexBarCoords('diagnostics', mockElements.diagnostics);
-assert.strictEqual(diagCoords.left, 119, 'Diagnostics should take first available slot (119px)');
-assert.strictEqual(mockElements.diagnostics.style.left, '119px', 'Element should be positioned at 119px');
+// Test 3: Minimize Positions first
+settings.bottomPanelStates['myfundedperpetuals'] = { isMinimized: true, isDetached: false };
+mockElements.positions.style.display = 'block';
+markWindowAsMinimized('positions');
 
-// Test 3: Minimize News second (out of legacy alphabetical/hardcoded order)
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['positions'], 'Positions pill enters taskbar order');
+assert.strictEqual(mockElements.positions.style.left, '119px', 'Positions pill takes first available slot (119px)');
+
+// Test 4: Minimize News second (must take next slot after Positions)
 settings.newsBox.collapsed = true;
 markWindowAsMinimized('news');
 
-assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['diagnostics', 'news'], 'Order must follow minimization sequence');
-assert.strictEqual(mockElements.diagnostics.style.left, '119px', 'Diagnostics stays in slot 0');
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['positions', 'news'], 'Order follows minimization sequence');
+assert.strictEqual(mockElements.positions.style.left, '119px', 'Positions stays in slot 0');
+const expectedNewsLeft = 119 + 195 + 8; // 322px
+assert.strictEqual(mockElements.news.style.left, `${expectedNewsLeft}px`, 'News must take NEXT available slot after positions');
+assert.notStrictEqual(mockElements.news.style.left, mockElements.positions.style.left, 'Pills must NEVER overlap or cover positions');
 
-// Next slot is 119 + 245 (diag width) + 8 = 372px
-const expectedNewsLeft = 119 + 245 + 8;
-assert.strictEqual(mockElements.news.style.left, `${expectedNewsLeft}px`, 'News must take NEXT available slot, never below diagnostics');
-assert.notStrictEqual(mockElements.news.style.left, mockElements.diagnostics.style.left, 'Pills must NEVER overlap or sit below each other');
-
-// Test 4: Minimize Trades third
+// Test 5: Minimize Trades third
 settings.tradesBox.collapsed = true;
 markWindowAsMinimized('trades');
 
-assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['diagnostics', 'news', 'trades']);
-const expectedTradesLeft = expectedNewsLeft + 215 + 8; // 372 + 215 + 8 = 595px
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['positions', 'news', 'trades']);
+const expectedTradesLeft = expectedNewsLeft + 215 + 8; // 322 + 215 + 8 = 545px
 assert.strictEqual(mockElements.trades.style.left, `${expectedTradesLeft}px`, 'Trades takes 3rd available slot');
 
-// Test 5: Restore Diagnostics (first window)
-settings.diagnosticsBox.collapsed = false;
-markWindowAsRestored('diagnostics');
+// Test 6: Restore Positions (Docked back to bottom)
+settings.bottomPanelStates['myfundedperpetuals'] = { isMinimized: false, isDetached: false };
+mockElements.positions.style.display = 'none';
+markWindowAsRestored('positions');
 
-assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['news', 'trades'], 'Diagnostics removed from taskbar');
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['news', 'trades'], 'Positions cleanly removed from taskbar');
 // News should now shift into slot 0 (119px)
-assert.strictEqual(mockElements.news.style.left, '119px', 'News shifts to slot 0 when earlier window is restored');
+assert.strictEqual(mockElements.news.style.left, '119px', 'News shifts to slot 0 when positions is docked');
 // Trades should now shift into slot 1 (119 + 215 + 8 = 342px)
 assert.strictEqual(mockElements.trades.style.left, `${119 + 215 + 8}px`, 'Trades shifts to slot 1');
 
-// Test 6: Bottom positions pill appears in bar
-mockPositionsPill.isConnected = true;
-mockPositionsPill.style.display = 'block';
-repositionAllMinimizedBoxes();
+// Test 7: Per-firm isolation check
+// On Vest Markets, positions is docked; on My Funded Perpetuals, it was minimized
+activeFirm = { id: 'vestmarkets', managePositionsPanel: true };
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['news', 'trades'], 'Vest maintains its own docked bottom panel state');
 
-const newStart = 259 + 8; // 267px
-assert.strictEqual(mockElements.news.style.left, `${newStart}px`, 'Minimized pills shift when positions pill is present');
-assert.strictEqual(mockElements.trades.style.left, `${newStart + 215 + 8}px`, 'Subsequent pills shift proportionally');
+// Disable positions manager for a firm
+activeFirm = { id: 'customfirm', managePositionsPanel: false };
+settings.bottomPanelStates['customfirm'] = { isMinimized: true, isDetached: false };
+assert.deepStrictEqual(getActiveMinimizedWindowOrder(), ['news', 'trades'], 'Disabled firm suppresses positions from taskbar');
 
 console.log('✓ All Taskbar Minimized Windows Slot Tests Passed!');
+
