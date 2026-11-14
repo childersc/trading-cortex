@@ -4,6 +4,17 @@ All notable changes, new features, and bug fixes through the current release (`v
 
 ---
 
+## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
+
+### ✨ Features
+- **Perp Firm Settings**: New dedicated settings manager accessible via the Cortex dropdown menu and the multi-tab Settings dialog.
+- **Side-by-Side Firm Tiles**: Displays configured perpetual brokers and prop firms (My Funded Perpetuals, Vest Markets, Vest Exchange, plus custom firms) in side-by-side tiles with site badges and visual statuses.
+- **Per-Firm Layout & Offsets**: Configure custom top-bar offsets, custom bottom margins, firm header height reference, default order leverage, account tiers, and trader notes for each firm.
+- **Dynamic Firm Registration**: Easily add any perpetual firm or prop broker by URL. Trading Cortex dynamically requests host permissions and registers content scripts at runtime.
+- **Live Layout Adaptation**: Cortex top-bar automatically adapts position and bottom margin based on the active perp firm.
+
+---
+
 ## [v1.1.44] — Cortex Top Bar Relocation, Diagnostics Suite & Dev Channel Updater
 
 ### ✨ Features
