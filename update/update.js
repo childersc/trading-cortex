@@ -13,6 +13,30 @@
   const IDB_STORE = 'handles';
   const IDB_KEY = 'extension_dir_handle';
 
+  // Core distribution files streamed directly via unmetered Raw CDN if GitHub API is rate-limited (HTTP 403)
+  const CORE_DIST_FILES = [
+    'manifest.json',
+    'background/service-worker.js',
+    'content/content-isolated.js',
+    'content/content-main.js',
+    'content/cortex-execution.js',
+    'content/template-bar.css',
+    'icons/icon16.png',
+    'icons/icon32.png',
+    'icons/icon48.png',
+    'icons/icon128.png',
+    'icons/discord.svg',
+    'popup/popup.html',
+    'popup/popup.js',
+    'popup/popup.css',
+    'update/update.html',
+    'update/update.js',
+    'update/update.css',
+    'README.md',
+    'RELEASE_NOTES.md',
+    'CHANGELOG.md'
+  ];
+
   const manifest = chrome.runtime.getManifest();
   let installedVersion = manifest.version || '1.1.0';
 
@@ -400,36 +424,81 @@
     logTerm(`Polling https://api.github.com/repos/${DEFAULT_REPO}/commits?sha=dev ...`, 'info');
 
     try {
-      const resp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/commits?sha=dev&per_page=12`, {
-        headers: { 'Accept': 'application/vnd.github+json' },
-        cache: 'no-store'
-      });
+      let commits = [];
+      let topCommit = null;
+      let shortSha = 'dev';
+      let commitMsg = 'Bleeding-edge dev build';
+      let authorName = 'Developer';
+      let commitDate = new Date().toISOString();
+      let upcomingDevVer = 'v1.1.62';
+      let usingRawFallback = false;
+      let rawNotes = null;
 
-      if (!resp.ok) {
-        throw new Error(`GitHub API HTTP ${resp.status}`);
+      try {
+        const resp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/commits?sha=dev&per_page=12`, {
+          headers: { 'Accept': 'application/vnd.github+json' },
+          cache: 'no-store'
+        });
+
+        if (resp.ok) {
+          const fetchedCommits = await resp.json();
+          if (Array.isArray(fetchedCommits) && fetchedCommits.length > 0) {
+            commits = fetchedCommits;
+          }
+        } else {
+          logTerm(`GitHub API returned HTTP ${resp.status}. Falling back to unthrottled Raw CDN...`, 'warn');
+          usingRawFallback = true;
+        }
+      } catch (fetchErr) {
+        logTerm(`GitHub API fetch failed (${fetchErr.message}). Falling back to unthrottled Raw CDN...`, 'warn');
+        usingRawFallback = true;
       }
 
-      const commits = await resp.json();
-      if (!Array.isArray(commits) || commits.length === 0) {
-        throw new Error('No commits found on dev branch.');
+      if (usingRawFallback || commits.length === 0) {
+        usingRawFallback = true;
+        const rawManifestResp = await fetch(`https://raw.githubusercontent.com/${DEFAULT_REPO}/dev/manifest.json`, { cache: 'no-store' });
+        if (!rawManifestResp.ok) {
+          throw new Error(`GitHub API rate-limited and Raw CDN unreachable (HTTP ${rawManifestResp.status})`);
+        }
+        const rawManifest = await rawManifestResp.json();
+        const rawVer = rawManifest.version || '1.1.62';
+        upcomingDevVer = `v${rawVer}`;
+        commitMsg = `Dev build v${rawVer} (unmetered Raw CDN)`;
+
+        try {
+          const notesResp = await fetch(`https://raw.githubusercontent.com/${DEFAULT_REPO}/dev/RELEASE_NOTES.md`, { cache: 'no-store' });
+          if (notesResp.ok) rawNotes = await notesResp.text();
+        } catch (e) {}
+
+        topCommit = {
+          sha: 'dev-latest',
+          commit: {
+            message: commitMsg,
+            author: { name: 'Trading Cortex Dev' },
+            committer: { date: commitDate }
+          }
+        };
+        commits = [topCommit];
       }
 
       devCommitsList = commits;
-      const topCommit = commits[0];
+      topCommit = commits[0];
       latestDevCommit = topCommit;
-      const shortSha = topCommit.sha.slice(0, 7);
-      const commitMsg = (topCommit.commit?.message || '').split(/\r?\n/)[0].trim();
-      const authorName = topCommit.commit?.author?.name || 'Developer';
-      const commitDate = topCommit.commit?.committer?.date || topCommit.commit?.author?.date;
+      shortSha = topCommit.sha.slice(0, 7);
+      commitMsg = (topCommit.commit?.message || '').split(/\r?\n/)[0].trim();
+      authorName = topCommit.commit?.author?.name || 'Developer';
+      commitDate = topCommit.commit?.committer?.date || topCommit.commit?.author?.date;
 
-      const upcomingDevVer = getUpcomingDevVersion(latestRelease ? latestRelease.tag_name : installedVersion);
+      if (!usingRawFallback) {
+        upcomingDevVer = getUpcomingDevVersion(latestRelease ? latestRelease.tag_name : installedVersion);
+      }
 
       vboxLatest.textContent = upcomingDevVer;
       vboxChanges.textContent = String(commits.length);
 
       if (notesCardTitle) notesCardTitle.textContent = 'Dev Branch Commits';
       if (notesVersionTitle) notesVersionTitle.textContent = `${upcomingDevVer} (${shortSha})`;
-      if (notesZipName) notesZipName.textContent = `zipball/dev (${shortSha})`;
+      if (notesZipName) notesZipName.textContent = usingRawFallback ? `raw/dev (${upcomingDevVer})` : `zipball/dev (${shortSha})`;
       if (releaseGithubLink) {
         releaseGithubLink.href = `https://github.com/${DEFAULT_REPO}/commits/dev`;
         releaseGithubLink.textContent = 'Dev Commits';
@@ -439,40 +508,54 @@
       }
 
       if (notesSummary) {
-        notesSummary.textContent = `Bleeding-edge commits from the 'dev' branch of ${DEFAULT_REPO}. Features may be in-flight before official release tagging.`;
+        notesSummary.textContent = usingRawFallback
+          ? `Bleeding-edge dev release ${upcomingDevVer} served directly via unmetered GitHub CDN (bypass GitHub API rate limits).`
+          : `Bleeding-edge commits from the 'dev' branch of ${DEFAULT_REPO}. Features may be in-flight before official release tagging.`;
       }
 
       if (notesBody) {
-        notesBody.innerHTML = `
-          <ul class="notes-list">
-            ${commits.map(c => {
-              const sSha = c.sha.slice(0, 7);
-              const firstLine = (c.commit?.message || '').split(/\r?\n/)[0].trim();
-              const auth = c.commit?.author?.name || 'dev';
-              const dStr = c.commit?.committer?.date ? new Date(c.commit.committer.date).toLocaleDateString() : '';
-              const link = c.html_url || `https://github.com/${DEFAULT_REPO}/commit/${c.sha}`;
-              return `
-                <li>
-                  <a href="${link}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
-                    <span class="commit-sha-badge">${sSha}</span>
-                  </a>
-                  <strong>${escapeHtml(firstLine)}</strong>
-                  <span class="commit-meta">— ${escapeHtml(auth)}${dStr ? `, ${escapeHtml(dStr)}` : ''}</span>
-                </li>
-              `;
-            }).join('')}
-          </ul>
-        `;
+        if (usingRawFallback && rawNotes) {
+          notesBody.innerHTML = `
+            <div style="font-size:12px; line-height:1.6; color:#cbd5e1; white-space:pre-wrap; padding:4px;">
+              ${escapeHtml(rawNotes.slice(0, 1500))}
+            </div>
+          `;
+        } else {
+          notesBody.innerHTML = `
+            <ul class="notes-list">
+              ${commits.map(c => {
+                const sSha = c.sha.slice(0, 7);
+                const firstLine = (c.commit?.message || '').split(/\r?\n/)[0].trim();
+                const auth = c.commit?.author?.name || 'dev';
+                const dStr = c.commit?.committer?.date ? new Date(c.commit.committer.date).toLocaleDateString() : '';
+                const link = c.html_url || `https://github.com/${DEFAULT_REPO}/commit/${c.sha}`;
+                return `
+                  <li>
+                    <a href="${link}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+                      <span class="commit-sha-badge">${sSha}</span>
+                    </a>
+                    <strong>${escapeHtml(firstLine)}</strong>
+                    <span class="commit-meta">— ${escapeHtml(auth)}${dStr ? `, ${escapeHtml(dStr)}` : ''}</span>
+                  </li>
+                `;
+              }).join('')}
+            </ul>
+          `;
+        }
       }
 
       const checkedAt = Date.now();
       updateLastCheckedUI(checkedAt);
 
-      // Check if current installed build is already this dev commit
-      const isUpToDate = Boolean(
-        (installedDevSha && (installedDevSha === shortSha || installedDevSha === topCommit.sha)) ||
-        (installedVersion && installedVersion.includes(shortSha))
-      );
+      // Check if current installed build is already this dev commit or version
+      const cleanInstalled = cleanVersion(installedVersion);
+      const cleanDev = cleanVersion(upcomingDevVer);
+      const isUpToDate = usingRawFallback
+        ? (compareSemver(cleanInstalled, cleanDev) >= 0)
+        : Boolean(
+            (installedDevSha && (installedDevSha === shortSha || installedDevSha === topCommit.sha)) ||
+            (installedVersion && installedVersion.includes(shortSha))
+          );
 
       const upcomingDevVerState = upcomingDevVer;
       await chrome.storage.local.set({
@@ -557,38 +640,50 @@
 
       if (resp.ok) {
         release = await resp.json();
-      } else if (resp.status === 404) {
-        // Fallback 1: check all releases (including pre-releases)
-        const listResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=5`, {
-          headers: { 'Accept': 'application/vnd.github+json' },
-          cache: 'no-store'
-        });
-        if (listResp.ok) {
-          const list = await listResp.json();
-          if (Array.isArray(list) && list.length > 0) {
-            release = list[0];
+      } else if (resp.status === 404 || resp.status === 403 || resp.status === 429) {
+        logTerm(`GitHub API returned HTTP ${resp.status}. Falling back to unthrottled Raw CDN...`, 'warn');
+        // Fallback 1: check raw CDN manifest.json
+        try {
+          const rawResp = await fetch(`https://raw.githubusercontent.com/${DEFAULT_REPO}/main/manifest.json`, { cache: 'no-store' });
+          if (rawResp.ok) {
+            const rawData = await rawResp.json();
+            const topVer = rawData.version || '1.1.62';
+            let rawNotesText = '';
+            try {
+              const notesResp = await fetch(`https://raw.githubusercontent.com/${DEFAULT_REPO}/main/RELEASE_NOTES.md`, { cache: 'no-store' });
+              if (notesResp.ok) rawNotesText = await notesResp.text();
+            } catch (e) {}
+
+            release = {
+              tag_name: `v${topVer}`,
+              name: `Trading Cortex v${topVer}`,
+              html_url: `https://github.com/${DEFAULT_REPO}/releases`,
+              zipball_url: `https://github.com/${DEFAULT_REPO}/archive/refs/tags/v${topVer}.zip`,
+              assets: [
+                {
+                  name: `trading-cortex-${topVer}.zip`,
+                  browser_download_url: `https://github.com/${DEFAULT_REPO}/releases/download/v${topVer}/trading-cortex-${topVer}.zip`
+                }
+              ],
+              body: rawNotesText || `Trading Cortex v${topVer} packaged build.`
+            };
           }
-        }
-        // Fallback 2: check repository tags if GitHub Actions is still building the release
+        } catch (rawErr) {}
+
+        // Fallback 2: check all releases (including pre-releases)
         if (!release) {
-          const tagsResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/tags?per_page=5`, {
-            headers: { 'Accept': 'application/vnd.github+json' },
-            cache: 'no-store'
-          });
-          if (tagsResp.ok) {
-            const tags = await tagsResp.json();
-            if (Array.isArray(tags) && tags.length > 0) {
-              const topTag = tags[0].name;
-              release = {
-                tag_name: topTag,
-                name: `Trading Cortex ${topTag}`,
-                html_url: `https://github.com/${DEFAULT_REPO}/releases/tag/${topTag}`,
-                zipball_url: tags[0].zipball_url,
-                assets: [],
-                body: `Packaged build ${topTag} on GitHub (${DEFAULT_REPO}).`
-              };
+          try {
+            const listResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/releases?per_page=5`, {
+              headers: { 'Accept': 'application/vnd.github+json' },
+              cache: 'no-store'
+            });
+            if (listResp.ok) {
+              const list = await listResp.json();
+              if (Array.isArray(list) && list.length > 0) {
+                release = list[0];
+              }
             }
-          }
+          } catch (e) {}
         }
       } else {
         throw new Error(`GitHub API HTTP ${resp.status}`);
@@ -1015,22 +1110,29 @@
         }
 
         if (!extractedFiles || extractedFiles.length === 0) {
-          logTerm(`Streaming dev tree from GitHub Git API...`, 'info');
-          progressLabelLeft.textContent = 'Fetching dev branch file tree...';
-          const treeResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/git/trees/dev?recursive=1`, {
-            headers: { 'Accept': 'application/vnd.github+json' },
-            cache: 'no-store'
-          });
-          if (!treeResp.ok) {
-            throw new Error(`Failed to fetch dev branch tree (HTTP ${treeResp.status})`);
-          }
-          const treeData = await treeResp.json();
-          const blobs = (treeData.tree || []).filter(item => item.type === 'blob' && !item.path.startsWith('.git/'));
-          if (blobs.length === 0) {
-            throw new Error('No files found on dev branch tree.');
+          logTerm(`Fetching dev file list...`, 'info');
+          progressLabelLeft.textContent = 'Fetching dev branch files...';
+          let blobs = [];
+          try {
+            const treeResp = await fetch(`https://api.github.com/repos/${DEFAULT_REPO}/git/trees/dev?recursive=1`, {
+              headers: { 'Accept': 'application/vnd.github+json' },
+              cache: 'no-store'
+            });
+            if (treeResp.ok) {
+              const treeData = await treeResp.json();
+              blobs = (treeData.tree || []).filter(item => item.type === 'blob' && !item.path.startsWith('.git/'));
+            } else {
+              logTerm(`Git Trees API returned HTTP ${treeResp.status}. Falling back to core file manifest via Raw CDN...`, 'warn');
+            }
+          } catch (treeErr) {
+            logTerm(`Git Trees API fetch error (${treeErr.message}). Falling back to core file manifest via Raw CDN...`, 'warn');
           }
 
-          logTerm(`Found ${blobs.length} dev files. Streaming directly...`, 'info');
+          if (!blobs || blobs.length === 0) {
+            blobs = CORE_DIST_FILES.map(p => ({ path: p }));
+          }
+
+          logTerm(`Streaming ${blobs.length} dev files directly from unmetered Raw CDN...`, 'info');
           extractedFiles = [];
           for (let b = 0; b < blobs.length; b++) {
             const blobItem = blobs[b];
@@ -1055,30 +1157,57 @@
       } else {
         const zipAsset = (latestRelease?.assets || []).find(a => a.name && a.name.endsWith('.zip'));
         const downloadUrl = zipAsset ? zipAsset.browser_download_url : latestRelease?.zipball_url;
-        if (!downloadUrl) {
-          throw new Error('No downloadable ZIP archive found on this GitHub release.');
-        }
+        let downloadedZip = false;
 
-        logTerm(`Downloading ${zipAsset ? zipAsset.name : 'release zipball'}...`, 'info');
-        const zipResp = await fetch(downloadUrl, { cache: 'no-store' });
-        if (!zipResp.ok) {
-          throw new Error(`Failed to download release archive (HTTP ${zipResp.status})`);
-        }
+        if (downloadUrl) {
+          try {
+            logTerm(`Downloading ${zipAsset ? zipAsset.name : 'release zipball'}...`, 'info');
+            const zipResp = await fetch(downloadUrl, { cache: 'no-store' });
+            if (zipResp.ok) {
+              const zipBuffer = await zipResp.arrayBuffer();
+              logTerm(`Downloaded ${(zipBuffer.byteLength / 1024).toFixed(1)} KB`, 'ok');
 
-        const zipBuffer = await zipResp.arrayBuffer();
-        logTerm(`Downloaded ${(zipBuffer.byteLength / 1024).toFixed(1)} KB`, 'ok');
+              if (zipAsset && zipAsset.digest && zipAsset.digest.startsWith('sha256:')) {
+                const expectedHex = zipAsset.digest.slice('sha256:'.length).toLowerCase();
+                const hashBuf = await crypto.subtle.digest('SHA-256', zipBuffer);
+                const actualHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+                if (actualHex !== expectedHex) {
+                  throw new Error('SHA-256 digest mismatch! Aborting deployment.');
+                }
+                logTerm(`Verified SHA-256 digest (${actualHex.slice(0, 12)}...)`, 'ok');
+              }
 
-        if (zipAsset && zipAsset.digest && zipAsset.digest.startsWith('sha256:')) {
-          const expectedHex = zipAsset.digest.slice('sha256:'.length).toLowerCase();
-          const hashBuf = await crypto.subtle.digest('SHA-256', zipBuffer);
-          const actualHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-          if (actualHex !== expectedHex) {
-            throw new Error('SHA-256 digest mismatch! Aborting deployment.');
+              extractedFiles = await extractZipBuffer(zipBuffer);
+              downloadedZip = Boolean(extractedFiles && extractedFiles.length > 0);
+            }
+          } catch (zipErr) {
+            logTerm(`ZIP download failed (${zipErr.message}). Streaming files directly via Raw CDN...`, 'warn');
           }
-          logTerm(`Verified SHA-256 digest (${actualHex.slice(0, 12)}...)`, 'ok');
         }
 
-        extractedFiles = await extractZipBuffer(zipBuffer);
+        if (!downloadedZip || !extractedFiles || extractedFiles.length === 0) {
+          logTerm(`Streaming release files directly from unmetered Raw CDN (main branch)...`, 'info');
+          extractedFiles = [];
+          for (let b = 0; b < CORE_DIST_FILES.length; b++) {
+            const fPath = CORE_DIST_FILES[b];
+            progressLabelRight.textContent = `${b + 1} / ${CORE_DIST_FILES.length} files`;
+            const pct = Math.round(((b + 1) / CORE_DIST_FILES.length) * 35);
+            progressFill.style.width = `${pct}%`;
+
+            const rawUrl = `https://raw.githubusercontent.com/${DEFAULT_REPO}/main/${fPath}`;
+            const fileResp = await fetch(rawUrl, { cache: 'no-store' });
+            if (!fileResp.ok) {
+              throw new Error(`Failed to download ${fPath} (HTTP ${fileResp.status})`);
+            }
+            const arrayBuf = await fileResp.arrayBuffer();
+            extractedFiles.push({
+              path: fPath,
+              data: new Uint8Array(arrayBuf),
+              size: arrayBuf.byteLength
+            });
+          }
+          logTerm(`Successfully downloaded all ${extractedFiles.length} release files directly!`, 'ok');
+        }
       }
 
       updateStepState(step2Row, step2Badge, 'done', 2);
