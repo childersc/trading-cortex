@@ -25,6 +25,8 @@
     "tabs"
   ],
   "host_permissions": [
+    "https://myfundedperpetuals.com/*",
+    "https://*.myfundedperpetuals.com/*",
     "https://*.vestmarkets.com/*",
     "https://vestmarkets.com/*",
     "https://*.vest.exchange/*",
@@ -46,7 +48,9 @@
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
         "https://*.vest.exchange/*",
-        "https://vest.exchange/*"
+        "https://vest.exchange/*",
+        "https://*.myfundedperpetuals.com/*",
+        "https://myfundedperpetuals.com/*"
       ],
       "js": [
         "content/content-main.js"
@@ -62,7 +66,9 @@
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
         "https://*.vest.exchange/*",
-        "https://vest.exchange/*"
+        "https://vest.exchange/*",
+        "https://*.myfundedperpetuals.com/*",
+        "https://myfundedperpetuals.com/*"
       ],
       "js": [
         "content/cortex-execution.js",
@@ -87,7 +93,9 @@
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
         "https://*.vest.exchange/*",
-        "https://vest.exchange/*"
+        "https://vest.exchange/*",
+        "https://*.myfundedperpetuals.com/*",
+        "https://myfundedperpetuals.com/*"
       ]
     }
   ],

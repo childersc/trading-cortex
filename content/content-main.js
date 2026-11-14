@@ -10882,11 +10882,11 @@
     try {
       const doc = window.top === window ? document : (window.top ? window.top.document : document);
 
-      // Search all elements containing "Mid Price" or "Last Price" or "Mark Price"
+      // Search all elements containing "Mid Price" or "Last Price" or "Mark Price" or "Mark / Mid"
       const labelEls = Array.from(doc.querySelectorAll('span, div, p')).filter(el => {
         if (!el.childNodes.length) return false;
         const text = (el.innerText || el.textContent || '').trim();
-        return text === 'Mid Price' || text === 'Last Price' || text === 'Mark Price' || text === 'Index Price';
+        return text === 'Mid Price' || text === 'Last Price' || text === 'Mark Price' || text === 'Index Price' || text === 'Mark / Mid' || text.startsWith('Mark / Mid');
       });
 
       for (const labelEl of labelEls) {
@@ -10901,7 +10901,7 @@
         }
         const parent = labelEl.parentElement;
         if (parent && parent.children.length <= 3) {
-          const parentText = (parent.innerText || parent.textContent || '').replace(/Mid Price|Last Price|Mark Price|Index Price/gi, '').trim();
+          const parentText = (parent.innerText || parent.textContent || '').replace(/Mid Price|Last Price|Mark Price|Index Price|Mark \/ Mid/gi, '').trim();
           const match = parentText.match(/^\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)$/);
           if (match && match[1] && match[1] !== '0') {
             return match[1].trim();

@@ -1,6 +1,6 @@
 # Trading Cortex (Chrome Extension)
 
-A Chrome extension for **TradingView Charting Library** platforms (`next.vestmarkets.com`, `vest.exchange`) that adds **Chart Memory Features, Viewport Position & Zoom Persistence, and Box/Drawing Templates**.
+A Chrome extension for **TradingView Charting Library** platforms (`next.vestmarkets.com`, `vest.exchange`, `myfundedperpetuals.com`) that adds **Chart Memory Features, Viewport Position & Zoom Persistence, and Box/Drawing Templates**.
 
 Vest Markets embeds TradingView charts, but by default it lacks a drawing template system—meaning every time you draw a box, it defaults to the generic purple color (`#9c27b0`). This extension provides **custom templates, 1-click color presets, center lines (50% / CE), ray extensions (left & right), an on-chart floating quick-bar, and automatic styling**.
 
