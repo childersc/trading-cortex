@@ -3809,3 +3809,310 @@ body.vest-cortex-top-bar-active {
   color: #94a3b8;
   font-family: 'JetBrains Mono', monospace;
 }
+
+/* =============================================================
+   Bottom Positions & Orders Panel Manager (Detach & Minimize)
+   ============================================================= */
+
+/* Controls Injected into Bottom Panel Tab Bar */
+.vest-bottom-panel-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 2px 4px;
+  z-index: 100;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.vest-bpc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 6px;
+  color: #38bdf8;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+
+.vest-bpc-btn svg {
+  flex-shrink: 0;
+  transition: transform 0.16s ease;
+}
+
+.vest-bpc-detach-btn:hover {
+  background: rgba(6, 182, 212, 0.22);
+  border-color: #06b6d4;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.4);
+  transform: translateY(-1px);
+}
+
+.vest-bpc-detach-btn:hover svg {
+  transform: scale(1.12);
+}
+
+.vest-bpc-minimize-btn:hover {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+  transform: translateY(-1px);
+}
+
+.vest-bpc-minimize-btn:hover svg {
+  transform: translateY(1px);
+}
+
+/* Minimized State */
+.vest-bottom-panel-minimized {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.vest-bottom-resizer-hidden {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+}
+
+/* Detached Floating Mode */
+.vest-bottom-panel-detached {
+  position: fixed !important;
+  z-index: 99995 !important;
+  background: rgba(11, 15, 25, 0.97) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(56, 189, 248, 0.45) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 20px rgba(6, 182, 212, 0.2) !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  resize: both !important;
+  min-width: 520px !important;
+  min-height: 240px !important;
+  animation: vest-fade-in 0.18s ease-out !important;
+}
+
+/* Detached Window Title Bar */
+.vest-detached-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px 0 12px;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.vest-dtb-drag-handle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  flex: 1;
+  min-width: 0;
+}
+
+.vest-dtb-drag-handle:active {
+  cursor: grabbing;
+}
+
+.vest-dtb-icon-box {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.vest-dtb-title-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.vest-dtb-brand {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #06b6d4;
+  background: rgba(6, 182, 212, 0.14);
+  padding: 1.5px 5px;
+  border-radius: 4px;
+}
+
+.vest-dtb-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  white-space: nowrap;
+}
+
+.vest-dtb-count-badge {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 1.5px 6px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #34d399;
+}
+
+.vest-dtb-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.vest-dtb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.vest-dtb-btn:hover {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #f8fafc;
+}
+
+#vest-dtb-dock-btn:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #34d399;
+}
+
+/* Cortex Toolbar (Top Bar) Pill */
+#vest-bottom-panel-topbar-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 8px;
+  z-index: 2147483640;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+#vest-bottom-panel-topbar-pill .vest-bpp-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 2px 10px 2px 8px;
+  background: linear-gradient(145deg, rgba(20, 25, 36, 0.92), rgba(15, 19, 28, 0.92));
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 9999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #f8fafc;
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: all 0.16s ease;
+}
+
+#vest-bottom-panel-topbar-pill:hover .vest-bpp-trigger {
+  border-color: #38bdf8;
+  background: linear-gradient(145deg, rgba(28, 35, 51, 0.95), rgba(20, 25, 36, 0.95));
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+  transform: translateY(-1px);
+}
+
+#vest-bottom-panel-topbar-pill.minimized .vest-bpp-trigger {
+  border-color: #06b6d4;
+  background: linear-gradient(145deg, rgba(6, 182, 212, 0.18), rgba(15, 23, 42, 0.92));
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.35), inset 0 0 0 1px rgba(6, 182, 212, 0.3);
+}
+
+#vest-bottom-panel-topbar-pill.detached .vest-bpp-trigger {
+  border-color: #a855f7;
+  background: linear-gradient(145deg, rgba(168, 85, 247, 0.18), rgba(15, 23, 42, 0.92));
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.35);
+}
+
+.vest-bpp-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #e2e8f0;
+}
+
+.vest-bpp-count {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #34d399;
+}
+
+.vest-bpp-status {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+}
+
+.vest-bpp-status.dock {
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.vest-bpp-status.min {
+  background: rgba(6, 182, 212, 0.25);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+.vest-bpp-status.det {
+  background: rgba(168, 85, 247, 0.25);
+  color: #c084fc;
+  border: 1px solid rgba(192, 132, 252, 0.4);
+}
+
