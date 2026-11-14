@@ -366,50 +366,36 @@
           });
         }
 
-        // Check if bar is already properly situated in toolbarRow after toolbarGroup
-        let isAlreadyPlaced = false;
-        if (bar.parentElement === toolbarRow) {
-          let prev = bar.previousElementSibling;
-          while (prev) {
-            if (prev === toolbarGroup) {
-              isAlreadyPlaced = true;
+        // Check for third-party indicator buttons (like TV / Vela) in toolbarRow.
+        // Let the third-party indicator have the FRONT position directly after toolbarGroup,
+        // and place Trading Cortex timeframe buttons immediately after it so they never fight.
+        let thirdPartyAnchor = null;
+        const allChildren = Array.from(toolbarRow.children);
+        for (const child of allChildren) {
+          if (child === bar || child === toolbarGroup) continue;
+          const txt = (child.innerText || child.textContent || '').trim();
+          const id = child.id || '';
+          const dataName = child.getAttribute('data-name') || '';
+          if (
+            txt.includes('Vela') ||
+            (txt.includes('TV') && txt.includes('Vela')) ||
+            (!id.startsWith('header-toolbar-') && !dataName.startsWith('header-toolbar-') && child.tagName === 'DIV' && !id.includes('favorites'))
+          ) {
+            if (!id.startsWith('header-toolbar-chart-styles') && !dataName.startsWith('header-toolbar-chart-styles')) {
+              thirdPartyAnchor = child;
               break;
-            }
-            prev = prev.previousElementSibling;
-          }
-
-          // Make sure it wasn't pushed after the chart styles or indicators
-          if (isAlreadyPlaced) {
-            const chartStyles = toolbarRow.querySelector('#header-toolbar-chart-styles, [data-name="header-toolbar-chart-styles"]');
-            if (chartStyles && (bar.compareDocumentPosition(chartStyles) & Node.DOCUMENT_POSITION_PRECEDING)) {
-              isAlreadyPlaced = false;
             }
           }
         }
 
-        // Only insert/move if bar is detached or in the wrong place.
-        // If a third-party control (like TV / Vela) is present, place after it so they don't fight.
-        if (!isAlreadyPlaced) {
-          let anchor = toolbarGroup;
-          let nextSib = toolbarGroup.nextElementSibling;
-          while (nextSib && nextSib !== bar) {
-            const txt = (nextSib.innerText || nextSib.textContent || '').trim();
-            const id = nextSib.id || '';
-            const dataName = nextSib.getAttribute('data-name') || '';
-            const isVelaOrThirdParty =
-              txt.includes('Vela') ||
-              (txt.includes('TV') && txt.includes('Vela')) ||
-              (!id.startsWith('header-toolbar-') && !dataName.startsWith('header-toolbar-') && nextSib.tagName === 'DIV');
+        const targetAnchor = thirdPartyAnchor || toolbarGroup;
 
-            if (isVelaOrThirdParty && !id.startsWith('header-toolbar-chart-styles')) {
-              anchor = nextSib;
-              nextSib = nextSib.nextElementSibling;
-            } else {
-              break;
-            }
-          }
-          toolbarRow.insertBefore(bar, anchor.nextSibling);
+        // If bar is already placed immediately after targetAnchor, do not touch the DOM
+        if (bar.parentElement === toolbarRow && bar.previousElementSibling === targetAnchor) {
+          return;
         }
+
+        toolbarRow.insertBefore(bar, targetAnchor.nextSibling);
       } catch (e) {}
     });
   }
