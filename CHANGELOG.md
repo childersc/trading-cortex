@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.65`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.66`) are documented in this file.
+
+---
+
+## [v1.1.66] — 2026-11-14
+
+### 🐛 Bug Fixes & Stability
+- **Guaranteed Left Drawing Toolbar Persistence & Desync Self-Healing**:
+  1. *DOM Ground-Truth Visibility Verification*: Rewrote `isDrawingToolbarVisibleNow()` to inspect true DOM reality (drawing toolbar container elements, magnet buttons, and sidebar group slots) rather than relying on TradingView's internal JS `drawingToolbarAction` checkable state, which falsely remained `true` even when the toolbar was collapsed or missing.
+  2. *Eliminated Startup Toolbar Collapse*: Fixed `getHideDrawingsButton()` selector ambiguity where substring matching for `"Hide Drawings"` improperly targeted TradingView's toolbar collapse button ("Hide Drawing Tools"). Added comprehensive negative guards (`tools`, `collapse`, `toggle`, `sidebar`, `toolbar`, `panel`, `expand`), and strictly prevented `restoreSidebarSelections()` from toggling hide buttons unless explicitly saved as `true` by the user.
+  3. *Fixed `side_toolbar.state` String Corruption*: Corrected `localStorage` pre-seeding from boolean string `'true'` to `'expanded'`, matching TradingView's internal state schema and ensuring the side toolbar loads expanded on chart initialization.
+  4. *Multi-Tier Recovery & Action State Desync Self-Healing*: Enhanced `ensureDrawingToolbarVisible()` with multi-tiered recovery across widget/chart APIs (`showDrawingToolbar()`, `setDrawingToolbarVisibility(true)`), bottom-left chart corner DOM expand toggle selectors, and action state self-healing that automatically detects desynchronized action states and re-toggles `drawingToolbarAction` into DOM sync.
+  5. *Accurate Dropdown Badge & Direct Toggle*: Updated the Cortex dropdown "Left Drawing Toolbar" badge to reflect ground-truth DOM state (`VISIBLE` vs `HIDDEN`), and wired the toggle click event to explicitly alternate target visibility (`force: !latestDrawingToolbarVisible`).
 
 ---
 

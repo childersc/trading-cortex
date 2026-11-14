@@ -4211,12 +4211,12 @@
 
     // Left Drawing Toolbar Toggle Button -> sends toggle command to TradingView chart
     menuEl.querySelector('#vest-sdm-toggle-drawing-toolbar-btn')?.addEventListener('click', () => {
-      const force = latestDrawingToolbarVisible === false ? true : null;
+      const nextVisible = !latestDrawingToolbarVisible;
       postToMainWorlds({
         type: 'VEST_TV_TOGGLE_DRAWING_TOOLBAR',
-        payload: { force }
+        payload: { force: nextVisible }
       });
-      showToast(latestDrawingToolbarVisible === false ? 'Opening left drawing toolbar...' : 'Toggling left drawing toolbar...');
+      showToast(nextVisible ? 'Opening left drawing toolbar...' : 'Hiding left drawing toolbar...');
     });
 
     // Perp Firm Settings Button -> opens Settings Dialog on Perp Firms tab
