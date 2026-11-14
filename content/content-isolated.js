@@ -6324,7 +6324,7 @@
         voicesChangedHandler = null;
       }
       overlay.innerHTML = `
-        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: 820px; height: 580px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: 80vw; height: 80vh; max-width: 80vw; max-height: 80vh; min-width: min(760px, 94vw); min-height: min(520px, 92vh); transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
           <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move">
             <div class="vest-tvs-title">Settings</div>
             <button type="button" class="vest-tvs-close-btn" id="vest-tvs-close" title="Close">
@@ -13032,7 +13032,7 @@ if (activeTab === 'diagnostics') {
     function renderManagerDialog() {
       const navItems = getSidebarCategories();
       overlay.innerHTML = `
-        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Template Manager" style="width: 820px; height: 560px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Template Manager" style="width: 80vw; height: 80vh; max-width: 80vw; max-height: 80vh; min-width: min(760px, 94vw); min-height: min(520px, 92vh); transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
           <div class="vest-tvs-header" id="vest-tm-drag-handle" title="Drag to move">
             <div class="vest-tvs-title">Template Manager</div>
             <button type="button" class="vest-tvs-close-btn" id="vest-tm-close" title="Close">

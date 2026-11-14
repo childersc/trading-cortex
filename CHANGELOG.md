@@ -11,6 +11,7 @@ All notable changes, new features, and bug fixes through the current release (`v
 - **Timeframe Toolbar Harmony with Third-Party Buttons (TV / Vela)**: Resolved the rapid jumping and DOM positioning fight between Cortex timeframe shortcut buttons and third-party indicator buttons (`TV / Vela`). Let the third-party indicator (`TV / Vela`) hold the front position directly following the native interval button, situating Trading Cortex timeframe buttons cleanly immediately after it without DOM re-entry or MutationObserver churn.
 
 ### ✨ Features
+- **80% Viewport Settings & Manager Panel**: Expanded the Trading Cortex multi-tab Settings dialog and Template Manager dialogs to take up 80% around each side of the screen (`80vw` × `80vh`), centered in the viewport with responsive bounds, providing expansive breathing room for side-by-side perp firm tiles, session configurations, and controls.
 - **Bottom Positions & Orders Detach & Minimize**:
   - Added dedicated `DETACH` button to the bottom positions and orders box, popping it out into a floating, moveable, resizable HUD window so the chart can become full screen.
   - Added `MINIMIZE` button to minimize the bottom panel directly to the Cortex top toolbar system, instantly collapsing the panel and split resizer so the chart expands to 100% full screen.
