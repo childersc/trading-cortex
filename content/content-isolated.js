@@ -1337,6 +1337,7 @@
       headerHeightPx: 48,
       rememberOrderAmount: true,
       restoreSelectedAccount: true,
+      managePositionsPanel: true,
       defaultLeverage: "5x",
       notes: "Top-bar anchored below primary navbar and above ticker row"
     },
@@ -1354,6 +1355,7 @@
       headerHeightPx: 48,
       rememberOrderAmount: true,
       restoreSelectedAccount: true,
+      managePositionsPanel: true,
       defaultLeverage: "10x",
       notes: "Arbitrum perpetual DEX on Vest"
     },
@@ -1371,6 +1373,7 @@
       headerHeightPx: 48,
       rememberOrderAmount: true,
       restoreSelectedAccount: true,
+      managePositionsPanel: true,
       defaultLeverage: "10x",
       notes: "Base app portal"
     }
@@ -1402,6 +1405,8 @@
         barMarginBottom: Number.isFinite(existing.barMarginBottom) ? Math.max(0, Math.min(100, existing.barMarginBottom)) : def.barMarginBottom,
         headerHeightPx: Number.isFinite(existing.headerHeightPx) ? Math.max(0, Math.min(200, existing.headerHeightPx)) : def.headerHeightPx,
         rememberOrderAmount: existing.rememberOrderAmount !== false,
+        restoreSelectedAccount: existing.restoreSelectedAccount !== false,
+        managePositionsPanel: existing.managePositionsPanel !== false,
         defaultLeverage: String(existing.defaultLeverage || def.defaultLeverage || '10x'),
         notes: String(existing.notes || def.notes || '')
       });
@@ -1429,6 +1434,8 @@
         barMarginBottom: Number.isFinite(item.barMarginBottom) ? Math.max(0, Math.min(100, item.barMarginBottom)) : 8,
         headerHeightPx: Number.isFinite(item.headerHeightPx) ? Math.max(0, Math.min(200, item.headerHeightPx)) : 48,
         rememberOrderAmount: item.rememberOrderAmount !== false,
+        restoreSelectedAccount: item.restoreSelectedAccount !== false,
+        managePositionsPanel: item.managePositionsPanel !== false,
         defaultLeverage: String(item.defaultLeverage || '10x'),
         notes: String(item.notes || '')
       });
@@ -1546,6 +1553,7 @@
     debugMode: false,
     minimizedWindowOrder: [],
     diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
+    bottomPanelStates: {},
     bottomPanelState: {
       isMinimized: false,
       isDetached: false,
@@ -6337,6 +6345,23 @@
                 </label>
               </div>
             </div>
+
+            <!-- Section 5: Positions & Orders Panel Management -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Positions &amp; Orders Panel Management
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="max-width:80%;">
+                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Manage Positions &amp; Orders Panel (Dock / Minimize / Detach)</div>
+                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Allows detaching or minimizing the Positions &amp; Orders bottom panel into full screen chart mode on this firm. When minimized or detached, a sleek POSITIONS item docks into the Cortex taskbar.</div>
+                </div>
+                <label class="vest-tvs-switch" title="Toggle Positions & Orders Panel Management">
+                  <input type="checkbox" id="vest-pf-input-manage-positions" ${firm.managePositionsPanel !== false ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+            </div>
           </div>
         `;
       }
@@ -6628,6 +6653,8 @@
       if (levEl) firm.defaultLeverage = levEl.value;
       if (rememberSizeEl) firm.rememberOrderAmount = Boolean(rememberSizeEl.checked);
       if (restoreAccountEl) firm.restoreSelectedAccount = Boolean(restoreAccountEl.checked);
+      const managePositionsEl = overlay.querySelector('#vest-pf-input-manage-positions');
+      if (managePositionsEl) firm.managePositionsPanel = Boolean(managePositionsEl.checked);
       if (notesEl) firm.notes = notesEl.value.trim();
     }
     function syncCurrentPaneToDraft() {
@@ -7910,6 +7937,8 @@
               barMarginBottom: 8,
               headerHeightPx: 48,
               rememberOrderAmount: true,
+              restoreSelectedAccount: true,
+              managePositionsPanel: true,
               defaultLeverage: '10x',
               notes: ''
             };
@@ -8245,12 +8274,6 @@ if (activeTab === 'diagnostics') {
       if (r.right > startX) startX = r.right;
     }
 
-    const bottomPill = document.getElementById('vest-bottom-panel-topbar-pill');
-    if (bottomPill && bottomPill.isConnected && bottomPill.style.display !== 'none') {
-      const r = bottomPill.getBoundingClientRect();
-      if (r.right > startX) startX = r.right;
-    }
-
     return Math.round(startX + 8);
   }
 
@@ -8259,7 +8282,14 @@ if (activeTab === 'diagnostics') {
       ? [...settings.minimizedWindowOrder]
       : (Array.isArray(minimizedWindowOrder) ? [...minimizedWindowOrder] : []);
 
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const isPositionsManaged = !activeFirm || activeFirm.managePositionsPanel !== false;
+    const st = typeof getActiveFirmBottomPanelState === 'function' ? getActiveFirmBottomPanelState() : (settings.bottomPanelState || {});
+
     const activeCollapsed = [];
+    if (isPositionsManaged && (st.isMinimized || st.isDetached)) {
+      activeCollapsed.push('positions');
+    }
     if (settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
       activeCollapsed.push('news');
     }
@@ -8373,6 +8403,9 @@ if (activeTab === 'diagnostics') {
       } else if (boxType === 'diagnostics') {
         el = chartDiagnosticsBoxEl;
         defaultW = 245;
+      } else if (boxType === 'positions') {
+        el = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
+        defaultW = 195;
       }
 
       if (!el || !el.isConnected || el.style.display === 'none') continue;
@@ -11034,15 +11067,35 @@ if (activeTab === 'diagnostics') {
     return latestDetectedPositionsCount;
   }
 
-  function saveBottomPanelState(updates) {
-    if (!settings.bottomPanelState) {
-      settings.bottomPanelState = { isMinimized: false, isDetached: false, pos: null };
+  function getActiveFirmBottomPanelState() {
+    const firm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const firmId = firm?.id || 'default';
+    if (settings.bottomPanelStates && settings.bottomPanelStates[firmId]) {
+      return settings.bottomPanelStates[firmId];
     }
-    settings.bottomPanelState = {
-      ...settings.bottomPanelState,
+    if (settings.bottomPanelState && typeof settings.bottomPanelState === 'object') {
+      return settings.bottomPanelState;
+    }
+    return { isMinimized: false, isDetached: false, pos: null };
+  }
+
+  function saveBottomPanelState(updates) {
+    const firm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const firmId = firm?.id || 'default';
+    if (!settings.bottomPanelStates) {
+      settings.bottomPanelStates = {};
+    }
+    const current = getActiveFirmBottomPanelState();
+    const updated = {
+      ...current,
       ...updates
     };
-    queueSettingsSave({ bottomPanelState: settings.bottomPanelState });
+    settings.bottomPanelStates[firmId] = updated;
+    settings.bottomPanelState = updated;
+    queueSettingsSave({
+      bottomPanelStates: settings.bottomPanelStates,
+      bottomPanelState: updated
+    });
   }
 
   function findBottomPositionsPanel() {
@@ -11202,6 +11255,11 @@ if (activeTab === 'diagnostics') {
     setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
 
     saveBottomPanelState({ isMinimized: true, isDetached: false });
+    if (!minimizedWindowOrder.includes('positions')) {
+      minimizedWindowOrder.push('positions');
+      settings.minimizedWindowOrder = [...minimizedWindowOrder];
+      queueSettingsSave({ minimizedWindowOrder: settings.minimizedWindowOrder });
+    }
     updateBottomPanelTopBarPill();
 
     if (showToastMsg) {
@@ -11251,6 +11309,11 @@ if (activeTab === 'diagnostics') {
     setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
 
     saveBottomPanelState({ isMinimized: false, isDetached: false });
+    minimizedWindowOrder = minimizedWindowOrder.filter(id => id !== 'positions');
+    if (Array.isArray(settings.minimizedWindowOrder)) {
+      settings.minimizedWindowOrder = settings.minimizedWindowOrder.filter(id => id !== 'positions');
+      queueSettingsSave({ minimizedWindowOrder: settings.minimizedWindowOrder });
+    }
     updateBottomPanelTopBarPill();
 
     if (showToastMsg) {
@@ -11310,6 +11373,11 @@ if (activeTab === 'diagnostics') {
     setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
 
     saveBottomPanelState({ isMinimized: false, isDetached: true, pos: { top, left, width, height } });
+    if (!minimizedWindowOrder.includes('positions')) {
+      minimizedWindowOrder.push('positions');
+      settings.minimizedWindowOrder = [...minimizedWindowOrder];
+      queueSettingsSave({ minimizedWindowOrder: settings.minimizedWindowOrder });
+    }
     updateBottomPanelTopBarPill();
 
     if (showToastMsg) {
@@ -11479,33 +11547,21 @@ if (activeTab === 'diagnostics') {
   }
 
   function ensureBottomPanelTopBarPill() {
-    const bar = ensureCortexTopBar();
-    if (!bar) return null;
-
-    let pill = document.getElementById('vest-bottom-panel-topbar-pill');
+    let pill = document.getElementById('vest-bottom-panel-topbar-pill') || bottomPanelTopBarPillEl;
     if (!pill) {
       pill = document.createElement('div');
       pill.id = 'vest-bottom-panel-topbar-pill';
-      pill.className = 'vest-topbar-action-pill';
-      const studioPill = document.getElementById('vest-studio-header-pill');
-      if (studioPill && studioPill.nextSibling) {
-        bar.insertBefore(pill, studioPill.nextSibling);
-      } else {
-        bar.appendChild(pill);
-      }
+      pill.className = 'is-minimized-pill';
+      pill.style.position = 'fixed';
+      pill.style.zIndex = '99990';
+      pill.style.display = 'none';
+      document.body.appendChild(pill);
 
       pill.addEventListener('click', (e) => {
         e.stopPropagation();
-        const st = settings.bottomPanelState || {};
-        if (st.isMinimized) {
+        const st = getActiveFirmBottomPanelState();
+        if (st.isMinimized || st.isDetached) {
           restoreBottomPanelDocked(true);
-        } else if (st.isDetached) {
-          if (cachedBottomPanelEl) {
-            cachedBottomPanelEl.style.setProperty('z-index', '99999', 'important');
-          }
-          restoreBottomPanelDocked(true);
-        } else {
-          minimizeBottomPanel(true);
         }
       });
     }
@@ -11519,29 +11575,57 @@ if (activeTab === 'diagnostics') {
     const pill = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
     if (!pill) return;
 
-    const st = settings.bottomPanelState || {};
+    const firm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (firm && firm.managePositionsPanel === false) {
+      pill.style.display = 'none';
+      repositionAllMinimizedBoxes();
+      return;
+    }
+
+    const st = getActiveFirmBottomPanelState();
     const isMin = Boolean(st.isMinimized);
     const isDet = Boolean(st.isDetached);
     const posCount = getLivePositionCount();
 
-    pill.className = `vest-topbar-action-pill ${isMin ? 'minimized' : (isDet ? 'detached' : '')}`;
+    if (!isMin && !isDet) {
+      // Docked / normal state: DO NOT SHOW IN TOP BAR!
+      pill.style.display = 'none';
+      repositionAllMinimizedBoxes();
+      return;
+    }
+
+    pill.style.display = 'block';
+    pill.className = `is-minimized-pill ${isDet ? 'detached' : 'minimized'}`;
     pill.title = isMin
       ? 'Positions & Orders Minimized (Click to Restore Docked)'
-      : (isDet ? 'Positions & Orders Detached (Click to Dock to Bottom)' : 'Positions & Orders Docked (Click to Minimize for Full Screen Chart)');
+      : 'Positions & Orders Detached (Click to Dock to Bottom)';
 
-    const statusClass = isMin ? 'min' : (isDet ? 'det' : 'dock');
-    const statusText = isMin ? 'MINIMIZED ↗' : (isDet ? 'DETACHED' : 'DOCKED');
+    const dotColor = isMin ? '#38bdf8' : '#c084fc';
+    const statusText = isMin ? 'MIN' : 'DETACH';
+    const statusStyle = isMin
+      ? 'color:#22d3ee; background:rgba(6, 182, 212, 0.18); border:1px solid rgba(34, 211, 238, 0.35);'
+      : 'color:#c084fc; background:rgba(168, 85, 247, 0.18); border:1px solid rgba(192, 132, 252, 0.35);';
 
     pill.innerHTML = `
-      <div class="vest-bpp-trigger">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px; color:#38bdf8;">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-          <line x1="3" y1="9" x2="21" y2="9"></line>
-          <line x1="9" y1="21" x2="9" y2="9"></line>
-        </svg>
-        <span class="vest-bpp-label">POSITIONS</span>
-        <span class="vest-bpp-count" id="vest-bpp-pos-count">${posCount > 0 ? posCount : '0'}</span>
-        <span class="vest-bpp-status ${statusClass}">${statusText}</span>
+      <div class="vest-cnb-min-pill-bar" id="vest-bpp-restore-bar" title="${isMin ? 'Positions & Orders Minimized (Click to Restore Docked)' : 'Positions & Orders Detached (Click to Dock to Bottom)'}">
+        <div class="vest-cnb-title-group">
+          <span class="vest-cnb-title-dot" style="background:${dotColor}; box-shadow:0 0 8px ${dotColor};"></span>
+          <span class="vest-cnb-title">POSITIONS</span>
+          <span style="font-size:9.5px; font-family:'JetBrains Mono', monospace; font-weight:700; color:${posCount > 0 ? '#34d399' : '#94a3b8'}; background:${posCount > 0 ? 'rgba(16, 185, 129, 0.18)' : 'rgba(255, 255, 255, 0.06)'}; border:1px solid ${posCount > 0 ? 'rgba(52, 211, 153, 0.35)' : 'rgba(255, 255, 255, 0.1)'}; padding:1px 5px; border-radius:4px;">
+            ${posCount}
+          </span>
+          <span style="font-size:8.5px; font-weight:700; letter-spacing:0.4px; text-transform:uppercase; padding:1px 5px; border-radius:3px; ${statusStyle}">
+            ${statusText}
+          </span>
+        </div>
+        <span class="vest-cnb-restore-hint" title="${isMin ? 'Restore Docked' : 'Dock to Bottom'}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:13px; height:13px;">
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <polyline points="9 21 3 21 3 15"></polyline>
+            <line x1="21" y1="3" x2="14" y2="10"></line>
+            <line x1="3" y1="21" x2="10" y2="14"></line>
+          </svg>
+        </span>
       </div>
     `;
 
@@ -11554,6 +11638,21 @@ if (activeTab === 'diagnostics') {
 
   function ensureBottomPositionsPanelManager() {
     if (!isTopWindow) return;
+    const firm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (firm && firm.managePositionsPanel === false) {
+      const pill = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
+      if (pill) pill.style.display = 'none';
+      const info = findBottomPositionsPanel();
+      if (info && info.panel) {
+        if (info.panel.classList.contains('vest-bottom-panel-minimized') || info.panel.classList.contains('vest-bottom-panel-detached')) {
+          restoreBottomPanelDocked(false);
+        }
+        const controls = info.panel.querySelector('#vest-bottom-panel-controls');
+        if (controls) controls.remove();
+      }
+      return;
+    }
+
     const info = findBottomPositionsPanel();
     ensureBottomPanelTopBarPill();
 
@@ -11561,7 +11660,7 @@ if (activeTab === 'diagnostics') {
     const panel = info.panel;
     const tabBar = info.tabBar;
 
-    const st = settings.bottomPanelState || {};
+    const st = getActiveFirmBottomPanelState();
     if (st.isMinimized) {
       if (!panel.classList.contains('vest-bottom-panel-minimized')) {
         minimizeBottomPanel(false);
@@ -11597,8 +11696,10 @@ if (activeTab === 'diagnostics') {
       // Alt + P to toggle Positions & Orders Panel Minimized / Docked
       if (e.altKey && (e.key === 'p' || e.key === 'P')) {
         e.preventDefault();
-        const st = settings.bottomPanelState || {};
-        if (st.isMinimized) {
+        const firm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+        if (firm && firm.managePositionsPanel === false) return;
+        const st = getActiveFirmBottomPanelState();
+        if (st.isMinimized || st.isDetached) {
           restoreBottomPanelDocked(true);
         } else {
           minimizeBottomPanel(true);
@@ -13898,6 +13999,7 @@ if (activeTab === 'diagnostics') {
           perpFirms: normalizePerpFirmsConfig(data.settings.perpFirms, data.settings.deletedFirmIds),
           deletedFirmIds: Array.isArray(data.settings.deletedFirmIds) ? data.settings.deletedFirmIds : [],
           vestLastActiveAccount: data.settings.vestLastActiveAccount || null,
+          bottomPanelStates: (data.settings.bottomPanelStates && typeof data.settings.bottomPanelStates === 'object') ? data.settings.bottomPanelStates : {},
           sessionIndicators: normalizeSessionIndicatorsConfig(data.settings.sessionIndicators),
           autoFvg: normalizeAutoFvgConfig(data.settings.autoFvg),
           newsBox: normalizeNewsBoxConfig(data.settings.newsBox),
@@ -13919,6 +14021,7 @@ if (activeTab === 'diagnostics') {
         settings.perpFirms = normalizePerpFirmsConfig(settings.perpFirms, settings.deletedFirmIds);
         settings.deletedFirmIds = Array.isArray(settings.deletedFirmIds) ? settings.deletedFirmIds : [];
         settings.vestLastActiveAccount = settings.vestLastActiveAccount || null;
+        settings.bottomPanelStates = (settings.bottomPanelStates && typeof settings.bottomPanelStates === 'object') ? settings.bottomPanelStates : {};
         settings.sessionIndicators = normalizeSessionIndicatorsConfig(settings.sessionIndicators);
         settings.autoFvg = normalizeAutoFvgConfig(settings.autoFvg);
         settings.newsBox = normalizeNewsBoxConfig(settings.newsBox);

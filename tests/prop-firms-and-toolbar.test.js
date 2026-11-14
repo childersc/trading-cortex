@@ -162,4 +162,11 @@ assert.strictEqual(isolatedContent.includes('account-selector-trigger'), true);
 assert.strictEqual(isolatedContent.includes('Restore Selected Account on Refresh'), true);
 console.log('✓ Vest account tracking and auto-restoration verified');
 
+// 5. Verify Positions panel management per-firm setting and scoped state
+assert.strictEqual(isolatedContent.includes('managePositionsPanel: true'), true);
+assert.strictEqual(isolatedContent.includes('Manage Positions &amp; Orders Panel'), true);
+assert.strictEqual(isolatedContent.includes('function getActiveFirmBottomPanelState()'), true);
+assert.strictEqual(isolatedContent.includes('vest-pf-input-manage-positions'), true);
+console.log('✓ Positions panel per-firm management & scoped state verified');
+
 console.log('All Prop Firms Management, Account Restoration & Toolbar Tests Passed!');

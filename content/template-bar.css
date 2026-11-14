@@ -2728,7 +2728,9 @@ body.vest-cortex-top-bar-active {
 }
 
 #vest-chart-news-box.is-minimized-pill,
-#vest-chart-trades-box.is-minimized-pill {
+#vest-chart-trades-box.is-minimized-pill,
+#vest-chart-diagnostics-box.is-minimized-pill,
+#vest-bottom-panel-topbar-pill.is-minimized-pill {
   cursor: pointer !important;
   border-radius: 8px !important;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(56, 189, 248, 0.25) !important;
@@ -2736,7 +2738,9 @@ body.vest-cortex-top-bar-active {
 }
 
 #vest-chart-news-box.is-minimized-pill:hover,
-#vest-chart-trades-box.is-minimized-pill:hover {
+#vest-chart-trades-box.is-minimized-pill:hover,
+#vest-chart-diagnostics-box.is-minimized-pill:hover,
+#vest-bottom-panel-topbar-pill.is-minimized-pill:hover {
   border-color: rgba(56, 189, 248, 0.85) !important;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.82), 0 0 12px rgba(56, 189, 248, 0.28) !important;
 }
@@ -4131,95 +4135,38 @@ body.vest-cortex-top-bar-active {
   color: #34d399;
 }
 
-/* Cortex Toolbar (Top Bar) Pill */
+/* Cortex Toolbar (Top Bar) Minimized Positions Pill */
 #vest-bottom-panel-topbar-pill {
-  position: relative;
-  display: inline-flex;
+  position: fixed !important;
+  z-index: 99990 !important;
+  display: none;
   align-items: center;
-  margin-right: 8px;
-  z-index: 2147483640;
+  margin: 0 !important;
+  border-radius: 8px !important;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   user-select: none;
-  flex-shrink: 0;
-  cursor: pointer;
+  cursor: pointer !important;
+  box-sizing: border-box;
+  background: rgba(19, 23, 34, 0.92) !important;
+  border: 1px solid rgba(56, 189, 248, 0.48) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(56, 189, 248, 0.25) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: left 0.18s cubic-bezier(0.2, 0, 0, 1), top 0.18s cubic-bezier(0.2, 0, 0, 1), border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
 
-#vest-bottom-panel-topbar-pill .vest-bpp-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 2px 10px 2px 8px;
-  background: linear-gradient(145deg, rgba(20, 25, 36, 0.92), rgba(15, 19, 28, 0.92));
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-radius: 9999px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  color: #f8fafc;
-  font-size: 11.5px;
-  font-weight: 600;
-  transition: all 0.16s ease;
+#vest-bottom-panel-topbar-pill:hover {
+  border-color: rgba(56, 189, 248, 0.85) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.82), 0 0 12px rgba(56, 189, 248, 0.28) !important;
 }
 
-#vest-bottom-panel-topbar-pill:hover .vest-bpp-trigger {
-  border-color: #38bdf8;
-  background: linear-gradient(145deg, rgba(28, 35, 51, 0.95), rgba(20, 25, 36, 0.95));
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
-  transform: translateY(-1px);
+#vest-bottom-panel-topbar-pill.detached {
+  border-color: rgba(168, 85, 247, 0.55) !important;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(168, 85, 247, 0.25) !important;
 }
 
-#vest-bottom-panel-topbar-pill.minimized .vest-bpp-trigger {
-  border-color: #06b6d4;
-  background: linear-gradient(145deg, rgba(6, 182, 212, 0.18), rgba(15, 23, 42, 0.92));
-  box-shadow: 0 0 14px rgba(6, 182, 212, 0.35), inset 0 0 0 1px rgba(6, 182, 212, 0.3);
-}
-
-#vest-bottom-panel-topbar-pill.detached .vest-bpp-trigger {
-  border-color: #a855f7;
-  background: linear-gradient(145deg, rgba(168, 85, 247, 0.18), rgba(15, 23, 42, 0.92));
-  box-shadow: 0 0 14px rgba(168, 85, 247, 0.35);
-}
-
-.vest-bpp-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  color: #e2e8f0;
-}
-
-.vest-bpp-count {
-  font-size: 10px;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', monospace;
-  padding: 1px 5px;
-  border-radius: 9999px;
-  background: rgba(16, 185, 129, 0.2);
-  border: 1px solid rgba(52, 211, 153, 0.4);
-  color: #34d399;
-}
-
-.vest-bpp-status {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  padding: 1.5px 5px;
-  border-radius: 4px;
-}
-
-.vest-bpp-status.dock {
-  background: rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
-}
-
-.vest-bpp-status.min {
-  background: rgba(6, 182, 212, 0.25);
-  color: #22d3ee;
-  border: 1px solid rgba(34, 211, 238, 0.4);
-}
-
-.vest-bpp-status.det {
-  background: rgba(168, 85, 247, 0.25);
-  color: #c084fc;
-  border: 1px solid rgba(192, 132, 252, 0.4);
+#vest-bottom-panel-topbar-pill.detached:hover {
+  border-color: rgba(192, 132, 252, 0.85) !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.82), 0 0 12px rgba(168, 85, 247, 0.35) !important;
 }
 
