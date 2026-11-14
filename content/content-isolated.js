@@ -1873,6 +1873,7 @@
     globalDrawings = normalizeGlobalDrawings(next);
     if (!isTopWindow || !isExtensionValid()) return;
     chrome.storage.local.set({ globalDrawings }).catch(() => {});
+    postToMainWorlds({ type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE', payload: { drawings: globalDrawings } });
   }
 
   // Listen for storage changes from popup
@@ -2597,16 +2598,22 @@
     } else if (type === 'VEST_TV_GLOBAL_DRAWING_UPSERT') {
       if (!isTopWindow || !isExtensionValid() || !event.data.drawing) return;
       const drawing = event.data.drawing;
+      globalDrawings = (globalDrawings || []).filter(item => item && item.id !== drawing.id);
+      globalDrawings.push(drawing);
+      postToMainWorlds({ type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE', payload: { drawings: globalDrawings } });
       const stored = await chrome.storage.local.get(['globalDrawings']).catch(() => ({}));
       const latest = normalizeGlobalDrawings(stored.globalDrawings || globalDrawings);
-      const next = latest.filter(item => item.id !== drawing.id);
+      const next = latest.filter(item => item && item.id !== drawing.id);
       next.push(drawing);
       saveGlobalDrawings(next);
     } else if (type === 'VEST_TV_GLOBAL_DRAWING_REMOVE') {
       if (!isTopWindow || !isExtensionValid() || !event.data.drawingId) return;
+      const targetId = event.data.drawingId;
+      globalDrawings = (globalDrawings || []).filter(item => item && item.id !== targetId);
+      postToMainWorlds({ type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE', payload: { drawings: globalDrawings } });
       const stored = await chrome.storage.local.get(['globalDrawings']).catch(() => ({}));
       const latest = normalizeGlobalDrawings(stored.globalDrawings || globalDrawings);
-      saveGlobalDrawings(latest.filter(item => item.id !== event.data.drawingId));
+      saveGlobalDrawings(latest.filter(item => item && item.id !== targetId));
     } else if (type === 'VEST_TV_TOGGLE_TIMEFRAME_FAVORITE') {
       if (!isTopWindow) return;
       const payload = event.data.payload || {};
