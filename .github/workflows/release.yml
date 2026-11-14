@@ -41,7 +41,7 @@ jobs:
               IFS='.' read -r MAJOR MINOR PATCH <<< "$MANIFEST_VER"
               PATCH=$((PATCH + 1))
               VERSION="${MAJOR}.${MINOR}.${PATCH}"
-              jq --arg v "$VERSION" '.version = $v' manifest.json > manifest.tmp.json && mv manifest.tmp.json manifest.json
+              jq --arg v "$VERSION" '.version = $v | del(.version_name)' manifest.json > manifest.tmp.json && mv manifest.tmp.json manifest.json
               git add manifest.json
               git commit -m "chore(release): auto-bump version to v${VERSION} [skip ci]"
               git push origin HEAD:main

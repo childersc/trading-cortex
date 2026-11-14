@@ -1602,7 +1602,7 @@
     try {
       if (isExtensionValid() && chrome.runtime.getManifest) {
         const m = chrome.runtime.getManifest();
-        manifestVer = m.version_name || m.version || '1.1.0';
+        manifestVer = m.version || m.version_name || '1.1.0';
       }
     } catch (e) {}
     if (installedVersionOverride && compareSemver(installedVersionOverride, manifestVer) > 0) {
@@ -3956,9 +3956,6 @@
     }
     studioDropdownEl = menuEl;
 
-    const isDev = latestUpdateChannel === 'dev' || /alpha/i.test(extVersion);
-    const cleanVer = cleanSemver(extVersion);
-
     const channelHeaderHtml = `
       <div class="vest-sdm-channel-header ${isDev ? 'dev' : 'prod'}">
         <div class="vest-sdm-channel-top">
@@ -4546,6 +4543,308 @@
         }
       });
     }
+
+      function renderPerpFirmsHtml() {
+        const firms = normalizePerpFirmsConfig(draftSettings.perpFirms);
+        const currentFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+        const activeId = currentFirm ? currentFirm.id : null;
+
+        if (selectedFirmId !== '__new__' && !firms.some(f => f.id === selectedFirmId)) {
+          selectedFirmId = activeId || (firms[0] ? firms[0].id : '__new__');
+        }
+
+        const isAddingNew = selectedFirmId === '__new__';
+        const selectedFirm = !isAddingNew ? firms.find(f => f.id === selectedFirmId) : null;
+
+        function getInitials(name) {
+          if (!name) return 'PF';
+          const parts = name.trim().split(/\s+/);
+          if (parts.length >= 2) {
+            return (parts[0][0] + parts[1][0]).toUpperCase();
+          }
+          return name.slice(0, 3).toUpperCase();
+        }
+
+        function cleanDomain(url) {
+          if (!url) return '';
+          return url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+        }
+
+        return `
+          <div class="vest-tvs-section-title">PERP FIRM SETTINGS &amp; BROKER ROUTING</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 16px;">
+            Configure Trading Cortex across multiple perpetual trading firms and prop brokers. Select a tile to customize top-bar offsets, margins, and account settings below, or add any new perp firm by URL.
+          </p>
+
+          <!-- Side-by-side Tiles Grid -->
+          <div class="vest-pf-grid">
+            ${firms.map(firm => {
+              const isSelected = !isAddingNew && firm.id === selectedFirmId;
+              const isCurrent = activeId === firm.id;
+              const initials = getInitials(firm.name);
+              const domain = cleanDomain(firm.url) || (firm.matchPatterns && firm.matchPatterns[0]) || '';
+              const topBarLabel = firm.topBarMode === 'custom' ? `+${firm.customTopBarOffsetPx}px` : 'Auto';
+              const marginLabel = `${firm.barMarginBottom ?? 8}px`;
+
+              return `
+                <div class="vest-pf-tile ${isSelected ? 'selected' : ''} ${!firm.enabled ? 'disabled' : ''}" data-firm-id="${firm.id}">
+                  <div class="vest-pf-tile-top">
+                    <div class="vest-pf-tile-title-row">
+                      <div class="vest-pf-avatar" title="${firm.name}">${getPropFirmLogoSvg(firm.id, 24)}</div>
+                      <div class="vest-pf-name" title="${firm.name}">${firm.name}</div>
+                      <button type="button" class="vest-pf-tile-delete-btn" data-delete-firm-id="${firm.id}" title="Remove ${firm.name}" style="margin-left:auto; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#fca5a5; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700; cursor:pointer; line-height:1.2;">
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="vest-pf-url-badge" title="${firm.url || domain}">
+                    ${domain || 'No URL'}
+                  </div>
+
+                  <div class="vest-pf-tags-row">
+                    ${isCurrent ? `<span class="vest-pf-badge current">Current Site</span>` : ''}
+                    ${firm.isBuiltin ? `<span class="vest-pf-badge builtin">Built-In</span>` : `<span class="vest-pf-badge custom">Custom</span>`}
+                    ${!firm.enabled ? `<span class="vest-pf-badge off">Disabled</span>` : ''}
+                  </div>
+
+                  <div style="font-size:10.5px; color:#64748b; margin-top:2px; display:flex; justify-content:space-between;">
+                    <span>Top-bar: <strong style="color:#94a3b8;">${topBarLabel}</strong></span>
+                    <span>Margin: <strong style="color:#94a3b8;">${marginLabel}</strong></span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+
+            <!-- Add Perp Firm Tile -->
+            <div class="vest-pf-tile vest-pf-tile-add ${isAddingNew ? 'selected' : ''}" id="vest-pf-add-tile">
+              <div class="vest-pf-tile-add-icon">+</div>
+              <div style="font-size:12.5px; font-weight:700; color:#38bdf8;">Add Perp Firm</div>
+              <div style="font-size:10.5px; color:#64748b;">Add Broker / Prop URL</div>
+            </div>
+          </div>
+
+          <!-- Detail Settings Card Below Grid -->
+          <div id="vest-pf-detail-container">
+            ${isAddingNew ? renderAddNewFirmCard() : (selectedFirm ? renderFirmDetailCard(selectedFirm, activeId === selectedFirm.id) : '')}
+          </div>
+        `;
+      }
+
+      function renderFirmDetailCard(firm, isCurrent) {
+        const topMode = firm.topBarMode === 'custom' ? 'custom' : 'auto';
+        const offsetPx = firm.customTopBarOffsetPx ?? 0;
+        const marginPx = firm.barMarginBottom ?? 8;
+        const headerPx = firm.headerHeightPx ?? 48;
+        const lev = firm.defaultLeverage || '10x';
+
+        return `
+          <div class="vest-pf-detail-card" id="vest-pf-detail-card">
+            <input type="hidden" id="vest-pf-current-id" value="${firm.id}" />
+
+            <div class="vest-pf-detail-header">
+              <div class="vest-pf-detail-title-group">
+                <div class="vest-pf-avatar" style="width:36px; height:36px; display:flex; align-items:center; justify-content:center;">
+                  ${getPropFirmLogoSvg(firm.id, 26)}
+                </div>
+                <div>
+                  <div class="vest-pf-detail-title">${firm.name}</div>
+                  <div class="vest-pf-detail-subtitle">${firm.url || 'No URL specified'}</div>
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:11.5px; font-weight:600; color:${firm.enabled ? '#34d399' : '#94a3b8'};">
+                    ${firm.enabled ? 'Cortex Active' : 'Cortex Disabled'}
+                  </span>
+                  <label class="vest-tvs-switch" title="Enable or disable Trading Cortex on this firm">
+                    <input type="checkbox" id="vest-pf-input-enabled" ${firm.enabled ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+
+                <button type="button" id="vest-pf-btn-delete" style="background:rgba(239,68,68,0.14); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Remove this prop firm">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  Remove Prop Firm
+                </button>
+              </div>
+            </div>
+
+            <!-- Section 1: Firm Identification & URL Routing -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Firm Identification &amp; Routing
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Firm Display Name</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-name" value="${firm.name}" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Account Tier / Type</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-tier" value="${firm.accountTier || ''}" placeholder="e.g. Evaluation / Funded / DEX" />
+                </div>
+              </div>
+              <div class="vest-ed-grid-2">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Web Trading URL</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-url" value="${firm.url || ''}" placeholder="https://example.com/trade" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Domain Match Patterns (comma-separated)</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-patterns" value="${Array.isArray(firm.matchPatterns) ? firm.matchPatterns.join(', ') : ''}" placeholder="example.com, trade.example.com" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 2: Layout & Top-Bar Spacing -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Top-Bar Placement &amp; Spacing
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Cortex Bar Placement Mode</label>
+                  <select class="vest-ed-select" id="vest-pf-input-topbarmode">
+                    <option value="auto" ${topMode === 'auto' ? 'selected' : ''}>Auto Detect (Navbar / Ticker Row)</option>
+                    <option value="custom" ${topMode === 'custom' ? 'selected' : ''}>Custom Fixed Offset (px)</option>
+                  </select>
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Custom Top-Bar Offset: <span id="vest-pf-val-offset" style="color:#38bdf8; font-weight:700;">${offsetPx}px</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-pf-input-offset" min="0" max="140" step="2" value="${offsetPx}" ${topMode === 'auto' ? 'disabled style="opacity:0.45;"' : ''} />
+                </div>
+              </div>
+              <div class="vest-ed-grid-2">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Bottom Margin Spacing: <span id="vest-pf-val-margin" style="color:#38bdf8; font-weight:700;">${marginPx}px</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-pf-input-margin" min="0" max="32" step="1" value="${marginPx}" />
+                  <div style="font-size:10.5px; color:#64748b; margin-top:3px;">Pushes the chart and tickers down so they aren't squished against the Cortex bar.</div>
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Firm Header Height: <span id="vest-pf-val-header" style="color:#38bdf8; font-weight:700;">${headerPx}px</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-pf-input-header" min="32" max="100" step="2" value="${headerPx}" />
+                  <div style="font-size:10.5px; color:#64748b; margin-top:3px;">Standard height of this firm's primary navigation header.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 3: Trading Defaults & Trader Notes -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Trading Defaults &amp; Notes
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Default Order Leverage</label>
+                  <select class="vest-ed-select" id="vest-pf-input-leverage">
+                    ${['1x', '2x', '3x', '5x', '10x', '15x', '20x', '25x', '50x', '100x'].map(v => `<option value="${v}" ${lev === v ? 'selected' : ''}>${v}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="vest-ed-field" style="display:flex; align-items:center; justify-content:space-between; padding-top:16px;">
+                  <label class="vest-ed-label" style="margin:0;">Remember Order Amount / Size</label>
+                  <label class="vest-tvs-switch">
+                    <input type="checkbox" id="vest-pf-input-remember-size" ${firm.rememberOrderAmount !== false ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Trader Notes / Firm Rules</label>
+                <input type="text" class="vest-ed-input" id="vest-pf-input-notes" value="${firm.notes || ''}" placeholder="e.g. Max drawdown 4%, trade only during NY Killzone" />
+              </div>
+            </div>
+
+            <!-- Section 4: Account Persistence & Subaccount Routing -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Account Persistence &amp; Subaccount Routing
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="max-width:80%;">
+                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Restore Selected Account on Refresh</div>
+                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Keeps track of which account is selected on this exchange (e.g. Vest subaccounts or evaluation accounts) and restores your tab to that account on refresh.</div>
+                </div>
+                <label class="vest-tvs-switch" title="Restore selected account on refresh">
+                  <input type="checkbox" id="vest-pf-input-restore-account" ${firm.restoreSelectedAccount !== false ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Section 5: Positions & Orders Panel Management -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Positions &amp; Orders Panel Management
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="max-width:80%;">
+                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Manage Positions &amp; Orders Panel (Dock / Minimize / Detach)</div>
+                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Allows detaching or minimizing the Positions &amp; Orders bottom panel into full screen chart mode on this firm. When minimized or detached, a sleek POSITIONS item docks into the Cortex taskbar.</div>
+                </div>
+                <label class="vest-tvs-switch" title="Toggle Positions & Orders Panel Management">
+                  <input type="checkbox" id="vest-pf-input-manage-positions" ${firm.managePositionsPanel !== false ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderAddNewFirmCard() {
+        return `
+          <div class="vest-pf-detail-card" id="vest-pf-detail-card">
+            <div class="vest-pf-detail-header">
+              <div class="vest-pf-detail-title-group">
+                <div class="vest-pf-avatar" style="width:32px; height:32px; font-size:16px; background:linear-gradient(135deg, #06b6d4, #2563eb); color:#fff;">
+                  +
+                </div>
+                <div>
+                  <div class="vest-pf-detail-title">Add New Perp Trading Firm</div>
+                  <div class="vest-pf-detail-subtitle">Configure Trading Cortex to run on any perpetual broker or prop firm URL</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="vest-ed-section" style="padding:14px 16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:14px;">
+              <div class="vest-ed-grid-2" style="margin-bottom:12px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Firm Name <span style="color:#ef4444;">*</span></label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-new-name" placeholder="e.g. Apex Perp Exchange" />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Account Tier / Type</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-new-tier" placeholder="e.g. Prop Firm Evaluation / Live DEX" />
+                </div>
+              </div>
+
+              <div class="vest-ed-field" style="margin-bottom:12px;">
+                <label class="vest-ed-label">Trading Web URL <span style="color:#ef4444;">*</span></label>
+                <input type="url" class="vest-ed-input" id="vest-pf-new-url" placeholder="https://app.apexperp.com/trade" />
+                <div style="font-size:11px; color:#64748b; margin-top:4px;">
+                  Enter the full URL where the charting terminal is hosted. Trading Cortex will register content scripts for this domain.
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Optional Domain Patterns (comma-separated)</label>
+                <input type="text" class="vest-ed-input" id="vest-pf-new-patterns" placeholder="app.apexperp.com, apexperp.com" />
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <button type="button" id="vest-pf-new-cancel-btn" style="padding:8px 16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;">
+                Cancel
+              </button>
+              <button type="button" id="vest-pf-new-create-btn" style="padding:8px 20px; background:linear-gradient(135deg, #06b6d4, #2563eb); border:none; color:#ffffff; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; box-shadow:0 0 12px rgba(6,182,212,0.35);">
+                Add Perp Firm
+              </button>
+            </div>
+          </div>
+        `;
+      }
 
     function renderRightPaneContent() {
       if (activeTab === 'alertsvoice') {
@@ -6138,307 +6437,6 @@
       }
 
 
-      function renderPerpFirmsHtml() {
-        const firms = normalizePerpFirmsConfig(draftSettings.perpFirms);
-        const currentFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
-        const activeId = currentFirm ? currentFirm.id : null;
-
-        if (selectedFirmId !== '__new__' && !firms.some(f => f.id === selectedFirmId)) {
-          selectedFirmId = activeId || (firms[0] ? firms[0].id : '__new__');
-        }
-
-        const isAddingNew = selectedFirmId === '__new__';
-        const selectedFirm = !isAddingNew ? firms.find(f => f.id === selectedFirmId) : null;
-
-        function getInitials(name) {
-          if (!name) return 'PF';
-          const parts = name.trim().split(/\s+/);
-          if (parts.length >= 2) {
-            return (parts[0][0] + parts[1][0]).toUpperCase();
-          }
-          return name.slice(0, 3).toUpperCase();
-        }
-
-        function cleanDomain(url) {
-          if (!url) return '';
-          return url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-        }
-
-        return `
-          <div class="vest-tvs-section-title">PERP FIRM SETTINGS &amp; BROKER ROUTING</div>
-          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 16px;">
-            Configure Trading Cortex across multiple perpetual trading firms and prop brokers. Select a tile to customize top-bar offsets, margins, and account settings below, or add any new perp firm by URL.
-          </p>
-
-          <!-- Side-by-side Tiles Grid -->
-          <div class="vest-pf-grid">
-            ${firms.map(firm => {
-              const isSelected = !isAddingNew && firm.id === selectedFirmId;
-              const isCurrent = activeId === firm.id;
-              const initials = getInitials(firm.name);
-              const domain = cleanDomain(firm.url) || (firm.matchPatterns && firm.matchPatterns[0]) || '';
-              const topBarLabel = firm.topBarMode === 'custom' ? `+${firm.customTopBarOffsetPx}px` : 'Auto';
-              const marginLabel = `${firm.barMarginBottom ?? 8}px`;
-
-              return `
-                <div class="vest-pf-tile ${isSelected ? 'selected' : ''} ${!firm.enabled ? 'disabled' : ''}" data-firm-id="${firm.id}">
-                  <div class="vest-pf-tile-top">
-                    <div class="vest-pf-tile-title-row">
-                      <div class="vest-pf-avatar" title="${firm.name}">${getPropFirmLogoSvg(firm.id, 24)}</div>
-                      <div class="vest-pf-name" title="${firm.name}">${firm.name}</div>
-                      <button type="button" class="vest-pf-tile-delete-btn" data-delete-firm-id="${firm.id}" title="Remove ${firm.name}" style="margin-left:auto; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#fca5a5; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700; cursor:pointer; line-height:1.2;">
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="vest-pf-url-badge" title="${firm.url || domain}">
-                    ${domain || 'No URL'}
-                  </div>
-
-                  <div class="vest-pf-tags-row">
-                    ${isCurrent ? `<span class="vest-pf-badge current">Current Site</span>` : ''}
-                    ${firm.isBuiltin ? `<span class="vest-pf-badge builtin">Built-In</span>` : `<span class="vest-pf-badge custom">Custom</span>`}
-                    ${!firm.enabled ? `<span class="vest-pf-badge off">Disabled</span>` : ''}
-                  </div>
-
-                  <div style="font-size:10.5px; color:#64748b; margin-top:2px; display:flex; justify-content:space-between;">
-                    <span>Top-bar: <strong style="color:#94a3b8;">${topBarLabel}</strong></span>
-                    <span>Margin: <strong style="color:#94a3b8;">${marginLabel}</strong></span>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-
-            <!-- Add Perp Firm Tile -->
-            <div class="vest-pf-tile vest-pf-tile-add ${isAddingNew ? 'selected' : ''}" id="vest-pf-add-tile">
-              <div class="vest-pf-tile-add-icon">+</div>
-              <div style="font-size:12.5px; font-weight:700; color:#38bdf8;">Add Perp Firm</div>
-              <div style="font-size:10.5px; color:#64748b;">Add Broker / Prop URL</div>
-            </div>
-          </div>
-
-          <!-- Detail Settings Card Below Grid -->
-          <div id="vest-pf-detail-container">
-            ${isAddingNew ? renderAddNewFirmCard() : (selectedFirm ? renderFirmDetailCard(selectedFirm, activeId === selectedFirm.id) : '')}
-          </div>
-        `;
-      }
-
-      function renderFirmDetailCard(firm, isCurrent) {
-        const topMode = firm.topBarMode === 'custom' ? 'custom' : 'auto';
-        const offsetPx = firm.customTopBarOffsetPx ?? 0;
-        const marginPx = firm.barMarginBottom ?? 8;
-        const headerPx = firm.headerHeightPx ?? 48;
-        const lev = firm.defaultLeverage || '10x';
-
-        return `
-          <div class="vest-pf-detail-card" id="vest-pf-detail-card">
-            <input type="hidden" id="vest-pf-current-id" value="${firm.id}" />
-
-            <div class="vest-pf-detail-header">
-              <div class="vest-pf-detail-title-group">
-                <div class="vest-pf-avatar" style="width:36px; height:36px; display:flex; align-items:center; justify-content:center;">
-                  ${getPropFirmLogoSvg(firm.id, 26)}
-                </div>
-                <div>
-                  <div class="vest-pf-detail-title">${firm.name}</div>
-                  <div class="vest-pf-detail-subtitle">${firm.url || 'No URL specified'}</div>
-                </div>
-              </div>
-
-              <div style="display:flex; align-items:center; gap:12px;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <span style="font-size:11.5px; font-weight:600; color:${firm.enabled ? '#34d399' : '#94a3b8'};">
-                    ${firm.enabled ? 'Cortex Active' : 'Cortex Disabled'}
-                  </span>
-                  <label class="vest-tvs-switch" title="Enable or disable Trading Cortex on this firm">
-                    <input type="checkbox" id="vest-pf-input-enabled" ${firm.enabled ? 'checked' : ''} />
-                    <span class="vest-tvs-switch-slider"></span>
-                  </label>
-                </div>
-
-                <button type="button" id="vest-pf-btn-delete" style="background:rgba(239,68,68,0.14); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Remove this prop firm">
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                  Remove Prop Firm
-                </button>
-              </div>
-            </div>
-
-            <!-- Section 1: Firm Identification & URL Routing -->
-            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:12px;">
-              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-                Firm Identification &amp; Routing
-              </div>
-              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Firm Display Name</label>
-                  <input type="text" class="vest-ed-input" id="vest-pf-input-name" value="${firm.name}" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
-                </div>
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Account Tier / Type</label>
-                  <input type="text" class="vest-ed-input" id="vest-pf-input-tier" value="${firm.accountTier || ''}" placeholder="e.g. Evaluation / Funded / DEX" />
-                </div>
-              </div>
-              <div class="vest-ed-grid-2">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Web Trading URL</label>
-                  <input type="text" class="vest-ed-input" id="vest-pf-input-url" value="${firm.url || ''}" placeholder="https://example.com/trade" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
-                </div>
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Domain Match Patterns (comma-separated)</label>
-                  <input type="text" class="vest-ed-input" id="vest-pf-input-patterns" value="${Array.isArray(firm.matchPatterns) ? firm.matchPatterns.join(', ') : ''}" placeholder="example.com, trade.example.com" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
-                </div>
-              </div>
-            </div>
-
-            <!-- Section 2: Layout & Top-Bar Spacing -->
-            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:12px;">
-              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-                Top-Bar Placement &amp; Spacing
-              </div>
-              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Cortex Bar Placement Mode</label>
-                  <select class="vest-ed-select" id="vest-pf-input-topbarmode">
-                    <option value="auto" ${topMode === 'auto' ? 'selected' : ''}>Auto Detect (Navbar / Ticker Row)</option>
-                    <option value="custom" ${topMode === 'custom' ? 'selected' : ''}>Custom Fixed Offset (px)</option>
-                  </select>
-                </div>
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Custom Top-Bar Offset: <span id="vest-pf-val-offset" style="color:#38bdf8; font-weight:700;">${offsetPx}px</span></label>
-                  <input type="range" class="vest-ed-range" id="vest-pf-input-offset" min="0" max="140" step="2" value="${offsetPx}" ${topMode === 'auto' ? 'disabled style="opacity:0.45;"' : ''} />
-                </div>
-              </div>
-              <div class="vest-ed-grid-2">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Bottom Margin Spacing: <span id="vest-pf-val-margin" style="color:#38bdf8; font-weight:700;">${marginPx}px</span></label>
-                  <input type="range" class="vest-ed-range" id="vest-pf-input-margin" min="0" max="32" step="1" value="${marginPx}" />
-                  <div style="font-size:10.5px; color:#64748b; margin-top:3px;">Pushes the chart and tickers down so they aren't squished against the Cortex bar.</div>
-                </div>
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Firm Header Height: <span id="vest-pf-val-header" style="color:#38bdf8; font-weight:700;">${headerPx}px</span></label>
-                  <input type="range" class="vest-ed-range" id="vest-pf-input-header" min="32" max="100" step="2" value="${headerPx}" />
-                  <div style="font-size:10.5px; color:#64748b; margin-top:3px;">Standard height of this firm's primary navigation header.</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Section 3: Trading Defaults & Trader Notes -->
-            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
-              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-                Trading Defaults &amp; Notes
-              </div>
-              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Default Order Leverage</label>
-                  <select class="vest-ed-select" id="vest-pf-input-leverage">
-                    ${['1x', '2x', '3x', '5x', '10x', '15x', '20x', '25x', '50x', '100x'].map(v => `<option value="${v}" ${lev === v ? 'selected' : ''}>${v}</option>`).join('')}
-                  </select>
-                </div>
-                <div class="vest-ed-field" style="display:flex; align-items:center; justify-content:space-between; padding-top:16px;">
-                  <label class="vest-ed-label" style="margin:0;">Remember Order Amount / Size</label>
-                  <label class="vest-tvs-switch">
-                    <input type="checkbox" id="vest-pf-input-remember-size" ${firm.rememberOrderAmount !== false ? 'checked' : ''} />
-                    <span class="vest-tvs-switch-slider"></span>
-                  </label>
-                </div>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Trader Notes / Firm Rules</label>
-                <input type="text" class="vest-ed-input" id="vest-pf-input-notes" value="${firm.notes || ''}" placeholder="e.g. Max drawdown 4%, trade only during NY Killzone" />
-              </div>
-            </div>
-
-            <!-- Section 4: Account Persistence & Subaccount Routing -->
-            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
-              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-                Account Persistence &amp; Subaccount Routing
-              </div>
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="max-width:80%;">
-                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Restore Selected Account on Refresh</div>
-                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Keeps track of which account is selected on this exchange (e.g. Vest subaccounts or evaluation accounts) and restores your tab to that account on refresh.</div>
-                </div>
-                <label class="vest-tvs-switch" title="Restore selected account on refresh">
-                  <input type="checkbox" id="vest-pf-input-restore-account" ${firm.restoreSelectedAccount !== false ? 'checked' : ''} />
-                  <span class="vest-tvs-switch-slider"></span>
-                </label>
-              </div>
-            </div>
-
-            <!-- Section 5: Positions & Orders Panel Management -->
-            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
-              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-                Positions &amp; Orders Panel Management
-              </div>
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="max-width:80%;">
-                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Manage Positions &amp; Orders Panel (Dock / Minimize / Detach)</div>
-                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Allows detaching or minimizing the Positions &amp; Orders bottom panel into full screen chart mode on this firm. When minimized or detached, a sleek POSITIONS item docks into the Cortex taskbar.</div>
-                </div>
-                <label class="vest-tvs-switch" title="Toggle Positions & Orders Panel Management">
-                  <input type="checkbox" id="vest-pf-input-manage-positions" ${firm.managePositionsPanel !== false ? 'checked' : ''} />
-                  <span class="vest-tvs-switch-slider"></span>
-                </label>
-              </div>
-            </div>
-          </div>
-        `;
-      }
-
-      function renderAddNewFirmCard() {
-        return `
-          <div class="vest-pf-detail-card" id="vest-pf-detail-card">
-            <div class="vest-pf-detail-header">
-              <div class="vest-pf-detail-title-group">
-                <div class="vest-pf-avatar" style="width:32px; height:32px; font-size:16px; background:linear-gradient(135deg, #06b6d4, #2563eb); color:#fff;">
-                  +
-                </div>
-                <div>
-                  <div class="vest-pf-detail-title">Add New Perp Trading Firm</div>
-                  <div class="vest-pf-detail-subtitle">Configure Trading Cortex to run on any perpetual broker or prop firm URL</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="vest-ed-section" style="padding:14px 16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:14px;">
-              <div class="vest-ed-grid-2" style="margin-bottom:12px;">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Firm Name <span style="color:#ef4444;">*</span></label>
-                  <input type="text" class="vest-ed-input" id="vest-pf-new-name" placeholder="e.g. Apex Perp Exchange" />
-                </div>
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Account Tier / Type</label>
-                  <input type="text" class="vest-ed-input" id="vest-pf-new-tier" placeholder="e.g. Prop Firm Evaluation / Live DEX" />
-                </div>
-              </div>
-
-              <div class="vest-ed-field" style="margin-bottom:12px;">
-                <label class="vest-ed-label">Trading Web URL <span style="color:#ef4444;">*</span></label>
-                <input type="url" class="vest-ed-input" id="vest-pf-new-url" placeholder="https://app.apexperp.com/trade" />
-                <div style="font-size:11px; color:#64748b; margin-top:4px;">
-                  Enter the full URL where the charting terminal is hosted. Trading Cortex will register content scripts for this domain.
-                </div>
-              </div>
-
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Optional Domain Patterns (comma-separated)</label>
-                <input type="text" class="vest-ed-input" id="vest-pf-new-patterns" placeholder="app.apexperp.com, apexperp.com" />
-              </div>
-            </div>
-
-            <div style="display:flex; justify-content:flex-end; gap:10px;">
-              <button type="button" id="vest-pf-new-cancel-btn" style="padding:8px 16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;">
-                Cancel
-              </button>
-              <button type="button" id="vest-pf-new-create-btn" style="padding:8px 20px; background:linear-gradient(135deg, #06b6d4, #2563eb); border:none; color:#ffffff; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; box-shadow:0 0 12px rgba(6,182,212,0.35);">
-                Add Perp Firm
-              </button>
-            </div>
-          </div>
-        `;
-      }
 
       if (activeTab === 'perpfirms') {
         return renderPerpFirmsHtml();
@@ -14002,10 +14000,15 @@ if (activeTab === 'diagnostics') {
   // -------------------------------------------------------------
   async function init() {
     try {
-      const data = await safeStorageGet(['templates', 'settings', 'globalDrawings', 'updaterState', 'installedVersionOverride']);
+      const data = await safeStorageGet(['templates', 'settings', 'globalDrawings', 'updaterState', 'installedVersionOverride', 'updateChannel']);
       globalDrawings = normalizeGlobalDrawings(data.globalDrawings);
       if (data.installedVersionOverride) {
         installedVersionOverride = data.installedVersionOverride;
+      }
+      if (data.updateChannel) {
+        latestUpdateChannel = data.updateChannel;
+      } else if (data.settings && data.settings.updateChannel) {
+        latestUpdateChannel = data.settings.updateChannel;
       }
       if (data.templates && Array.isArray(data.templates)) {
         templates = sanitizeUserTemplates(data.templates);

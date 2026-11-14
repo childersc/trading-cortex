@@ -1,3 +1,11 @@
+Trading Cortex v1.1.60 — Dev Glow, Version Subtext, Bleeding Edge Title & Fixes
+
+- **Dev Branch Red Glow & Version Number Subtext (`v1.1.60`)**: Replaced `'dev'` on the Cortex top bar pill with the active version number (`v1.1.60`). Dev branch is signified by a vibrant red outer glow (`rgba(239, 68, 68, 0.35)`), red border, and red-tinted icon and subtext.
+- **Bleeding Edge / Production Dropdown Title Bar (`v1.1.60`)**: Added a title bar directly above "Template Manager..." displaying "Bleeding Edge" (with red glowing dot and `DEV` badge) on dev builds, or "Production" (with blue glowing dot and `RELEASE` badge) on production builds, plus the version number.
+- **Dynamic Taskbar Slot Allocation (`v1.1.60`)**: Minimized windows and detached/minimized Positions panel allocate sequential slots dynamically like the Windows taskbar.
+- **Prop Firms Management & Account Restoration (`v1.1.60`)**: Delete any prop firm, view official vector logos, and auto-restore selected trading account on refresh.
+- **Bug Fixes**: Resolved `SyntaxError: Identifier 'isDev' has already been declared`, `ReferenceError: renderPerpFirmsHtml is not defined`, and removed stale `version_name` so updates cleanly report the true latest version.
+
 Trading Cortex v1.1.44 — Cortex Top Bar Relocation, Diagnostics Suite & Dev Channel Updater
 
 - **Dev Branch Update Channel (`v1.1.44`)**: Switch between Stable and Dev (Bleeding Edge) channels in the Update Center. Dev mode polls branch commits, previews recent commit history, and unpacks the latest dev zipball directly into your workspace.
