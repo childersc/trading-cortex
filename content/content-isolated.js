@@ -119,13 +119,15 @@
       return false;
     }
     return (
-      key.startsWith('tradingview.') ||
-      key.startsWith('tvlocalstorage.') ||
-      key.startsWith('tv.') ||
       key === 'properties_toolbar.position' ||
+      key === 'ChartDrawingToolbarWidget.visible' ||
+      key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
+      key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+      key === 'tradingview.IntervalWidget.quicks' ||
+      key === 'tradingview.StyleWidget.quicks' ||
+      key.startsWith('tradingview.chartproperties') ||
       key.startsWith('linetool.') ||
       key.startsWith('combobox.') ||
-      key.startsWith('ChartDrawingToolbarWidget.') ||
       key.startsWith('drawingToolbar.') ||
       key.startsWith('drawingFavorites') ||
       key.startsWith('side_toolbar.') ||
@@ -1526,6 +1528,14 @@
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
+          if (parsed.settings && typeof parsed.settings === 'object') {
+            if (parsed.settings.sidebarState && parsed.settings.sidebarState.toolbarStorage) {
+              parsed.settings.sidebarState.toolbarStorage = sanitizeSidebarToolbarStorage(parsed.settings.sidebarState.toolbarStorage);
+            }
+            if (parsed.settings.lastChartSettings && parsed.settings.lastChartSettings.localStorageEntries) {
+              parsed.settings.lastChartSettings.localStorageEntries = sanitizeSidebarToolbarStorage(parsed.settings.lastChartSettings.localStorageEntries);
+            }
+          }
           return parsed;
         }
       }
@@ -1536,11 +1546,20 @@
   function writeDomainVault(nextTemplates, nextSettings) {
     try {
       const prev = readDomainVault() || {};
+      let cleanSettings = nextSettings ? { ...(prev.settings || {}), ...nextSettings } : (prev.settings || settings);
+      if (cleanSettings && typeof cleanSettings === 'object') {
+        if (cleanSettings.sidebarState && cleanSettings.sidebarState.toolbarStorage) {
+          cleanSettings.sidebarState.toolbarStorage = sanitizeSidebarToolbarStorage(cleanSettings.sidebarState.toolbarStorage);
+        }
+        if (cleanSettings.lastChartSettings && cleanSettings.lastChartSettings.localStorageEntries) {
+          cleanSettings.lastChartSettings.localStorageEntries = sanitizeSidebarToolbarStorage(cleanSettings.lastChartSettings.localStorageEntries);
+        }
+      }
       const payload = {
         schemaVersion: CURRENT_DB_SCHEMA_VERSION,
         updatedAt: Date.now(),
         templates: Array.isArray(nextTemplates) ? sanitizeUserTemplates(nextTemplates) : sanitizeUserTemplates(prev.templates || templates),
-        settings: nextSettings ? { ...(prev.settings || {}), ...nextSettings } : (prev.settings || settings)
+        settings: cleanSettings
       };
       window.localStorage.setItem(DOMAIN_VAULT_KEY, JSON.stringify(payload));
     } catch (e) {}

@@ -812,13 +812,15 @@
       return false;
     }
     return (
-      key.startsWith('tradingview.') ||
-      key.startsWith('tvlocalstorage.') ||
-      key.startsWith('tv.') ||
       key === 'properties_toolbar.position' ||
+      key === 'ChartDrawingToolbarWidget.visible' ||
+      key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
+      key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+      key === 'tradingview.IntervalWidget.quicks' ||
+      key === 'tradingview.StyleWidget.quicks' ||
+      key.startsWith('tradingview.chartproperties') ||
       key.startsWith('linetool.') ||
       key.startsWith('combobox.') ||
-      key.startsWith('ChartDrawingToolbarWidget.') ||
       key.startsWith('drawingToolbar.') ||
       key.startsWith('drawingFavorites') ||
       key.startsWith('side_toolbar.') ||
@@ -884,6 +886,7 @@
       }
 
       if (existingDiskDb && existingDiskDb.settings && typeof existingDiskDb.settings === 'object') {
+        existingDiskDb.settings = sanitizeSettingsStorageKeys(existingDiskDb.settings);
         if (!finalSettings || (!finalSettings._savedAt && existingDiskDb.updatedAt)) {
           finalSettings = { ...(finalSettings || {}), ...existingDiskDb.settings };
           restoredFromDisk = true;
@@ -919,7 +922,7 @@
         extensionVersion: installedVersion,
         migrations,
         templates: finalTemplates || sanitizeTemplatesList(existingDiskDb?.templates) || [],
-        settings: finalSettings || existingDiskDb?.settings || {}
+        settings: sanitizeSettingsStorageKeys(finalSettings || existingDiskDb?.settings || {})
       };
 
       const fileHandle = await userDataDir.getFileHandle(DB_FILE_NAME, { create: true });

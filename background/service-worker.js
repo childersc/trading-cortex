@@ -185,13 +185,15 @@ function isSafeTradingViewStorageKey(key) {
     return false;
   }
   return (
-    key.startsWith("tradingview.") ||
-    key.startsWith("tvlocalstorage.") ||
-    key.startsWith("tv.") ||
     key === "properties_toolbar.position" ||
+    key === "ChartDrawingToolbarWidget.visible" ||
+    key === "tvlocalstorage.ChartDrawingToolbarWidget.visible" ||
+    key === "tradingview.ChartDrawingToolbarWidget.visible" ||
+    key === "tradingview.IntervalWidget.quicks" ||
+    key === "tradingview.StyleWidget.quicks" ||
+    key.startsWith("tradingview.chartproperties") ||
     key.startsWith("linetool.") ||
     key.startsWith("combobox.") ||
-    key.startsWith("ChartDrawingToolbarWidget.") ||
     key.startsWith("drawingToolbar.") ||
     key.startsWith("drawingFavorites") ||
     key.startsWith("side_toolbar.") ||
