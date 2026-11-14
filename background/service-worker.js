@@ -165,6 +165,54 @@ function sanitizeUserTemplates(rawList) {
   return cleaned;
 }
 
+function isSafeTradingViewStorageKey(key) {
+  if (typeof key !== "string" || !key) return false;
+  if (key.startsWith("__trading_cortex_")) return false;
+  if (
+    key.startsWith("tv-chart-drawings-") ||
+    key.startsWith("tv-drawings-flush") ||
+    key.startsWith("tv-layout-flush") ||
+    key.startsWith("user-state-") ||
+    key.startsWith("vest") ||
+    key.startsWith("mfp") ||
+    key.startsWith("privy:") ||
+    key.startsWith("wagmi.") ||
+    key.startsWith("rk-") ||
+    key.startsWith("turnkey_") ||
+    key.startsWith("web3") ||
+    /auth|token|session|jwt|refresh|bearer|user|account|wallet|privy|wagmi|rainbow|web3|turnkey|dynamic|metamask|coinbase|phantom|keplr|solana|ethereum|address|signature|credential|login|identity|cookie|flush|layout-base/i.test(key)
+  ) {
+    return false;
+  }
+  return (
+    key.startsWith("tradingview.") ||
+    key.startsWith("tvlocalstorage.") ||
+    key.startsWith("tv.") ||
+    key === "properties_toolbar.position" ||
+    key.startsWith("linetool.") ||
+    key.startsWith("combobox.")
+  );
+}
+
+function sanitizeSettingsStorageKeys(st) {
+  if (!st || typeof st !== "object") return st;
+  if (st.sidebarState && st.sidebarState.toolbarStorage && typeof st.sidebarState.toolbarStorage === "object") {
+    const clean = {};
+    for (const [k, v] of Object.entries(st.sidebarState.toolbarStorage)) {
+      if (typeof v === "string" && isSafeTradingViewStorageKey(k)) clean[k] = v;
+    }
+    st.sidebarState.toolbarStorage = clean;
+  }
+  if (st.lastChartSettings && st.lastChartSettings.localStorageEntries && typeof st.lastChartSettings.localStorageEntries === "object") {
+    const clean = {};
+    for (const [k, v] of Object.entries(st.lastChartSettings.localStorageEntries)) {
+      if (typeof v === "string" && isSafeTradingViewStorageKey(k)) clean[k] = v;
+    }
+    st.lastChartSettings.localStorageEntries = clean;
+  }
+  return st;
+}
+
 /**
  * Normalizes and migrates any database object from older schema versions up to CURRENT_DB_SCHEMA_VERSION
  */
@@ -226,6 +274,10 @@ function runDatabaseMigrations(rawDb) {
       migratedAt: new Date().toISOString(),
       description: "Added persistent globally synced chart drawings"
     });
+  }
+
+  if (db.settings) {
+    db.settings = sanitizeSettingsStorageKeys(db.settings);
   }
 
   db.schemaVersion = CURRENT_DB_SCHEMA_VERSION;

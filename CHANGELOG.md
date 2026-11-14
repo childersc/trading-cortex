@@ -7,6 +7,7 @@ All notable changes, new features, and bug fixes through the current release (`v
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
 ### 🐛 Bug Fixes
+- **DEX & Web3 Session Preservation on Browser Refresh**: Fixed an issue on Vest Markets (and other Web3 DEX platforms) where refreshing the browser after updating an indicator or chart layout caused the user's trading session to be logged out. The drawing toolbar persistence engine (`toolbarStorage`) was capturing non-TradingView `localStorage` keys containing platform user IDs, account layout state (`user-state-layout-base`), drawings flush snapshots (`tv-drawings-flush`), and Web3 connector states (`wagmi.*`, `privy:*`), then overwriting them at `document_start` on page reload. Implemented strict key validation (`isSafeTradingViewStorageKey`) across `content-main.js`, `content-isolated.js`, `service-worker.js`, and `update.js` to ensure platform auth tokens, user IDs, wallet connectors, and account states are never captured, overwritten, or corrupted.
 - **Timeframe Toolbar Harmony with Third-Party Buttons (TV / Vela)**: Resolved the rapid jumping and DOM positioning fight between Cortex timeframe shortcut buttons and third-party indicator buttons (`TV / Vela`). Implemented stable non-destructive placement checks and cached DOM reconciliation to eliminate cascading MutationObserver loops.
 
 ### ✨ Features

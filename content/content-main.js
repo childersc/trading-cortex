@@ -446,6 +446,37 @@
     }
   } catch (e) {}
 
+  // Safe TradingView Drawing Toolbar Storage Key Validator
+  // Prevents capturing or restoring platform auth tokens, user IDs, wallet connectors, or session keys!
+  function isSafeTradingViewStorageKey(key) {
+    if (typeof key !== 'string' || !key) return false;
+    if (key.startsWith('__trading_cortex_')) return false;
+    if (
+      key.startsWith('tv-chart-drawings-') ||
+      key.startsWith('tv-drawings-flush') ||
+      key.startsWith('tv-layout-flush') ||
+      key.startsWith('user-state-') ||
+      key.startsWith('vest') ||
+      key.startsWith('mfp') ||
+      key.startsWith('privy:') ||
+      key.startsWith('wagmi.') ||
+      key.startsWith('rk-') ||
+      key.startsWith('turnkey_') ||
+      key.startsWith('web3') ||
+      /auth|token|session|jwt|refresh|bearer|user|account|wallet|privy|wagmi|rainbow|web3|turnkey|dynamic|metamask|coinbase|phantom|keplr|solana|ethereum|address|signature|credential|login|identity|cookie|flush|layout-base/i.test(key)
+    ) {
+      return false;
+    }
+    return (
+      key.startsWith('tradingview.') ||
+      key.startsWith('tvlocalstorage.') ||
+      key.startsWith('tv.') ||
+      key === 'properties_toolbar.position' ||
+      key.startsWith('linetool.') ||
+      key.startsWith('combobox.')
+    );
+  }
+
   // Immediately hydrate sidebarState and lastChartSettings from localStorage mirror (checking both current window and window.top for blob: chart iframes!)
   try {
     const rawSavedSidebar =
@@ -456,14 +487,32 @@
       if (parsedSidebar && typeof parsedSidebar === 'object') {
         currentSettings.sidebarState = parsedSidebar;
         // Pre-populate TradingView's native toolbar localStorage keys at document_start BEFORE TradingView's scripts run!
+        // Strictly sanitize keys so platform auth/session keys are NEVER overwritten or corrupted on page refresh!
         if (currentSettings.rememberSidebarTools !== false && parsedSidebar.toolbarStorage) {
+          let dirty = false;
+          const cleanedToolbarStorage = {};
           Object.entries(parsedSidebar.toolbarStorage).forEach(([k, v]) => {
-            if (typeof v === 'string' && !k.startsWith('__trading_cortex_')) {
-              try {
-                window.localStorage.setItem(k, v);
-              } catch (e) {}
+            if (isSafeTradingViewStorageKey(k)) {
+              cleanedToolbarStorage[k] = v;
+              if (typeof v === 'string') {
+                try {
+                  window.localStorage.setItem(k, v);
+                } catch (e) {}
+              }
+            } else {
+              dirty = true;
             }
           });
+          if (dirty) {
+            parsedSidebar.toolbarStorage = cleanedToolbarStorage;
+            currentSettings.sidebarState = parsedSidebar;
+            try {
+              window.localStorage.setItem('__trading_cortex_sidebar_state__', JSON.stringify(parsedSidebar));
+              if (window.top && window.top !== window && window.top.localStorage) {
+                window.top.localStorage.setItem('__trading_cortex_sidebar_state__', JSON.stringify(parsedSidebar));
+              }
+            } catch (e) {}
+          }
         }
       }
     }
@@ -475,13 +524,30 @@
       if (parsedChart && typeof parsedChart === 'object') {
         currentSettings.lastChartSettings = parsedChart;
         if (currentSettings.rememberLastChartSettings !== false && parsedChart.localStorageEntries) {
+          let dirty = false;
+          const cleanedEntries = {};
           Object.entries(parsedChart.localStorageEntries).forEach(([k, v]) => {
-            if (typeof v === 'string' && !k.startsWith('__trading_cortex_')) {
-              try {
-                window.localStorage.setItem(k, v);
-              } catch (e) {}
+            if (isSafeTradingViewStorageKey(k)) {
+              cleanedEntries[k] = v;
+              if (typeof v === 'string') {
+                try {
+                  window.localStorage.setItem(k, v);
+                } catch (e) {}
+              }
+            } else {
+              dirty = true;
             }
           });
+          if (dirty) {
+            parsedChart.localStorageEntries = cleanedEntries;
+            currentSettings.lastChartSettings = parsedChart;
+            try {
+              window.localStorage.setItem('__trading_cortex_chart_settings__', JSON.stringify(parsedChart));
+              if (window.top && window.top !== window && window.top.localStorage) {
+                window.top.localStorage.setItem('__trading_cortex_chart_settings__', JSON.stringify(parsedChart));
+              }
+            } catch (e) {}
+          }
         }
       }
     }
@@ -500,44 +566,37 @@
           if (
             this === window.localStorage &&
             typeof key === 'string' &&
-            !key.startsWith('__trading_cortex_') &&
-            !key.startsWith('tv-chart-drawings-') &&
-            !key.startsWith('vest') &&
             typeof value === 'string' &&
-            value.length < 16000
+            value.length < 16000 &&
+            currentSettings.rememberSidebarTools !== false &&
+            isSafeTradingViewStorageKey(key)
           ) {
-            // Capture ANY TradingView key (tradingview.*, TVLocalStorage.*, combobox.*, linetool.*, etc.)
-            if (
-              currentSettings.rememberSidebarTools !== false &&
-              (/tradingview|tvlocalstorage|linetool|drawing|toolbar|magnet|combobox|group|active|tool|favorite/i.test(key) || /LineTool/i.test(value))
-            ) {
-              const prev = currentSettings.sidebarState || {};
-              const prevToolbar = prev.toolbarStorage || {};
-              if (prevToolbar[key] !== value) {
-                const nextToolbarStorage = {
-                  ...prevToolbar,
-                  [key]: value
-                };
-                currentSettings.sidebarState = {
-                  ...prev,
-                  toolbarStorage: nextToolbarStorage
-                };
-                const serialized = JSON.stringify(currentSettings.sidebarState);
-                origSetItem.call(window.localStorage, '__trading_cortex_sidebar_state__', serialized);
-                try {
-                  if (window.top && window.top !== window && window.top.localStorage) {
-                    origSetItem.call(window.top.localStorage, '__trading_cortex_sidebar_state__', serialized);
-                  }
-                } catch (e) {}
-                if (storageHookPostTimer) clearTimeout(storageHookPostTimer);
-                storageHookPostTimer = setTimeout(() => {
-                  storageHookPostTimer = null;
-                  postToIsolated({
-                    type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
-                    sidebarState: currentSettings.sidebarState
-                  });
-                }, 400);
-              }
+            const prev = currentSettings.sidebarState || {};
+            const prevToolbar = prev.toolbarStorage || {};
+            if (prevToolbar[key] !== value) {
+              const nextToolbarStorage = {
+                ...prevToolbar,
+                [key]: value
+              };
+              currentSettings.sidebarState = {
+                ...prev,
+                toolbarStorage: nextToolbarStorage
+              };
+              const serialized = JSON.stringify(currentSettings.sidebarState);
+              origSetItem.call(window.localStorage, '__trading_cortex_sidebar_state__', serialized);
+              try {
+                if (window.top && window.top !== window && window.top.localStorage) {
+                  origSetItem.call(window.top.localStorage, '__trading_cortex_sidebar_state__', serialized);
+                }
+              } catch (e) {}
+              if (storageHookPostTimer) clearTimeout(storageHookPostTimer);
+              storageHookPostTimer = setTimeout(() => {
+                storageHookPostTimer = null;
+                postToIsolated({
+                  type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
+                  sidebarState: currentSettings.sidebarState
+                });
+              }, 400);
             }
           }
         } catch (e) {}
@@ -4320,12 +4379,7 @@
       for (let i = 0; i < window.localStorage.length; i++) {
         const key = window.localStorage.key(i);
         if (!key) continue;
-        if (
-          /drawing|linetool|toolbar|favorite|magnet|chartcontrols|combobox/i.test(key) &&
-          !key.startsWith('tv-chart-drawings-') &&
-          !key.startsWith('vest') &&
-          !key.startsWith('__trading_cortex_')
-        ) {
+        if (isSafeTradingViewStorageKey(key)) {
           const val = window.localStorage.getItem(key);
           if (typeof val === 'string' && val.length < 16000) {
             entries[key] = val;
@@ -4844,8 +4898,15 @@
       }
     }
 
+    const cleanedPrevToolbar = {};
+    if (prev.toolbarStorage && typeof prev.toolbarStorage === 'object') {
+      Object.entries(prev.toolbarStorage).forEach(([k, v]) => {
+        if (isSafeTradingViewStorageKey(k)) cleanedPrevToolbar[k] = v;
+      });
+    }
+
     const toolbarStorage = {
-      ...(prev.toolbarStorage || {}),
+      ...cleanedPrevToolbar,
       ...collectTvDrawingToolbarLocalStorage()
     };
 
@@ -4910,11 +4971,11 @@
     isRestoringSidebar = true;
 
     try {
-      // 0. Restore TradingView's own drawing toolbar localStorage entries if present
+      // 0. Restore TradingView's own drawing toolbar localStorage entries if present (safe TradingView keys only)
       if (targetState.toolbarStorage && typeof targetState.toolbarStorage === 'object') {
         try {
           Object.entries(targetState.toolbarStorage).forEach(([k, v]) => {
-            if (typeof v === 'string') {
+            if (typeof v === 'string' && isSafeTradingViewStorageKey(k)) {
               window.localStorage.setItem(k, v);
             }
           });
@@ -5658,11 +5719,11 @@
     hasCompletedInitialChartSettingsRestore = true;
 
     try {
-      // 1. Restore saved TradingView chartproperties localStorage entries
+      // 1. Restore saved TradingView chartproperties localStorage entries (safe TradingView keys only)
       if (saved.localStorageEntries && typeof saved.localStorageEntries === 'object') {
         try {
           Object.entries(saved.localStorageEntries).forEach(([k, v]) => {
-            if (typeof v === 'string') {
+            if (typeof v === 'string' && isSafeTradingViewStorageKey(k)) {
               window.localStorage.setItem(k, v);
               if (k === 'tradingview.chartproperties' && typeof activeChart.applyOverrides === 'function') {
                 try {
