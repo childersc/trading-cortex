@@ -1,6 +1,23 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.60`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.64`) are documented in this file.
+
+---
+
+## [v1.1.64] — 2026-11-14
+
+### 🚀 New Features & Enhancements
+- **Configurable Dialog Glass Effect Setting**:
+  1. *Cortex Settings Control*: Added a user-controllable *Dialog Glass Effect* switch in Cortex Settings under a new dedicated **DISPLAY & DIALOG APPEARANCE** section in the About tab.
+  2. *Cortex Dropdown Quick Toggle*: Added a 1-click quick-toggle option with live `ON` / `OFF` status badge directly inside the Cortex dropdown menu for instant switching.
+  3. *Frosted Glass Aesthetic*: When enabled, detached windows, dialog boxes, and floating panels render with a modern translucent frosted-glass aesthetic (`backdrop-filter: blur(...)` with specular highlights).
+  4. *Real-Time Live Application*: Toggling instantly applies or removes the effect on all open dialogs and persists seamlessly to storage.
+
+### 🐛 Bug Fixes
+- **Eliminated Viewport & Chart Bleed-Through on Dialogs & Detached Windows**:
+  1. *100% Solid Opaque Backdrops*: Detached Positions & Orders window (`.vest-bottom-panel-detached`), Cortex Settings card (`.vest-tvs-card`), Template Manager (`.vest-stm-dialog`), and floating boxes now feature completely solid, fully opaque backgrounds (`#0b0f19` / `#0d121d`) with `backdrop-filter: none !important;` by default.
+  2. *Zero Viewport Bleed-Through*: Eliminated candlestick wicks, candles, order lines, and fail price overlays shining or blurring through the dialog body or empty panel space.
+  3. *Isolated Stacking Context & High Z-Index*: Applied `isolation: isolate !important;` and elevated detached window z-index to `2147483640` (and `2147483645` on active interaction/drag), ensuring all dialogs float firmly above all chart canvas, order lines, and fail lines.
 
 ---
 
