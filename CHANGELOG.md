@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.64`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.65`) are documented in this file.
+
+---
+
+## [v1.1.65] — 2026-11-14
+
+### 🐛 Bug Fixes
+- **Guaranteed Bottom Positions & Orders Panel Re-Docking & Height Restoration**:
+  1. *Immediate Table & Row Restoration*: Fixed a critical issue where re-docking the Positions & Orders bottom panel from detached or minimized mode caused the table container to collapse to height 0 (rendering only the tab bar with empty dark space below until a full page refresh).
+  2. *Docked Height Persistence*: Automatically captures and preserves the user's true docked height (`panel.dataset.vestDockedHeight`) before detaching or minimizing, and guarantees explicit restoration (`height`, `min-height: 180px`, `flex: 0 0 auto`, `display: flex`, and `flex-direction: column`) upon re-docking.
+  3. *Chart Container Flex Restoration*: Resolved a bug where `chartEl.style.height` was captured as falsy and permanently overwritten with `100%`, preventing chart elements from squeezing out the bottom panel. Chart now cleanly relinquishes exclusive height and returns to `flex: 1 1 0%`.
+  4. *TanStack Virtualizer & Tab Wake-Up*: Dispatches reflow, resize, and scroll events across inner table containers and virtualizers, and safely synchronizes the active React tab (`info.matchedTab.click()`) upon re-docking, eliminating any requirement to refresh the page.
+  5. *Legacy Panel Scanner Isolation*: Cleanly decoupled the bottom positions panel from the legacy `PANEL_DEFINITIONS` scanner, preventing legacy panel header injections or accidental `.vest-panel-collapsed` collapses.
 
 ---
 

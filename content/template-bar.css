@@ -4181,6 +4181,10 @@ body.vest-cortex-top-bar-active {
   background-color: #0b0f19 !important;
 }
 
+.vest-bottom-panel-detached .vest-bottom-panel-controls {
+  display: none !important;
+}
+
 .vest-bottom-panel-detached [role="tabpanel"],
 .vest-bottom-panel-detached div[class*="content"],
 .vest-bottom-panel-detached div[class*="body"],
