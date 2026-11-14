@@ -6,6 +6,9 @@ All notable changes, new features, and bug fixes through the current release (`v
 
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
+### 🐛 Bug Fixes
+- **Timeframe Toolbar Harmony with Third-Party Buttons (TV / Vela)**: Resolved the rapid jumping and DOM positioning fight between Cortex timeframe shortcut buttons and third-party indicator buttons (`TV / Vela`). Implemented stable non-destructive placement checks and cached DOM reconciliation to eliminate cascading MutationObserver loops.
+
 ### ✨ Features
 - **Bottom Positions & Orders Detach & Minimize**:
   - Added dedicated `DETACH` button to the bottom positions and orders box, popping it out into a floating, moveable, resizable HUD window so the chart can become full screen.
@@ -17,6 +20,10 @@ All notable changes, new features, and bug fixes through the current release (`v
 - **Per-Firm Layout & Offsets**: Configure custom top-bar offsets, custom bottom margins, firm header height reference, default order leverage, account tiers, and trader notes for each firm.
 - **Dynamic Firm Registration**: Easily add any perpetual firm or prop broker by URL. Trading Cortex dynamically requests host permissions and registers content scripts at runtime.
 - **Live Layout Adaptation**: Cortex top-bar automatically adapts position and bottom margin based on the active perp firm.
+
+### ⚡ Bleeding Edge
+- Active development branch tracking upcoming v1.1.47 release.
+- Live Alpha version metadata (`1.1.47 Alpha`) across manifest, popup, and Update Center.
 
 ---
 
