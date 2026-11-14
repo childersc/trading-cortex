@@ -4675,13 +4675,18 @@
         } catch (e) {}
       }
 
-      // 4. Last fallback: Try executeActionById('drawingToolbarAction') once if confirmed not visible
+      // 4. Fallback: Only execute drawingToolbarAction if checkable state explicitly confirms it is NOT visible
       for (const target of targets) {
-        if (target && typeof target.executeActionById === 'function') {
+        if (!target) continue;
+        if (typeof target.getCheckableActionState === 'function') {
           try {
-            target.executeActionById('drawingToolbarAction');
-            setTimeout(reportDrawingToolbarVisibility, 150);
-            return true;
+            const isVisible = target.getCheckableActionState('drawingToolbarAction');
+            if (isVisible === false && typeof target.executeActionById === 'function') {
+              log('Restoring toolbar visibility via drawingToolbarAction fallback...');
+              target.executeActionById('drawingToolbarAction');
+              setTimeout(reportDrawingToolbarVisibility, 150);
+              return true;
+            }
           } catch (e) {}
         }
       }
@@ -4782,6 +4787,7 @@
           if (!inToolbarContainer) {
             const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
             const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
+            const rect = el.getBoundingClientRect();
             if (rect.width > 0 && (rect.left - hostLeft) > 120) {
               return;
             }
@@ -5040,6 +5046,7 @@
           if (!inToolbarContainer) {
             const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
             const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
+            const rect = el.getBoundingClientRect();
             if (rect.width > 0 && (rect.left - hostLeft) > 120) continue;
           }
 

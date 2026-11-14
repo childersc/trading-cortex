@@ -6,7 +6,18 @@ All notable changes, new features, and bug fixes through the current release (`v
 
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
+### 🚀 New Features & Enhancements
+- **Prop Firms Management, Universal Deletion & Official Vector Logos**:
+  1. *Universal Prop Firm Deletion*: Added quick delete `✕` buttons directly on every prop firm tile in the Prop Firms grid as well as a universal `Remove Prop Firm` button in the detail card, enabling deletion of any firm (including default/built-in firms). Deleted IDs are persisted in `settings.deletedFirmIds` and permanently excluded from re-spawning during configuration normalization.
+  2. *Official Vector Logos*: Extracted and vectorized official SVG logos directly from respective platforms: My Funded Perpetuals (official gold & blue shield trophy mark), Vest Markets (official emerald/cyan geometric V-bracket mark), Vest Exchange (sky blue & indigo geometric V-bracket mark), and a sleek candlestick chart glyph for custom user-added firms. Logos are displayed across both the grid tiles and detail card headers.
+  3. *Vest Selected Account Tracking & Auto-Restoration on Refresh*: Automatically tracks the active trading subaccount on Vest Markets (`next.vestmarkets.com`, `vestmarkets.com`, `vest.exchange`) and seamlessly restores the tab to that account upon browser refresh or reconnection. Configurable per prop firm via a new toggle switch in Section 4 ("Account Persistence & Subaccount Routing") within Prop Firm settings.
+- **Defensive Extension Invalidation Protection**:
+  1. Hardened all event listeners (`chrome.storage.onChanged`, `window.addEventListener('message')`, and recurring background interval timers) with `isExtensionValid()` guards and `try / catch` boundaries to prevent benign Chrome extension context invalidation errors during development reloads or channel updates.
+
 ### 🐛 Bug Fixes
+- **TradingView Left Drawing Toolbar Restoration & ReferenceError Fix**:
+  1. *Fixed Scope ReferenceError in Sidebar Scanner*: Resolved an issue where `rect` was referenced without being defined inside `scanDomSidebarGroupSlots()` and the candidate scanner in `content-main.js`, causing a silent runtime error that made `isDrawingToolbarVisibleNow()` report false.
+  2. *Guarded Toggle Action*: Fixed `ensureDrawingToolbarVisible()` to verify `getCheckableActionState('drawingToolbarAction') === false` before executing `drawingToolbarAction`, guaranteeing that an already open toolbar is never inadvertently toggled off during chart initialization.
 - **Dynamic Taskbar Next-Available Slot Allocation for Minimized Windows**: Fixed an issue where minimized chart windows (Upcoming News, Instrument Trades, Cortex Diagnostics) had hardcoded slot coordinates, causing windows minimized out of order to stack directly on top of or below each other.
   1. *Dynamic Taskbar Order Queue*: Implemented `minimizedWindowOrder` tracking the exact chronological order in which windows are minimized, allocating each window to the next available horizontal slot in the Cortex top bar rather than a fixed predetermined spot.
   2. *Adaptive Left-Anchor Calculation*: Implemented `getTaskbarStartLeft()` to automatically detect the right-most bounding edge of all permanent top-bar elements (Cortex menu pill and Positions pill), guaranteeing minimized pills never overlap or collide with existing toolbar controls.
