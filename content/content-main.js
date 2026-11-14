@@ -138,6 +138,7 @@
   const removedGlobalDrawingIds = new Set();
   const nativeAutoFvgRemovalSuppression = new Set();
   const globalDrawingRestoreStartTimes = new WeakMap();
+  const lastKnownLiveShapeIds = new Set();
   let hasReceivedConfigUpdate = false;
   let liveFailPrices = { long: null, short: null };
   let liveEstimatedStopLoss = { side: null, price: null };
@@ -1570,6 +1571,7 @@
     setupContextMenuHandler();
     enhanceTimeframeControls();
     hookActiveChartResetMethods();
+    hookActiveChartEntityRemovalMethods();
     ensureDrawingToolbarVisible();
     setTimeout(ensureDrawingToolbarVisible, 500);
     setTimeout(ensureDrawingToolbarVisible, 1200);
@@ -1613,28 +1615,118 @@
     return false;
   }
 
+  function handleGlobalDrawingEntityRemoved(entityId) {
+    if (!entityId) return;
+    const strId = String(entityId);
+    lastKnownLiveShapeIds.delete(entityId);
+    lastKnownLiveShapeIds.delete(strId);
+    if (globalDrawingUpdateTimers.has(entityId)) {
+      clearTimeout(globalDrawingUpdateTimers.get(entityId));
+      globalDrawingUpdateTimers.delete(entityId);
+    }
+    if (globalDrawingUpdateTimers.has(strId)) {
+      clearTimeout(globalDrawingUpdateTimers.get(strId));
+      globalDrawingUpdateTimers.delete(strId);
+    }
+    const key = globalDrawingEntityMap.has(entityId) ? entityId : (globalDrawingEntityMap.has(strId) ? strId : null);
+    const removedGlobalId = key ? globalDrawingEntityMap.get(key) : null;
+    if (removedGlobalId) {
+      globalDrawingEntityMap.delete(entityId);
+      globalDrawingEntityMap.delete(strId);
+      removedGlobalDrawingIds.add(removedGlobalId);
+      currentGlobalDrawings = currentGlobalDrawings.filter(item => item && item.id !== removedGlobalId);
+      postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_REMOVE', drawingId: removedGlobalId });
+      log(`Removed global drawing ${removedGlobalId} (source entity ${key})`);
+    }
+  }
+
+  function hookActiveChartEntityRemovalMethods() {
+    if (!activeChart) return;
+    try {
+      if (typeof activeChart.removeEntity === 'function' && !activeChart.__trading_cortex_remove_hooked) {
+        activeChart.__trading_cortex_remove_hooked = true;
+        const origRemove = activeChart.removeEntity.bind(activeChart);
+        activeChart.removeEntity = function(entityId, ...args) {
+          handleGlobalDrawingEntityRemoved(entityId);
+          for (const [fvgKey, entry] of nativeAutoFvgShapesMap.entries()) {
+            if (entry && (entry.entityId === entityId || String(entry.entityId) === String(entityId))) {
+              nativeAutoFvgShapesMap.delete(fvgKey);
+              if (!nativeAutoFvgRemovalSuppression.has(entityId)) dismissCreatedFvg(fvgKey);
+            }
+          }
+          return origRemove(entityId, ...args);
+        };
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof activeChart.removeEntities === 'function' && !activeChart.__trading_cortex_remove_entities_hooked) {
+        activeChart.__trading_cortex_remove_entities_hooked = true;
+        const origRemoveEntities = activeChart.removeEntities.bind(activeChart);
+        activeChart.removeEntities = function(entityIds, ...args) {
+          if (Array.isArray(entityIds)) {
+            entityIds.forEach(id => {
+              handleGlobalDrawingEntityRemoved(id);
+              for (const [fvgKey, entry] of nativeAutoFvgShapesMap.entries()) {
+                if (entry && (entry.entityId === id || String(entry.entityId) === String(id))) {
+                  nativeAutoFvgShapesMap.delete(fvgKey);
+                  if (!nativeAutoFvgRemovalSuppression.has(id)) dismissCreatedFvg(fvgKey);
+                }
+              }
+            });
+          }
+          return origRemoveEntities(entityIds, ...args);
+        };
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof activeChart.removeAllShapes === 'function' && !activeChart.__trading_cortex_remove_all_hooked) {
+        activeChart.__trading_cortex_remove_all_hooked = true;
+        const origRemoveAll = activeChart.removeAllShapes.bind(activeChart);
+        activeChart.removeAllShapes = function(...args) {
+          for (const [entityId] of Array.from(globalDrawingEntityMap.entries())) {
+            handleGlobalDrawingEntityRemoved(entityId);
+          }
+          return origRemoveAll(...args);
+        };
+      }
+    } catch (e) {}
+
+    try {
+      const model = getInternalChartModel();
+      if (model && typeof model.removeSource === 'function' && !model.__trading_cortex_remove_source_hooked) {
+        model.__trading_cortex_remove_source_hooked = true;
+        const origRemoveSource = model.removeSource.bind(model);
+        model.removeSource = function(source, ...args) {
+          try {
+            const sid = (source && typeof source.id === 'function') ? source.id() : (source && (source._id || source.id));
+            if (sid) {
+              handleGlobalDrawingEntityRemoved(sid);
+              for (const [fvgKey, entry] of nativeAutoFvgShapesMap.entries()) {
+                if (entry && (entry.entityId === sid || String(entry.entityId) === String(sid))) {
+                  nativeAutoFvgShapesMap.delete(fvgKey);
+                  if (!nativeAutoFvgRemovalSuppression.has(sid)) dismissCreatedFvg(fvgKey);
+                }
+              }
+            }
+          } catch (e) {}
+          return origRemoveSource(source, ...args);
+        };
+      }
+    } catch (e) {}
+  }
+
   // -------------------------------------------------------------
   // Drawing Event Handling
   // -------------------------------------------------------------
   function onDrawingEvent(entityId, eventType) {
     try {
-      if (String(eventType || '').toLowerCase() === 'remove' && entityId) {
-        if (globalDrawingUpdateTimers.has(entityId)) {
-          clearTimeout(globalDrawingUpdateTimers.get(entityId));
-          globalDrawingUpdateTimers.delete(entityId);
-        }
-        const removedGlobalId = globalDrawingEntityMap.get(entityId);
-        if (removedGlobalId) {
-          globalDrawingEntityMap.delete(entityId);
-          // Background charts can remove/recreate local entities while following a
-          // focused tab. Only the focused tab is allowed to change the shared record.
-          if (chartMemoryTabFocused && !globalDrawingRestoreSuppression.has(entityId)) {
-            removedGlobalDrawingIds.add(removedGlobalId);
-            postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_REMOVE', drawingId: removedGlobalId });
-          }
-        }
+      const evt = String(eventType || '').toLowerCase();
+      if ((evt === 'remove' || evt === 'delete' || evt === 'destroy') && entityId) {
+        handleGlobalDrawingEntityRemoved(entityId);
         for (const [fvgKey, entry] of nativeAutoFvgShapesMap.entries()) {
-          if (entry && entry.entityId === entityId) {
+          if (entry && (entry.entityId === entityId || String(entry.entityId) === String(entityId))) {
             nativeAutoFvgShapesMap.delete(fvgKey);
             if (!nativeAutoFvgRemovalSuppression.has(entityId)) dismissCreatedFvg(fvgKey);
           }
@@ -1661,8 +1753,8 @@
         return;
       }
 
-      const globalId = globalDrawingEntityMap.get(entityId);
-      if (globalId && chartMemoryTabFocused && !globalDrawingRestoreSuppression.has(entityId)) {
+      const globalId = globalDrawingEntityMap.get(entityId) || globalDrawingEntityMap.get(String(entityId));
+      if (globalId && !globalDrawingRestoreSuppression.has(entityId) && !removedGlobalDrawingIds.has(globalId)) {
         queueGlobalDrawingUpdate(entityId, globalId);
       }
 
@@ -1785,15 +1877,19 @@
   }
 
   function toggleGlobalSyncForShape(entityId) {
-    if (!chartMemoryTabFocused) {
-      postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: 'Focus this chart tab to change global drawing sync' });
-      return;
-    }
-    const existingId = globalDrawingEntityMap.get(entityId);
-    if (existingId) {
-      globalDrawingEntityMap.delete(entityId);
-      removedGlobalDrawingIds.add(existingId);
-      postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_REMOVE', drawingId: existingId });
+    const key = globalDrawingEntityMap.has(entityId) ? entityId : (globalDrawingEntityMap.has(String(entityId)) ? String(entityId) : null);
+    if (key) {
+      const existingId = globalDrawingEntityMap.get(key);
+      globalDrawingEntityMap.delete(key);
+      globalDrawingEntityMap.delete(String(key));
+      lastKnownLiveShapeIds.delete(key);
+      lastKnownLiveShapeIds.delete(String(key));
+      if (existingId) {
+        removedGlobalDrawingIds.add(existingId);
+        currentGlobalDrawings = currentGlobalDrawings.filter(item => item && item.id !== existingId);
+        postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_REMOVE', drawingId: existingId });
+      }
+      postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: 'Removed global drawing sync' });
       return;
     }
     const drawing = serializeGlobalDrawing(entityId);
@@ -1802,17 +1898,23 @@
       return;
     }
     globalDrawingEntityMap.set(entityId, drawing.id);
+    globalDrawingEntityMap.set(String(entityId), drawing.id);
+    lastKnownLiveShapeIds.add(entityId);
+    lastKnownLiveShapeIds.add(String(entityId));
+    removedGlobalDrawingIds.delete(drawing.id);
     postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
     postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: `Syncing ${drawing.timeframe} drawing globally across ${drawing.symbol} charts` });
   }
 
   function queueGlobalDrawingUpdate(entityId, globalId) {
-    if (!chartMemoryTabFocused) return;
+    if (removedGlobalDrawingIds.has(globalId)) return;
     const previous = globalDrawingUpdateTimers.get(entityId);
     if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       globalDrawingUpdateTimers.delete(entityId);
-      if (!chartMemoryTabFocused || globalDrawingEntityMap.get(entityId) !== globalId) return;
+      if (removedGlobalDrawingIds.has(globalId)) return;
+      const currentGlobalId = globalDrawingEntityMap.get(entityId) || globalDrawingEntityMap.get(String(entityId));
+      if (currentGlobalId !== globalId) return;
       const drawing = serializeGlobalDrawing(entityId, globalId);
       if (drawing) postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
     }, 300);
@@ -1909,6 +2011,7 @@
 
   function restoreGlobalDrawings() {
     if (!activeChart || typeof activeChart.getAllShapes !== 'function' || !Array.isArray(currentGlobalDrawings)) return;
+    hookActiveChartEntityRemovalMethods();
     let symbol = '';
     try { symbol = getCurrentChartSymbolKey(); } catch (e) {}
     if (!symbol) return;
@@ -1917,6 +2020,8 @@
     if (!restoreState || restoreState.symbol !== normalizedSymbol) {
       restoreState = { symbol: normalizedSymbol, startedAt: Date.now() };
       globalDrawingRestoreStartTimes.set(activeChart, restoreState);
+      globalDrawingEntityMap.clear();
+      lastKnownLiveShapeIds.clear();
     }
     const withinInitialHydrationWindow = Date.now() - restoreState.startedAt < 6000;
     const records = currentGlobalDrawings.filter(record => record && String(record.symbol).toUpperCase() === normalizedSymbol);
@@ -1925,12 +2030,28 @@
     const persistedShapes = getPersistedChartDrawingCandidates();
     const liveIds = new Set(chartShapes.map(item => item && item.id).filter(Boolean));
     const registeredIds = new Set(currentGlobalDrawings.map(record => record && record.id).filter(Boolean));
-    for (const [entityId, globalId] of globalDrawingEntityMap.entries()) {
-      if (!liveIds.has(entityId)) globalDrawingEntityMap.delete(entityId);
-      else if (!registeredIds.has(globalId)) {
+
+    for (const [entityId, globalId] of Array.from(globalDrawingEntityMap.entries())) {
+      if (!liveIds.has(entityId) && !liveIds.has(String(entityId))) {
+        if (lastKnownLiveShapeIds.has(entityId) || lastKnownLiveShapeIds.has(String(entityId))) {
+          // Shape was previously confirmed on this chart for this symbol, but is now gone -> deleted by user!
+          handleGlobalDrawingEntityRemoved(entityId);
+        } else {
+          globalDrawingEntityMap.delete(entityId);
+        }
+      } else if (!registeredIds.has(globalId)) {
+        // Global drawing was removed from registry -> clean up and remove from chart
         globalDrawingEntityMap.delete(entityId);
+        lastKnownLiveShapeIds.delete(entityId);
+        lastKnownLiveShapeIds.delete(String(entityId));
+        try {
+          if (activeChart && typeof activeChart.removeEntity === 'function') {
+            activeChart.removeEntity(entityId);
+          }
+        } catch (e) {}
       }
     }
+
     if (!records.length) return;
 
     records.forEach(record => {
@@ -1940,6 +2061,8 @@
         if (mapped) {
           const mappedShape = activeChart.getShapeById(mapped[0]);
           if (mappedShape) {
+            lastKnownLiveShapeIds.add(mapped[0]);
+            lastKnownLiveShapeIds.add(String(mapped[0]));
             applyGlobalDrawingRecord(record, mapped[0], mappedShape);
             return;
           }
@@ -1952,6 +2075,8 @@
         const alreadyOnChart = matchingOnChart[0];
         if (alreadyOnChart) {
           globalDrawingEntityMap.set(alreadyOnChart.id, record.id);
+          lastKnownLiveShapeIds.add(alreadyOnChart.id);
+          lastKnownLiveShapeIds.add(String(alreadyOnChart.id));
           applyGlobalDrawingRecord(record, alreadyOnChart.id, activeChart.getShapeById(alreadyOnChart.id));
           // Clean up identical copies left by earlier restores, while preserving same-geometry drawings with different properties.
           const canonicalProperties = JSON.stringify(record.properties || {});
@@ -1961,6 +2086,8 @@
             try { sameProperties = JSON.stringify(duplicateShape.getProperties() || {}) === canonicalProperties; } catch (e) {}
             if (sameProperties) {
               globalDrawingEntityMap.delete(duplicate.id);
+              lastKnownLiveShapeIds.delete(duplicate.id);
+              lastKnownLiveShapeIds.delete(String(duplicate.id));
               try { activeChart.removeEntity(duplicate.id); } catch (e) {}
             }
           });
@@ -1982,11 +2109,21 @@
           entityId = activeChart.createMultipointShape(points, { shape: record.shape, lock: false, disableSelection: false, disableSave: false });
         }
         if (!entityId) return;
-        globalDrawingEntityMap.set(entityId, record.id);
-        globalDrawingRestoreSuppression.add(entityId);
-        setTimeout(() => globalDrawingRestoreSuppression.delete(entityId), 1200);
-        const shape = activeChart.getShapeById(entityId);
-        if (shape) applyGlobalDrawingRecord(record, entityId, shape);
+        const bindCreatedEntity = resolvedId => {
+          if (!resolvedId) return;
+          globalDrawingEntityMap.set(resolvedId, record.id);
+          lastKnownLiveShapeIds.add(resolvedId);
+          lastKnownLiveShapeIds.add(String(resolvedId));
+          globalDrawingRestoreSuppression.add(resolvedId);
+          setTimeout(() => globalDrawingRestoreSuppression.delete(resolvedId), 1200);
+          const shape = activeChart.getShapeById(resolvedId);
+          if (shape) applyGlobalDrawingRecord(record, resolvedId, shape);
+        };
+        if (entityId && typeof entityId.then === 'function') {
+          entityId.then(bindCreatedEntity).catch(() => {});
+        } else {
+          bindCreatedEntity(entityId);
+        }
       } catch (e) {}
     });
   }
@@ -10888,11 +11025,15 @@
           activeChart = activeChartApi.chart();
         }
       }
+      hookActiveChartResetMethods();
+      hookActiveChartEntityRemovalMethods();
     } catch (e) {}
 
     // 2. Clear all cached model, series, bar, signature, and canvas references
     // Note: Clear nativeAutoFvgShapesMap in-memory without calling removeEntity on the previous symbol's saved drawings
     nativeAutoFvgShapesMap.clear();
+    globalDrawingEntityMap.clear();
+    lastKnownLiveShapeIds.clear();
     cachedSessionsChartModel = null;
     cachedExtractedBarsObj = null;
     cachedQuickPlotSig = '';
