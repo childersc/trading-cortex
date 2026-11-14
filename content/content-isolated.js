@@ -1336,6 +1336,7 @@
       barMarginBottom: 8,
       headerHeightPx: 48,
       rememberOrderAmount: true,
+      restoreSelectedAccount: true,
       defaultLeverage: "5x",
       notes: "Top-bar anchored below primary navbar and above ticker row"
     },
@@ -1352,6 +1353,7 @@
       barMarginBottom: 8,
       headerHeightPx: 48,
       rememberOrderAmount: true,
+      restoreSelectedAccount: true,
       defaultLeverage: "10x",
       notes: "Arbitrum perpetual DEX on Vest"
     },
@@ -1368,6 +1370,7 @@
       barMarginBottom: 8,
       headerHeightPx: 48,
       rememberOrderAmount: true,
+      restoreSelectedAccount: true,
       defaultLeverage: "10x",
       notes: "Base app portal"
     }
@@ -1458,10 +1461,72 @@
     return list.find(f => f.enabled) || list[0] || null;
   }
 
+  function getPropFirmLogoSvg(firmId, size = 22) {
+    const id = String(firmId || '').toLowerCase();
+    if (id.includes('myfundedperpetuals') || id.includes('myfundedperps') || id.includes('mfp')) {
+      return `
+        <svg width="${size}" height="${size}" viewBox="30 44 88 108" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; flex-shrink:0;">
+          <defs>
+            <linearGradient id="mfp_g_${size}" x1="117.5" y1="61.5" x2="30.5" y2="148" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#EAB308"/>
+              <stop offset="1" stop-color="#FDE047"/>
+            </linearGradient>
+            <radialGradient id="mfp_r_${size}" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(82.5 94.3) rotate(112) scale(46.8 18.8)">
+              <stop stop-color="#D97706"/>
+              <stop offset="1" stop-color="#FCD34D"/>
+            </radialGradient>
+          </defs>
+          <path d="M51.2 56.3476V44H58.7276V49.199H70.0189V44H77.5465V49.199H88.8378V44H96.3653V56.3476H51.2Z" fill="#3B82F6"/>
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M30.099 63.2073C30.099 63.2073 29.8762 74.045 30.099 88.1987C30.1186 89.4424 30.1337 90.7064 30.149 91.9864C30.4666 118.543 30.8658 151.927 72.8883 151.927C116.936 151.927 117.565 128.81 117.565 85.0748L117.565 63.2073H30.099ZM110.265 70.5244H37.3154C37.2883 74.9567 37.289 81.1158 37.3987 88.0833C37.4176 89.2874 37.4334 90.4915 37.4492 91.6937C37.6193 104.663 37.7864 117.406 41.8895 127.429C44.0082 132.604 47.0759 136.71 51.6043 139.603C56.1834 142.529 62.8753 144.61 72.8883 144.61C83.3627 144.61 90.497 143.219 95.4292 140.971C100.13 138.828 103.125 135.779 105.227 131.605C107.451 127.19 108.793 121.268 109.508 113.315C110.22 105.384 110.265 96.0779 110.265 85.0748L110.265 70.5244Z" fill="url(#mfp_g_${size})"/>
+          <path d="M58.1131 106.652H44.287C44.287 106.652 44.3734 115.772 47.0522 122.659C49.731 129.545 58.1131 135.921 58.1131 135.921V106.652Z" fill="#FDE047"/>
+          <path d="M82.5392 94.3049H65.0262V137.75H82.5392V94.3049Z" fill="url(#mfp_r_${size})"/>
+          <path d="M103.739 82.4146H89.4523V135.921C89.4523 135.921 103.739 132.469 103.739 114.346V82.4146Z" fill="#D97706"/>
+        </svg>
+      `;
+    }
+    if (id.includes('vestmarkets') || id.includes('vest_markets')) {
+      return `
+        <svg width="${size}" height="${Math.round(size * 0.72)}" viewBox="0 0 32 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; flex-shrink:0;">
+          <defs>
+            <linearGradient id="vest_g_${size}" x1="0" y1="0" x2="32" y2="20" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#34D399"/>
+              <stop offset="1" stop-color="#06B6D4"/>
+            </linearGradient>
+          </defs>
+          <path d="M7.58838 0.0535078L0.0805368 6.06693C-0.0268456 6.15643 -0.0268456 6.31749 0.0805368 6.40697L15.8658 19.0513C15.9463 19.1139 16.0537 19.1139 16.1342 19.0513L31.9196 6.40697C32.0268 6.31749 32.0268 6.15643 31.9196 6.06693L24.4206 0.0535078C24.2774 -0.0628224 24.0717 0.0445599 24.0717 0.223532V19.5793C24.0717 19.6956 23.9732 19.794 23.8568 19.794H8.23267C8.11633 19.794 8.0179 19.6956 8.0179 19.5793L7.93737 0.214582C7.93737 0.035612 7.73154 -0.0628224 7.58838 0.0445599V0.0535078Z" fill="url(#vest_g_${size})"/>
+        </svg>
+      `;
+    }
+    if (id.includes('vestexchange') || id.includes('vest_exchange') || id.includes('vest')) {
+      return `
+        <svg width="${size}" height="${Math.round(size * 0.72)}" viewBox="0 0 32 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; flex-shrink:0;">
+          <defs>
+            <linearGradient id="vestex_g_${size}" x1="0" y1="0" x2="32" y2="20" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#38BDF8"/>
+              <stop offset="1" stop-color="#6366F1"/>
+            </linearGradient>
+          </defs>
+          <path d="M7.58838 0.0535078L0.0805368 6.06693C-0.0268456 6.15643 -0.0268456 6.31749 0.0805368 6.40697L15.8658 19.0513C15.9463 19.1139 16.0537 19.1139 16.1342 19.0513L31.9196 6.40697C32.0268 6.31749 32.0268 6.15643 31.9196 6.06693L24.4206 0.0535078C24.2774 -0.0628224 24.0717 0.0445599 24.0717 0.223532V19.5793C24.0717 19.6956 23.9732 19.794 23.8568 19.794H8.23267C8.11633 19.794 8.0179 19.6956 8.0179 19.5793L7.93737 0.214582C7.93737 0.035612 7.73154 -0.0628224 7.58838 0.0445599V0.0535078Z" fill="url(#vestex_g_${size})"/>
+        </svg>
+      `;
+    }
+    // Generic custom prop firm fallback icon: Candlestick chart terminal mark
+    return `
+      <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#38bdf8; display:block; flex-shrink:0;">
+        <line x1="9" y1="2" x2="9" y2="22"></line>
+        <line x1="17" y1="4" x2="17" y2="18"></line>
+        <rect x="7" y="6" width="4" height="9" rx="1" fill="rgba(56,189,248,0.35)"></rect>
+        <rect x="15" y="8" width="4" height="6" rx="1" fill="rgba(56,189,248,0.35)"></rect>
+      </svg>
+    `;
+  }
+
   let settings = {
     activeTemplateId: null,
     defaultTemplateId: null,
     perpFirms: JSON.parse(JSON.stringify(DEFAULT_PERP_FIRMS)),
+    deletedFirmIds: [],
+    vestLastActiveAccount: null,
     showFloatingBar: false,
     floatingBarPosition: { top: 80, left: 16 },
     autoApplyToNew: false,
@@ -6090,8 +6155,11 @@
                 <div class="vest-pf-tile ${isSelected ? 'selected' : ''} ${!firm.enabled ? 'disabled' : ''}" data-firm-id="${firm.id}">
                   <div class="vest-pf-tile-top">
                     <div class="vest-pf-tile-title-row">
-                      <div class="vest-pf-avatar">${initials}</div>
+                      <div class="vest-pf-avatar" title="${firm.name}">${getPropFirmLogoSvg(firm.id, 24)}</div>
                       <div class="vest-pf-name" title="${firm.name}">${firm.name}</div>
+                      <button type="button" class="vest-pf-tile-delete-btn" data-delete-firm-id="${firm.id}" title="Remove ${firm.name}" style="margin-left:auto; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#fca5a5; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:700; cursor:pointer; line-height:1.2;">
+                        ✕
+                      </button>
                     </div>
                   </div>
 
@@ -6141,8 +6209,8 @@
 
             <div class="vest-pf-detail-header">
               <div class="vest-pf-detail-title-group">
-                <div class="vest-pf-avatar" style="width:32px; height:32px; font-size:13px;">
-                  ${firm.name.slice(0, 3).toUpperCase()}
+                <div class="vest-pf-avatar" style="width:36px; height:36px; display:flex; align-items:center; justify-content:center;">
+                  ${getPropFirmLogoSvg(firm.id, 26)}
                 </div>
                 <div>
                   <div class="vest-pf-detail-title">${firm.name}</div>
@@ -6161,11 +6229,10 @@
                   </label>
                 </div>
 
-                ${!firm.isBuiltin ? `
-                  <button type="button" id="vest-pf-btn-delete" style="background:rgba(239,68,68,0.14); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:6px; padding:4px 9px; font-size:11px; font-weight:600; cursor:pointer;" title="Delete this custom perp firm">
-                    Delete
-                  </button>
-                ` : ''}
+                <button type="button" id="vest-pf-btn-delete" style="background:rgba(239,68,68,0.14); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:6px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Remove this prop firm">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  Remove Prop Firm
+                </button>
               </div>
             </div>
 
@@ -6251,6 +6318,23 @@
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Trader Notes / Firm Rules</label>
                 <input type="text" class="vest-ed-input" id="vest-pf-input-notes" value="${firm.notes || ''}" placeholder="e.g. Max drawdown 4%, trade only during NY Killzone" />
+              </div>
+            </div>
+
+            <!-- Section 4: Account Persistence & Subaccount Routing -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Account Persistence &amp; Subaccount Routing
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="max-width:80%;">
+                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Restore Selected Account on Refresh</div>
+                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Keeps track of which account is selected on this exchange (e.g. Vest subaccounts or evaluation accounts) and restores your tab to that account on refresh.</div>
+                </div>
+                <label class="vest-tvs-switch" title="Restore selected account on refresh">
+                  <input type="checkbox" id="vest-pf-input-restore-account" ${firm.restoreSelectedAccount !== false ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
               </div>
             </div>
           </div>
@@ -6527,6 +6611,7 @@
       const headerEl = overlay.querySelector('#vest-pf-input-header');
       const levEl = overlay.querySelector('#vest-pf-input-leverage');
       const rememberSizeEl = overlay.querySelector('#vest-pf-input-remember-size');
+      const restoreAccountEl = overlay.querySelector('#vest-pf-input-restore-account');
       const notesEl = overlay.querySelector('#vest-pf-input-notes');
 
       if (!firm.isBuiltin && nameEl) firm.name = nameEl.value.trim() || firm.name;
@@ -6542,6 +6627,7 @@
       if (headerEl) firm.headerHeightPx = Number(headerEl.value) || 48;
       if (levEl) firm.defaultLeverage = levEl.value;
       if (rememberSizeEl) firm.rememberOrderAmount = Boolean(rememberSizeEl.checked);
+      if (restoreAccountEl) firm.restoreSelectedAccount = Boolean(restoreAccountEl.checked);
       if (notesEl) firm.notes = notesEl.value.trim();
     }
     function syncCurrentPaneToDraft() {
@@ -7710,9 +7796,30 @@
 
             function bindPerpFirmsListeners() {
         overlay.querySelectorAll('.vest-pf-tile[data-firm-id]').forEach(tile => {
-          tile.addEventListener('click', () => {
+          tile.addEventListener('click', (e) => {
+            if (e.target.closest('.vest-pf-tile-delete-btn')) return;
             syncCurrentFirmToDraft();
             selectedFirmId = tile.dataset.firmId;
+            const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+            if (rightPane) {
+              rightPane.innerHTML = renderPerpFirmsHtml();
+              bindPerpFirmsListeners();
+            }
+          });
+        });
+
+        overlay.querySelectorAll('.vest-pf-tile-delete-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const firmId = btn.dataset.deleteFirmId;
+            if (!firmId) return;
+            draftSettings.perpFirms = draftSettings.perpFirms.filter(f => f.id !== firmId);
+            if (!draftSettings.deletedFirmIds) draftSettings.deletedFirmIds = [];
+            if (!draftSettings.deletedFirmIds.includes(firmId)) draftSettings.deletedFirmIds.push(firmId);
+            if (selectedFirmId === firmId) {
+              selectedFirmId = draftSettings.perpFirms[0]?.id || '__new__';
+            }
+            showToast('Firm removed');
             const rightPane = overlay.querySelector('#vest-tvs-right-pane');
             if (rightPane) {
               rightPane.innerHTML = renderPerpFirmsHtml();
@@ -7869,7 +7976,9 @@
               const firmId = detailCard.querySelector('#vest-pf-current-id')?.value;
               if (!firmId) return;
               draftSettings.perpFirms = draftSettings.perpFirms.filter(f => f.id !== firmId);
-              selectedFirmId = draftSettings.perpFirms[0]?.id || 'myfundedperpetuals';
+              if (!draftSettings.deletedFirmIds) draftSettings.deletedFirmIds = [];
+              if (!draftSettings.deletedFirmIds.includes(firmId)) draftSettings.deletedFirmIds.push(firmId);
+              selectedFirmId = draftSettings.perpFirms[0]?.id || '__new__';
               showToast('Firm removed');
               const rightPane = overlay.querySelector('#vest-tvs-right-pane');
               if (rightPane) {
@@ -13611,6 +13720,162 @@ if (activeTab === 'diagnostics') {
   }
 
   // -------------------------------------------------------------
+  // Vest & Prop Firm Active Account Tracking & Auto-Restoration
+  // -------------------------------------------------------------
+  let lastObservedAccountName = null;
+  let hasCompletedAccountRestoration = false;
+  let vestAccountTrackerTimer = null;
+
+  function getActiveAccountTriggerElement() {
+    return (
+      document.querySelector('[data-testid="account-selector-trigger"]') ||
+      document.querySelector('button[data-testid*="account"]') ||
+      document.querySelector('[class*="account-selector"]') ||
+      document.querySelector('[class*="accountSelector"]')
+    );
+  }
+
+  function readCurrentSelectedAccount() {
+    const trigger = getActiveAccountTriggerElement();
+    if (trigger) {
+      const copyBtn = trigger.querySelector('[text]');
+      const id = copyBtn ? copyBtn.getAttribute('text') : null;
+      const textSpan = trigger.querySelector('span');
+      const name = (textSpan ? textSpan.innerText : trigger.innerText || '').replace(/[↕▼⌄▾]/g, '').trim();
+      if (name) {
+        return { name, id: id || name };
+      }
+    }
+
+    const headerBtns = document.querySelectorAll('header button, [class*="header"] button, [class*="nav"] button');
+    for (const btn of headerBtns) {
+      const txt = (btn.innerText || '').trim();
+      if (
+        txt &&
+        txt.length < 50 &&
+        (/evaluation|funded|dll|account|dex|capital/i.test(txt)) &&
+        !/deposit|withdraw|connect|login|sign in|buy|sell|order/i.test(txt)
+      ) {
+        return { name: txt, id: txt };
+      }
+    }
+    return null;
+  }
+
+  function trackActiveAccount() {
+    if (!isExtensionValid()) return;
+    const currentFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (!currentFirm || currentFirm.restoreSelectedAccount === false) return;
+
+    const current = readCurrentSelectedAccount();
+    if (!current || !current.name) return;
+
+    if (current.name !== lastObservedAccountName) {
+      lastObservedAccountName = current.name;
+      const record = {
+        firmId: currentFirm.id,
+        name: current.name,
+        id: current.id,
+        timestamp: Date.now()
+      };
+      settings.vestLastActiveAccount = record;
+      safeStorageSet({ settings });
+      cortexDebugLog(`Tracked active account for ${currentFirm.name}: "${current.name}"`);
+    }
+  }
+
+  let restoreAccountAttempts = 0;
+  function attemptRestoreSelectedAccount() {
+    if (hasCompletedAccountRestoration) return;
+    if (!isExtensionValid()) return;
+
+    const currentFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (!currentFirm || currentFirm.restoreSelectedAccount === false) {
+      hasCompletedAccountRestoration = true;
+      return;
+    }
+
+    const saved = settings.vestLastActiveAccount;
+    if (!saved || !saved.name || saved.firmId !== currentFirm.id) {
+      hasCompletedAccountRestoration = true;
+      return;
+    }
+
+    const trigger = getActiveAccountTriggerElement();
+    if (!trigger) {
+      if (restoreAccountAttempts < 15) {
+        restoreAccountAttempts++;
+        setTimeout(attemptRestoreSelectedAccount, 400);
+      }
+      return;
+    }
+
+    const current = readCurrentSelectedAccount();
+    if (current && (current.name === saved.name || (saved.id && current.id === saved.id))) {
+      cortexDebugLog(`Active account already matches saved "${saved.name}". No switch needed.`);
+      hasCompletedAccountRestoration = true;
+      lastObservedAccountName = current.name;
+      return;
+    }
+
+    cortexDebugLog(`Attempting to restore selected account to "${saved.name}" (current: "${current?.name || 'unknown'}")`);
+    trigger.click();
+
+    setTimeout(() => {
+      const items = document.querySelectorAll(
+        '[data-testid^="account-item-"], [role="menuitem"], [class*="menu-item"], [class*="account-item"], [class*="DropdownMenuItem"]'
+      );
+      let matchedItem = null;
+      for (const item of items) {
+        const itemText = (item.innerText || '').trim();
+        const copyAttr = item.querySelector('[text]')?.getAttribute('text');
+        if (
+          (saved.id && copyAttr === saved.id) ||
+          (saved.id && item.getAttribute('data-testid')?.includes(saved.id)) ||
+          itemText.includes(saved.name) ||
+          (saved.name && itemText.toLowerCase().includes(saved.name.toLowerCase()))
+        ) {
+          matchedItem = item;
+          break;
+        }
+      }
+
+      if (matchedItem) {
+        matchedItem.click();
+        hasCompletedAccountRestoration = true;
+        lastObservedAccountName = saved.name;
+        showToast(`Restored account: ${saved.name}`, 3000);
+        cortexDebugLog(`Successfully restored account to "${saved.name}"`);
+      } else {
+        trigger.click();
+        if (restoreAccountAttempts < 8) {
+          restoreAccountAttempts++;
+          setTimeout(attemptRestoreSelectedAccount, 800);
+        } else {
+          hasCompletedAccountRestoration = true;
+        }
+      }
+    }, 150);
+  }
+
+  function initVestAccountTracker() {
+    if (!isTopWindow) return;
+    setTimeout(attemptRestoreSelectedAccount, 800);
+    setTimeout(attemptRestoreSelectedAccount, 2000);
+
+    if (!vestAccountTrackerTimer) {
+      vestAccountTrackerTimer = setInterval(() => {
+        if (!isExtensionValid()) {
+          clearInterval(vestAccountTrackerTimer);
+          vestAccountTrackerTimer = null;
+          return;
+        }
+        trackActiveAccount();
+      }, 1500);
+    }
+  }
+
+  // -------------------------------------------------------------
   // Initialization
   // -------------------------------------------------------------
   async function init() {
@@ -13630,6 +13895,9 @@ if (activeTab === 'diagnostics') {
           ...settings,
           ...data.settings,
           autoApplyToNew: false,
+          perpFirms: normalizePerpFirmsConfig(data.settings.perpFirms, data.settings.deletedFirmIds),
+          deletedFirmIds: Array.isArray(data.settings.deletedFirmIds) ? data.settings.deletedFirmIds : [],
+          vestLastActiveAccount: data.settings.vestLastActiveAccount || null,
           sessionIndicators: normalizeSessionIndicatorsConfig(data.settings.sessionIndicators),
           autoFvg: normalizeAutoFvgConfig(data.settings.autoFvg),
           newsBox: normalizeNewsBoxConfig(data.settings.newsBox),
@@ -13648,6 +13916,9 @@ if (activeTab === 'diagnostics') {
           settings.defaultTemplateId = templates[0]?.id || null;
         }
       } else {
+        settings.perpFirms = normalizePerpFirmsConfig(settings.perpFirms, settings.deletedFirmIds);
+        settings.deletedFirmIds = Array.isArray(settings.deletedFirmIds) ? settings.deletedFirmIds : [];
+        settings.vestLastActiveAccount = settings.vestLastActiveAccount || null;
         settings.sessionIndicators = normalizeSessionIndicatorsConfig(settings.sessionIndicators);
         settings.autoFvg = normalizeAutoFvgConfig(settings.autoFvg);
         settings.newsBox = normalizeNewsBoxConfig(settings.newsBox);
@@ -13691,6 +13962,7 @@ if (activeTab === 'diagnostics') {
         renderChartTradesBox();
         renderChartDiagnosticsBox();
         setupIsolatedActionTracking();
+        initVestAccountTracker();
         // Run background update check on page refresh / load
         triggerQuickUpdateCheck();
       }
