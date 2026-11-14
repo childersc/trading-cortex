@@ -120,18 +120,17 @@
     }
     return (
       key === 'properties_toolbar.position' ||
-      key === 'ChartDrawingToolbarWidget.visible' ||
-      key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
-      key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+      key.includes('ChartDrawingToolbarWidget') ||
+      key.includes('drawingToolbar') ||
+      key.includes('drawingTools') ||
+      key.includes('side_toolbar') ||
+      key.includes('sideToolbar') ||
       key === 'tradingview.IntervalWidget.quicks' ||
       key === 'tradingview.StyleWidget.quicks' ||
       key.startsWith('tradingview.chartproperties') ||
       key.startsWith('linetool.') ||
       key.startsWith('combobox.') ||
-      key.startsWith('drawingToolbar.') ||
-      key.startsWith('drawingFavorites') ||
-      key.startsWith('side_toolbar.') ||
-      key.startsWith('sideToolbar.')
+      key.startsWith('drawingFavorites')
     );
   }
 
@@ -4109,10 +4108,12 @@
 
     // Left Drawing Toolbar Toggle Button -> sends toggle command to TradingView chart
     menuEl.querySelector('#vest-sdm-toggle-drawing-toolbar-btn')?.addEventListener('click', () => {
+      const force = latestDrawingToolbarVisible === false ? true : null;
       postToMainWorlds({
-        type: 'VEST_TV_TOGGLE_DRAWING_TOOLBAR'
+        type: 'VEST_TV_TOGGLE_DRAWING_TOOLBAR',
+        payload: { force }
       });
-      showToast('Toggling left drawing toolbar...');
+      showToast(latestDrawingToolbarVisible === false ? 'Opening left drawing toolbar...' : 'Toggling left drawing toolbar...');
     });
 
     // Perp Firm Settings Button -> opens Settings Dialog on Perp Firms tab

@@ -455,18 +455,17 @@
     }
     return (
       key === 'properties_toolbar.position' ||
-      key === 'ChartDrawingToolbarWidget.visible' ||
-      key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
-      key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+      key.includes('ChartDrawingToolbarWidget') ||
+      key.includes('drawingToolbar') ||
+      key.includes('drawingTools') ||
+      key.includes('side_toolbar') ||
+      key.includes('sideToolbar') ||
       key === 'tradingview.IntervalWidget.quicks' ||
       key === 'tradingview.StyleWidget.quicks' ||
       key.startsWith('tradingview.chartproperties') ||
       key.startsWith('linetool.') ||
       key.startsWith('combobox.') ||
-      key.startsWith('drawingToolbar.') ||
-      key.startsWith('drawingFavorites') ||
-      key.startsWith('side_toolbar.') ||
-      key.startsWith('sideToolbar.')
+      key.startsWith('drawingFavorites')
     );
   }
 
@@ -1467,7 +1466,7 @@
 
     const targetWin = window;
     for (const key of Object.keys(targetWin)) {
-      if (key.startsWith('tradingview_') && targetWin[key]) {
+      if ((key.startsWith('tradingview_') || key.startsWith('tv_') || key === 'tvWidget' || key === 'widget' || key === 'tradingViewWidget' || key === '_tvWidget') && targetWin[key]) {
         const obj = targetWin[key];
         if (obj._innerAPI && typeof obj._innerAPI === 'function') {
           try {
@@ -4371,7 +4370,42 @@
     return direct;
   }
 
+  function getDrawingToolbarContainer(doc = null) {
+    try {
+      const docs = doc ? [doc] : (typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document]);
+      for (const d of docs) {
+        if (!d) continue;
+        const container = d.querySelector([
+          '[data-name="drawing-toolbar"]',
+          'div[class*="drawingToolbar"]',
+          'div[class*="drawing-toolbar"]',
+          'div[class*="chart-controls-bar"]',
+          'div[class*="tv-side-toolbar"]',
+          'div[class*="side-toolbar"]',
+          'div[class*="sideToolbar"]'
+        ].join(', '));
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          if (rect.width > 20 && rect.height > 50) {
+            return container;
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function isDrawingToolbarVisibleNow() {
+    // 1. Direct ground-truth DOM container check
+    const container = getDrawingToolbarContainer();
+    if (container) return true;
+
+    // 2. Direct DOM check for magnet or group tools
+    const magnetBtn = getMagnetButton();
+    const { detectedGroups } = scanDomSidebarGroupSlots();
+    if (magnetBtn || Object.keys(detectedGroups).length > 0) return true;
+
+    // 3. TradingView Charting Library widget/chart API
     const targets = [activeWidget, activeChart, activeChartApi, activeWidget?.activeChart?.()];
     for (const target of targets) {
       if (!target) continue;
@@ -4388,9 +4422,7 @@
         } catch (e) {}
       }
     }
-    const magnetBtn = getMagnetButton();
-    const { detectedGroups } = scanDomSidebarGroupSlots();
-    return Boolean(magnetBtn || Object.keys(detectedGroups).length > 0);
+    return false;
   }
 
   function reportDrawingToolbarVisibility() {
@@ -4402,21 +4434,57 @@
     return visible;
   }
 
+  let lastToolbarRestoreAttemptTimestamp = 0;
   function ensureDrawingToolbarVisible() {
     try {
-      const magnetBtn = getMagnetButton();
-      const { detectedGroups } = scanDomSidebarGroupSlots();
-      const hasSidebarDom = Boolean(magnetBtn || Object.keys(detectedGroups).length > 0);
+      // 0. If ALREADY visible, DO NOTHING! Never toggle or collapse an open toolbar!
+      if (isDrawingToolbarVisibleNow()) {
+        reportDrawingToolbarVisibility();
+        return true;
+      }
 
-      // 1. Check TradingView Charting Library API via executeActionById or getCheckableActionState
+      // Throttle restore attempts to prevent rapid flapping
+      const now = Date.now();
+      if (now - lastToolbarRestoreAttemptTimestamp < 350) {
+        return false;
+      }
+      lastToolbarRestoreAttemptTimestamp = now;
+
+      log('Drawing toolbar is not visible. Attempting to restore visibility...');
+
       const targets = [activeWidget, activeChart, activeChartApi, activeWidget?.activeChart?.()];
+
+      // 1. First preference: Explicit non-toggling methods (show / setVisible)
+      for (const target of targets) {
+        if (!target) continue;
+        if (typeof target.showDrawingToolbar === 'function') {
+          try {
+            target.showDrawingToolbar();
+            if (isDrawingToolbarVisibleNow()) {
+              setTimeout(reportDrawingToolbarVisibility, 120);
+              return true;
+            }
+          } catch (e) {}
+        }
+        if (typeof target.setDrawingToolbarVisibility === 'function') {
+          try {
+            target.setDrawingToolbarVisibility(true);
+            if (isDrawingToolbarVisibleNow()) {
+              setTimeout(reportDrawingToolbarVisibility, 120);
+              return true;
+            }
+          } catch (e) {}
+        }
+      }
+
+      // 2. Second preference: Check if getCheckableActionState explicitly says false
       for (const target of targets) {
         if (!target) continue;
         if (typeof target.getCheckableActionState === 'function') {
           try {
             const isVisible = target.getCheckableActionState('drawingToolbarAction');
             if (isVisible === false) {
-              log('Drawing toolbar is hidden according to getCheckableActionState. Restoring visibility via drawingToolbarAction...');
+              log('Restoring toolbar visibility via drawingToolbarAction action...');
               if (typeof target.executeActionById === 'function') {
                 target.executeActionById('drawingToolbarAction');
               }
@@ -4427,78 +4495,56 @@
         }
       }
 
-      // 2. Also check if activeWidget or activeChart has showDrawingToolbar or setDrawingToolbarVisibility method
-      for (const target of targets) {
-        if (!target) continue;
-        if (typeof target.showDrawingToolbar === 'function') {
-          try {
-            target.showDrawingToolbar();
+      // 3. Third preference: Find and click TradingView's DOM expand/collapse button
+      const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
+      for (const doc of docs) {
+        try {
+          const directToggle = doc.querySelector([
+            'button[data-name="drawing-toolbar-visibility"]',
+            'div[data-name="drawing-toolbar-visibility"]',
+            'button[data-name="toggle-visibility-drawing-toolbar"]',
+            'div[data-name="toggle-visibility-drawing-toolbar"]',
+            'button[data-name="show-drawing-toolbar"]',
+            'div[data-name="show-drawing-toolbar"]',
+            'button[data-name*="drawing-toolbar"]',
+            'div[data-name*="drawing-toolbar"]',
+            'button[class*="collapseButton"]',
+            'div[class*="collapseButton"]',
+            'button[class*="toggleButton"]',
+            'div[class*="toggleButton"]'
+          ].join(', '));
+          if (directToggle) {
+            log('Found direct TradingView collapse/expand toggle button. Clicking to expand drawing toolbar...');
+            directToggle.click();
             setTimeout(reportDrawingToolbarVisibility, 120);
             return true;
-          } catch (e) {}
-        }
-        if (typeof target.setDrawingToolbarVisibility === 'function') {
-          try {
-            target.setDrawingToolbarVisibility(true);
-            setTimeout(reportDrawingToolbarVisibility, 120);
-            return true;
-          } catch (e) {}
-        }
-      }
-
-      // 3. If DOM toolbar is currently missing (!hasSidebarDom), try executeActionById('drawingToolbarAction')
-      if (!hasSidebarDom) {
-        for (const target of targets) {
-          if (target && typeof target.executeActionById === 'function') {
-            try {
-              target.executeActionById('drawingToolbarAction');
-              setTimeout(reportDrawingToolbarVisibility, 150);
-              return true;
-            } catch (e) {}
           }
-        }
-      }
 
-      // 4. Check for any DOM button to expand/toggle the drawing toolbar when not visible in DOM
-      if (!hasSidebarDom) {
-        const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
-        for (const doc of docs) {
-          try {
-            const toggleSelectors = [
-              'button[data-name="drawing-toolbar-visibility"]',
-              'div[data-name="drawing-toolbar-visibility"]',
-              'button[data-name="toggle-visibility-drawing-toolbar"]',
-              'div[data-name="toggle-visibility-drawing-toolbar"]',
-              'button[data-name="show-drawing-toolbar"]',
-              'div[data-name="show-drawing-toolbar"]',
-              'button[data-name*="drawing-toolbar"]',
-              'div[data-name*="drawing-toolbar"]',
-              'button[class*="collapseButton"]',
-              'div[class*="collapseButton"]',
-              'button[class*="toggleButton"]',
-              'div[class*="toggleButton"]'
-            ];
-            const directToggle = doc.querySelector(toggleSelectors.join(', '));
-            if (directToggle) {
-              log('Found direct TradingView collapse/expand toggle button. Clicking to expand drawing toolbar...');
-              directToggle.click();
+          // Search buttons near the left edge of the chart container
+          const chartHost = doc.querySelector('[class*="chart-container"], [id*="chart"], body');
+          const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
+          const btns = doc.querySelectorAll('button, div[role="button"], a');
+          for (const btn of btns) {
+            const rect = btn.getBoundingClientRect();
+            if (rect.width > 0 && (rect.left - hostLeft) > 60) continue;
+            const label = `${btn.getAttribute('data-name') || ''} ${btn.getAttribute('aria-label') || ''} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''}`.toLowerCase();
+            if (label.includes('drawing') || label.includes('toolbar') || label.includes('sidebar') || label.includes('collapse') || label.includes('toggle')) {
+              log('Found left-edge toggle candidate to restore drawing toolbar:', label);
+              btn.click();
               setTimeout(reportDrawingToolbarVisibility, 120);
               return true;
             }
+          }
+        } catch (e) {}
+      }
 
-            // Broader search on left edge (x < 70px)
-            const btns = doc.querySelectorAll('button, div[role="button"], a');
-            for (const btn of btns) {
-              const rect = btn.getBoundingClientRect();
-              if (rect.width > 0 && rect.left > 70) continue;
-              const label = `${btn.getAttribute('data-name') || ''} ${btn.getAttribute('aria-label') || ''} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''}`.toLowerCase();
-              if (label.includes('drawing') || label.includes('toolbar') || label.includes('sidebar') || label.includes('collapse') || label.includes('toggle')) {
-                log('Found left-edge toggle candidate to restore drawing toolbar:', label);
-                btn.click();
-                setTimeout(reportDrawingToolbarVisibility, 120);
-                return true;
-              }
-            }
+      // 4. Last fallback: Try executeActionById('drawingToolbarAction') once if confirmed not visible
+      for (const target of targets) {
+        if (target && typeof target.executeActionById === 'function') {
+          try {
+            target.executeActionById('drawingToolbarAction');
+            setTimeout(reportDrawingToolbarVisibility, 150);
+            return true;
           } catch (e) {}
         }
       }
@@ -4509,31 +4555,24 @@
   }
 
   function toggleDrawingToolbarVisibility(forceShow = null) {
+    if (forceShow === true && isDrawingToolbarVisibleNow()) {
+      reportDrawingToolbarVisibility();
+      return;
+    }
+    if (forceShow === false && !isDrawingToolbarVisibleNow()) {
+      reportDrawingToolbarVisibility();
+      return;
+    }
+
+    if (forceShow === true) {
+      ensureDrawingToolbarVisible();
+      return;
+    }
+
     let handled = false;
     const targets = [activeWidget, activeChart, activeChartApi, activeWidget?.activeChart?.()];
     for (const target of targets) {
       if (!target) continue;
-      const currentState = typeof target.getCheckableActionState === 'function'
-        ? target.getCheckableActionState('drawingToolbarAction')
-        : (typeof target.isDrawingToolbarVisible === 'function' ? target.isDrawingToolbarVisible() : null);
-
-      if (forceShow === true && currentState === true) {
-        handled = true;
-        break;
-      }
-      if (forceShow === false && currentState === false) {
-        handled = true;
-        break;
-      }
-
-      if (forceShow === true && typeof target.showDrawingToolbar === 'function') {
-        try {
-          target.showDrawingToolbar();
-          handled = true;
-          break;
-        } catch (e) {}
-      }
-
       if (typeof target.executeActionById === 'function') {
         try {
           target.executeActionById('drawingToolbarAction');
@@ -4543,8 +4582,22 @@
       }
     }
 
-    if (!handled && (forceShow === true || forceShow === null)) {
-      ensureDrawingToolbarVisible();
+    if (!handled) {
+      const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
+      for (const doc of docs) {
+        const toggleBtn = doc.querySelector([
+          'button[data-name*="drawing-toolbar"]',
+          'div[data-name*="drawing-toolbar"]',
+          'button[class*="collapseButton"]',
+          'div[class*="collapseButton"]',
+          'button[class*="toggleButton"]',
+          'div[class*="toggleButton"]'
+        ].join(', '));
+        if (toggleBtn) {
+          toggleBtn.click();
+          break;
+        }
+      }
     }
 
     setTimeout(reportDrawingToolbarVisibility, 150);
@@ -4587,10 +4640,14 @@
           if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
             return;
           }
-          // Only consider buttons on the left-hand drawing sidebar (x < 120px)
-          const rect = el.getBoundingClientRect();
-          if (rect.width > 0 && rect.left > 140) {
-            return;
+          // Only consider buttons on the left-hand drawing sidebar
+          const inToolbarContainer = Boolean(el.closest('[data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="chart-controls-bar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
+          if (!inToolbarContainer) {
+            const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
+            const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
+            if (rect.width > 0 && (rect.left - hostLeft) > 120) {
+              return;
+            }
           }
 
           let toolId = normalizeToolId(el.getAttribute('data-name'));
@@ -4842,8 +4899,12 @@
           if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
             continue;
           }
-          const rect = el.getBoundingClientRect();
-          if (rect.width > 0 && rect.left > 140) continue;
+          const inToolbarContainer = Boolean(el.closest('[data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="chart-controls-bar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
+          if (!inToolbarContainer) {
+            const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
+            const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
+            if (rect.width > 0 && (rect.left - hostLeft) > 120) continue;
+          }
 
           const tId =
             normalizeToolId(el.getAttribute('data-name')) ||
