@@ -6,6 +6,9 @@ All notable changes, new features, and bug fixes through the current release (`v
 
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
+### 🐛 Bug Fixes
+- **Timeframe Toolbar Harmony with Third-Party Buttons (TV / Vela)**: Resolved the rapid jumping and DOM positioning fight between Cortex timeframe shortcut buttons and third-party indicator buttons (`TV / Vela`). Implemented stable non-destructive placement checks and cached DOM reconciliation to eliminate cascading MutationObserver loops.
+
 ### ✨ Features
 - **Bottom Positions & Orders Detach & Minimize**:
   - Added dedicated `DETACH` button to the bottom positions and orders box, popping it out into a floating, moveable, resizable HUD window so the chart can become full screen.

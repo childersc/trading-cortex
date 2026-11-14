@@ -331,32 +331,84 @@
           if (existing) existing.remove();
           return;
         }
+        const toolbarRow = toolbarGroup.parentElement;
         const bar = existing || doc.createElement('div');
         bar.id = 'vest-timeframe-favorites';
         bar.setAttribute('data-tc-favorites-placement', 'toolbar-row');
         bar.setAttribute('aria-label', 'Favorite timeframes');
         Object.assign(bar.style, { display: 'inline-flex', visibility: 'visible', opacity: '1', alignItems: 'center', gap: '3px', marginLeft: '5px', whiteSpace: 'nowrap', verticalAlign: 'middle', flex: '0 0 auto', position: 'relative', zIndex: '20' });
-        bar.replaceChildren();
+
         let activeResolution = '';
         try { activeResolution = String((activeChart && activeChart.resolution && activeChart.resolution()) || '').toLowerCase(); } catch (e) {}
-        favorites.forEach(option => {
-          const button = doc.createElement('button');
-          button.type = 'button';
-          button.textContent = option.short;
-          button.title = `${option.label} — click to switch`;
-          button.setAttribute('data-tc-timeframe-resolution', option.resolution);
-          const isActive = activeResolution === option.resolution.toLowerCase();
-          Object.assign(button.style, {
-            border: '1px solid ' + (isActive ? 'rgba(56,189,248,.65)' : 'rgba(148,163,184,.24)'),
-            borderRadius: '4px', background: isActive ? 'rgba(14,116,144,.25)' : 'rgba(15,23,42,.55)',
-            color: isActive ? '#7dd3fc' : '#d1d5db', font: '600 11px/20px Arial,sans-serif',
-            minWidth: '27px', padding: '0 5px', cursor: 'pointer'
+
+        const favKey = favorites.map(f => f.resolution).join('|');
+        const stateKey = `${favKey}::${activeResolution}`;
+
+        // Only rebuild button DOM when favorites configuration or active resolution changes
+        // to prevent triggering cascading MutationObservers with other indicator scripts (e.g. TV / Vela)
+        if (bar.dataset.tcRenderKey !== stateKey || bar.children.length !== favorites.length) {
+          bar.dataset.tcRenderKey = stateKey;
+          bar.replaceChildren();
+          favorites.forEach(option => {
+            const button = doc.createElement('button');
+            button.type = 'button';
+            button.textContent = option.short;
+            button.title = `${option.label} — click to switch`;
+            button.setAttribute('data-tc-timeframe-resolution', option.resolution);
+            const isActive = activeResolution === option.resolution.toLowerCase();
+            Object.assign(button.style, {
+              border: '1px solid ' + (isActive ? 'rgba(56,189,248,.65)' : 'rgba(148,163,184,.24)'),
+              borderRadius: '4px', background: isActive ? 'rgba(14,116,144,.25)' : 'rgba(15,23,42,.55)',
+              color: isActive ? '#7dd3fc' : '#d1d5db', font: '600 11px/20px Arial,sans-serif',
+              minWidth: '27px', padding: '0 5px', cursor: 'pointer'
+            });
+            bar.appendChild(button);
           });
-          bar.appendChild(button);
-        });
-        const toolbarRow = toolbarGroup.parentElement;
-        if (bar.parentElement !== toolbarRow || bar.previousElementSibling !== toolbarGroup) {
-          toolbarRow.insertBefore(bar, toolbarGroup.nextSibling);
+        }
+
+        // Check if bar is already properly situated in toolbarRow after toolbarGroup
+        let isAlreadyPlaced = false;
+        if (bar.parentElement === toolbarRow) {
+          let prev = bar.previousElementSibling;
+          while (prev) {
+            if (prev === toolbarGroup) {
+              isAlreadyPlaced = true;
+              break;
+            }
+            prev = prev.previousElementSibling;
+          }
+
+          // Make sure it wasn't pushed after the chart styles or indicators
+          if (isAlreadyPlaced) {
+            const chartStyles = toolbarRow.querySelector('#header-toolbar-chart-styles, [data-name="header-toolbar-chart-styles"]');
+            if (chartStyles && (bar.compareDocumentPosition(chartStyles) & Node.DOCUMENT_POSITION_PRECEDING)) {
+              isAlreadyPlaced = false;
+            }
+          }
+        }
+
+        // Only insert/move if bar is detached or in the wrong place.
+        // If a third-party control (like TV / Vela) is present, place after it so they don't fight.
+        if (!isAlreadyPlaced) {
+          let anchor = toolbarGroup;
+          let nextSib = toolbarGroup.nextElementSibling;
+          while (nextSib && nextSib !== bar) {
+            const txt = (nextSib.innerText || nextSib.textContent || '').trim();
+            const id = nextSib.id || '';
+            const dataName = nextSib.getAttribute('data-name') || '';
+            const isVelaOrThirdParty =
+              txt.includes('Vela') ||
+              (txt.includes('TV') && txt.includes('Vela')) ||
+              (!id.startsWith('header-toolbar-') && !dataName.startsWith('header-toolbar-') && nextSib.tagName === 'DIV');
+
+            if (isVelaOrThirdParty && !id.startsWith('header-toolbar-chart-styles')) {
+              anchor = nextSib;
+              nextSib = nextSib.nextElementSibling;
+            } else {
+              break;
+            }
+          }
+          toolbarRow.insertBefore(bar, anchor.nextSibling);
         }
       } catch (e) {}
     });
