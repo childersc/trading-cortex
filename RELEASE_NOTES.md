@@ -1,3 +1,9 @@
+Trading Cortex v1.1.64 — Viewport Bleed-Through Elimination & Dialog Glass Setting
+
+- **Eliminated Viewport Bleed-Through on Dialogs (`v1.1.64`)**: Floating Positions & Orders window, settings dialog, template manager, and floating boxes feature 100% solid, fully opaque backdrops (`#0b0f19` / `#0d121d`) with `backdrop-filter: none !important;` by default. Viewport candlesticks, wicks, and chart lines can no longer bleed through.
+- **Configurable Dialog Glass Effect (`v1.1.64`)**: Added a user-controllable *Dialog Glass Effect* switch in Cortex Settings under "Display & Dialog Appearance" and a 1-click quick-toggle directly in the Cortex dropdown menu. When enabled, dialogs feature a modern translucent frosted-glass aesthetic.
+- **Isolated Stacking Context & Elevated Z-Index (`v1.1.64`)**: Detached Positions & Orders window has `isolation: isolate` and elevated `z-index: 2147483640` (and `2147483645` on active interaction/drag), ensuring all dialogs float firmly above all chart canvas, order lines, and fail lines.
+
 Trading Cortex v1.1.60 — Dev Glow, Version Subtext, Bleeding Edge Title & Fixes
 
 - **Dev Branch Red Glow & Version Number Subtext (`v1.1.60`)**: Replaced `'dev'` on the Cortex top bar pill with the active version number (`v1.1.60`). Dev branch is signified by a vibrant red outer glow (`rgba(239, 68, 68, 0.35)`), red border, and red-tinted icon and subtext.

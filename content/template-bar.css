@@ -745,13 +745,13 @@
   min-height: 180px;
   max-width: 90vw;
   max-height: 85vh;
-  background: rgba(15, 23, 42, 0.96);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: #0f172a !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 1px rgba(255, 255, 255, 0.3);
-  z-index: 100010;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 255, 255, 0.3);
+  z-index: 2147483645 !important;
   display: flex;
   flex-direction: column;
   color: #e2e8f0;
@@ -2048,16 +2048,16 @@ body.vest-cortex-top-bar-active {
   max-height: 80vh;
   min-width: min(760px, 94vw);
   min-height: min(520px, 92vh);
-  background: linear-gradient(145deg, rgba(19, 25, 38, 0.76) 0%, rgba(13, 18, 29, 0.70) 100%);
-  backdrop-filter: blur(22px) saturate(165%);
-  -webkit-backdrop-filter: blur(22px) saturate(165%);
-  border: 1px solid rgba(56, 189, 248, 0.32);
+  background: #0d121d !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid rgba(56, 189, 248, 0.35);
   border-radius: 12px;
   box-shadow:
-    0 0 0 1px rgba(59, 130, 246, 0.12),
-    0 0 16px rgba(56, 189, 248, 0.20),
+    0 0 0 1px rgba(59, 130, 246, 0.15),
+    0 0 20px rgba(56, 189, 248, 0.22),
     0 0 38px rgba(37, 99, 235, 0.15),
-    0 24px 60px rgba(0, 0, 0, 0.65),
+    0 24px 60px rgba(0, 0, 0, 0.95),
     inset 0 1px 0 rgba(186, 230, 253, 0.16);
   display: flex;
   flex-direction: column;
@@ -2768,9 +2768,9 @@ body.vest-cortex-top-bar-active {
 #vest-chart-news-box {
   position: fixed !important;
   z-index: 2147483635 !important;
-  background: rgba(19, 23, 34, 0.90);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: #131722;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border: 1px solid rgba(56, 189, 248, 0.35);
   border-radius: 9px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.45);
@@ -3042,9 +3042,9 @@ body.vest-cortex-top-bar-active {
 #vest-chart-trades-box {
   position: fixed !important;
   z-index: 2147483636 !important;
-  background: rgba(19, 23, 34, 0.90);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: #131722;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border: 1px solid rgba(56, 189, 248, 0.35);
   border-radius: 9px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(0, 0, 0, 0.45);
@@ -3440,9 +3440,9 @@ body.vest-cortex-top-bar-active {
 #vest-chart-diagnostics-box {
   position: fixed !important;
   z-index: 2147483637 !important;
-  background: rgba(15, 23, 42, 0.94);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: #0f172a;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border: 1px solid rgba(56, 189, 248, 0.42);
   border-radius: 9px;
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -4154,16 +4154,17 @@ body.vest-cortex-top-bar-active {
   min-height: 0 !important;
 }
 
-/* Detached Floating Mode */
+/* Detached Floating Mode - 100% Solid Opaque Backdrop (Eliminates Viewport & Chart Bleed-Through) */
 .vest-bottom-panel-detached {
   position: fixed !important;
-  z-index: 99995 !important;
-  background: rgba(11, 15, 25, 0.97) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
+  z-index: 2147483640 !important;
+  isolation: isolate !important;
+  background: #0b0f19 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   border: 1px solid rgba(56, 189, 248, 0.45) !important;
   border-radius: 10px !important;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 20px rgba(6, 182, 212, 0.2) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.1), 0 0 24px rgba(6, 182, 212, 0.25) !important;
   overflow: hidden !important;
   display: flex !important;
   flex-direction: column !important;
@@ -4171,6 +4172,22 @@ body.vest-cortex-top-bar-active {
   min-width: 520px !important;
   min-height: 240px !important;
   animation: vest-fade-in 0.18s ease-out !important;
+}
+
+/* Ensure inner tab lists, content containers, tables, and wrappers inside detached bottom panel are completely opaque */
+.vest-bottom-panel-detached [role="tablist"],
+.vest-bottom-panel-detached div[class*="tabs"],
+.vest-bottom-panel-detached div[class*="header"] {
+  background-color: #0b0f19 !important;
+}
+
+.vest-bottom-panel-detached [role="tabpanel"],
+.vest-bottom-panel-detached div[class*="content"],
+.vest-bottom-panel-detached div[class*="body"],
+.vest-bottom-panel-detached div[class*="table-container"],
+.vest-bottom-panel-detached div[class*="scroll"],
+.vest-bottom-panel-detached > div:not(.vest-detached-title-bar) {
+  background-color: #0b0f19;
 }
 
 /* Detached Window Title Bar */
@@ -4181,7 +4198,7 @@ body.vest-cortex-top-bar-active {
   height: 36px;
   min-height: 36px;
   padding: 0 10px 0 12px;
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  background: linear-gradient(180deg, #1e293b, #0f172a) !important;
   border-bottom: 1px solid rgba(56, 189, 248, 0.25);
   user-select: none;
   flex-shrink: 0;
@@ -4318,4 +4335,60 @@ body.vest-cortex-top-bar-active {
   border-color: rgba(192, 132, 252, 0.85) !important;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.82), 0 0 12px rgba(168, 85, 247, 0.35) !important;
 }
+
+/* ============================================================= */
+/* Dialog Glass Effect Mode (Configurable via Cortex Settings)    */
+/* ============================================================= */
+
+body.vest-dialog-glass-mode .vest-bottom-panel-detached {
+  background: rgba(11, 15, 25, 0.82) !important;
+  backdrop-filter: blur(20px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
+  border-color: rgba(56, 189, 248, 0.5) !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 24px rgba(6, 182, 212, 0.25) !important;
+}
+
+body.vest-dialog-glass-mode .vest-bottom-panel-detached [role="tablist"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached div[class*="tabs"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached div[class*="header"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached [role="tabpanel"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached div[class*="content"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached div[class*="body"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached div[class*="table-container"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached div[class*="scroll"],
+body.vest-dialog-glass-mode .vest-bottom-panel-detached > div:not(.vest-detached-title-bar) {
+  background-color: transparent !important;
+}
+
+body.vest-dialog-glass-mode .vest-tvs-card {
+  background: linear-gradient(145deg, rgba(19, 25, 38, 0.78) 0%, rgba(13, 18, 29, 0.72) 100%) !important;
+  backdrop-filter: blur(22px) saturate(165%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(165%) !important;
+  border-color: rgba(56, 189, 248, 0.4) !important;
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.2),
+    0 0 24px rgba(56, 189, 248, 0.25),
+    0 24px 60px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(186, 230, 253, 0.2) !important;
+}
+
+body.vest-dialog-glass-mode .vest-stm-dialog {
+  background: rgba(15, 23, 42, 0.85) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+}
+
+body.vest-dialog-glass-mode #vest-chart-news-box,
+body.vest-dialog-glass-mode #vest-chart-trades-box {
+  background: rgba(19, 23, 34, 0.85) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+}
+
+body.vest-dialog-glass-mode #vest-chart-diagnostics-box {
+  background: rgba(15, 23, 42, 0.88) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
+}
+
 

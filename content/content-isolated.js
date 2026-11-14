@@ -1551,6 +1551,7 @@
     failLines: JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES)),
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     debugMode: false,
+    dialogGlassEffect: false,
     minimizedWindowOrder: [],
     diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
     bottomPanelStates: {},
@@ -1579,6 +1580,13 @@
   let dragOffset = { x: 0, y: 0 };
   let isCollapsed = false;
   let latestDrawingToolbarVisible = true;
+
+  function applyDialogGlassEffect(enabled) {
+    try {
+      if (typeof document === 'undefined' || !document.body) return;
+      document.body.classList.toggle('vest-dialog-glass-mode', Boolean(enabled));
+    } catch (e) {}
+  }
 
   // -------------------------------------------------------------
   // Safe Chrome Extension Context & Storage Helper
@@ -4104,6 +4112,17 @@
           </div>
           <span class="vest-sdm-badge-pill on">FIRMS</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-toggle-glass-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
+              <rect x="3" y="3" width="18" height="18" rx="3"></rect>
+              <line x1="3" y1="9" x2="21" y2="9"></line>
+              <line x1="9" y1="21" x2="9" y2="9"></line>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Dialog Glass Effect</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.dialogGlassEffect ? 'on' : ''}">${settings.dialogGlassEffect ? 'ON' : 'OFF'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
@@ -4219,6 +4238,21 @@
     menuEl.querySelector('#vest-sdm-open-perpfirms-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('perpfirms');
+    });
+
+    // Dialog Glass Effect Toggle Button -> toggles solid vs frosted glass backdrop on all dialogs
+    menuEl.querySelector('#vest-sdm-toggle-glass-btn')?.addEventListener('click', () => {
+      settings.dialogGlassEffect = !settings.dialogGlassEffect;
+      applyDialogGlassEffect(settings.dialogGlassEffect);
+      queueSettingsSave({ dialogGlassEffect: settings.dialogGlassEffect });
+      safeStorageSet({ settings });
+      showToast(
+        settings.dialogGlassEffect
+          ? 'Dialog Glass Effect enabled (Frosted glass)'
+          : 'Dialog Glass Effect disabled (Solid opaque backdrop)',
+        2500
+      );
+      renderStudioHeaderMenu();
     });
 
     // Top Settings Button -> opens Settings Dialog on About tab
@@ -4510,6 +4544,10 @@
       if (typeof draftSettings.debugMode === 'boolean') {
         settings.debugMode = draftSettings.debugMode;
       }
+      if (typeof draftSettings.dialogGlassEffect === 'boolean') {
+        settings.dialogGlassEffect = draftSettings.dialogGlassEffect;
+        applyDialogGlassEffect(draftSettings.dialogGlassEffect);
+      }
       queueSettingsSave({
         sessionIndicators: settings.sessionIndicators,
         autoFvg: settings.autoFvg,
@@ -4520,7 +4558,8 @@
         failLines: settings.failLines,
         cortexIndicator: settings.cortexIndicator,
         diagnosticsBox: settings.diagnosticsBox,
-        debugMode: settings.debugMode
+        debugMode: settings.debugMode,
+        dialogGlassEffect: settings.dialogGlassEffect
       });
       renderStudioHeaderPill();
       if (typeof renderChartNewsBox === 'function') {
@@ -4935,6 +4974,24 @@
                 <button type="button" class="vest-tvs-action-btn" id="vest-tvs-open-ota-btn" style="border-color:#10b981; color:#10b981;">
                   Open Update Center ↗
                 </button>
+              </div>
+            </div>
+
+            <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(148,163,184,0.14);">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+                DISPLAY &amp; DIALOG APPEARANCE
+              </div>
+              <div class="vest-tvs-toggle-box">
+                <div class="vest-tvs-toggle-info">
+                  <div class="vest-tvs-toggle-title">Dialog Glass Effect</div>
+                  <div class="vest-tvs-toggle-desc">
+                    Enable modern translucent frosted-glass styling with background blur for detached windows and dialogs. When disabled (recommended), dialogs use 100% solid, fully opaque backdrops to completely prevent candles, order lines, and chart elements from bleeding through.
+                  </div>
+                </div>
+                <label class="vest-tvs-switch" title="Toggle Dialog Glass Effect">
+                  <input type="checkbox" id="vest-tvs-dialog-glass-toggle" ${draftSettings.dialogGlassEffect ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
               </div>
             </div>
 
@@ -6552,6 +6609,7 @@
       notifyMainWorldConfig();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
+      applyDialogGlassEffect(settings.dialogGlassEffect);
     }
 
     function onModalMouseMove(e) {
@@ -6684,6 +6742,10 @@
       const remChartToggle = overlay.querySelector('#vest-tvs-remember-chart-settings-toggle');
       if (remChartToggle) {
         draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
+      }
+      const glassToggle = overlay.querySelector('#vest-tvs-dialog-glass-toggle');
+      if (glassToggle) {
+        draftSettings.dialogGlassEffect = Boolean(glassToggle.checked);
       }
       const favoriteTimeframeInputs = overlay.querySelectorAll('.vest-tvs-favorite-timeframe');
       if (favoriteTimeframeInputs.length) {
@@ -7167,6 +7229,7 @@
         ...settings,
         ...draftSettings
       };
+      applyDialogGlassEffect(settings.dialogGlassEffect);
       safeStorageSet({ templates, settings });
       notifyMainWorldConfig();
       if (settings.rememberSidebarTools !== false) {
@@ -11384,7 +11447,16 @@ if (activeTab === 'diagnostics') {
     panel.style.setProperty('left', `${left}px`, 'important');
     panel.style.setProperty('width', `${width}px`, 'important');
     panel.style.setProperty('height', `${height}px`, 'important');
-    panel.style.setProperty('z-index', '99995', 'important');
+    panel.style.setProperty('z-index', '2147483640', 'important');
+
+    if (!panel.dataset.vestZIndexBound) {
+      panel.dataset.vestZIndexBound = 'true';
+      panel.addEventListener('mousedown', () => {
+        if (panel.classList.contains('vest-bottom-panel-detached')) {
+          panel.style.setProperty('z-index', '2147483645', 'important');
+        }
+      }, { capture: true });
+    }
 
     injectDetachedTitleBar(panel);
 
@@ -11534,6 +11606,7 @@ if (activeTab === 'diagnostics') {
   function onDetachedPanelDragStart(e, panel) {
     if (e.button !== 0) return;
     if (e.target.closest('button')) return;
+    if (panel) panel.style.setProperty('z-index', '2147483645', 'important');
     isDraggingDetachedBottomPanel = true;
     detachedDragStartMouse = { x: e.clientX, y: e.clientY };
     const r = panel.getBoundingClientRect();
@@ -14033,6 +14106,7 @@ if (activeTab === 'diagnostics') {
           cortexIndicator: normalizeCortexIndicatorConfig(data.settings.cortexIndicator),
           diagnosticsBox: normalizeDiagnosticsBoxConfig(data.settings.diagnosticsBox),
           debugMode: Boolean(data.settings.debugMode),
+          dialogGlassEffect: Boolean(data.settings.dialogGlassEffect),
           favoriteTimeframes: normalizeFavoriteTimeframes(data.settings.favoriteTimeframes)
         };
         if (settings.activeTemplateId && LEGACY_PRESET_IDS.has(String(settings.activeTemplateId))) {
@@ -14055,8 +14129,10 @@ if (activeTab === 'diagnostics') {
         settings.cortexIndicator = normalizeCortexIndicatorConfig(settings.cortexIndicator);
         settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(settings.diagnosticsBox);
         settings.debugMode = Boolean(settings.debugMode);
+        settings.dialogGlassEffect = Boolean(settings.dialogGlassEffect);
         settings.favoriteTimeframes = normalizeFavoriteTimeframes(settings.favoriteTimeframes);
       }
+      applyDialogGlassEffect(settings.dialogGlassEffect);
       // Persist cleaned templates & settings so legacy defaults are permanently removed
       safeStorageSet({ templates, settings });
 
