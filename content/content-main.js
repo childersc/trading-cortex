@@ -459,9 +459,33 @@
       key.startsWith('tv.') ||
       key === 'properties_toolbar.position' ||
       key.startsWith('linetool.') ||
-      key.startsWith('combobox.')
+      key.startsWith('combobox.') ||
+      key.startsWith('ChartDrawingToolbarWidget.') ||
+      key.startsWith('drawingToolbar.') ||
+      key.startsWith('drawingFavorites') ||
+      key.startsWith('side_toolbar.') ||
+      key.startsWith('sideToolbar.')
     );
   }
+
+  // Ensure left drawing toolbar visibility flag is not suppressed or set to hidden in localStorage
+  try {
+    const drawingToolbarKeys = [
+      'ChartDrawingToolbarWidget.visible',
+      'tvlocalstorage.ChartDrawingToolbarWidget.visible',
+      'tradingview.ChartDrawingToolbarWidget.visible'
+    ];
+    for (const dKey of drawingToolbarKeys) {
+      if (window.localStorage.getItem(dKey) === 'false') {
+        window.localStorage.setItem(dKey, 'true');
+      }
+      if (window.top && window.top !== window && window.top.localStorage) {
+        if (window.top.localStorage.getItem(dKey) === 'false') {
+          window.top.localStorage.setItem(dKey, 'true');
+        }
+      }
+    }
+  } catch (e) {}
 
   // Immediately hydrate sidebarState and lastChartSettings from localStorage mirror (checking both current window and window.top for blob: chart iframes!)
   try {
@@ -1518,6 +1542,10 @@
     setupContextMenuHandler();
     enhanceTimeframeControls();
     hookActiveChartResetMethods();
+    ensureDrawingToolbarVisible();
+    setTimeout(() => {
+      ensureDrawingToolbarVisible();
+    }, 1200);
     if (!hasCompletedInitialSidebarRestore) {
       restoreSidebarSelections();
     }
@@ -3349,6 +3377,15 @@
         cortexDebugLog(`Debug Mode updated to ${nextVal ? 'ON' : 'OFF'} in main world frame`);
         break;
       }
+      case 'VEST_TV_TOGGLE_DRAWING_TOOLBAR': {
+        const force = payload && payload.force !== undefined ? payload.force : null;
+        toggleDrawingToolbarVisibility(force);
+        break;
+      }
+      case 'VEST_TV_QUERY_DRAWING_TOOLBAR_STATE': {
+        reportDrawingToolbarVisibility();
+        break;
+      }
       case 'VEST_TV_REQUEST_DIAGNOSTICS': {
         const telemetry = typeof buildDiagnosticsTelemetrySnapshot === 'function' ? buildDiagnosticsTelemetrySnapshot() : {};
         postToIsolated({
@@ -4281,15 +4318,143 @@
   }
 
   function getHideDrawingsButton() {
-    return findSidebarElement([
+    const direct = findSidebarElement([
       'button[data-name="hide-all-drawings"]',
       'div[data-name="hide-all-drawings"]',
-      '[data-name="hide-all"]',
-      'button[aria-label*="Hide All" i]',
-      'div[aria-label*="Hide All" i]',
-      'button[data-tooltip*="Hide" i]',
-      'div[data-tooltip*="Hide" i]'
+      'button[data-name="hide-all"]',
+      'div[data-name="hide-all"]',
+      'button[aria-label*="Hide All Drawings" i]',
+      'div[aria-label*="Hide All Drawings" i]',
+      'button[aria-label*="Hide Drawings" i]',
+      'div[aria-label*="Hide Drawings" i]',
+      'button[data-tooltip*="Hide All Drawings" i]',
+      'div[data-tooltip*="Hide All Drawings" i]',
+      'button[data-tooltip*="Hide Drawings" i]',
+      'div[data-tooltip*="Hide Drawings" i]'
     ]);
+    if (!direct) return null;
+
+    // Safety guard: NEVER match the drawing toolbar collapse/hide toggle button!
+    const descriptor = `${direct.getAttribute('data-name') || ''} ${direct.getAttribute('aria-label') || ''} ${direct.getAttribute('data-tooltip') || ''} ${direct.getAttribute('title') || ''}`.toLowerCase();
+    if (descriptor.includes('toolbar') || descriptor.includes('sidebar') || descriptor.includes('panel')) {
+      return null;
+    }
+    return direct;
+  }
+
+  function isDrawingToolbarVisibleNow() {
+    const targets = [activeChart, activeChartApi, activeWidget?.activeChart?.()];
+    for (const target of targets) {
+      if (target && typeof target.getCheckableActionState === 'function') {
+        try {
+          const state = target.getCheckableActionState('drawingToolbarAction');
+          if (typeof state === 'boolean') return state;
+        } catch (e) {}
+      }
+    }
+    const magnetBtn = getMagnetButton();
+    const { detectedGroups } = scanDomSidebarGroupSlots();
+    return Boolean(magnetBtn || Object.keys(detectedGroups).length > 0);
+  }
+
+  function reportDrawingToolbarVisibility() {
+    const visible = isDrawingToolbarVisibleNow();
+    postToIsolated({
+      type: 'VEST_TV_DRAWING_TOOLBAR_STATE',
+      visible
+    });
+    return visible;
+  }
+
+  function ensureDrawingToolbarVisible() {
+    try {
+      // 1. Check TradingView Charting Library API via getCheckableActionState
+      const targets = [activeChart, activeChartApi, activeWidget?.activeChart?.()];
+      for (const target of targets) {
+        if (!target) continue;
+        if (typeof target.getCheckableActionState === 'function') {
+          try {
+            const isVisible = target.getCheckableActionState('drawingToolbarAction');
+            if (isVisible === false) {
+              log('Drawing toolbar is hidden according to getCheckableActionState. Restoring visibility via drawingToolbarAction...');
+              if (typeof target.executeActionById === 'function') {
+                target.executeActionById('drawingToolbarAction');
+              }
+              setTimeout(reportDrawingToolbarVisibility, 120);
+              return true;
+            }
+          } catch (e) {}
+        }
+      }
+
+      // 2. Also check if activeChart or widget has showDrawingToolbar method
+      for (const target of [activeWidget, activeChart, activeChartApi]) {
+        if (target && typeof target.showDrawingToolbar === 'function') {
+          try {
+            target.showDrawingToolbar();
+            setTimeout(reportDrawingToolbarVisibility, 120);
+            return true;
+          } catch (e) {}
+        }
+      }
+
+      // 3. Check for any DOM button to show/unhide the drawing toolbar
+      const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
+      for (const doc of docs) {
+        try {
+          const btns = doc.querySelectorAll('button, div[role="button"], a');
+          for (const btn of btns) {
+            const label = `${btn.getAttribute('data-name') || ''} ${btn.getAttribute('aria-label') || ''} ${btn.getAttribute('data-tooltip') || ''} ${btn.getAttribute('title') || ''}`.toLowerCase();
+            if (
+              (label.includes('drawing toolbar') || label.includes('drawing panel') || label.includes('drawing tools')) &&
+              (label.includes('show') || label.includes('expand') || label.includes('open') || label.includes('unhide'))
+            ) {
+              log('Found DOM button to restore drawing toolbar:', label);
+              btn.click();
+              setTimeout(reportDrawingToolbarVisibility, 120);
+              return true;
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (err) {
+      log('Error ensuring drawing toolbar visible:', err);
+    }
+    return false;
+  }
+
+  function toggleDrawingToolbarVisibility(forceShow = null) {
+    let handled = false;
+    const targets = [activeChart, activeChartApi, activeWidget?.activeChart?.()];
+    for (const target of targets) {
+      if (!target) continue;
+      const currentState = typeof target.getCheckableActionState === 'function'
+        ? target.getCheckableActionState('drawingToolbarAction')
+        : null;
+
+      if (forceShow === true && currentState === true) {
+        handled = true;
+        break;
+      }
+      if (forceShow === false && currentState === false) {
+        handled = true;
+        break;
+      }
+
+      if (typeof target.executeActionById === 'function') {
+        try {
+          target.executeActionById('drawingToolbarAction');
+          handled = true;
+          break;
+        } catch (e) {}
+      }
+    }
+
+    if (!handled && (forceShow === true || forceShow === null)) {
+      ensureDrawingToolbarVisible();
+    }
+
+    setTimeout(reportDrawingToolbarVisibility, 150);
   }
 
   function isElementActive(el) {
@@ -4941,12 +5106,16 @@
       return;
     }
 
+    // Ensure left drawing toolbar is not collapsed or hidden
+    ensureDrawingToolbarVisible();
+
     // Wait until the left-hand drawing toolbar DOM buttons are actually rendered in the document (up to 14 attempts)
     const magnetBtn = getMagnetButton();
     const { detectedGroups } = scanDomSidebarGroupSlots();
     const hasSidebarDom = Boolean(magnetBtn || Object.keys(detectedGroups).length > 0);
 
     if (!hasSidebarDom) {
+      ensureDrawingToolbarVisible();
       if (restoreAttempts < 14) {
         restoreAttempts++;
         setTimeout(restoreSidebarSelections, 500);
@@ -4962,7 +5131,8 @@
         try {
           Object.entries(targetState.toolbarStorage).forEach(([k, v]) => {
             if (typeof v === 'string' && isSafeTradingViewStorageKey(k)) {
-              window.localStorage.setItem(k, v);
+              const safeVal = (k.includes('Toolbar') && k.endsWith('.visible') && v === 'false') ? 'true' : v;
+              window.localStorage.setItem(k, safeVal);
             }
           });
         } catch (e) {}

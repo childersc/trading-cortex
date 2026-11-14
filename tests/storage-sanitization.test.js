@@ -25,7 +25,12 @@ function isSafeTradingViewStorageKey(key) {
     key.startsWith('tv.') ||
     key === 'properties_toolbar.position' ||
     key.startsWith('linetool.') ||
-    key.startsWith('combobox.')
+    key.startsWith('combobox.') ||
+    key.startsWith('ChartDrawingToolbarWidget.') ||
+    key.startsWith('drawingToolbar.') ||
+    key.startsWith('drawingFavorites') ||
+    key.startsWith('side_toolbar.') ||
+    key.startsWith('sideToolbar.')
   );
 }
 
@@ -39,6 +44,11 @@ assert.strictEqual(isSafeTradingViewStorageKey('tvlocalstorage.available'), true
 assert.strictEqual(isSafeTradingViewStorageKey('tv.toolbar.drawings'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('linetool.cursor'), true);
 assert.strictEqual(isSafeTradingViewStorageKey('combobox.tradingview'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('ChartDrawingToolbarWidget.visible'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('drawingToolbar.visible'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('drawingFavorites'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('side_toolbar.state'), true);
+assert.strictEqual(isSafeTradingViewStorageKey('sideToolbar.state'), true);
 
 // 2. Negative tests: Web3, Auth, Session, Wallet, Account, Platform Layout keys
 assert.strictEqual(isSafeTradingViewStorageKey('user-state-layout-base:e3cd52e5-5f3e-5259-a7b5-b28416a1d7da'), false);

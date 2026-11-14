@@ -190,7 +190,12 @@ function isSafeTradingViewStorageKey(key) {
     key.startsWith("tv.") ||
     key === "properties_toolbar.position" ||
     key.startsWith("linetool.") ||
-    key.startsWith("combobox.")
+    key.startsWith("combobox.") ||
+    key.startsWith("ChartDrawingToolbarWidget.") ||
+    key.startsWith("drawingToolbar.") ||
+    key.startsWith("drawingFavorites") ||
+    key.startsWith("side_toolbar.") ||
+    key.startsWith("sideToolbar.")
   );
 }
 
