@@ -12,17 +12,18 @@ const rectMatches = mainContent.match(/const rect = el\.getBoundingClientRect\(\
 assert.strictEqual(rectMatches && rectMatches.length >= 2, true, 'rect must be defined before measuring horizontal offset in scanDomSidebarGroupSlots');
 console.log('✓ rect is properly defined in scanDomSidebarGroupSlots & toolbar candidate scanner');
 
-// Assert ensureDrawingToolbarVisible fallback does not blindly execute drawingToolbarAction when state is unknown/true
+// Assert ensureDrawingToolbarVisible handles desynchronized TradingView action states and executes self-healing
 assert.strictEqual(
-  mainContent.includes('isVisible === false && typeof target.executeActionById === \'function\''),
+  mainContent.includes('isVisible === false || isVisible === null') &&
+  mainContent.includes('Resynchronizing desynced drawingToolbarAction state...'),
   true,
-  'ensureDrawingToolbarVisible must only toggle if checkable state explicitly confirms false'
+  'ensureDrawingToolbarVisible must handle false/null and desynced states safely'
 );
 assert.strictEqual(mainContent.includes('function isElementVisible(el)'), true, 'isElementVisible helper must exist');
 assert.strictEqual(mainContent.includes('isElementVisible(container)'), true, 'drawing toolbar container must check isElementVisible');
 assert.strictEqual(mainContent.includes('isElementVisible(magnetBtn)'), true, 'magnet button must check isElementVisible');
-assert.strictEqual(mainContent.includes('Restoring toolbar visibility via executeActionById drawingToolbarAction final fallback...'), true, 'final fallback to restore drawing toolbar must exist');
-console.log('✓ ensureDrawingToolbarVisible toggle guard and strict element visibility verified');
+assert.strictEqual(mainContent.includes('descriptor.includes(\'tools\')'), true, 'getHideDrawingsButton must exclude toolbar tools collapse button');
+console.log('✓ ensureDrawingToolbarVisible desync healing and strict element visibility verified');
 
 // 2. Verify content-isolated.js Prop Firms configuration and deletion logic
 const isolatedContent = fs.readFileSync(path.join(__dirname, '../content/content-isolated.js'), 'utf8');

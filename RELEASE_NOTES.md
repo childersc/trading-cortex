@@ -1,3 +1,10 @@
+Trading Cortex v1.1.66 — Left Drawing Toolbar Persistence & Desync Self-Healing
+
+- **DOM Ground-Truth Visibility (`v1.1.66`)**: Rewrote toolbar visibility detection to check actual DOM container elements, magnet buttons, and group slots rather than internal TradingView JS state flags, eliminating false-positive reports in the dropdown menu.
+- **Eliminated False Collapse Triggers (`v1.1.66`)**: Fixed selector collisions where "Hide Drawings" controls erroneously clicked TradingView's "Hide Drawing Tools" collapse button during startup restoration.
+- **Multi-Tier Recovery & Action State Self-Healing (`v1.1.66`)**: Automatically detects when TradingView's internal toolbar state desynchronizes from the DOM and heals it via API commands, left-edge toggle clicks, and resynchronized action execution.
+- **Accurate Dropdown Badge & Toggle (`v1.1.66`)**: The Cortex dropdown badge accurately indicates `VISIBLE` or `HIDDEN` based on DOM reality, and clicking toggles the toolbar directly.
+
 Trading Cortex v1.1.65 — Bottom Panel Re-Docking & Height Restoration
 
 - **Guaranteed Positions & Orders Re-Docking (`v1.1.65`)**: Fixed an issue where re-docking the bottom positions and orders panel from floating/detached or minimized mode collapsed the table container, showing only the tab bar and an empty void until browser refresh.
