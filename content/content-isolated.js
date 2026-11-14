@@ -97,6 +97,48 @@
     return cleaned;
   }
 
+  // Safe TradingView Drawing Toolbar Storage Key Validator
+  // Prevents capturing or restoring platform auth tokens, user IDs, wallet connectors, or session keys!
+  function isSafeTradingViewStorageKey(key) {
+    if (typeof key !== 'string' || !key) return false;
+    if (key.startsWith('__trading_cortex_')) return false;
+    if (
+      key.startsWith('tv-chart-drawings-') ||
+      key.startsWith('tv-drawings-flush') ||
+      key.startsWith('tv-layout-flush') ||
+      key.startsWith('user-state-') ||
+      key.startsWith('vest') ||
+      key.startsWith('mfp') ||
+      key.startsWith('privy:') ||
+      key.startsWith('wagmi.') ||
+      key.startsWith('rk-') ||
+      key.startsWith('turnkey_') ||
+      key.startsWith('web3') ||
+      /auth|token|session|jwt|refresh|bearer|user|account|wallet|privy|wagmi|rainbow|web3|turnkey|dynamic|metamask|coinbase|phantom|keplr|solana|ethereum|address|signature|credential|login|identity|cookie|flush|layout-base/i.test(key)
+    ) {
+      return false;
+    }
+    return (
+      key.startsWith('tradingview.') ||
+      key.startsWith('tvlocalstorage.') ||
+      key.startsWith('tv.') ||
+      key === 'properties_toolbar.position' ||
+      key.startsWith('linetool.') ||
+      key.startsWith('combobox.')
+    );
+  }
+
+  function sanitizeSidebarToolbarStorage(rawStorage) {
+    if (!rawStorage || typeof rawStorage !== 'object') return {};
+    const clean = {};
+    for (const [k, v] of Object.entries(rawStorage)) {
+      if (typeof v === 'string' && isSafeTradingViewStorageKey(k)) {
+        clean[k] = v;
+      }
+    }
+    return clean;
+  }
+
   let templates = [];
   let globalDrawings = [];
 
@@ -1558,6 +1600,15 @@
       }
     } catch (e) {}
 
+    if (result.settings && typeof result.settings === 'object') {
+      if (result.settings.sidebarState && result.settings.sidebarState.toolbarStorage) {
+        result.settings.sidebarState.toolbarStorage = sanitizeSidebarToolbarStorage(result.settings.sidebarState.toolbarStorage);
+      }
+      if (result.settings.lastChartSettings && result.settings.lastChartSettings.localStorageEntries) {
+        result.settings.lastChartSettings.localStorageEntries = sanitizeSidebarToolbarStorage(result.settings.lastChartSettings.localStorageEntries);
+      }
+    }
+
     return result;
   }
 
@@ -1583,7 +1634,10 @@
     return {
       ...prev,
       ...next,
-      localStorageEntries: { ...(prev.localStorageEntries || {}), ...(next.localStorageEntries || {}) },
+      localStorageEntries: {
+        ...sanitizeSidebarToolbarStorage(prev.localStorageEntries),
+        ...sanitizeSidebarToolbarStorage(next.localStorageEntries)
+      },
       viewportsBySymbol: { ...(prev.viewportsBySymbol || {}), ...(next.viewportsBySymbol || {}) },
       viewportsByChart: mergeChartViewportMap(prev.viewportsByChart, next.viewportsByChart)
     };
@@ -1597,6 +1651,12 @@
         data.templates = sanitizeUserTemplates(data.templates);
       }
       if (data && data.settings) {
+        if (data.settings.sidebarState && data.settings.sidebarState.toolbarStorage) {
+          data.settings.sidebarState.toolbarStorage = sanitizeSidebarToolbarStorage(data.settings.sidebarState.toolbarStorage);
+        }
+        if (data.settings.lastChartSettings && data.settings.lastChartSettings.localStorageEntries) {
+          data.settings.lastChartSettings.localStorageEntries = sanitizeSidebarToolbarStorage(data.settings.lastChartSettings.localStorageEntries);
+        }
         data.settings._savedAt = Date.now();
         window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(data.settings));
       }
@@ -1634,6 +1694,12 @@
     if (dataSettingsMirrorAvailable()) {
       try {
         const merged = { ...settings, ...pendingSettingsUpdate, _savedAt: Date.now() };
+        if (merged.sidebarState && merged.sidebarState.toolbarStorage) {
+          merged.sidebarState.toolbarStorage = sanitizeSidebarToolbarStorage(merged.sidebarState.toolbarStorage);
+        }
+        if (merged.lastChartSettings && merged.lastChartSettings.localStorageEntries) {
+          merged.lastChartSettings.localStorageEntries = sanitizeSidebarToolbarStorage(merged.lastChartSettings.localStorageEntries);
+        }
         window.localStorage.setItem('__trading_cortex_isolated_settings__', JSON.stringify(merged));
         writeDomainVault(templates, merged);
       } catch (e) {}
@@ -2616,8 +2682,8 @@
             ...(incoming.groupTools || {})
           },
           toolbarStorage: {
-            ...(prev.toolbarStorage || {}),
-            ...(incoming.toolbarStorage || {})
+            ...sanitizeSidebarToolbarStorage(prev.toolbarStorage),
+            ...sanitizeSidebarToolbarStorage(incoming.toolbarStorage)
           }
         };
         // Debounce storage write to avoid hammering Chrome API and invalidating context
