@@ -813,18 +813,17 @@
     }
     return (
       key === 'properties_toolbar.position' ||
-      key === 'ChartDrawingToolbarWidget.visible' ||
-      key === 'tvlocalstorage.ChartDrawingToolbarWidget.visible' ||
-      key === 'tradingview.ChartDrawingToolbarWidget.visible' ||
+      key.includes('ChartDrawingToolbarWidget') ||
+      key.includes('drawingToolbar') ||
+      key.includes('drawingTools') ||
+      key.includes('side_toolbar') ||
+      key.includes('sideToolbar') ||
       key === 'tradingview.IntervalWidget.quicks' ||
       key === 'tradingview.StyleWidget.quicks' ||
       key.startsWith('tradingview.chartproperties') ||
       key.startsWith('linetool.') ||
       key.startsWith('combobox.') ||
-      key.startsWith('drawingToolbar.') ||
-      key.startsWith('drawingFavorites') ||
-      key.startsWith('side_toolbar.') ||
-      key.startsWith('sideToolbar.')
+      key.startsWith('drawingFavorites')
     );
   }
 
