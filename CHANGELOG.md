@@ -7,6 +7,10 @@ All notable changes, new features, and bug fixes through the current release (`v
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
 ### 🚀 New Features & Enhancements
+- **Dev Branch Red Glow, Version Number Display & Bleeding Edge Title Bar**:
+  1. *Version Number Subtext*: Replaced the `'dev'` label on the Cortex top bar pill with the active extension version number (`v${version}`) across both dev and production branches.
+  2. *Dev Channel Red Glow Theme*: Signifies dev/bleeding edge branch with a vibrant red outer glow (`rgba(239, 68, 68, 0.35)`), red border, and red-tinted icon and subtext, distinct from the blue/cyan production theme.
+  3. *Channel Header in Dropdown Menu*: Added a prominent title bar at the very top of the Cortex dropdown menu directly above "Template Manager...". It displays "Bleeding Edge" (with a glowing red indicator and `DEV` badge) on dev builds, or "Production" (with a glowing blue indicator and `RELEASE` badge) on production builds, accompanied by the active version number directly beneath the title.
 - **Dynamic Positions Taskbar Integration, Unified Design & Per-Firm Scoping**:
   1. *Conditional Top-Bar Display*: The POSITIONS button now strictly hides (`display: none`) when the bottom info panel is in its normal docked state, eliminating any visual obstruction of chart timeframe buttons or platform controls. It only displays when the user explicitly minimizes or detaches the bottom panel.
   2. *Unified Minimized Window Styling*: Redesigned the POSITIONS top-bar item to match the other minimized items (`UPCOMING NEWS`, `INSTRUMENT TRADES`, `CORTEX DIAG`) identically: 8px rounded corners (`is-minimized-pill`), glowing status dot (cyan for minimized, purple for detached), bold uppercase title (`POSITIONS`), position count badge, state tag (`MIN` / `DETACH`), and restore arrow icon (`↗`).

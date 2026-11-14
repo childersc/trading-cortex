@@ -3910,19 +3910,21 @@
     studioPillEl = pill;
 
     const extVersion = getSafeExtVersion();
-    const isDev = latestUpdateChannel === 'dev';
+    const isDev = latestUpdateChannel === 'dev' || /alpha/i.test(extVersion);
+    const cleanVer = cleanSemver(extVersion);
     const subText = isUpdateAvailable
       ? (isDev ? 'Dev ready' : 'Update ready')
-      : (isDev ? 'dev' : `v${extVersion}`);
+      : `v${cleanVer}`;
     const pillTitle = isUpdateAvailable
       ? `Trading Cortex · ${isDev ? 'Dev build' : 'Update'} ready (${latestAvailableVersion || 'new'})`
-      : `Trading Cortex v${extVersion}${isDev ? ' (dev channel)' : ''}`;
+      : `Trading Cortex v${cleanVer} · ${isDev ? 'Bleeding Edge (Dev)' : 'Production'}`;
 
     const updateClass = isUpdateAvailable ? (isDev ? 'dev-update-ready' : 'update-ready') : '';
     const updateTextClass = isUpdateAvailable ? (isDev ? 'dev-update-ready-text' : 'update-ready-text') : '';
+    const channelClass = isDev ? 'dev-channel' : 'prod-channel';
 
     pill.innerHTML = `
-      <button type="button" class="vest-studio-pill-trigger ${studioMenuOpen ? 'open' : ''} ${updateClass}" id="vest-studio-pill-btn" title="${pillTitle}">
+      <button type="button" class="vest-studio-pill-trigger ${channelClass} ${studioMenuOpen ? 'open' : ''} ${updateClass}" id="vest-studio-pill-btn" title="${pillTitle}">
         <div class="vest-studio-pill-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -3954,6 +3956,22 @@
     }
     studioDropdownEl = menuEl;
 
+    const isDev = latestUpdateChannel === 'dev' || /alpha/i.test(extVersion);
+    const cleanVer = cleanSemver(extVersion);
+
+    const channelHeaderHtml = `
+      <div class="vest-sdm-channel-header ${isDev ? 'dev' : 'prod'}">
+        <div class="vest-sdm-channel-top">
+          <div class="vest-sdm-channel-left">
+            <span class="vest-sdm-channel-dot"></span>
+            <span class="vest-sdm-channel-name">${isDev ? 'Bleeding Edge' : 'Production'}</span>
+          </div>
+          <span class="vest-sdm-channel-badge">${isDev ? 'DEV' : 'RELEASE'}</span>
+        </div>
+        <div class="vest-sdm-channel-version">v${cleanVer}</div>
+      </div>
+    `;
+
     const updateItemHtml = isUpdateAvailable
       ? (isDev
         ? `
@@ -3982,6 +4000,9 @@
 
     menuEl.style.display = studioMenuOpen ? 'flex' : 'none';
     menuEl.innerHTML = `
+      <!-- Channel & Version Title Bar -->
+      ${channelHeaderHtml}
+
       <!-- Settings & Update Entry -->
       <div class="vest-sdm-section" style="gap: 6px;">
         ${updateItemHtml}

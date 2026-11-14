@@ -1538,6 +1538,46 @@ body.vest-cortex-top-bar-active {
     0 0 16px rgba(56, 189, 248, 0.32);
 }
 
+/* Dev Channel Red Glow & Styling */
+.vest-studio-pill-trigger.dev-channel {
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow:
+    0 0 12px rgba(239, 68, 68, 0.35),
+    0 0 24px rgba(185, 28, 28, 0.22),
+    inset 0 1px 0 rgba(254, 202, 202, 0.2);
+}
+
+.vest-studio-pill-trigger.dev-channel:hover {
+  background: #241416;
+  border-color: rgba(248, 113, 113, 0.85);
+  box-shadow:
+    0 0 16px rgba(239, 68, 68, 0.5),
+    0 0 28px rgba(185, 28, 28, 0.32),
+    inset 0 1px 0 rgba(254, 202, 202, 0.3);
+}
+
+.vest-studio-pill-trigger.dev-channel.open {
+  background: #241416;
+  border-color: rgba(248, 113, 113, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(239, 68, 68, 0.25),
+    0 0 20px rgba(239, 68, 68, 0.45);
+}
+
+.vest-studio-pill-trigger.dev-channel .vest-studio-pill-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(185, 28, 28, 0.25));
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #f87171;
+}
+
+.vest-studio-pill-trigger.dev-channel .vest-studio-pill-sub {
+  color: #f87171;
+}
+
+.vest-studio-pill-trigger.dev-channel.open .vest-studio-pill-chevron {
+  color: #f87171;
+}
+
 @keyframes vestCortexUpdateGlow {
   0%, 100% {
     border-color: rgba(56, 189, 248, 0.28);
@@ -1687,6 +1727,110 @@ body.vest-cortex-top-bar-active {
 
 .vest-studio-dropdown-menu * {
   box-sizing: border-box;
+}
+
+/* Dropdown Channel & Version Title Header */
+.vest-sdm-channel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  margin: 4px 8px 6px 8px;
+  border-radius: 8px;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.vest-sdm-channel-header.dev {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.16), rgba(185, 28, 28, 0.08));
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.22), inset 0 1px 0 rgba(254, 202, 202, 0.12);
+}
+
+.vest-sdm-channel-header.prod {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.16), rgba(37, 99, 235, 0.08));
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.22), inset 0 1px 0 rgba(186, 230, 253, 0.12);
+}
+
+.vest-sdm-channel-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vest-sdm-channel-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vest-sdm-channel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.vest-sdm-channel-header.dev .vest-sdm-channel-dot {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.vest-sdm-channel-header.prod .vest-sdm-channel-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+}
+
+.vest-sdm-channel-name {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.vest-sdm-channel-header.dev .vest-sdm-channel-name {
+  color: #fca5a5;
+}
+
+.vest-sdm-channel-header.prod .vest-sdm-channel-name {
+  color: #7dd3fc;
+}
+
+.vest-sdm-channel-badge {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.vest-sdm-channel-header.dev .vest-sdm-channel-badge {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.vest-sdm-channel-header.prod .vest-sdm-channel-badge {
+  background: rgba(56, 189, 248, 0.22);
+  color: #bae6fd;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+}
+
+.vest-sdm-channel-version {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  padding-left: 13px;
+}
+
+.vest-sdm-channel-header.dev .vest-sdm-channel-version {
+  color: #f87171;
+}
+
+.vest-sdm-channel-header.prod .vest-sdm-channel-version {
+  color: #38bdf8;
 }
 
 .vest-sdm-section {

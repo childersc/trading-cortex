@@ -169,4 +169,14 @@ assert.strictEqual(isolatedContent.includes('function getActiveFirmBottomPanelSt
 assert.strictEqual(isolatedContent.includes('vest-pf-input-manage-positions'), true);
 console.log('✓ Positions panel per-firm management & scoped state verified');
 
+// 6. Verify Dev Branch indicator (red glow, version number display, and Bleeding Edge title bar)
+const cssContent = fs.readFileSync(path.join(__dirname, '../content/template-bar.css'), 'utf8');
+assert.strictEqual(cssContent.includes('.vest-studio-pill-trigger.dev-channel'), true, 'dev-channel red glow must exist in CSS');
+assert.strictEqual(cssContent.includes('.vest-sdm-channel-header.dev'), true, 'dev channel title header must exist in CSS');
+assert.strictEqual(cssContent.includes('.vest-sdm-channel-header.prod'), true, 'prod channel title header must exist in CSS');
+assert.strictEqual(isolatedContent.includes('Bleeding Edge'), true, 'Bleeding Edge title must be in dropdown');
+assert.strictEqual(isolatedContent.includes('Production'), true, 'Production title must be in dropdown');
+assert.strictEqual(isolatedContent.includes(': `v${cleanVer}`'), true, 'Pill subText must show version number instead of dev');
+console.log('✓ Dev branch red glow and Bleeding Edge dropdown title bar verified');
+
 console.log('All Prop Firms Management, Account Restoration & Toolbar Tests Passed!');
