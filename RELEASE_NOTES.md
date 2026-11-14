@@ -1,3 +1,10 @@
+Trading Cortex v1.1.65 — Bottom Panel Re-Docking & Height Restoration
+
+- **Guaranteed Positions & Orders Re-Docking (`v1.1.65`)**: Fixed an issue where re-docking the bottom positions and orders panel from floating/detached or minimized mode collapsed the table container, showing only the tab bar and an empty void until browser refresh.
+- **True Docked Height Preservation (`v1.1.65`)**: Captures and preserves the user's docked height (`panel.dataset.vestDockedHeight`) before detaching or minimizing, and restores explicit height, `min-height: 180px`, `flex: 0 0 auto`, and `display: flex; flex-direction: column;` when docked.
+- **Chart Flex & Height Recovery (`v1.1.65`)**: Resolves chart container height override collision, ensuring chart elements properly release full-screen allocation and return to `flex: 1 1 0%`.
+- **Virtualizer & React Tab Wake-Up (`v1.1.65`)**: Immediately dispatches scroll and resize events across inner containers and synchronizes active React tab state on re-dock so table headers and rows render instantly without requiring a page refresh.
+
 Trading Cortex v1.1.64 — Viewport Bleed-Through Elimination & Dialog Glass Setting
 
 - **Eliminated Viewport Bleed-Through on Dialogs (`v1.1.64`)**: Floating Positions & Orders window, settings dialog, template manager, and floating boxes feature 100% solid, fully opaque backdrops (`#0b0f19` / `#0d121d`) with `backdrop-filter: none !important;` by default. Viewport candlesticks, wicks, and chart lines can no longer bleed through.

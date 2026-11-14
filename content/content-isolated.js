@@ -2198,7 +2198,8 @@
   }
 
   function getPositionRow(symbol) {
-    const panel = findPanelElement(PANEL_DEFINITIONS.find(def => def.key === 'bottom_positions'));
+    const bottomInfo = typeof findBottomPositionsPanel === 'function' ? findBottomPositionsPanel() : null;
+    const panel = bottomInfo?.panel || (typeof findPanelElement === 'function' && Array.isArray(PANEL_DEFINITIONS) ? findPanelElement(PANEL_DEFINITIONS.find(def => def && def.key === 'bottom_positions')) : null) || document.querySelector('[data-vest-bottom-panel="true"]');
     if (!panel) return null;
     const ticker = normalizeInstrumentKey(symbol);
     const candidates = Array.from(panel.querySelectorAll('tr, [role="row"]')).filter(row => {
@@ -3316,22 +3317,6 @@
           text.includes('Price') &&
           text.includes('Time') &&
           !text.includes('Order Book')
-        );
-      }
-    },
-    {
-      key: 'bottom_positions',
-      title: 'Positions & Orders',
-      match: (el) => {
-        if (!el || el.nodeType !== 1) return false;
-        const text = el.textContent || '';
-        const hasAccountTabs = Boolean(el.querySelector('[role="tab"]')) &&
-          text.includes('Active Positions') && text.includes('Open Orders') && text.includes('Funding History');
-        return (
-          hasAccountTabs || (
-            (text.includes('Active Positions') || text.includes('Open Orders') || text.includes('Positions History')) &&
-            text.includes('PnL')
-          )
         );
       }
     }
@@ -11259,6 +11244,12 @@ if (activeTab === 'diagnostics') {
       panel.setAttribute('data-vest-bottom-panel', 'true');
       cachedBottomPanelEl = panel;
       cachedBottomTabBarEl = tabBar;
+      if (!panel.classList.contains('vest-bottom-panel-detached') && !panel.classList.contains('vest-bottom-panel-minimized')) {
+        const r = panel.getBoundingClientRect();
+        if (r.height >= 120) {
+          panel.dataset.vestDockedHeight = String(Math.round(r.height));
+        }
+      }
     }
 
     return { panel, tabBar, matchedTab, posCount: detectedCount };
@@ -11308,6 +11299,13 @@ if (activeTab === 'diagnostics') {
     if (!info || !info.panel) return false;
     const panel = info.panel;
 
+    if (!panel.classList.contains('vest-bottom-panel-detached') && !panel.classList.contains('vest-bottom-panel-minimized')) {
+      const r = panel.getBoundingClientRect();
+      if (r.height >= 120) {
+        panel.dataset.vestDockedHeight = String(Math.round(r.height));
+      }
+    }
+
     if (panel.classList.contains('vest-bottom-panel-detached')) {
       restoreDetachedToDocked(panel);
     }
@@ -11320,7 +11318,8 @@ if (activeTab === 'diagnostics') {
 
     const chartEl = findChartContainerAbovePanel(panel);
     if (chartEl) {
-      if (!chartEl.dataset.vestOrigHeight) {
+      if (chartEl.dataset.vestOrigCaptured !== 'true') {
+        chartEl.dataset.vestOrigCaptured = 'true';
         chartEl.dataset.vestOrigHeight = chartEl.style.height || '';
         chartEl.dataset.vestOrigMaxH = chartEl.style.maxHeight || '';
         chartEl.dataset.vestOrigFlex = chartEl.style.flex || '';
@@ -11356,20 +11355,33 @@ if (activeTab === 'diagnostics') {
     const panel = info.panel;
 
     panel.classList.remove('vest-bottom-panel-minimized');
+    panel.classList.remove('vest-panel-collapsed', 'vest-panel-floating', 'vest-panel-hidden');
     panel.style.removeProperty('display');
+    panel.style.removeProperty('visibility');
+    panel.style.removeProperty('opacity');
 
     if (panel.classList.contains('vest-bottom-panel-detached')) {
       restoreDetachedToDocked(panel);
+    } else {
+      const targetH = parseInt(panel.dataset.vestDockedHeight, 10) || Math.min(360, Math.max(240, Math.round(window.innerHeight * 0.30)));
+      panel.style.setProperty('height', `${targetH}px`);
+      panel.style.setProperty('min-height', '180px');
+      panel.style.setProperty('max-height', 'none');
+      panel.style.setProperty('flex', '0 0 auto');
+      panel.style.setProperty('display', 'flex');
+      panel.style.setProperty('flex-direction', 'column');
     }
 
     const resizer = findPanelSplitResizer(panel);
     if (resizer) {
       resizer.classList.remove('vest-bottom-resizer-hidden');
       resizer.style.removeProperty('display');
+      resizer.style.removeProperty('height');
+      resizer.style.removeProperty('min-height');
     }
 
     const chartEl = findChartContainerAbovePanel(panel);
-    if (chartEl && chartEl.dataset.vestOrigHeight !== undefined) {
+    if (chartEl) {
       if (chartEl.dataset.vestOrigHeight) {
         chartEl.style.height = chartEl.dataset.vestOrigHeight;
       } else {
@@ -11384,11 +11396,15 @@ if (activeTab === 'diagnostics') {
         chartEl.style.flex = chartEl.dataset.vestOrigFlex;
       } else {
         chartEl.style.removeProperty('flex');
+        chartEl.style.setProperty('flex', '1 1 0%');
       }
+      delete chartEl.dataset.vestOrigCaptured;
+      delete chartEl.dataset.vestOrigHeight;
+      delete chartEl.dataset.vestOrigMaxH;
+      delete chartEl.dataset.vestOrigFlex;
     }
 
-    window.dispatchEvent(new Event('resize'));
-    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+    wakeUpPositionsPanel(panel, info);
 
     saveBottomPanelState({ isMinimized: false, isDetached: false });
     minimizedWindowOrder = minimizedWindowOrder.filter(id => id !== 'positions');
@@ -11409,6 +11425,13 @@ if (activeTab === 'diagnostics') {
     if (!info || !info.panel) return false;
     const panel = info.panel;
 
+    if (!panel.classList.contains('vest-bottom-panel-detached') && !panel.classList.contains('vest-bottom-panel-minimized')) {
+      const r = panel.getBoundingClientRect();
+      if (r.height >= 120) {
+        panel.dataset.vestDockedHeight = String(Math.round(r.height));
+      }
+    }
+
     panel.classList.remove('vest-bottom-panel-minimized');
     panel.style.removeProperty('display');
 
@@ -11420,7 +11443,8 @@ if (activeTab === 'diagnostics') {
 
     const chartEl = findChartContainerAbovePanel(panel);
     if (chartEl) {
-      if (!chartEl.dataset.vestOrigHeight) {
+      if (chartEl.dataset.vestOrigCaptured !== 'true') {
+        chartEl.dataset.vestOrigCaptured = 'true';
         chartEl.dataset.vestOrigHeight = chartEl.style.height || '';
         chartEl.dataset.vestOrigMaxH = chartEl.style.maxHeight || '';
         chartEl.dataset.vestOrigFlex = chartEl.style.flex || '';
@@ -11480,15 +11504,53 @@ if (activeTab === 'diagnostics') {
   function restoreDetachedToDocked(panel) {
     if (!panel) return;
     panel.classList.remove('vest-bottom-panel-detached');
+    panel.classList.remove('vest-panel-collapsed', 'vest-panel-floating', 'vest-panel-hidden');
     panel.style.removeProperty('position');
     panel.style.removeProperty('top');
     panel.style.removeProperty('left');
     panel.style.removeProperty('width');
-    panel.style.removeProperty('height');
     panel.style.removeProperty('z-index');
+    panel.style.removeProperty('resize');
 
     const titleBar = panel.querySelector('#vest-detached-title-bar');
     if (titleBar) titleBar.remove();
+
+    const targetH = parseInt(panel.dataset.vestDockedHeight, 10) || Math.min(360, Math.max(240, Math.round(window.innerHeight * 0.30)));
+    panel.style.setProperty('height', `${targetH}px`);
+    panel.style.setProperty('min-height', '180px');
+    panel.style.setProperty('max-height', 'none');
+    panel.style.setProperty('flex', '0 0 auto');
+    panel.style.setProperty('display', 'flex');
+    panel.style.setProperty('flex-direction', 'column');
+  }
+
+  function wakeUpPositionsPanel(panel, info) {
+    if (!panel) return;
+
+    function triggerReflow() {
+      const scrollables = panel.querySelectorAll('div, [role="tabpanel"], table, tbody');
+      scrollables.forEach(el => {
+        try {
+          el.dispatchEvent(new Event('scroll', { bubbles: true }));
+          el.dispatchEvent(new Event('resize', { bubbles: true }));
+        } catch (e) {}
+      });
+      window.dispatchEvent(new Event('resize'));
+    }
+
+    triggerReflow();
+    setTimeout(triggerReflow, 50);
+    setTimeout(triggerReflow, 150);
+    setTimeout(triggerReflow, 300);
+
+    setTimeout(() => {
+      try {
+        const activeTab = panel.querySelector('[role="tab"][aria-selected="true"], [role="tab"][data-state="active"]') || info?.matchedTab;
+        if (activeTab && typeof activeTab.click === 'function') {
+          activeTab.click();
+        }
+      } catch (e) {}
+    }, 40);
   }
 
   function injectDockedBottomPanelControls(panel, tabBar) {
@@ -11751,6 +11813,13 @@ if (activeTab === 'diagnostics') {
     if (!info || !info.panel) return;
     const panel = info.panel;
     const tabBar = info.tabBar;
+
+    if (!panel.classList.contains('vest-bottom-panel-detached') && !panel.classList.contains('vest-bottom-panel-minimized')) {
+      const r = panel.getBoundingClientRect();
+      if (r.height >= 120) {
+        panel.dataset.vestDockedHeight = String(Math.round(r.height));
+      }
+    }
 
     const st = getActiveFirmBottomPanelState();
     if (st.isMinimized) {
