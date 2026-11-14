@@ -124,7 +124,12 @@
       key.startsWith('tv.') ||
       key === 'properties_toolbar.position' ||
       key.startsWith('linetool.') ||
-      key.startsWith('combobox.')
+      key.startsWith('combobox.') ||
+      key.startsWith('ChartDrawingToolbarWidget.') ||
+      key.startsWith('drawingToolbar.') ||
+      key.startsWith('drawingFavorites') ||
+      key.startsWith('side_toolbar.') ||
+      key.startsWith('sideToolbar.')
     );
   }
 
@@ -1470,6 +1475,7 @@
   let isDragging = false;
   let dragOffset = { x: 0, y: 0 };
   let isCollapsed = false;
+  let latestDrawingToolbarVisible = true;
 
   // -------------------------------------------------------------
   // Safe Chrome Extension Context & Storage Helper
@@ -2523,6 +2529,14 @@
     } else if (type === 'VEST_TV_MAIN_READY') {
       if (settingsLoaded) {
         notifyMainWorldConfig();
+      }
+      postToMainWorlds({ type: 'VEST_TV_QUERY_DRAWING_TOOLBAR_STATE' });
+    } else if (type === 'VEST_TV_DRAWING_TOOLBAR_STATE') {
+      latestDrawingToolbarVisible = Boolean(event.data.visible);
+      const badge = document.getElementById('vest-sdm-drawing-toolbar-badge');
+      if (badge) {
+        badge.className = `vest-sdm-badge-pill ${latestDrawingToolbarVisible ? 'on' : ''}`;
+        badge.textContent = latestDrawingToolbarVisible ? 'VISIBLE' : 'HIDDEN';
       }
     } else if (type === 'VEST_TV_GLOBAL_DRAWING_UPSERT') {
       if (!isTopWindow || !isExtensionValid() || !event.data.drawing) return;
@@ -3905,6 +3919,18 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.debugMode ? 'on' : (settings.diagnosticsBox && settings.diagnosticsBox.enabled ? 'on' : '')}">${settings.debugMode ? 'DEBUG ON' : (settings.diagnosticsBox && settings.diagnosticsBox.enabled ? 'ON' : 'OFF')}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-toggle-drawing-toolbar-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
+              <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+              <path d="M2 2l7.586 7.586"></path>
+              <circle cx="11" cy="11" r="2"></circle>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Left Drawing Toolbar</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${latestDrawingToolbarVisible !== false ? 'on' : ''}" id="vest-sdm-drawing-toolbar-badge">${latestDrawingToolbarVisible !== false ? 'VISIBLE' : 'HIDDEN'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-perpfirms-btn">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#06b6d4;">
@@ -3950,6 +3976,7 @@
           }
           updateStudioDropdownPosition(pill);
           menuEl.style.display = 'flex';
+          postToMainWorlds({ type: 'VEST_TV_QUERY_DRAWING_TOOLBAR_STATE' });
         } else {
           menuEl.style.display = 'none';
         }
@@ -4013,6 +4040,14 @@
     menuEl.querySelector('#vest-sdm-open-diagnostics-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('diagnostics');
+    });
+
+    // Left Drawing Toolbar Toggle Button -> sends toggle command to TradingView chart
+    menuEl.querySelector('#vest-sdm-toggle-drawing-toolbar-btn')?.addEventListener('click', () => {
+      postToMainWorlds({
+        type: 'VEST_TV_TOGGLE_DRAWING_TOOLBAR'
+      });
+      showToast('Toggling left drawing toolbar...');
     });
 
     // Perp Firm Settings Button -> opens Settings Dialog on Perp Firms tab
