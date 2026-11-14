@@ -12,6 +12,7 @@ All notable changes, new features, and bug fixes through the current release (`v
 - **Timeframe Toolbar Harmony with Third-Party Buttons (TV / Vela)**: Resolved the rapid jumping and DOM positioning fight between Cortex timeframe shortcut buttons and third-party indicator buttons (`TV / Vela`). Let the third-party indicator (`TV / Vela`) hold the front position directly following the native interval button, situating Trading Cortex timeframe buttons cleanly immediately after it without DOM re-entry or MutationObserver churn.
 
 ### ✨ Features
+- **Join Our Discord Community Banner**: Added an official Discord community banner at the very top of the About tab in the Settings Dialog linking directly to `https://discord.gg/ztXmwMBQ2Y` with official Discord Clyde vector branding, blurple styling, and one-click launch.
 - **80% Viewport Settings & Manager Panel**: Expanded the Trading Cortex multi-tab Settings dialog and Template Manager dialogs to take up 80% around each side of the screen (`80vw` × `80vh`), centered in the viewport with responsive bounds, providing expansive breathing room for side-by-side perp firm tiles, session configurations, and controls.
 - **Bottom Positions & Orders Detach & Minimize**:
   - Added dedicated `DETACH` button to the bottom positions and orders box, popping it out into a floating, moveable, resizable HUD window so the chart can become full screen.
