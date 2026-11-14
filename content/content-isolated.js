@@ -1404,6 +1404,11 @@
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     debugMode: false,
     diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
+    bottomPanelState: {
+      isMinimized: false,
+      isDetached: false,
+      pos: null
+    },
     enablePanelManagement: true,
     panelLayout: {},
     sidebarState: {
@@ -3294,6 +3299,7 @@
     if (!studioPillHeartbeat) {
       studioPillHeartbeat = setInterval(() => {
         ensureCortexTopBar();
+        ensureBottomPositionsPanelManager();
         if (!studioPillEl || !studioPillEl.isConnected) {
           renderStudioHeaderPill();
         } else {
@@ -10555,6 +10561,570 @@ if (activeTab === 'diagnostics') {
     });
   }
 
+  // =============================================================
+  // Bottom Positions & Orders Panel Manager (Detach & Minimize)
+  // =============================================================
+  let bottomPanelTopBarPillEl = null;
+  let cachedBottomPanelEl = null;
+  let cachedBottomTabBarEl = null;
+  let latestDetectedPositionsCount = 0;
+  let isDraggingDetachedBottomPanel = false;
+  let detachedDragStartMouse = { x: 0, y: 0 };
+  let detachedDragStartOffset = { x: 0, y: 0 };
+
+  function getLivePositionCount() {
+    return latestDetectedPositionsCount;
+  }
+
+  function saveBottomPanelState(updates) {
+    if (!settings.bottomPanelState) {
+      settings.bottomPanelState = { isMinimized: false, isDetached: false, pos: null };
+    }
+    settings.bottomPanelState = {
+      ...settings.bottomPanelState,
+      ...updates
+    };
+    queueSettingsSave({ bottomPanelState: settings.bottomPanelState });
+  }
+
+  function findBottomPositionsPanel() {
+    if (cachedBottomPanelEl && cachedBottomPanelEl.isConnected) {
+      return { panel: cachedBottomPanelEl, tabBar: cachedBottomTabBarEl, posCount: latestDetectedPositionsCount };
+    }
+
+    const tagged = document.querySelector('[data-vest-bottom-panel="true"]');
+    if (tagged && tagged.isConnected) {
+      cachedBottomPanelEl = tagged;
+      return { panel: tagged, tabBar: cachedBottomTabBarEl, posCount: latestDetectedPositionsCount };
+    }
+
+    const candidates = Array.from(document.querySelectorAll('button, [role="tab"], div[class*="tab"], a[role="tab"], div, span'));
+    let matchedTab = null;
+    let detectedCount = 0;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const el = candidates[i];
+      if (el.id === 'vest-bottom-panel-controls' || el.closest('#vest-bottom-panel-controls')) continue;
+      if (el.closest('#vest-cortex-top-bar') || el.closest('#vest-studio-settings-dialog') || el.closest('#vest-chart-trades-box') || el.closest('#vest-action-log-box')) continue;
+      if (el.children.length > 4) continue;
+
+      const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+      if (!txt) continue;
+
+      const mPos = txt.match(/^(?:active\s+)?positions?(?:\s*\(?(\d+)\)?)?$/i);
+      if (mPos) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 24 && r.height > 12 && r.height <= 60 && r.top >= 120) {
+          matchedTab = el;
+          if (mPos[1]) detectedCount = parseInt(mPos[1], 10);
+          break;
+        }
+      }
+
+      if (/^(?:open\s+orders|positions?\s+history|order\s+history|funding\s+history)(?:\s*\(?(\d+)\)?)?$/i.test(txt)) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 24 && r.height > 12 && r.height <= 60 && r.top >= 120) {
+          if (!matchedTab) matchedTab = el;
+        }
+      }
+    }
+
+    if (!matchedTab) return null;
+
+    latestDetectedPositionsCount = detectedCount;
+
+    let tabBar = matchedTab.parentElement;
+    while (tabBar && tabBar !== document.body) {
+      const t = (tabBar.innerText || tabBar.textContent || '');
+      if ((/positions/i.test(t) || /orders/i.test(t)) && tabBar.children.length >= 2) {
+        const tr = tabBar.getBoundingClientRect();
+        if (tr.width >= 200 && tr.height <= 65) {
+          break;
+        }
+      }
+      tabBar = tabBar.parentElement;
+    }
+
+    let panel = tabBar || matchedTab.parentElement;
+    while (panel && panel.parentElement && panel.parentElement !== document.body && panel.parentElement.id !== '__next' && panel.parentElement.id !== 'root') {
+      const parent = panel.parentElement;
+      const parentHasChart = parent.querySelector('iframe, canvas, div[class*="chart"], div[id*="chart"]');
+      const panelHasChart = panel.querySelector('iframe, canvas, div[class*="chart"]');
+      if (parentHasChart && !panelHasChart) {
+        break;
+      }
+      const r = panel.getBoundingClientRect();
+      if (r.width >= window.innerWidth * 0.45 && r.height >= 100 && r.top >= 140) {
+        if (parent.clientHeight > r.height + 120) {
+          break;
+        }
+      }
+      panel = parent;
+    }
+
+    if (panel) {
+      panel.setAttribute('data-vest-bottom-panel', 'true');
+      cachedBottomPanelEl = panel;
+      cachedBottomTabBarEl = tabBar;
+    }
+
+    return { panel, tabBar, matchedTab, posCount: detectedCount };
+  }
+
+  function findPanelSplitResizer(panel) {
+    if (!panel || !panel.parentElement) return null;
+    let prev = panel.previousElementSibling;
+    while (prev) {
+      const r = prev.getBoundingClientRect();
+      const style = window.getComputedStyle(prev);
+      const cursor = style.cursor || '';
+      const txt = (prev.innerText || prev.textContent || '').trim();
+      if (
+        cursor.includes('resize') ||
+        r.height <= 24 ||
+        txt === ':::' ||
+        prev.getAttribute('role') === 'separator' ||
+        prev.className.includes('resiz') ||
+        prev.className.includes('separator') ||
+        prev.className.includes('splitter')
+      ) {
+        return prev;
+      }
+      if (r.height >= 80) break;
+      prev = prev.previousElementSibling;
+    }
+    return null;
+  }
+
+  function findChartContainerAbovePanel(panel) {
+    if (!panel || !panel.parentElement) return null;
+    const resizer = findPanelSplitResizer(panel);
+    let el = resizer ? resizer.previousElementSibling : panel.previousElementSibling;
+    while (el) {
+      const r = el.getBoundingClientRect();
+      if (r.height >= 120 && (el.querySelector('iframe, canvas') || el.className.includes('chart') || el.id.includes('chart'))) {
+        return el;
+      }
+      el = el.previousElementSibling;
+    }
+    return panel.parentElement.querySelector('div[class*="chart"], div[id*="chart"], iframe, canvas')?.closest('div') || null;
+  }
+
+  function minimizeBottomPanel(showToastMsg = true) {
+    const info = findBottomPositionsPanel();
+    if (!info || !info.panel) return false;
+    const panel = info.panel;
+
+    if (panel.classList.contains('vest-bottom-panel-detached')) {
+      restoreDetachedToDocked(panel);
+    }
+
+    const resizer = findPanelSplitResizer(panel);
+    if (resizer) {
+      resizer.classList.add('vest-bottom-resizer-hidden');
+      resizer.style.setProperty('display', 'none', 'important');
+    }
+
+    const chartEl = findChartContainerAbovePanel(panel);
+    if (chartEl) {
+      if (!chartEl.dataset.vestOrigHeight) {
+        chartEl.dataset.vestOrigHeight = chartEl.style.height || '';
+        chartEl.dataset.vestOrigMaxH = chartEl.style.maxHeight || '';
+        chartEl.dataset.vestOrigFlex = chartEl.style.flex || '';
+      }
+      chartEl.style.setProperty('height', '100%', 'important');
+      chartEl.style.setProperty('max-height', 'none', 'important');
+      chartEl.style.setProperty('flex', '1 1 0%', 'important');
+    }
+
+    panel.classList.add('vest-bottom-panel-minimized');
+    panel.style.setProperty('display', 'none', 'important');
+
+    window.dispatchEvent(new Event('resize'));
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+
+    saveBottomPanelState({ isMinimized: true, isDetached: false });
+    updateBottomPanelTopBarPill();
+
+    if (showToastMsg) {
+      showToast('Positions & Orders minimized to Cortex Toolbar (Full Screen Chart)');
+    }
+    return true;
+  }
+
+  function restoreBottomPanelDocked(showToastMsg = true) {
+    const info = findBottomPositionsPanel();
+    if (!info || !info.panel) return false;
+    const panel = info.panel;
+
+    panel.classList.remove('vest-bottom-panel-minimized');
+    panel.style.removeProperty('display');
+
+    if (panel.classList.contains('vest-bottom-panel-detached')) {
+      restoreDetachedToDocked(panel);
+    }
+
+    const resizer = findPanelSplitResizer(panel);
+    if (resizer) {
+      resizer.classList.remove('vest-bottom-resizer-hidden');
+      resizer.style.removeProperty('display');
+    }
+
+    const chartEl = findChartContainerAbovePanel(panel);
+    if (chartEl && chartEl.dataset.vestOrigHeight !== undefined) {
+      if (chartEl.dataset.vestOrigHeight) {
+        chartEl.style.height = chartEl.dataset.vestOrigHeight;
+      } else {
+        chartEl.style.removeProperty('height');
+      }
+      if (chartEl.dataset.vestOrigMaxH) {
+        chartEl.style.maxHeight = chartEl.dataset.vestOrigMaxH;
+      } else {
+        chartEl.style.removeProperty('max-height');
+      }
+      if (chartEl.dataset.vestOrigFlex) {
+        chartEl.style.flex = chartEl.dataset.vestOrigFlex;
+      } else {
+        chartEl.style.removeProperty('flex');
+      }
+    }
+
+    window.dispatchEvent(new Event('resize'));
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+
+    saveBottomPanelState({ isMinimized: false, isDetached: false });
+    updateBottomPanelTopBarPill();
+
+    if (showToastMsg) {
+      showToast('Positions & Orders docked to bottom');
+    }
+    return true;
+  }
+
+  function detachBottomPanel(showToastMsg = true) {
+    const info = findBottomPositionsPanel();
+    if (!info || !info.panel) return false;
+    const panel = info.panel;
+
+    panel.classList.remove('vest-bottom-panel-minimized');
+    panel.style.removeProperty('display');
+
+    const resizer = findPanelSplitResizer(panel);
+    if (resizer) {
+      resizer.classList.add('vest-bottom-resizer-hidden');
+      resizer.style.setProperty('display', 'none', 'important');
+    }
+
+    const chartEl = findChartContainerAbovePanel(panel);
+    if (chartEl) {
+      if (!chartEl.dataset.vestOrigHeight) {
+        chartEl.dataset.vestOrigHeight = chartEl.style.height || '';
+        chartEl.dataset.vestOrigMaxH = chartEl.style.maxHeight || '';
+        chartEl.dataset.vestOrigFlex = chartEl.style.flex || '';
+      }
+      chartEl.style.setProperty('height', '100%', 'important');
+      chartEl.style.setProperty('max-height', 'none', 'important');
+      chartEl.style.setProperty('flex', '1 1 0%', 'important');
+    }
+
+    const savedState = settings.bottomPanelState || {};
+    const defaultW = Math.min(980, Math.max(560, Math.round(window.innerWidth * 0.65)));
+    const defaultH = Math.min(500, Math.max(260, Math.round(window.innerHeight * 0.42)));
+    const defaultTop = Math.max(80, window.innerHeight - defaultH - 30);
+    const defaultLeft = Math.max(20, Math.round((window.innerWidth - defaultW) / 2));
+
+    const top = savedState.pos?.top ?? defaultTop;
+    const left = savedState.pos?.left ?? defaultLeft;
+    const width = savedState.pos?.width ?? defaultW;
+    const height = savedState.pos?.height ?? defaultH;
+
+    panel.classList.add('vest-bottom-panel-detached');
+    panel.style.setProperty('position', 'fixed', 'important');
+    panel.style.setProperty('top', `${top}px`, 'important');
+    panel.style.setProperty('left', `${left}px`, 'important');
+    panel.style.setProperty('width', `${width}px`, 'important');
+    panel.style.setProperty('height', `${height}px`, 'important');
+    panel.style.setProperty('z-index', '99995', 'important');
+
+    injectDetachedTitleBar(panel);
+
+    window.dispatchEvent(new Event('resize'));
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+
+    saveBottomPanelState({ isMinimized: false, isDetached: true, pos: { top, left, width, height } });
+    updateBottomPanelTopBarPill();
+
+    if (showToastMsg) {
+      showToast('Positions & Orders detached into floating window (Chart is full screen)');
+    }
+    return true;
+  }
+
+  function restoreDetachedToDocked(panel) {
+    if (!panel) return;
+    panel.classList.remove('vest-bottom-panel-detached');
+    panel.style.removeProperty('position');
+    panel.style.removeProperty('top');
+    panel.style.removeProperty('left');
+    panel.style.removeProperty('width');
+    panel.style.removeProperty('height');
+    panel.style.removeProperty('z-index');
+
+    const titleBar = panel.querySelector('#vest-detached-title-bar');
+    if (titleBar) titleBar.remove();
+  }
+
+  function injectDockedBottomPanelControls(panel, tabBar) {
+    if (!panel) return;
+    let controls = panel.querySelector('#vest-bottom-panel-controls');
+    if (controls && controls.isConnected) return;
+
+    controls = document.createElement('div');
+    controls.id = 'vest-bottom-panel-controls';
+    controls.className = 'vest-bottom-panel-controls';
+    controls.innerHTML = `
+      <button type="button" class="vest-bpc-btn vest-bpc-detach-btn" id="vest-bpc-detach-btn" title="Detach Positions & Orders into floating movable window">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:12px; height:12px;">
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+        </svg>
+        <span>DETACH</span>
+      </button>
+      <button type="button" class="vest-bpc-btn vest-bpc-minimize-btn" id="vest-bpc-minimize-btn" title="Minimize to Cortex Toolbar (Full Screen Chart)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:12px; height:12px;">
+          <line x1="4" y1="18" x2="20" y2="18"></line>
+          <polyline points="7 12 12 17 17 12"></polyline>
+        </svg>
+        <span>MINIMIZE</span>
+      </button>
+    `;
+
+    controls.querySelector('#vest-bpc-detach-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      detachBottomPanel(true);
+    });
+
+    controls.querySelector('#vest-bpc-minimize-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      minimizeBottomPanel(true);
+    });
+
+    if (tabBar && tabBar.isConnected) {
+      tabBar.appendChild(controls);
+    } else {
+      controls.style.position = 'absolute';
+      controls.style.top = '6px';
+      controls.style.right = '12px';
+      panel.style.position = 'relative';
+      panel.insertBefore(controls, panel.firstChild);
+    }
+  }
+
+  function injectDetachedTitleBar(panel) {
+    if (!panel) return;
+    let titleBar = panel.querySelector('#vest-detached-title-bar');
+    if (!titleBar) {
+      titleBar = document.createElement('div');
+      titleBar.id = 'vest-detached-title-bar';
+      titleBar.className = 'vest-detached-title-bar';
+      panel.insertBefore(titleBar, panel.firstChild);
+    }
+
+    const posCount = getLivePositionCount();
+
+    titleBar.innerHTML = `
+      <div class="vest-dtb-drag-handle" title="Drag to move Positions & Orders window">
+        <div class="vest-dtb-icon-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:14px; height:14px;">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="3" y1="9" x2="21" y2="9"></line>
+            <line x1="9" y1="21" x2="9" y2="9"></line>
+          </svg>
+        </div>
+        <div class="vest-dtb-title-group">
+          <span class="vest-dtb-brand">Trading Cortex</span>
+          <span class="vest-dtb-title">Positions &amp; Orders</span>
+          <span class="vest-dtb-count-badge" id="vest-dtb-count-badge">${posCount > 0 ? `${posCount} Active` : '0 Active'}</span>
+        </div>
+      </div>
+      <div class="vest-dtb-actions">
+        <button type="button" class="vest-dtb-btn" id="vest-dtb-dock-btn" title="Dock back to bottom of chart">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:12px; height:12px;">
+            <polyline points="4 14 10 14 10 20"></polyline>
+            <polyline points="20 10 14 10 14 4"></polyline>
+            <line x1="14" y1="10" x2="21" y2="3"></line>
+            <line x1="3" y1="21" x2="10" y2="14"></line>
+          </svg>
+          <span>Dock</span>
+        </button>
+        <button type="button" class="vest-dtb-btn" id="vest-dtb-min-btn" title="Minimize to Cortex Toolbar (Full Screen Chart)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width:12px; height:12px;">
+            <line x1="4" y1="18" x2="20" y2="18"></line>
+            <polyline points="7 12 12 17 17 12"></polyline>
+          </svg>
+          <span>Minimize</span>
+        </button>
+      </div>
+    `;
+
+    const dragHandle = titleBar.querySelector('.vest-dtb-drag-handle');
+    if (dragHandle) {
+      dragHandle.onmousedown = (e) => onDetachedPanelDragStart(e, panel);
+    }
+
+    titleBar.querySelector('#vest-dtb-dock-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      restoreBottomPanelDocked(true);
+    });
+
+    titleBar.querySelector('#vest-dtb-min-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      minimizeBottomPanel(true);
+    });
+  }
+
+  function onDetachedPanelDragStart(e, panel) {
+    if (e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    isDraggingDetachedBottomPanel = true;
+    detachedDragStartMouse = { x: e.clientX, y: e.clientY };
+    const r = panel.getBoundingClientRect();
+    detachedDragStartOffset = { x: r.left, y: r.top };
+    e.preventDefault();
+  }
+
+  function onDetachedPanelDragMove(e) {
+    if (!isDraggingDetachedBottomPanel || !cachedBottomPanelEl) return;
+    const dx = e.clientX - detachedDragStartMouse.x;
+    const dy = e.clientY - detachedDragStartMouse.y;
+    const newLeft = Math.max(10, Math.min(window.innerWidth - 120, detachedDragStartOffset.x + dx));
+    const newTop = Math.max(40, Math.min(window.innerHeight - 60, detachedDragStartOffset.y + dy));
+    cachedBottomPanelEl.style.setProperty('left', `${Math.round(newLeft)}px`, 'important');
+    cachedBottomPanelEl.style.setProperty('top', `${Math.round(newTop)}px`, 'important');
+  }
+
+  function onDetachedPanelDragEnd() {
+    if (!isDraggingDetachedBottomPanel || !cachedBottomPanelEl) return;
+    isDraggingDetachedBottomPanel = false;
+    const r = cachedBottomPanelEl.getBoundingClientRect();
+    saveBottomPanelState({
+      pos: {
+        top: Math.round(r.top),
+        left: Math.round(r.left),
+        width: Math.round(r.width),
+        height: Math.round(r.height)
+      }
+    });
+  }
+
+  function ensureBottomPanelTopBarPill() {
+    const bar = ensureCortexTopBar();
+    if (!bar) return null;
+
+    let pill = document.getElementById('vest-bottom-panel-topbar-pill');
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'vest-bottom-panel-topbar-pill';
+      pill.className = 'vest-topbar-action-pill';
+      const studioPill = document.getElementById('vest-studio-header-pill');
+      if (studioPill && studioPill.nextSibling) {
+        bar.insertBefore(pill, studioPill.nextSibling);
+      } else {
+        bar.appendChild(pill);
+      }
+
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const st = settings.bottomPanelState || {};
+        if (st.isMinimized) {
+          restoreBottomPanelDocked(true);
+        } else if (st.isDetached) {
+          if (cachedBottomPanelEl) {
+            cachedBottomPanelEl.style.setProperty('z-index', '99999', 'important');
+          }
+          restoreBottomPanelDocked(true);
+        } else {
+          minimizeBottomPanel(true);
+        }
+      });
+    }
+
+    bottomPanelTopBarPillEl = pill;
+    updateBottomPanelTopBarPill();
+    return pill;
+  }
+
+  function updateBottomPanelTopBarPill() {
+    const pill = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
+    if (!pill) return;
+
+    const st = settings.bottomPanelState || {};
+    const isMin = Boolean(st.isMinimized);
+    const isDet = Boolean(st.isDetached);
+    const posCount = getLivePositionCount();
+
+    pill.className = `vest-topbar-action-pill ${isMin ? 'minimized' : (isDet ? 'detached' : '')}`;
+    pill.title = isMin
+      ? 'Positions & Orders Minimized (Click to Restore Docked)'
+      : (isDet ? 'Positions & Orders Detached (Click to Dock to Bottom)' : 'Positions & Orders Docked (Click to Minimize for Full Screen Chart)');
+
+    const statusClass = isMin ? 'min' : (isDet ? 'det' : 'dock');
+    const statusText = isMin ? 'MINIMIZED ↗' : (isDet ? 'DETACHED' : 'DOCKED');
+
+    pill.innerHTML = `
+      <div class="vest-bpp-trigger">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px; height:13px; color:#38bdf8;">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="9" y1="21" x2="9" y2="9"></line>
+        </svg>
+        <span class="vest-bpp-label">POSITIONS</span>
+        <span class="vest-bpp-count" id="vest-bpp-pos-count">${posCount > 0 ? posCount : '0'}</span>
+        <span class="vest-bpp-status ${statusClass}">${statusText}</span>
+      </div>
+    `;
+
+    const detBadge = document.getElementById('vest-dtb-count-badge');
+    if (detBadge) {
+      detBadge.textContent = posCount > 0 ? `${posCount} Active` : '0 Active';
+    }
+  }
+
+  function ensureBottomPositionsPanelManager() {
+    if (!isTopWindow) return;
+    const info = findBottomPositionsPanel();
+    ensureBottomPanelTopBarPill();
+
+    if (!info || !info.panel) return;
+    const panel = info.panel;
+    const tabBar = info.tabBar;
+
+    const st = settings.bottomPanelState || {};
+    if (st.isMinimized) {
+      if (!panel.classList.contains('vest-bottom-panel-minimized')) {
+        minimizeBottomPanel(false);
+      }
+    } else if (st.isDetached) {
+      if (!panel.classList.contains('vest-bottom-panel-detached')) {
+        detachBottomPanel(false);
+      } else {
+        injectDetachedTitleBar(panel);
+      }
+    } else {
+      injectDockedBottomPanelControls(panel, tabBar);
+    }
+  }
+
+  function initBottomPositionsPanelManager() {
+    if (!isTopWindow) return;
+    window.addEventListener('mousemove', onDetachedPanelDragMove, true);
+    window.addEventListener('mouseup', onDetachedPanelDragEnd, true);
+    ensureBottomPositionsPanelManager();
+  }
+
   // -------------------------------------------------------------
   // Keyboard Shortcuts
   // -------------------------------------------------------------
@@ -10564,6 +11134,17 @@ if (activeTab === 'diagnostics') {
 
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+
+      // Alt + P to toggle Positions & Orders Panel Minimized / Docked
+      if (e.altKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        const st = settings.bottomPanelState || {};
+        if (st.isMinimized) {
+          restoreBottomPanelDocked(true);
+        } else {
+          minimizeBottomPanel(true);
+        }
+      }
 
       // Alt + M to toggle Maximize Chart
       if (e.altKey && (e.key === 'm' || e.key === 'M')) {
@@ -12755,6 +13336,7 @@ if (activeTab === 'diagnostics') {
       if (isTopWindow) {
         resolveCurrentTabInfo();
         initPanelManager();
+        initBottomPositionsPanelManager();
         renderChartNewsBox();
         renderChartTradesBox();
         renderChartDiagnosticsBox();

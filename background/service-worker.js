@@ -78,6 +78,11 @@ const DEFAULT_SETTINGS = {
   rememberLastChartSettings: true,
   lastChartSettings: {},
   favoriteTimeframes: [],
+  bottomPanelState: {
+    isMinimized: false,
+    isDetached: false,
+    pos: null
+  },
   enablePanelManagement: true,
   panelLayout: {},
   sidebarState: {

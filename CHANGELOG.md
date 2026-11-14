@@ -7,6 +7,11 @@ All notable changes, new features, and bug fixes through the current release (`v
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
 ### ✨ Features
+- **Bottom Positions & Orders Detach & Minimize**:
+  - Added dedicated `DETACH` button to the bottom positions and orders box, popping it out into a floating, moveable, resizable HUD window so the chart can become full screen.
+  - Added `MINIMIZE` button to minimize the bottom panel directly to the Cortex top toolbar system, instantly collapsing the panel and split resizer so the chart expands to 100% full screen.
+  - Added interactive Cortex toolbar pill (`POSITIONS (2) • DOCKED / MINIMIZED / DETACHED`) for instant one-click toggle or restore anytime.
+  - Added `Alt + P` keyboard shortcut to quickly toggle the bottom panel between minimized full-screen chart mode and docked mode.
 - **Perp Firm Settings**: New dedicated settings manager accessible via the Cortex dropdown menu and the multi-tab Settings dialog.
 - **Side-by-Side Firm Tiles**: Displays configured perpetual brokers and prop firms (My Funded Perpetuals, Vest Markets, Vest Exchange, plus custom firms) in side-by-side tiles with site badges and visual statuses.
 - **Per-Firm Layout & Offsets**: Configure custom top-bar offsets, custom bottom margins, firm header height reference, default order leverage, account tiers, and trader notes for each firm.
