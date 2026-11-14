@@ -15,9 +15,61 @@ const LEGACY_PRESET_IDS = new Set([
   "volume_imbalance"
 ]);
 
+const DEFAULT_PERP_FIRMS = [
+  {
+    id: "myfundedperpetuals",
+    name: "My Funded Perpetuals",
+    url: "https://myfundedperpetuals.com/trade/",
+    matchPatterns: ["myfundedperpetuals.com"],
+    enabled: true,
+    isBuiltin: true,
+    accountTier: "Evaluation / Funded",
+    topBarMode: "auto",
+    customTopBarOffsetPx: 0,
+    barMarginBottom: 8,
+    headerHeightPx: 48,
+    rememberOrderAmount: true,
+    defaultLeverage: "5x",
+    notes: "Top-bar anchored below primary navbar and above ticker row"
+  },
+  {
+    id: "vestmarkets",
+    name: "Vest Markets",
+    url: "https://next.vestmarkets.com/trade",
+    matchPatterns: ["next.vestmarkets.com", "vestmarkets.com"],
+    enabled: true,
+    isBuiltin: true,
+    accountTier: "Live DEX",
+    topBarMode: "auto",
+    customTopBarOffsetPx: 0,
+    barMarginBottom: 8,
+    headerHeightPx: 48,
+    rememberOrderAmount: true,
+    defaultLeverage: "10x",
+    notes: "Arbitrum perpetual DEX on Vest"
+  },
+  {
+    id: "vestexchange",
+    name: "Vest Exchange",
+    url: "https://vest.exchange",
+    matchPatterns: ["vest.exchange"],
+    enabled: true,
+    isBuiltin: true,
+    accountTier: "Exchange App",
+    topBarMode: "auto",
+    customTopBarOffsetPx: 0,
+    barMarginBottom: 8,
+    headerHeightPx: 48,
+    rememberOrderAmount: true,
+    defaultLeverage: "10x",
+    notes: "Base app portal"
+  }
+];
+
 const DEFAULT_SETTINGS = {
   activeTemplateId: null,
   defaultTemplateId: null,
+  perpFirms: DEFAULT_PERP_FIRMS,
   showFloatingBar: false,
   floatingBarPosition: { top: 80, left: 16 },
   autoApplyToNew: false,
@@ -234,10 +286,59 @@ async function writeLocalDiskDatabase(templates, settings, globalDrawings = null
 }
 
 // Automatically sync any template or settings changes in chrome.storage.local to user-data/cortex-db.json
+async function syncDynamicPerpFirmScripts(perpFirms) {
+  if (!chrome.scripting || typeof chrome.scripting.registerContentScripts !== "function") return;
+  try {
+    const registered = await chrome.scripting.getRegisteredContentScripts().catch(() => []);
+    const existingIds = registered.map(s => s.id).filter(id => id && id.startsWith("tc-firm-"));
+    if (existingIds.length > 0) {
+      await chrome.scripting.unregisterContentScripts({ ids: existingIds }).catch(() => {});
+    }
+    if (!Array.isArray(perpFirms)) return;
+    const toRegister = [];
+    for (const firm of perpFirms) {
+      if (!firm.enabled || firm.isBuiltin) continue;
+      const patterns = [];
+      const rawList = Array.isArray(firm.matchPatterns) ? firm.matchPatterns : [firm.url];
+      for (const item of rawList) {
+        let clean = String(item || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+        if (clean) {
+          patterns.push(`https://*.${clean}/*`);
+          patterns.push(`https://${clean}/*`);
+        }
+      }
+      if (patterns.length > 0) {
+        toRegister.push({
+          id: `tc-firm-${firm.id}`,
+          js: ["content/content-main.js"],
+          matches: patterns,
+          world: "MAIN",
+          runAt: "document_start",
+          allFrames: true
+        });
+        toRegister.push({
+          id: `tc-firm-iso-${firm.id}`,
+          js: ["content/cortex-execution.js", "content/content-isolated.js"],
+          css: ["content/template-bar.css"],
+          matches: patterns,
+          runAt: "document_idle",
+          allFrames: true
+        });
+      }
+    }
+    if (toRegister.length > 0) {
+      await chrome.scripting.registerContentScripts(toRegister).catch(() => {});
+    }
+  } catch (e) {}
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.updateChannel) {
     checkGitHubForUpdatesInBackground();
+  }
+  if (changes.settings && changes.settings.newValue?.perpFirms) {
+    syncDynamicPerpFirmScripts(changes.settings.newValue.perpFirms);
   }
   if (!changes.templates && !changes.settings && !changes.globalDrawings) return;
 

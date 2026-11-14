@@ -1246,9 +1246,146 @@
     };
   }
 
+  const DEFAULT_PERP_FIRMS = [
+    {
+      id: "myfundedperpetuals",
+      name: "My Funded Perpetuals",
+      url: "https://myfundedperpetuals.com/trade/",
+      matchPatterns: ["myfundedperpetuals.com"],
+      enabled: true,
+      isBuiltin: true,
+      accountTier: "Evaluation / Funded",
+      topBarMode: "auto",
+      customTopBarOffsetPx: 0,
+      barMarginBottom: 8,
+      headerHeightPx: 48,
+      rememberOrderAmount: true,
+      defaultLeverage: "5x",
+      notes: "Top-bar anchored below primary navbar and above ticker row"
+    },
+    {
+      id: "vestmarkets",
+      name: "Vest Markets",
+      url: "https://next.vestmarkets.com/trade",
+      matchPatterns: ["next.vestmarkets.com", "vestmarkets.com"],
+      enabled: true,
+      isBuiltin: true,
+      accountTier: "Live DEX",
+      topBarMode: "auto",
+      customTopBarOffsetPx: 0,
+      barMarginBottom: 8,
+      headerHeightPx: 48,
+      rememberOrderAmount: true,
+      defaultLeverage: "10x",
+      notes: "Arbitrum perpetual DEX on Vest"
+    },
+    {
+      id: "vestexchange",
+      name: "Vest Exchange",
+      url: "https://vest.exchange",
+      matchPatterns: ["vest.exchange"],
+      enabled: true,
+      isBuiltin: true,
+      accountTier: "Exchange App",
+      topBarMode: "auto",
+      customTopBarOffsetPx: 0,
+      barMarginBottom: 8,
+      headerHeightPx: 48,
+      rememberOrderAmount: true,
+      defaultLeverage: "10x",
+      notes: "Base app portal"
+    }
+  ];
+
+  function normalizePerpFirmsConfig(rawList) {
+    const list = Array.isArray(rawList) ? rawList : [];
+    const result = [];
+    const seenIds = new Set();
+    const existingById = new Map();
+    for (const item of list) {
+      if (item && item.id) {
+        existingById.set(item.id, item);
+      }
+    }
+
+    for (const def of DEFAULT_PERP_FIRMS) {
+      const existing = existingById.get(def.id) || {};
+      result.push({
+        id: def.id,
+        name: String(existing.name || def.name).trim(),
+        url: String(existing.url || def.url).trim(),
+        matchPatterns: Array.isArray(existing.matchPatterns) && existing.matchPatterns.length > 0 ? existing.matchPatterns.slice() : def.matchPatterns.slice(),
+        enabled: existing.enabled !== false,
+        isBuiltin: true,
+        accountTier: String(existing.accountTier || def.accountTier || ''),
+        topBarMode: existing.topBarMode === 'custom' ? 'custom' : 'auto',
+        customTopBarOffsetPx: Number.isFinite(existing.customTopBarOffsetPx) ? Math.max(0, Math.min(300, existing.customTopBarOffsetPx)) : def.customTopBarOffsetPx,
+        barMarginBottom: Number.isFinite(existing.barMarginBottom) ? Math.max(0, Math.min(100, existing.barMarginBottom)) : def.barMarginBottom,
+        headerHeightPx: Number.isFinite(existing.headerHeightPx) ? Math.max(0, Math.min(200, existing.headerHeightPx)) : def.headerHeightPx,
+        rememberOrderAmount: existing.rememberOrderAmount !== false,
+        defaultLeverage: String(existing.defaultLeverage || def.defaultLeverage || '10x'),
+        notes: String(existing.notes || def.notes || '')
+      });
+      seenIds.add(def.id);
+    }
+
+    for (const item of list) {
+      if (!item || !item.id || seenIds.has(item.id)) continue;
+      const cleanUrl = String(item.url || '').trim();
+      let matchPatterns = Array.isArray(item.matchPatterns) ? item.matchPatterns.slice() : [];
+      if (matchPatterns.length === 0 && cleanUrl) {
+        const domain = cleanUrl.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').trim();
+        if (domain) matchPatterns = [domain];
+      }
+      result.push({
+        id: String(item.id).trim(),
+        name: String(item.name || 'Custom Perp Firm').trim(),
+        url: cleanUrl,
+        matchPatterns,
+        enabled: item.enabled !== false,
+        isBuiltin: false,
+        accountTier: String(item.accountTier || 'Perp Account'),
+        topBarMode: item.topBarMode === 'custom' ? 'custom' : 'auto',
+        customTopBarOffsetPx: Number.isFinite(item.customTopBarOffsetPx) ? Math.max(0, Math.min(300, item.customTopBarOffsetPx)) : 0,
+        barMarginBottom: Number.isFinite(item.barMarginBottom) ? Math.max(0, Math.min(100, item.barMarginBottom)) : 8,
+        headerHeightPx: Number.isFinite(item.headerHeightPx) ? Math.max(0, Math.min(200, item.headerHeightPx)) : 48,
+        rememberOrderAmount: item.rememberOrderAmount !== false,
+        defaultLeverage: String(item.defaultLeverage || '10x'),
+        notes: String(item.notes || '')
+      });
+      seenIds.add(item.id);
+    }
+    return result;
+  }
+
+  function getActivePerpFirm() {
+    const list = normalizePerpFirmsConfig(settings.perpFirms);
+    const host = window.location.hostname.toLowerCase();
+    for (const firm of list) {
+      if (Array.isArray(firm.matchPatterns)) {
+        for (const pattern of firm.matchPatterns) {
+          const cleanPattern = String(pattern || '').toLowerCase().trim();
+          if (cleanPattern && (host === cleanPattern || host.endsWith('.' + cleanPattern))) {
+            return firm;
+          }
+        }
+      }
+      if (firm.url) {
+        try {
+          const parsed = new URL(firm.url);
+          if (host === parsed.hostname.toLowerCase() || host.endsWith('.' + parsed.hostname.toLowerCase())) {
+            return firm;
+          }
+        } catch (e) {}
+      }
+    }
+    return list.find(f => f.enabled) || list[0] || null;
+  }
+
   let settings = {
     activeTemplateId: null,
     defaultTemplateId: null,
+    perpFirms: JSON.parse(JSON.stringify(DEFAULT_PERP_FIRMS)),
     showFloatingBar: false,
     floatingBarPosition: { top: 80, left: 16 },
     autoApplyToNew: false,
@@ -1636,7 +1773,8 @@
         if (changes.installedVersionOverride && changes.installedVersionOverride.newValue) {
           installedVersionOverride = changes.installedVersionOverride.newValue;
           if (isTopWindow) {
-            renderStudioHeaderPill();
+            ensureCortexTopBar();
+      renderStudioHeaderPill();
           }
         }
         if (changes.updateChannel && isTopWindow) {
@@ -3014,6 +3152,10 @@
   }
 
   function getMainHeaderBottom() {
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (activeFirm && activeFirm.topBarMode === 'custom' && activeFirm.customTopBarOffsetPx > 0) {
+      return Math.round(activeFirm.customTopBarOffsetPx);
+    }
     const header = getMainHeaderElement();
     if (header) {
       const r = header.getBoundingClientRect();
@@ -3114,8 +3256,16 @@
 
   function ensureCortexTopBar() {
     if (!document.body) return null;
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (activeFirm && !activeFirm.enabled) {
+      const existingBar = document.getElementById(CORTEX_TOP_BAR_ID);
+      if (existingBar) existingBar.remove();
+      document.body.classList.remove('vest-cortex-top-bar-active');
+      return null;
+    }
     const headerBottom = getMainHeaderBottom();
-    adjustLayoutForTopBar(headerBottom, CORTEX_BAR_HEIGHT, CORTEX_BAR_MARGIN_BOTTOM);
+    const barMargin = (activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM;
+    adjustLayoutForTopBar(headerBottom, CORTEX_BAR_HEIGHT, barMargin);
 
     let bar = document.getElementById(CORTEX_TOP_BAR_ID);
     if (!bar) {
@@ -3683,6 +3833,17 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.debugMode ? 'on' : (settings.diagnosticsBox && settings.diagnosticsBox.enabled ? 'on' : '')}">${settings.debugMode ? 'DEBUG ON' : (settings.diagnosticsBox && settings.diagnosticsBox.enabled ? 'ON' : 'OFF')}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-perpfirms-btn">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#06b6d4;">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Perp Firm Settings...</span>
+          </div>
+          <span class="vest-sdm-badge-pill on">FIRMS</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-settings-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f8fafc;">
@@ -3780,6 +3941,12 @@
     menuEl.querySelector('#vest-sdm-open-diagnostics-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('diagnostics');
+    });
+
+    // Perp Firm Settings Button -> opens Settings Dialog on Perp Firms tab
+    menuEl.querySelector('#vest-sdm-open-perpfirms-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('perpfirms');
     });
 
     // Top Settings Button -> opens Settings Dialog on About tab
@@ -3932,7 +4099,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    let activeTab = ['about', 'alertsvoice', 'memory', 'sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'diagnostics'].includes(initialTab) ? initialTab : 'about';
+    let activeTab = ['about', 'alertsvoice', 'memory', 'sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'diagnostics', 'perpfirms'].includes(initialTab) ? initialTab : 'about';
     let voicesChangedHandler = null;
 
     // Working draft so "Cancel" discards or "Save Settings" commits
@@ -3952,6 +4119,9 @@
     draftSettings.failLines = normalizeFailLinesConfig(draftSettings.failLines);
     draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
     draftSettings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
+    draftSettings.perpFirms = normalizePerpFirmsConfig(draftSettings.perpFirms);
+    const activeFirmInitial = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    let selectedFirmId = activeFirmInitial ? activeFirmInitial.id : (draftSettings.perpFirms[0]?.id || 'myfundedperpetuals');
     if (!draftSettings.sidebarState) {
       draftSettings.sidebarState = {
         magnet: false,
@@ -4029,6 +4199,11 @@
         id: 'diagnostics',
         label: 'Diagnostics & Debug',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`
+      },
+      {
+        id: 'perpfirms',
+        label: 'Perp Firm Settings',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`
       }
     ];
 
@@ -5664,6 +5839,279 @@
         `;
       }
 
+
+      function renderPerpFirmsHtml() {
+        const firms = normalizePerpFirmsConfig(draftSettings.perpFirms);
+        const currentFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+        const activeId = currentFirm ? currentFirm.id : null;
+
+        if (selectedFirmId !== '__new__' && !firms.some(f => f.id === selectedFirmId)) {
+          selectedFirmId = activeId || (firms[0] ? firms[0].id : '__new__');
+        }
+
+        const isAddingNew = selectedFirmId === '__new__';
+        const selectedFirm = !isAddingNew ? firms.find(f => f.id === selectedFirmId) : null;
+
+        function getInitials(name) {
+          if (!name) return 'PF';
+          const parts = name.trim().split(/\s+/);
+          if (parts.length >= 2) {
+            return (parts[0][0] + parts[1][0]).toUpperCase();
+          }
+          return name.slice(0, 3).toUpperCase();
+        }
+
+        function cleanDomain(url) {
+          if (!url) return '';
+          return url.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+        }
+
+        return `
+          <div class="vest-tvs-section-title">PERP FIRM SETTINGS &amp; BROKER ROUTING</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 16px;">
+            Configure Trading Cortex across multiple perpetual trading firms and prop brokers. Select a tile to customize top-bar offsets, margins, and account settings below, or add any new perp firm by URL.
+          </p>
+
+          <!-- Side-by-side Tiles Grid -->
+          <div class="vest-pf-grid">
+            ${firms.map(firm => {
+              const isSelected = !isAddingNew && firm.id === selectedFirmId;
+              const isCurrent = activeId === firm.id;
+              const initials = getInitials(firm.name);
+              const domain = cleanDomain(firm.url) || (firm.matchPatterns && firm.matchPatterns[0]) || '';
+              const topBarLabel = firm.topBarMode === 'custom' ? `+${firm.customTopBarOffsetPx}px` : 'Auto';
+              const marginLabel = `${firm.barMarginBottom ?? 8}px`;
+
+              return `
+                <div class="vest-pf-tile ${isSelected ? 'selected' : ''} ${!firm.enabled ? 'disabled' : ''}" data-firm-id="${firm.id}">
+                  <div class="vest-pf-tile-top">
+                    <div class="vest-pf-tile-title-row">
+                      <div class="vest-pf-avatar">${initials}</div>
+                      <div class="vest-pf-name" title="${firm.name}">${firm.name}</div>
+                    </div>
+                  </div>
+
+                  <div class="vest-pf-url-badge" title="${firm.url || domain}">
+                    ${domain || 'No URL'}
+                  </div>
+
+                  <div class="vest-pf-tags-row">
+                    ${isCurrent ? `<span class="vest-pf-badge current">Current Site</span>` : ''}
+                    ${firm.isBuiltin ? `<span class="vest-pf-badge builtin">Built-In</span>` : `<span class="vest-pf-badge custom">Custom</span>`}
+                    ${!firm.enabled ? `<span class="vest-pf-badge off">Disabled</span>` : ''}
+                  </div>
+
+                  <div style="font-size:10.5px; color:#64748b; margin-top:2px; display:flex; justify-content:space-between;">
+                    <span>Top-bar: <strong style="color:#94a3b8;">${topBarLabel}</strong></span>
+                    <span>Margin: <strong style="color:#94a3b8;">${marginLabel}</strong></span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+
+            <!-- Add Perp Firm Tile -->
+            <div class="vest-pf-tile vest-pf-tile-add ${isAddingNew ? 'selected' : ''}" id="vest-pf-add-tile">
+              <div class="vest-pf-tile-add-icon">+</div>
+              <div style="font-size:12.5px; font-weight:700; color:#38bdf8;">Add Perp Firm</div>
+              <div style="font-size:10.5px; color:#64748b;">Add Broker / Prop URL</div>
+            </div>
+          </div>
+
+          <!-- Detail Settings Card Below Grid -->
+          <div id="vest-pf-detail-container">
+            ${isAddingNew ? renderAddNewFirmCard() : (selectedFirm ? renderFirmDetailCard(selectedFirm, activeId === selectedFirm.id) : '')}
+          </div>
+        `;
+      }
+
+      function renderFirmDetailCard(firm, isCurrent) {
+        const topMode = firm.topBarMode === 'custom' ? 'custom' : 'auto';
+        const offsetPx = firm.customTopBarOffsetPx ?? 0;
+        const marginPx = firm.barMarginBottom ?? 8;
+        const headerPx = firm.headerHeightPx ?? 48;
+        const lev = firm.defaultLeverage || '10x';
+
+        return `
+          <div class="vest-pf-detail-card" id="vest-pf-detail-card">
+            <input type="hidden" id="vest-pf-current-id" value="${firm.id}" />
+
+            <div class="vest-pf-detail-header">
+              <div class="vest-pf-detail-title-group">
+                <div class="vest-pf-avatar" style="width:32px; height:32px; font-size:13px;">
+                  ${firm.name.slice(0, 3).toUpperCase()}
+                </div>
+                <div>
+                  <div class="vest-pf-detail-title">${firm.name}</div>
+                  <div class="vest-pf-detail-subtitle">${firm.url || 'No URL specified'}</div>
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; gap:12px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:11.5px; font-weight:600; color:${firm.enabled ? '#34d399' : '#94a3b8'};">
+                    ${firm.enabled ? 'Cortex Active' : 'Cortex Disabled'}
+                  </span>
+                  <label class="vest-tvs-switch" title="Enable or disable Trading Cortex on this firm">
+                    <input type="checkbox" id="vest-pf-input-enabled" ${firm.enabled ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+
+                ${!firm.isBuiltin ? `
+                  <button type="button" id="vest-pf-btn-delete" style="background:rgba(239,68,68,0.14); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:6px; padding:4px 9px; font-size:11px; font-weight:600; cursor:pointer;" title="Delete this custom perp firm">
+                    Delete
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- Section 1: Firm Identification & URL Routing -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Firm Identification &amp; Routing
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Firm Display Name</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-name" value="${firm.name}" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Account Tier / Type</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-tier" value="${firm.accountTier || ''}" placeholder="e.g. Evaluation / Funded / DEX" />
+                </div>
+              </div>
+              <div class="vest-ed-grid-2">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Web Trading URL</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-url" value="${firm.url || ''}" placeholder="https://example.com/trade" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Domain Match Patterns (comma-separated)</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-input-patterns" value="${Array.isArray(firm.matchPatterns) ? firm.matchPatterns.join(', ') : ''}" placeholder="example.com, trade.example.com" ${firm.isBuiltin ? 'readonly style="opacity:0.85;"' : ''} />
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 2: Layout & Top-Bar Spacing -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Top-Bar Placement &amp; Spacing
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Cortex Bar Placement Mode</label>
+                  <select class="vest-ed-select" id="vest-pf-input-topbarmode">
+                    <option value="auto" ${topMode === 'auto' ? 'selected' : ''}>Auto Detect (Navbar / Ticker Row)</option>
+                    <option value="custom" ${topMode === 'custom' ? 'selected' : ''}>Custom Fixed Offset (px)</option>
+                  </select>
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Custom Top-Bar Offset: <span id="vest-pf-val-offset" style="color:#38bdf8; font-weight:700;">${offsetPx}px</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-pf-input-offset" min="0" max="140" step="2" value="${offsetPx}" ${topMode === 'auto' ? 'disabled style="opacity:0.45;"' : ''} />
+                </div>
+              </div>
+              <div class="vest-ed-grid-2">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Bottom Margin Spacing: <span id="vest-pf-val-margin" style="color:#38bdf8; font-weight:700;">${marginPx}px</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-pf-input-margin" min="0" max="32" step="1" value="${marginPx}" />
+                  <div style="font-size:10.5px; color:#64748b; margin-top:3px;">Pushes the chart and tickers down so they aren't squished against the Cortex bar.</div>
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Firm Header Height: <span id="vest-pf-val-header" style="color:#38bdf8; font-weight:700;">${headerPx}px</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-pf-input-header" min="32" max="100" step="2" value="${headerPx}" />
+                  <div style="font-size:10.5px; color:#64748b; margin-top:3px;">Standard height of this firm's primary navigation header.</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 3: Trading Defaults & Trader Notes -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Trading Defaults &amp; Notes
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Default Order Leverage</label>
+                  <select class="vest-ed-select" id="vest-pf-input-leverage">
+                    ${['1x', '2x', '3x', '5x', '10x', '15x', '20x', '25x', '50x', '100x'].map(v => `<option value="${v}" ${lev === v ? 'selected' : ''}>${v}</option>`).join('')}
+                  </select>
+                </div>
+                <div class="vest-ed-field" style="display:flex; align-items:center; justify-content:space-between; padding-top:16px;">
+                  <label class="vest-ed-label" style="margin:0;">Remember Order Amount / Size</label>
+                  <label class="vest-tvs-switch">
+                    <input type="checkbox" id="vest-pf-input-remember-size" ${firm.rememberOrderAmount !== false ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Trader Notes / Firm Rules</label>
+                <input type="text" class="vest-ed-input" id="vest-pf-input-notes" value="${firm.notes || ''}" placeholder="e.g. Max drawdown 4%, trade only during NY Killzone" />
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderAddNewFirmCard() {
+        return `
+          <div class="vest-pf-detail-card" id="vest-pf-detail-card">
+            <div class="vest-pf-detail-header">
+              <div class="vest-pf-detail-title-group">
+                <div class="vest-pf-avatar" style="width:32px; height:32px; font-size:16px; background:linear-gradient(135deg, #06b6d4, #2563eb); color:#fff;">
+                  +
+                </div>
+                <div>
+                  <div class="vest-pf-detail-title">Add New Perp Trading Firm</div>
+                  <div class="vest-pf-detail-subtitle">Configure Trading Cortex to run on any perpetual broker or prop firm URL</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="vest-ed-section" style="padding:14px 16px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-bottom:14px;">
+              <div class="vest-ed-grid-2" style="margin-bottom:12px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Firm Name <span style="color:#ef4444;">*</span></label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-new-name" placeholder="e.g. Apex Perp Exchange" />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Account Tier / Type</label>
+                  <input type="text" class="vest-ed-input" id="vest-pf-new-tier" placeholder="e.g. Prop Firm Evaluation / Live DEX" />
+                </div>
+              </div>
+
+              <div class="vest-ed-field" style="margin-bottom:12px;">
+                <label class="vest-ed-label">Trading Web URL <span style="color:#ef4444;">*</span></label>
+                <input type="url" class="vest-ed-input" id="vest-pf-new-url" placeholder="https://app.apexperp.com/trade" />
+                <div style="font-size:11px; color:#64748b; margin-top:4px;">
+                  Enter the full URL where the charting terminal is hosted. Trading Cortex will register content scripts for this domain.
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Optional Domain Patterns (comma-separated)</label>
+                <input type="text" class="vest-ed-input" id="vest-pf-new-patterns" placeholder="app.apexperp.com, apexperp.com" />
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <button type="button" id="vest-pf-new-cancel-btn" style="padding:8px 16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#cbd5e1; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;">
+                Cancel
+              </button>
+              <button type="button" id="vest-pf-new-create-btn" style="padding:8px 20px; background:linear-gradient(135deg, #06b6d4, #2563eb); border:none; color:#ffffff; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; box-shadow:0 0 12px rgba(6,182,212,0.35);">
+                Add Perp Firm
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      if (activeTab === 'perpfirms') {
+        return renderPerpFirmsHtml();
+      }
+      if (activeTab === 'perpfirms') {
+        syncCurrentFirmToDraft();
+      }
       if (activeTab === 'diagnostics') {
         const db = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
         draftSettings.diagnosticsBox = db;
@@ -5857,6 +6305,41 @@
       }
     }
 
+    function syncCurrentFirmToDraft() {
+      const currentIdInput = overlay.querySelector('#vest-pf-current-id');
+      if (!currentIdInput) return;
+      const firmId = currentIdInput.value;
+      const firm = draftSettings.perpFirms.find(f => f.id === firmId);
+      if (!firm) return;
+
+      const nameEl = overlay.querySelector('#vest-pf-input-name');
+      const tierEl = overlay.querySelector('#vest-pf-input-tier');
+      const urlEl = overlay.querySelector('#vest-pf-input-url');
+      const patternsEl = overlay.querySelector('#vest-pf-input-patterns');
+      const enabledEl = overlay.querySelector('#vest-pf-input-enabled');
+      const topBarModeEl = overlay.querySelector('#vest-pf-input-topbarmode');
+      const offsetEl = overlay.querySelector('#vest-pf-input-offset');
+      const marginEl = overlay.querySelector('#vest-pf-input-margin');
+      const headerEl = overlay.querySelector('#vest-pf-input-header');
+      const levEl = overlay.querySelector('#vest-pf-input-leverage');
+      const rememberSizeEl = overlay.querySelector('#vest-pf-input-remember-size');
+      const notesEl = overlay.querySelector('#vest-pf-input-notes');
+
+      if (!firm.isBuiltin && nameEl) firm.name = nameEl.value.trim() || firm.name;
+      if (tierEl) firm.accountTier = tierEl.value.trim();
+      if (!firm.isBuiltin && urlEl) firm.url = urlEl.value.trim();
+      if (!firm.isBuiltin && patternsEl) {
+        firm.matchPatterns = patternsEl.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      }
+      if (enabledEl) firm.enabled = Boolean(enabledEl.checked);
+      if (topBarModeEl) firm.topBarMode = topBarModeEl.value;
+      if (offsetEl) firm.customTopBarOffsetPx = Number(offsetEl.value) || 0;
+      if (marginEl) firm.barMarginBottom = Number(marginEl.value) || 8;
+      if (headerEl) firm.headerHeightPx = Number(headerEl.value) || 48;
+      if (levEl) firm.defaultLeverage = levEl.value;
+      if (rememberSizeEl) firm.rememberOrderAmount = Boolean(rememberSizeEl.checked);
+      if (notesEl) firm.notes = notesEl.value.trim();
+    }
     function syncCurrentPaneToDraft() {
       const remToggle = overlay.querySelector('#vest-tvs-remember-tools-toggle');
       if (remToggle) {
@@ -7021,7 +7504,183 @@
         });
       }
 
-      if (activeTab === 'diagnostics') {
+            function bindPerpFirmsListeners() {
+        overlay.querySelectorAll('.vest-pf-tile[data-firm-id]').forEach(tile => {
+          tile.addEventListener('click', () => {
+            syncCurrentFirmToDraft();
+            selectedFirmId = tile.dataset.firmId;
+            const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+            if (rightPane) {
+              rightPane.innerHTML = renderPerpFirmsHtml();
+              bindPerpFirmsListeners();
+            }
+          });
+        });
+
+        const addTile = overlay.querySelector('#vest-pf-add-tile');
+        if (addTile) {
+          addTile.addEventListener('click', () => {
+            syncCurrentFirmToDraft();
+            selectedFirmId = '__new__';
+            const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+            if (rightPane) {
+              rightPane.innerHTML = renderPerpFirmsHtml();
+              bindPerpFirmsListeners();
+            }
+          });
+        }
+
+        const cancelBtn = overlay.querySelector('#vest-pf-new-cancel-btn');
+        if (cancelBtn) {
+          cancelBtn.addEventListener('click', () => {
+            selectedFirmId = draftSettings.perpFirms[0]?.id || 'myfundedperpetuals';
+            const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+            if (rightPane) {
+              rightPane.innerHTML = renderPerpFirmsHtml();
+              bindPerpFirmsListeners();
+            }
+          });
+        }
+
+        const createBtn = overlay.querySelector('#vest-pf-new-create-btn');
+        if (createBtn) {
+          createBtn.addEventListener('click', async () => {
+            const nameInput = overlay.querySelector('#vest-pf-new-name');
+            const urlInput = overlay.querySelector('#vest-pf-new-url');
+            const tierInput = overlay.querySelector('#vest-pf-new-tier');
+            const patternsInput = overlay.querySelector('#vest-pf-new-patterns');
+
+            const name = (nameInput?.value || '').trim();
+            let rawUrl = (urlInput?.value || '').trim();
+            if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
+              rawUrl = 'https://' + rawUrl;
+            }
+
+            let domain = '';
+            try {
+              const u = new URL(rawUrl);
+              domain = u.hostname.toLowerCase();
+            } catch (e) {
+              showToast('Please enter a valid URL');
+              return;
+            }
+
+            if (!name) {
+              showToast('Please enter a firm name');
+              return;
+            }
+
+            let patterns = [];
+            if (patternsInput && patternsInput.value.trim()) {
+              patterns = patternsInput.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+            }
+            if (patterns.length === 0 && domain) {
+              patterns = [domain];
+            }
+
+            if (chrome.permissions && typeof chrome.permissions.request === 'function') {
+              try {
+                const origins = patterns.flatMap(d => [`https://${d}/*`, `https://*.${d}/*`]);
+                await chrome.permissions.request({ origins }).catch(() => {});
+              } catch (e) {}
+            }
+
+            const newId = 'custom_' + Date.now();
+            const newFirm = {
+              id: newId,
+              name,
+              url: rawUrl,
+              matchPatterns: patterns,
+              enabled: true,
+              isBuiltin: false,
+              accountTier: (tierInput?.value || 'Custom Perp').trim(),
+              topBarMode: 'auto',
+              customTopBarOffsetPx: 0,
+              barMarginBottom: 8,
+              headerHeightPx: 48,
+              rememberOrderAmount: true,
+              defaultLeverage: '10x',
+              notes: ''
+            };
+
+            draftSettings.perpFirms.push(newFirm);
+            selectedFirmId = newId;
+            showToast(`Added ${name}`);
+            const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+            if (rightPane) {
+              rightPane.innerHTML = renderPerpFirmsHtml();
+              bindPerpFirmsListeners();
+            }
+          });
+        }
+
+        const detailCard = overlay.querySelector('#vest-pf-detail-card');
+        if (detailCard) {
+          const offsetRange = detailCard.querySelector('#vest-pf-input-offset');
+          const offsetVal = detailCard.querySelector('#vest-pf-val-offset');
+          if (offsetRange && offsetVal) {
+            offsetRange.addEventListener('input', () => {
+              offsetVal.textContent = `${offsetRange.value}px`;
+              syncCurrentFirmToDraft();
+            });
+          }
+
+          const marginRange = detailCard.querySelector('#vest-pf-input-margin');
+          const marginVal = detailCard.querySelector('#vest-pf-val-margin');
+          if (marginRange && marginVal) {
+            marginRange.addEventListener('input', () => {
+              marginVal.textContent = `${marginRange.value}px`;
+              syncCurrentFirmToDraft();
+            });
+          }
+
+          const headerRange = detailCard.querySelector('#vest-pf-input-header');
+          const headerVal = detailCard.querySelector('#vest-pf-val-header');
+          if (headerRange && headerVal) {
+            headerRange.addEventListener('input', () => {
+              headerVal.textContent = `${headerRange.value}px`;
+              syncCurrentFirmToDraft();
+            });
+          }
+
+          const topBarModeSelect = detailCard.querySelector('#vest-pf-input-topbarmode');
+          if (topBarModeSelect && offsetRange) {
+            topBarModeSelect.addEventListener('change', () => {
+              const isCustom = topBarModeSelect.value === 'custom';
+              offsetRange.disabled = !isCustom;
+              offsetRange.style.opacity = isCustom ? '1' : '0.45';
+              syncCurrentFirmToDraft();
+            });
+          }
+
+          detailCard.querySelectorAll('input, select, textarea').forEach(el => {
+            el.addEventListener('change', () => {
+              syncCurrentFirmToDraft();
+            });
+          });
+
+          const deleteBtn = detailCard.querySelector('#vest-pf-btn-delete');
+          if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => {
+              const firmId = detailCard.querySelector('#vest-pf-current-id')?.value;
+              if (!firmId) return;
+              draftSettings.perpFirms = draftSettings.perpFirms.filter(f => f.id !== firmId);
+              selectedFirmId = draftSettings.perpFirms[0]?.id || 'myfundedperpetuals';
+              showToast('Firm removed');
+              const rightPane = overlay.querySelector('#vest-tvs-right-pane');
+              if (rightPane) {
+                rightPane.innerHTML = renderPerpFirmsHtml();
+                bindPerpFirmsListeners();
+              }
+            });
+          }
+        }
+      }
+
+      if (activeTab === 'perpfirms') {
+        bindPerpFirmsListeners();
+      }
+if (activeTab === 'diagnostics') {
         const wRange = overlay.querySelector('#vest-dbg-box-width');
         const wVal = overlay.querySelector('#vest-dbg-box-width-val');
         if (wRange && wVal) {
@@ -7246,7 +7905,9 @@
     const headerBottom = typeof getMainHeaderBottom === 'function' ? getMainHeaderBottom() : 48;
     const barEl = document.getElementById(CORTEX_TOP_BAR_ID);
     const barH = barEl ? barEl.offsetHeight : CORTEX_BAR_HEIGHT;
-    const top = Math.round(headerBottom + barH + CORTEX_BAR_MARGIN_BOTTOM);
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const barMargin = (activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM;
+    const top = Math.round(headerBottom + barH + barMargin);
     const right = Math.max(1, window.innerWidth);
     const bottom = Math.max(top + 50, window.innerHeight);
     return { left, top, right, bottom, width: right - left, height: bottom - top };
