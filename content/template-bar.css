@@ -2732,6 +2732,7 @@ body.vest-cortex-top-bar-active {
   cursor: pointer !important;
   border-radius: 8px !important;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(56, 189, 248, 0.25) !important;
+  transition: left 0.18s cubic-bezier(0.2, 0, 0, 1), top 0.18s cubic-bezier(0.2, 0, 0, 1), border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
 
 #vest-chart-news-box.is-minimized-pill:hover,
@@ -3317,6 +3318,7 @@ body.vest-cortex-top-bar-active {
   cursor: pointer !important;
   border-radius: 8px !important;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(56, 189, 248, 0.3) !important;
+  transition: left 0.18s cubic-bezier(0.2, 0, 0, 1), top 0.18s cubic-bezier(0.2, 0, 0, 1), border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
 
 #vest-chart-diagnostics-box.is-minimized-pill:hover {

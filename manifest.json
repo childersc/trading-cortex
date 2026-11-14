@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trading Cortex",
-  "version": "1.1.54",
+  "version": "1.1.55",
   "version_name": "1.1.47 Alpha",
   "description": "Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges.",
   "icons": {

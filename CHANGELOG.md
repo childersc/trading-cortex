@@ -7,6 +7,11 @@ All notable changes, new features, and bug fixes through the current release (`v
 ## [v1.1.47-Alpha] — In-Development (Bleeding Edge)
 
 ### 🐛 Bug Fixes
+- **Dynamic Taskbar Next-Available Slot Allocation for Minimized Windows**: Fixed an issue where minimized chart windows (Upcoming News, Instrument Trades, Cortex Diagnostics) had hardcoded slot coordinates, causing windows minimized out of order to stack directly on top of or below each other.
+  1. *Dynamic Taskbar Order Queue*: Implemented `minimizedWindowOrder` tracking the exact chronological order in which windows are minimized, allocating each window to the next available horizontal slot in the Cortex top bar rather than a fixed predetermined spot.
+  2. *Adaptive Left-Anchor Calculation*: Implemented `getTaskbarStartLeft()` to automatically detect the right-most bounding edge of all permanent top-bar elements (Cortex menu pill and Positions pill), guaranteeing minimized pills never overlap or collide with existing toolbar controls.
+  3. *Seamless Shift on Restore & Resize*: When any minimized window is restored, `repositionAllMinimizedBoxes()` automatically shifts all subsequent minimized pills to the left to cleanly fill the vacated slot, exactly like the Microsoft Windows taskbar.
+  4. *Smooth Slot Transitions*: Added cubic-bezier transitions for `left` and `top` properties so minimized pills glide smoothly into their assigned taskbar slots.
 - **Permanent Global Drawings Removal & Anti-Respawn**: Fixed an issue where removing a drawing that was "Synced Globally" would cause it to respawn and come right back after being deleted.
   1. *Eliminated Focus Gating on Removal & Toggling*: Removed artificial `chartMemoryTabFocused` and `globalDrawingRestoreSuppression` checks from drawing deletion and context menu handlers. When a drawing is removed on the chart, it is an explicit user action and is processed immediately regardless of tab focus tracking or iframe boundaries.
   2. *Hooked Chart Entity Removal & Model Source Deletion*: Hooked `activeChart.removeEntity`, `activeChart.removeEntities`, `activeChart.removeAllShapes`, and internal `model.removeSource` to intercept any drawing deletion triggered by the user (Delete key, Backspace, floating toolbar trash icon, right-click menu, or API calls).

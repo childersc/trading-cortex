@@ -1479,6 +1479,7 @@
     failLines: JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES)),
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     debugMode: false,
+    minimizedWindowOrder: [],
     diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
     bottomPanelState: {
       isMinimized: false,
@@ -8122,40 +8123,161 @@ if (activeTab === 'diagnostics') {
     return { left, top, right, bottom, width: right - left, height: bottom - top };
   }
 
+  let minimizedWindowOrder = [];
+
+  function getTaskbarStartLeft() {
+    const bar = document.getElementById(CORTEX_TOP_BAR_ID);
+    const barRect = bar ? bar.getBoundingClientRect() : { left: 0, top: 48, right: window.innerWidth };
+    let startX = barRect.left + 16;
+
+    const studioPill = document.getElementById('vest-studio-header-pill') || document.getElementById('vest-studio-pill-btn');
+    if (studioPill && studioPill.isConnected) {
+      const r = studioPill.getBoundingClientRect();
+      if (r.right > startX) startX = r.right;
+    }
+
+    const bottomPill = document.getElementById('vest-bottom-panel-topbar-pill');
+    if (bottomPill && bottomPill.isConnected && bottomPill.style.display !== 'none') {
+      const r = bottomPill.getBoundingClientRect();
+      if (r.right > startX) startX = r.right;
+    }
+
+    return Math.round(startX + 8);
+  }
+
+  function getActiveMinimizedWindowOrder() {
+    const current = Array.isArray(settings.minimizedWindowOrder)
+      ? [...settings.minimizedWindowOrder]
+      : (Array.isArray(minimizedWindowOrder) ? [...minimizedWindowOrder] : []);
+
+    const activeCollapsed = [];
+    if (settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
+      activeCollapsed.push('news');
+    }
+    if (settings.tradesBox && settings.tradesBox.enabled && settings.tradesBox.collapsed) {
+      activeCollapsed.push('trades');
+    }
+    if (settings.diagnosticsBox && settings.diagnosticsBox.enabled && settings.diagnosticsBox.collapsed) {
+      activeCollapsed.push('diagnostics');
+    }
+
+    const order = current.filter(id => activeCollapsed.includes(id));
+    activeCollapsed.forEach(id => {
+      if (!order.includes(id)) {
+        order.push(id);
+      }
+    });
+
+    minimizedWindowOrder = order;
+    return order;
+  }
+
+  function markWindowAsMinimized(boxType) {
+    const order = getActiveMinimizedWindowOrder();
+    if (!order.includes(boxType)) {
+      order.push(boxType);
+    }
+    minimizedWindowOrder = order;
+    settings.minimizedWindowOrder = order;
+    queueSettingsSave({ minimizedWindowOrder: order });
+    repositionAllMinimizedBoxes();
+  }
+
+  function markWindowAsRestored(boxType) {
+    minimizedWindowOrder = (minimizedWindowOrder || []).filter(id => id !== boxType);
+    settings.minimizedWindowOrder = minimizedWindowOrder;
+    queueSettingsSave({ minimizedWindowOrder: minimizedWindowOrder });
+    repositionAllMinimizedBoxes();
+  }
+
   /**
-   * Places minimized News, Trades, and Diagnostics pills inside the Cortex top bar.
+   * Places minimized News, Trades, and Diagnostics pills inside the Cortex top bar,
+   * dynamically allocating each minimized window to the next available taskbar slot.
    */
   function getMinimizedCortexBarCoords(boxType, boxEl) {
-    const defaultBoxWidth = boxType === 'trades' ? 235 : (boxType === 'diagnostics' ? 240 : 210);
-    const boxW = (boxEl && boxEl.offsetWidth) || defaultBoxWidth;
-    const boxH = (boxEl && boxEl.offsetHeight) || 30;
-    const pill = document.getElementById('vest-studio-pill-btn');
+    const order = getActiveMinimizedWindowOrder();
+    let currentLeft = getTaskbarStartLeft();
+
     const headerBottom = typeof getMainHeaderBottom === 'function' ? getMainHeaderBottom() : 48;
-    const pillRect = pill ? pill.getBoundingClientRect() : { right: 28, top: headerBottom };
-    let targetLeft = pillRect.right + 12;
-    if (boxType === 'trades' && settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
-      const newsW = (chartNewsBoxEl && chartNewsBoxEl.offsetWidth) || 215;
-      targetLeft += newsW + 8;
-    }
-    if (boxType === 'diagnostics') {
-      if (settings.newsBox && settings.newsBox.enabled && settings.newsBox.collapsed) {
-        const newsW = (chartNewsBoxEl && chartNewsBoxEl.offsetWidth) || 215;
-        targetLeft += newsW + 8;
-      }
-      if (settings.tradesBox && settings.tradesBox.enabled && settings.tradesBox.collapsed) {
-        const tradesW = (chartTradesBoxEl && chartTradesBoxEl.offsetWidth) || 235;
-        targetLeft += tradesW + 8;
-      }
-    }
-    targetLeft = Math.min(Math.max(8, targetLeft), Math.max(8, window.innerWidth - boxW - 8));
     const bar = document.getElementById(CORTEX_TOP_BAR_ID);
     const barRect = bar ? bar.getBoundingClientRect() : { top: headerBottom, height: CORTEX_BAR_HEIGHT };
     const barH = barRect.height || CORTEX_BAR_HEIGHT;
+
+    for (const type of order) {
+      let el = null;
+      let defaultW = 215;
+      if (type === 'news') {
+        el = chartNewsBoxEl;
+        defaultW = 215;
+      } else if (type === 'trades') {
+        el = chartTradesBoxEl;
+        defaultW = 240;
+      } else if (type === 'diagnostics') {
+        el = chartDiagnosticsBoxEl;
+        defaultW = 245;
+      }
+
+      const boxW = (el && el.offsetWidth) || (type === boxType && boxEl && boxEl.offsetWidth) || defaultW;
+      const boxH = (el && el.offsetHeight) || (type === boxType && boxEl && boxEl.offsetHeight) || 30;
+
+      if (type === boxType) {
+        const targetTop = Math.round(barRect.top + (barH - boxH) / 2);
+        const maxLeft = Math.max(8, window.innerWidth - boxW - 8);
+        return {
+          left: Math.round(Math.min(currentLeft, maxLeft)),
+          top: targetTop
+        };
+      }
+
+      currentLeft += boxW + 8;
+    }
+
+    const defaultBoxWidth = boxType === 'trades' ? 240 : (boxType === 'diagnostics' ? 245 : 215);
+    const boxW = (boxEl && boxEl.offsetWidth) || defaultBoxWidth;
+    const boxH = (boxEl && boxEl.offsetHeight) || 30;
     const targetTop = Math.round(barRect.top + (barH - boxH) / 2);
+    const maxLeft = Math.max(8, window.innerWidth - boxW - 8);
     return {
-      left: Math.round(targetLeft),
-      top: Math.round(targetTop)
+      left: Math.round(Math.min(currentLeft, maxLeft)),
+      top: targetTop
     };
+  }
+
+  function repositionAllMinimizedBoxes() {
+    const order = getActiveMinimizedWindowOrder();
+    let currentLeft = getTaskbarStartLeft();
+
+    const headerBottom = typeof getMainHeaderBottom === 'function' ? getMainHeaderBottom() : 48;
+    const bar = document.getElementById(CORTEX_TOP_BAR_ID);
+    const barRect = bar ? bar.getBoundingClientRect() : { top: headerBottom, height: CORTEX_BAR_HEIGHT };
+    const barH = barRect.height || CORTEX_BAR_HEIGHT;
+
+    for (const boxType of order) {
+      let el = null;
+      let defaultW = 215;
+      if (boxType === 'news') {
+        el = chartNewsBoxEl;
+        defaultW = 215;
+      } else if (boxType === 'trades') {
+        el = chartTradesBoxEl;
+        defaultW = 240;
+      } else if (boxType === 'diagnostics') {
+        el = chartDiagnosticsBoxEl;
+        defaultW = 245;
+      }
+
+      if (!el || !el.isConnected || el.style.display === 'none') continue;
+
+      const boxW = el.offsetWidth || defaultW;
+      const boxH = el.offsetHeight || 30;
+      const targetTop = Math.round(barRect.top + (barH - boxH) / 2);
+      const maxLeft = Math.max(8, window.innerWidth - boxW - 8);
+
+      el.style.left = `${Math.round(Math.min(currentLeft, maxLeft))}px`;
+      el.style.top = `${targetTop}px`;
+
+      currentLeft += boxW + 8;
+    }
   }
 
   /**
@@ -8497,10 +8619,7 @@ if (activeTab === 'diagnostics') {
       animateChartBoxMinimizeOrRestore(chartNewsBoxEl, animateFromRect, Boolean(nc.collapsed));
     }
 
-    // If Trades Box is also minimized at the bottom-left, keep its horizontal offset synced
-    if (settings.tradesBox && settings.tradesBox.enabled && settings.tradesBox.collapsed) {
-      clampAndPositionChartTradesBox();
-    }
+    repositionAllMinimizedBoxes();
 
     if (!newsBoxTickerInterval) {
       // Refresh countdowns & viewport clamping every 15 seconds, plus periodic feed check
@@ -8528,6 +8647,7 @@ if (activeTab === 'diagnostics') {
         const prevRect = chartNewsBoxEl.getBoundingClientRect();
         if (!settings.newsBox) settings.newsBox = JSON.parse(JSON.stringify(DEFAULT_NEWS_BOX));
         settings.newsBox.collapsed = false;
+        markWindowAsRestored('news');
         queueSettingsSave({ newsBox: settings.newsBox });
         renderChartNewsBox(prevRect);
       });
@@ -8645,6 +8765,7 @@ if (activeTab === 'diagnostics') {
         settings.newsBox.pinnedTop = Math.round(prevRect.top);
       }
       settings.newsBox.collapsed = true;
+      markWindowAsMinimized('news');
       queueSettingsSave({ newsBox: settings.newsBox });
       renderChartNewsBox(prevRect);
     });
@@ -8653,12 +8774,16 @@ if (activeTab === 'diagnostics') {
   if (isTopWindow) {
     window.addEventListener('resize', () => { // tv-chart-resize
       ensureCortexTopBar();
-      if (settings.newsBox && settings.newsBox.enabled) {
+      if (settings.newsBox && settings.newsBox.enabled && !settings.newsBox.collapsed) {
         clampAndPositionChartNewsBox();
       }
-      if (settings.tradesBox && settings.tradesBox.enabled) {
+      if (settings.tradesBox && settings.tradesBox.enabled && !settings.tradesBox.collapsed) {
         clampAndPositionChartTradesBox();
       }
+      if (settings.diagnosticsBox && settings.diagnosticsBox.enabled && !settings.diagnosticsBox.collapsed) {
+        clampAndPositionChartDiagnosticsBox();
+      }
+      repositionAllMinimizedBoxes();
     });
   }
 
@@ -9603,6 +9728,7 @@ if (activeTab === 'diagnostics') {
     if (animateFromRect) {
       animateChartBoxMinimizeOrRestore(chartTradesBoxEl, animateFromRect, Boolean(tc.collapsed));
     }
+    repositionAllMinimizedBoxes();
   }
 
   function wireChartTradesBoxEvents() {
@@ -9615,6 +9741,7 @@ if (activeTab === 'diagnostics') {
         const prevRect = chartTradesBoxEl.getBoundingClientRect();
         if (!settings.tradesBox) settings.tradesBox = JSON.parse(JSON.stringify(DEFAULT_TRADES_BOX));
         settings.tradesBox.collapsed = false;
+        markWindowAsRestored('trades');
         queueSettingsSave({ tradesBox: settings.tradesBox });
         renderChartTradesBox(prevRect);
       });
@@ -9736,6 +9863,7 @@ if (activeTab === 'diagnostics') {
         settings.tradesBox.pinnedTop = Math.round(prevRect.top);
       }
       settings.tradesBox.collapsed = true;
+      markWindowAsMinimized('trades');
       queueSettingsSave({ tradesBox: settings.tradesBox });
       renderChartTradesBox(prevRect);
     });
@@ -10167,6 +10295,7 @@ if (activeTab === 'diagnostics') {
     if (animateFromRect) {
       animateChartBoxMinimizeOrRestore(chartDiagnosticsBoxEl, animateFromRect, Boolean(db.collapsed));
     }
+    repositionAllMinimizedBoxes();
   }
 
   function updateChartDiagnosticsBoxTelemetryOnly() {
@@ -10230,6 +10359,7 @@ if (activeTab === 'diagnostics') {
         const prevRect = chartDiagnosticsBoxEl.getBoundingClientRect();
         if (!settings.diagnosticsBox) settings.diagnosticsBox = JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX));
         settings.diagnosticsBox.collapsed = false;
+        markWindowAsRestored('diagnostics');
         queueSettingsSave({ diagnosticsBox: settings.diagnosticsBox });
         renderChartDiagnosticsBox(prevRect);
         cortexDebugLog('Diagnostics window restored from Cortex bar');
@@ -10352,6 +10482,7 @@ if (activeTab === 'diagnostics') {
         settings.diagnosticsBox.pinnedTop = Math.round(prevRect.top);
       }
       settings.diagnosticsBox.collapsed = true;
+      markWindowAsMinimized('diagnostics');
       queueSettingsSave({ diagnosticsBox: settings.diagnosticsBox });
       renderChartDiagnosticsBox(prevRect);
       cortexDebugLog('Diagnostics window minimized to Cortex top bar');
@@ -11309,6 +11440,7 @@ if (activeTab === 'diagnostics') {
     if (detBadge) {
       detBadge.textContent = posCount > 0 ? `${posCount} Active` : '0 Active';
     }
+    repositionAllMinimizedBoxes();
   }
 
   function ensureBottomPositionsPanelManager() {
