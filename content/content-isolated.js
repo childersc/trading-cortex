@@ -140,7 +140,11 @@
     const clean = {};
     for (const [k, v] of Object.entries(rawStorage)) {
       if (typeof v === 'string' && isSafeTradingViewStorageKey(k)) {
-        clean[k] = v;
+        if (k.toLowerCase().includes('toolbar') && (k.endsWith('.visible') || k.includes('visibility')) && v === 'false') {
+          clean[k] = 'true';
+        } else {
+          clean[k] = v;
+        }
       }
     }
     return clean;
@@ -758,7 +762,13 @@
     }
   }
 
-  setInterval(rememberOrderAmount, 700);
+  const orderAmountInterval = setInterval(() => {
+    if (!isExtensionValid()) {
+      clearInterval(orderAmountInterval);
+      return;
+    }
+    rememberOrderAmount();
+  }, 700);
 
   let latestFailPrices = { long: null, short: null };
   let lastSentEstimatedPnl = '';
@@ -877,7 +887,13 @@
     }
   }, true);
 
-  setInterval(syncPendingStopLoss, 500);
+  const stopLossInterval = setInterval(() => {
+    if (!isExtensionValid()) {
+      clearInterval(stopLossInterval);
+      return;
+    }
+    syncPendingStopLoss();
+  }, 500);
 
   function readAndBroadcastFailPrices() {
     const pageText = (document.body && document.body.innerText) || '';
@@ -910,7 +926,13 @@
     lastSentFailPrices = signature;
     postToMainWorlds({ type: 'VEST_TV_FAIL_PRICES_UPDATE', payload: bestPrices });
   }
-  setInterval(readAndBroadcastFailPrices, 500);
+  const failPricesInterval = setInterval(() => {
+    if (!isExtensionValid()) {
+      clearInterval(failPricesInterval);
+      return;
+    }
+    readAndBroadcastFailPrices();
+  }, 500);
 
   function readAndBroadcastEstimatedPnl() {
     if (!isTopWindow) return;
@@ -924,7 +946,13 @@
     lastSentEstimatedPnl = String(value);
     postToMainWorlds({ type: 'VEST_TV_ESTIMATED_PNL_UPDATE', payload: { value } });
   }
-  setInterval(readAndBroadcastEstimatedPnl, 500);
+  const estimatedPnlInterval = setInterval(() => {
+    if (!isExtensionValid()) {
+      clearInterval(estimatedPnlInterval);
+      return;
+    }
+    readAndBroadcastEstimatedPnl();
+  }, 500);
 
   function normalizePositionHudConfig(rawCfg) {
     const base = JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD));
@@ -1484,7 +1512,11 @@
   // -------------------------------------------------------------
   function isExtensionValid() {
     try {
-      return Boolean(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local);
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+        return false;
+      }
+      const url = chrome.runtime.getURL('');
+      return Boolean(url && chrome.storage && chrome.storage.local);
     } catch (e) {
       return false;
     }
@@ -2253,7 +2285,13 @@
     }
   }
 
-  setInterval(syncManualTicketButtons, 800);
+  const manualTicketInterval = setInterval(() => {
+    if (!isExtensionValid()) {
+      clearInterval(manualTicketInterval);
+      return;
+    }
+    syncManualTicketButtons();
+  }, 800);
   let manualChartOrderInProgress = false;
   async function startManualChartOrder(side, payload) {
     if (!isTopWindow || !isExtensionValid() || manualChartOrderInProgress || !['long', 'short'].includes(side)) return;
@@ -3397,6 +3435,11 @@
 
     if (!studioPillHeartbeat) {
       studioPillHeartbeat = setInterval(() => {
+        if (!isExtensionValid()) {
+          clearInterval(studioPillHeartbeat);
+          studioPillHeartbeat = null;
+          return;
+        }
         ensureCortexTopBar();
         ensureBottomPositionsPanelManager();
         if (!studioPillEl || !studioPillEl.isConnected) {
@@ -3773,9 +3816,11 @@
   }
 
   function renderStudioHeaderPill() {
-    // Remove old bottom-left pill if present
-    const oldBottomPill = document.getElementById('vest-panel-toggle-pill');
-    if (oldBottomPill) oldBottomPill.remove();
+    if (!isExtensionValid()) return;
+    try {
+      // Remove old bottom-left pill if present
+      const oldBottomPill = document.getElementById('vest-panel-toggle-pill');
+      if (oldBottomPill) oldBottomPill.remove();
 
     let pill = document.getElementById('vest-studio-header-pill') || studioPillEl;
     if (!pill) {
@@ -3979,7 +4024,8 @@
       updateStudioDropdownPosition(pill);
     }
     attachStudioPillEvents(pill, menuEl);
-  }
+  } catch (e) {}
+}
 
   function attachStudioPillEvents(pill, menuEl) {
     const triggerBtn = pill.querySelector('#vest-studio-pill-btn');
@@ -8451,6 +8497,11 @@ if (activeTab === 'diagnostics') {
     if (!newsBoxTickerInterval) {
       // Refresh countdowns & viewport clamping every 15 seconds, plus periodic feed check
       newsBoxTickerInterval = setInterval(() => {
+        if (!isExtensionValid()) {
+          clearInterval(newsBoxTickerInterval);
+          newsBoxTickerInterval = null;
+          return;
+        }
         if (!settings.newsBox || !settings.newsBox.enabled) return;
         if (!activeNewsBoxDrag) {
           renderChartNewsBox();
@@ -9349,6 +9400,11 @@ if (activeTab === 'diagnostics') {
         }
       }, 600);
       tradesDomScanInterval = setInterval(() => {
+        if (!isExtensionValid()) {
+          clearInterval(tradesDomScanInterval);
+          tradesDomScanInterval = null;
+          return;
+        }
         if (settings.tradesBox && settings.tradesBox.enabled) {
           if (!hasPrepopulatedPositionsHistoryOnce) {
             ensurePositionsHistoryPrepopulatedOnce(false);
@@ -9883,6 +9939,11 @@ if (activeTab === 'diagnostics') {
     if (!diagnosticsBoxPollTimer) {
       postToMainWorlds({ type: 'VEST_TV_REQUEST_DIAGNOSTICS' });
       diagnosticsBoxPollTimer = setInterval(() => {
+        if (!isExtensionValid()) {
+          clearInterval(diagnosticsBoxPollTimer);
+          diagnosticsBoxPollTimer = null;
+          return;
+        }
         if (settings.diagnosticsBox && settings.diagnosticsBox.enabled) {
           postToMainWorlds({ type: 'VEST_TV_REQUEST_DIAGNOSTICS' });
         }
