@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.69`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.70`) are documented in this file.
+
+---
+
+## [v1.1.70] — 2026-11-15
+
+### 🐛 Bug Fixes & Multi-Window Chart Timeframe Isolation
+- **Strict Timeframe Isolation on Multi-Chart & Multi-Window Setups**:
+  1. *Blocked Cross-Tab Timeframe Hijacking*: Resolved an issue where having multiple charts open on different timeframes (e.g., 15m on screen 1, 1m on screen 2, 5m on screen 3) caused Cortex and TradingView's native cross-tab sync to force all charts to adopt the timeframe of whichever chart was clicked last.
+  2. *Window Storage Event Guard*: Installed a protective wrapper around `window.addEventListener('storage')` at `document_start` in the MAIN world to intercept and drop incoming cross-tab storage events for `tradingview.chartproperties` and `IntervalWidget`, preventing other windows' interval changes from propagating to background charts.
+  3. *Cleaned LocalStorage Persistence & Pre-Hydration*: Stripped raw `tradingview.chartproperties` from `collectTvChartLocalStorage()`, `restoreLastChartSettings()`, and `document_start` hydration. Preserved safe pane property overrides without writing raw chart properties to `window.localStorage`.
+  4. *Strict Resolution Match on Cross-Window Viewport Sync*: Enforced strict resolution checks in `applyIncomingChartViewportIfNewer()`. Viewport adjustments (pan, zoom, visible range, and price scale) from a focused chart only apply to background charts whose active resolution strictly matches (e.g. 15m $\rightarrow$ 15m). Background charts on different resolutions (e.g. 1m or 5m) remain completely unaffected.
+  5. *Timeframe Switch Restoration*: When switching a chart's timeframe (e.g. from 1m or 5m to 15m), the chart automatically pulls and restores the last known focused settings for that specific timeframe (`viewportsByChart[symbol|15]`). Once restored, that chart becomes the author for that timeframe and records any new changes.
 
 ---
 

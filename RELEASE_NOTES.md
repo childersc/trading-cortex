@@ -1,3 +1,11 @@
+Trading Cortex v1.1.70 — Multi-Window Chart Timeframe Isolation & Viewport Synchronization
+
+- **Strict Timeframe Isolation Across Multi-Chart Setups (`v1.1.70`)**: Charts open on different timeframes (e.g., 15m on screen 1, 1m on screen 2, 5m on screen 3) maintain their own independent timeframes and will never be forced to match another tab's resolution.
+- **Window Storage Event Guard (`v1.1.70`)**: Intercepts and drops incoming cross-tab storage events for `tradingview.chartproperties` and `IntervalWidget`, blocking TradingView's native cross-tab sync from hijacking background charts.
+- **Cleaned Storage Pre-Hydration (`v1.1.70`)**: Stripped raw `tradingview.chartproperties` from localStorage persistence and pre-hydration so new and restored tabs mount with their native or URL timeframe.
+- **Strict Resolution Matching for Viewport Sync (`v1.1.70`)**: Live cross-window viewport synchronization only applies if the receiving chart's active resolution matches the authoring chart's resolution (e.g. 15m $\rightarrow$ 15m). Background charts on 1m or 5m remain completely untouched.
+- **Timeframe Switch Memory Restoration (`v1.1.70`)**: Switching a chart to 15m automatically retrieves and restores the last known focused settings for that specific timeframe (`viewportsByChart[symbol|15]`), making that chart the authoritative author for subsequent changes.
+
 Trading Cortex v1.1.69 — Unified "Charting Indicators" Hub & Expandable Settings Tiles
 
 - **Consolidated "Charting Indicators" Hub (`v1.1.69`)**: Moved all 8 on-chart indicators (`sessions`, `autofvg`, `news`, `trades`, `candleohlc`, `positionhud`, `faillines`, `cortexindicator`) from separate left sidebar tabs into a single unified navigation section titled "Charting Indicators".
