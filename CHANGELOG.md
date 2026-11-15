@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.70`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.71`) are documented in this file.
+
+---
+
+## [v1.1.71] — 2026-11-15
+
+### 🐛 Bug Fixes & Event Listener Lifecycle Resolution
+- **Fixed Charting Indicators Tile Expansion & Master Toggle Wiring**:
+  1. *Relocated Master Event Wiring*: Fixed a lifecycle bug where event listener attachments for `.vest-ind-master-toggle` (master toggle sliders) and `.vest-indicator-tile-header` (tile click accordion) were inadvertently placed inside `renderRightPaneContent()` prior to template string insertion into the DOM, leaving newly rendered indicator tiles with unattached event handlers.
+  2. *Integrated with `wireDialogEvents()`*: Moved tile headers and master switch event listeners into `wireDialogEvents()`, ensuring they are cleanly wired immediately after the DOM tree is populated on the `chartingindicators` tab.
+  3. *Accordion Drawer Expansion on Target Scroll*: Ensured that when opening the settings modal with a target indicator (from the Cortex dropdown menu or deep links), the targeted indicator drawer automatically expands even if previously closed.
+  4. *Reliable Status Badge & Drawer State*: Toggling the switch or clicking the header immediately updates the `ON`/`OFF` badge, sets the `.is-enabled` card styles, smoothly drops down or collapses the drawer, and synchronizes the draft settings in real time.
 
 ---
 

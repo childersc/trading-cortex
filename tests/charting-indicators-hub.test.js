@@ -75,7 +75,21 @@ assert(isolatedJs.includes("badge.textContent = isChecked ? 'ON' : 'OFF'"), 'Tog
 console.log('✓ Toggle ON/OFF drops down settings drawer below indicator and updates status badge');
 
 // 6. Verify wireDialogEvents attaches handlers when activeTab === 'chartingindicators'
+const wireDialogEventsMatch = isolatedJs.match(/function wireDialogEvents\(\) \{([\s\S]*?)\n    function commitDraftAndClose/);
+// Or search within wireDialogEvents scope
 assert(isolatedJs.includes("activeTab === 'chartingindicators'"), 'wireDialogEvents must handle chartingindicators tab');
+assert(isolatedJs.includes("const indToggles = overlay.querySelectorAll('.vest-ind-master-toggle');"), 'wireDialogEvents must wire master toggle switches');
+assert(isolatedJs.includes("const tileHeaders = overlay.querySelectorAll('.vest-indicator-tile-header');"), 'wireDialogEvents must wire tile header clicks');
+
+// Verify renderRightPaneContent does NOT contain stranded event listeners
+const renderRightPaneMatch = isolatedJs.match(/function renderRightPaneContent\(\) \{([\s\S]*?)\n    function renderPerpFirmsHtml/);
+if (renderRightPaneMatch) {
+  assert(!renderRightPaneMatch[1].includes("overlay.querySelectorAll('.vest-ind-master-toggle')"), 'renderRightPaneContent must not contain stranded DOM query listeners');
+}
+
+// Verify drawer is automatically expanded when targetIndicatorToScroll is targeted
+assert(isolatedJs.includes("drawer.style.display = 'block';"), 'Targeted indicator drawer must be expanded when scrolled to');
+
 assert(isolatedJs.includes("activeTab === 'sessions' || activeTab === 'chartingindicators'"), 'Session indicators events must wire on chartingindicators');
 assert(isolatedJs.includes("activeTab === 'autofvg' || activeTab === 'chartingindicators'"), 'Auto FVG events must wire on chartingindicators');
 assert(isolatedJs.includes("activeTab === 'news' || activeTab === 'chartingindicators'"), 'News box events must wire on chartingindicators');

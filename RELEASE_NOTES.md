@@ -1,3 +1,10 @@
+Trading Cortex v1.1.71 — Charting Indicators Tile Expansion & Master Toggle Lifecycle Fix
+
+- **Event Listener Lifecycle Resolution (`v1.1.71`)**: Fixed an issue where master toggle sliders and tile header accordion clicks on the Charting Indicators panel did not respond due to listeners being queried during template rendering prior to DOM insertion.
+- **Wired inside `wireDialogEvents()` (`v1.1.71`)**: Integrated tile header and master switch listeners directly into `wireDialogEvents()`, ensuring all 8 indicator tiles and sliders are immediately active upon navigation or dialog opening.
+- **Drawer Auto-Expansion on Deep Link (`v1.1.71`)**: Opening an indicator via Cortex dropdown menu or deep link smoothly scrolls to the target tile, expands its settings drawer, and flashes the highlight glow.
+- **Real-Time Badge & Drawer Reactivity (`v1.1.71`)**: Toggling indicators instantly updates the `ON`/`OFF` badge, sets the `.is-enabled` tile border, drops down or collapses the drawer, and updates draft settings.
+
 Trading Cortex v1.1.70 — Multi-Window Chart Timeframe Isolation & Viewport Synchronization
 
 - **Strict Timeframe Isolation Across Multi-Chart Setups (`v1.1.70`)**: Charts open on different timeframes (e.g., 15m on screen 1, 1m on screen 2, 5m on screen 3) maintain their own independent timeframes and will never be forced to match another tab's resolution.
