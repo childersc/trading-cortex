@@ -1,3 +1,9 @@
+Trading Cortex v1.1.81 — Exact Order Block Placement on Impulsive Moves
+
+- **Accurate Impulsive Origin Placement (`v1.1.81`)**: Order blocks now consistently anchor to the true origin candle right before every impulsive displacement move (`obIdx = g - 1`) across all chart timeframes.
+- **Immediate Swing Leg Structure Break (`v1.1.81`)**: Evaluates structure breaks against the immediate swing leg leading into the origin candle, eliminating the issue where major reversal pivots were ignored because price didn't break an ancient macro low from days ago.
+- **Anti-Stacking Protection (`v1.1.81`)**: Prevents duplicate overlapping order blocks from cluttering the chart during multi-candle momentum runs.
+
 Trading Cortex v1.1.80 — Strict Order Block Gap Anchor Alignment
 
 - **Strict FVG Anchor Alignment (`v1.1.80`)**: Corrected `computeOrderBlocksFromBars` to strictly anchor Order Blocks to the candle immediately preceding the displacement candle that creates the Fair Value Gap (`obIdx = g - 1`).

@@ -8460,78 +8460,47 @@
     const lookback = cfg.swingLookback;
     const maxBlocks = cfg.maxBlocks;
 
-    // 1. Identify swing points across available bars
-    const swingHighs = [];
-    const swingLows = [];
-    for (let i = lookback; i < bars.length - lookback; i++) {
-      const curH = bars[i].high;
-      const curL = bars[i].low;
-      let isHigh = true;
-      let isLow = true;
-      for (let j = i - lookback; j <= i + lookback; j++) {
-        if (j === i) continue;
-        if (bars[j].high >= curH) isHigh = false;
-        if (bars[j].low <= curL) isLow = false;
-      }
-      if (isHigh) swingHighs.push({ index: i, timeSec: bars[i].timeSec, price: curH });
-      if (isLow) swingLows.push({ index: i, timeSec: bars[i].timeSec, price: curL });
-    }
-
     const orderBlocks = [];
 
-    // 2. Scan every bar g for Fair Value Gaps (FVG) creating inefficiency
-    // Core SMC Rule: An Order Block is strictly valid on the bar before the bar that creates a gap (obIdx = g - 1)
+    // Scan every bar g for Fair Value Gaps (FVG) creating inefficiency
+    // Rule: An Order Block is strictly valid on the bar before the displacement bar that creates the gap (obIdx = g - 1)
     for (let g = 1; g < bars.length - 1; g++) {
       const obIdx = g - 1; // Strictly the bar before the displacement bar that creates the gap!
 
-      // A. Bearish Order Block candidate:
+      // 1. Bearish Order Block candidate:
       // Bar g is downward displacement candle (close < open) creating gap between bars[g - 1].low and bars[g + 1].high
       if (bars[g].close < bars[g].open && bars[g + 1].high < bars[g - 1].low) {
-        // Structure break check: The impulsive move starting from g must break a recent swing low or recent low before obIdx
-        let targetLow = Infinity;
-        for (let s = swingLows.length - 1; s >= 0; s--) {
-          if (swingLows[s].index < obIdx) {
-            targetLow = swingLows[s].price;
-            break;
-          }
-        }
-        if (!isFinite(targetLow)) {
-          for (let k = Math.max(0, obIdx - lookback * 2); k < obIdx; k++) {
-            if (bars[k].low < targetLow) targetLow = bars[k].low;
-          }
+        // Find immediate structure low to break (the low of the swing leg leading into obIdx)
+        let targetLow = bars[obIdx].low;
+        for (let k = Math.max(0, obIdx - lookback); k < obIdx; k++) {
+          if (bars[k].low < targetLow) targetLow = bars[k].low;
         }
 
+        // Check for break of structure by the displacement move within 5 bars
+        let broke = false;
         let breakBarIndex = -1;
-        for (let b = g; b < Math.min(bars.length, g + 12); b++) {
-          if (bars[b].close < targetLow) {
+        for (let b = g; b < Math.min(bars.length, g + 6); b++) {
+          if (bars[b].close < targetLow || bars[b].low < targetLow) {
+            broke = true;
             breakBarIndex = b;
             break;
           }
         }
 
-        if (breakBarIndex >= 0) {
+        if (broke) {
           // Highest candle was bearish/down; search backward for the last bullish/up candle
-          let originIdx = obIdx;
-          if (bars[obIdx].close <= bars[obIdx].open) {
-            for (let k = obIdx; k >= Math.max(0, obIdx - 4); k--) {
-              if (bars[k].close > bars[k].open) {
-                originIdx = k;
-                break;
-              }
-            }
-          }
+          // Prevent stacking duplicate OBs within 2 bars on the same impulsive move
+          if (!orderBlocks.some(x => x.side === "short" && Math.abs(x.barIndex - obIdx) <= 2)) {
+            const obTop = bars[obIdx].high;
+            const obBottom = Math.min(bars[obIdx].low, bars[obIdx].open);
+            const id = "bear_ob_" + (bars[obIdx].timeSec || obIdx) + "_" + obTop.toFixed(4);
 
-          const obTop = bars[originIdx].high;
-          const obBottom = Math.min(bars[originIdx].low, bars[originIdx].open);
-          const id = "bear_ob_" + (bars[originIdx].timeSec || originIdx) + "_" + obTop.toFixed(4);
-
-          if (!orderBlocks.some(x => x.id === id)) {
             orderBlocks.push({
               id,
               side: "short",
               type: "bearish",
-              barIndex: originIdx,
-              timeSec: bars[originIdx].timeSec || 0,
+              barIndex: obIdx,
+              timeSec: bars[obIdx].timeSec || 0,
               top: obTop,
               bottom: obBottom,
               breakBarIndex,
@@ -8546,53 +8515,38 @@
         }
       }
 
-      // B. Bullish Order Block candidate:
+      // 2. Bullish Order Block candidate:
       // Bar g is upward displacement candle (close > open) creating gap between bars[g - 1].high and bars[g + 1].low
       if (bars[g].close > bars[g].open && bars[g + 1].low > bars[g - 1].high) {
-        let targetHigh = -Infinity;
-        for (let s = swingHighs.length - 1; s >= 0; s--) {
-          if (swingHighs[s].index < obIdx) {
-            targetHigh = swingHighs[s].price;
-            break;
-          }
-        }
-        if (!isFinite(targetHigh)) {
-          for (let k = Math.max(0, obIdx - lookback * 2); k < obIdx; k++) {
-            if (bars[k].high > targetHigh) targetHigh = bars[k].high;
-          }
+        let targetHigh = bars[obIdx].high;
+        for (let k = Math.max(0, obIdx - lookback); k < obIdx; k++) {
+          if (bars[k].high > targetHigh) targetHigh = bars[k].high;
         }
 
+        let broke = false;
         let breakBarIndex = -1;
-        for (let b = g; b < Math.min(bars.length, g + 12); b++) {
-          if (bars[b].close > targetHigh) {
+        for (let b = g; b < Math.min(bars.length, g + 6); b++) {
+          if (bars[b].close > targetHigh || bars[b].high > targetHigh) {
+            broke = true;
             breakBarIndex = b;
             break;
           }
         }
 
-        if (breakBarIndex >= 0) {
+        if (broke) {
           // Lowest candle was bullish/up; search backward for the last bearish/down candle
-          let originIdx = obIdx;
-          if (bars[obIdx].close >= bars[obIdx].open) {
-            for (let k = obIdx; k >= Math.max(0, obIdx - 4); k--) {
-              if (bars[k].close < bars[k].open) {
-                originIdx = k;
-                break;
-              }
-            }
-          }
+          // Prevent stacking duplicate OBs within 2 bars on the same impulsive move
+          if (!orderBlocks.some(x => x.side === "long" && Math.abs(x.barIndex - obIdx) <= 2)) {
+            const obTop = Math.max(bars[obIdx].high, bars[obIdx].open);
+            const obBottom = bars[obIdx].low;
+            const id = "bull_ob_" + (bars[obIdx].timeSec || obIdx) + "_" + obTop.toFixed(4);
 
-          const obTop = Math.max(bars[originIdx].high, bars[originIdx].open);
-          const obBottom = bars[originIdx].low;
-          const id = "bull_ob_" + (bars[originIdx].timeSec || originIdx) + "_" + obTop.toFixed(4);
-
-          if (!orderBlocks.some(x => x.id === id)) {
             orderBlocks.push({
               id,
               side: "long",
               type: "bullish",
-              barIndex: originIdx,
-              timeSec: bars[originIdx].timeSec || 0,
+              barIndex: obIdx,
+              timeSec: bars[obIdx].timeSec || 0,
               top: obTop,
               bottom: obBottom,
               breakBarIndex,
