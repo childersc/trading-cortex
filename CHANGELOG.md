@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.77`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.78`) are documented in this file.
+
+---
+
+## [v1.1.78] — 2026-11-15
+
+### 🐛 Bug Fixes & Update Center Fallback Resolution
+- **Resolved Update Center ReferenceError (`compareSemver is not defined`)**:
+  1. *Function Alias Alignment*: Defined `compareSemver` (and alias `compareVersions = compareSemver`) in `update/update.js`, resolving a crash when GitHub API returns HTTP 403 and the updater falls back to unmetered Raw CDN mode.
+  2. *Normalized Multi-Leading "v" Precedence*: Updated `cleanVersion` to strip all leading `v` characters (`/^v+/i`), preventing `vv1.1.76-dev.dev-lat` display anomalies.
+  3. *Consistent Version Formatting*: Added `formatV(v)` helper across the updater UI to ensure version labels consistently format with a single `v` prefix.
 
 ---
 

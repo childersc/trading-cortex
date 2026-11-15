@@ -1,3 +1,8 @@
+Trading Cortex v1.1.78 — Update Center compareSemver & Double "vv" Fix
+
+- **Resolved `compareSemver is not defined` (`v1.1.78`)**: Fixed a ReferenceError when the GitHub dev channel falls back to unmetered Raw CDN during API rate limits.
+- **Eliminated Double `vv` Display (`v1.1.78`)**: Standardized version display formatting with `formatV` and updated `cleanVersion` to strip any extra leading `v` prefixes.
+
 Trading Cortex v1.1.77 — Charting Indicators Tile Click: Toggle Settings When ON, Turn ON When OFF
 
 - **Context-Aware Tile Click (`v1.1.77`)**: Clicking an indicator tile now toggles its settings drawer open/closed if the indicator is already ON. If the indicator is OFF, clicking it enables the indicator.
