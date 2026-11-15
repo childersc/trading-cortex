@@ -2704,6 +2704,49 @@ body.vest-cortex-top-bar-active {
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.vest-indicator-settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+  line-height: 1.2;
+}
+
+.vest-indicator-settings-btn:hover {
+  color: #f1f5f9;
+  background: rgba(51, 65, 85, 0.85);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.vest-indicator-settings-btn.is-active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.15);
+}
+
+.vest-indicator-settings-btn svg {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.vest-indicator-settings-btn:hover svg {
+  transform: rotate(25deg);
+}
+
+.vest-indicator-settings-btn.is-active svg {
+  transform: rotate(90deg);
+}
+
 .vest-indicator-settings-drawer {
   padding: 16px 18px 18px;
   border-top: 1px solid rgba(148, 163, 184, 0.12);

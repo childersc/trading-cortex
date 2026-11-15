@@ -6402,13 +6402,20 @@
                   </div>
                   <div class="vest-indicator-tile-right">
                     <span class="vest-indicator-status-badge ${ind.isEnabled ? 'on' : 'off'}">${ind.isEnabled ? 'ON' : 'OFF'}</span>
+                    <button type="button" class="vest-indicator-settings-btn" id="vest-ind-settings-btn-${ind.id}" data-indicator-id="${ind.id}" title="View and configure ${ind.title} settings" style="display: ${ind.isEnabled ? 'inline-flex' : 'none'};">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                      </svg>
+                      <span>Settings</span>
+                    </button>
                     <label class="vest-tvs-switch" title="Toggle ${ind.title}">
                       <input type="checkbox" class="vest-ind-master-toggle" id="${ind.masterToggleId}" data-indicator-id="${ind.id}" ${ind.isEnabled ? 'checked' : ''} />
                       <span class="vest-tvs-switch-slider"></span>
                     </label>
                   </div>
                 </div>
-                <div class="vest-indicator-settings-drawer" id="vest-ind-drawer-${ind.id}" style="display: ${ind.isEnabled ? 'block' : 'none'};">
+                <div class="vest-indicator-settings-drawer" id="vest-ind-drawer-${ind.id}" style="display: none;">
                   ${ind.renderSettings()}
                 </div>
               </div>
@@ -6643,6 +6650,11 @@
             const drawer = overlay.querySelector(`#vest-ind-drawer-${targetIndicatorToScroll}`);
             if (drawer && drawer.style.display === 'none') {
               drawer.style.display = 'block';
+            }
+            const settingsBtn = overlay.querySelector(`#vest-ind-settings-btn-${targetIndicatorToScroll}`);
+            if (settingsBtn) {
+              settingsBtn.style.display = 'inline-flex';
+              settingsBtn.classList.add('is-active');
             }
             tile.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             tile.style.transition = 'box-shadow 0.3s ease, border-color 0.3s ease';
@@ -7369,9 +7381,20 @@
               }
             }
 
+            const settingsBtn = overlay.querySelector(`#vest-ind-settings-btn-${indId}`);
+            if (settingsBtn) {
+              settingsBtn.style.display = isChecked ? 'inline-flex' : 'none';
+              if (!isChecked) {
+                settingsBtn.classList.remove('is-active');
+              }
+            }
+
             const drawer = overlay.querySelector(`#vest-ind-drawer-${indId}`);
             if (drawer) {
-              drawer.style.display = isChecked ? 'block' : 'none';
+              // Toggling OFF collapses drawer. Toggling ON reveals Settings button while keeping drawer collapsed until clicked.
+              if (!isChecked) {
+                drawer.style.display = 'none';
+              }
             }
 
             if (indId === 'sessions' && draftSettings.sessionIndicators) draftSettings.sessionIndicators.enabled = isChecked;
@@ -7389,10 +7412,36 @@
           });
         });
 
+        // Settings button click: toggles settings drawer for that specific indicator
+        const settingsBtns = overlay.querySelectorAll('.vest-indicator-settings-btn');
+        settingsBtns.forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const indId = btn.getAttribute('data-indicator-id');
+            const drawer = overlay.querySelector(`#vest-ind-drawer-${indId}`);
+            if (!drawer) return;
+
+            const isCurrentlyOpen = drawer.style.display !== 'none';
+            if (isCurrentlyOpen) {
+              drawer.style.display = 'none';
+              btn.classList.remove('is-active');
+            } else {
+              drawer.style.display = 'block';
+              btn.classList.add('is-active');
+            }
+          });
+        });
+
         const tileHeaders = overlay.querySelectorAll('.vest-indicator-tile-header');
         tileHeaders.forEach(header => {
           header.addEventListener('click', (e) => {
-            if (e.target.closest('.vest-tvs-switch') || e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') {
+            if (
+              e.target.closest('.vest-tvs-switch') ||
+              e.target.closest('.vest-indicator-settings-btn') ||
+              e.target.tagName === 'INPUT' ||
+              e.target.tagName === 'LABEL' ||
+              e.target.tagName === 'BUTTON'
+            ) {
               return;
             }
             const toggle = header.querySelector('.vest-ind-master-toggle');
