@@ -171,6 +171,8 @@
   const sentOrderBlockAlerts = new Set();
   let cachedOrderBlocksSignature = '';
   let cachedComputedOrderBlocks = [];
+  let cachedMarketStructureSignature = '';
+  let cachedComputedMarketStructure = [];
   let currentGlobalDrawings = [];
   const globalDrawingEntityMap = new Map(); // chart entity id -> persistent global drawing id
   const globalDrawingRestoreSuppression = new Set();
@@ -8497,10 +8499,15 @@
           }
 
           let obIdx = lowestIdx;
-          while (obIdx < b && bars[obIdx].close >= bars[obIdx].open) {
-            obIdx++;
+          if (bars[lowestIdx].close >= bars[lowestIdx].open) {
+            // Lowest candle was bullish/up; search backward for the last bearish/down candle before the push
+            for (let k = lowestIdx; k >= Math.max(0, lowestIdx - 4); k--) {
+              if (bars[k].close < bars[k].open) {
+                obIdx = k;
+                break;
+              }
+            }
           }
-          if (obIdx >= b) obIdx = lowestIdx;
 
           // Check for displacement creating Inefficiency (FVG) within 3 candles
           let hasFvg = false;
@@ -8555,10 +8562,15 @@
           }
 
           let obIdx = highestIdx;
-          while (obIdx < b && bars[obIdx].close <= bars[obIdx].open) {
-            obIdx++;
+          if (bars[highestIdx].close <= bars[highestIdx].open) {
+            // Highest candle was bearish/down; search backward for the last bullish/up candle before the drop
+            for (let k = highestIdx; k >= Math.max(0, highestIdx - 4); k--) {
+              if (bars[k].close > bars[k].open) {
+                obIdx = k;
+                break;
+              }
+            }
           }
-          if (obIdx >= b) obIdx = highestIdx;
 
           let hasFvg = false;
           for (let f = obIdx; f < Math.min(b + 1, bars.length - 2); f++) {
@@ -8784,6 +8796,227 @@
       }
     }
 
+    ctx.restore();
+  }
+
+  // -------------------------------------------------------------
+  // Market Structure (BOS / MSS / CHoCH) Engine
+  // -------------------------------------------------------------
+  const DEFAULT_MARKET_STRUCTURE = {
+    enabled: false,
+    swingLookback: 5,
+    showBos: true,
+    showChoch: true,
+    breakMode: 'close', // 'close' | 'wick'
+    labelMode: 'both', // 'both' (BOS/CHoCH) | 'mss' (BOS/MSS) | 'bos' | 'choch'
+    bullishColor: '#10b981',
+    bearishColor: '#ef4444',
+    lineStyle: 'dashed', // 'dashed' | 'solid'
+    lineWidth: 1.5,
+    fontSize: 10,
+    maxStructureLines: 15,
+    extendLines: false
+  };
+
+  function normalizeMarketStructureConfig(rawCfg) {
+    const cfg = { ...DEFAULT_MARKET_STRUCTURE, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    return {
+      enabled: Boolean(cfg.enabled),
+      swingLookback: Math.max(3, Math.min(20, Math.round(Number(cfg.swingLookback) || 5))),
+      showBos: cfg.showBos !== false,
+      showChoch: cfg.showChoch !== false,
+      breakMode: cfg.breakMode === 'wick' ? 'wick' : 'close',
+      labelMode: ['both', 'mss', 'bos', 'choch'].includes(cfg.labelMode) ? cfg.labelMode : 'both',
+      bullishColor: typeof cfg.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bullishColor) ? cfg.bullishColor : '#10b981',
+      bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
+      lineStyle: cfg.lineStyle === 'solid' ? 'solid' : 'dashed',
+      lineWidth: Math.max(1, Math.min(3, Number(cfg.lineWidth) || 1.5)),
+      fontSize: Math.max(8, Math.min(16, Math.round(Number(cfg.fontSize) || 10))),
+      maxStructureLines: Math.max(5, Math.min(30, Math.round(Number(cfg.maxStructureLines) || 15))),
+      extendLines: Boolean(cfg.extendLines)
+    };
+  }
+
+  function computeMarketStructureFromBars(bars, config) {
+    if (!bars || bars.length < 15 || !config || !config.enabled) return [];
+    const cfg = normalizeMarketStructureConfig(config);
+    const lookback = cfg.swingLookback;
+    const isWickBreak = cfg.breakMode === 'wick';
+
+    // 1. Identify swing points
+    const swings = [];
+    for (let i = lookback; i < bars.length - lookback; i++) {
+      const curH = bars[i].high;
+      const curL = bars[i].low;
+      let isHigh = true;
+      let isLow = true;
+
+      for (let j = i - lookback; j <= i + lookback; j++) {
+        if (j === i) continue;
+        if (bars[j].high >= curH) isHigh = false;
+        if (bars[j].low <= curL) isLow = false;
+      }
+
+      if (isHigh) swings.push({ type: 'high', index: i, timeSec: bars[i].timeSec, price: curH });
+      if (isLow) swings.push({ type: 'low', index: i, timeSec: bars[i].timeSec, price: curL });
+    }
+
+    swings.sort((a, b) => a.index - b.index);
+
+    const structures = [];
+    let currentTrend = null; // 'bullish' | 'bearish'
+    let lastActiveHigh = null;
+    let lastActiveLow = null;
+
+    for (let b = 0; b < bars.length; b++) {
+      const bar = bars[b];
+
+      // Check if this bar confirmed a swing point from lookback bars ago
+      for (let sIdx = 0; sIdx < swings.length; sIdx++) {
+        const s = swings[sIdx];
+        if (s.index + lookback === b) {
+          if (s.type === 'high') lastActiveHigh = s;
+          else if (s.type === 'low') lastActiveLow = s;
+        }
+      }
+
+      // Check for Bullish Break above lastActiveHigh
+      if (lastActiveHigh && b > lastActiveHigh.index) {
+        const breakPrice = isWickBreak ? bar.high : bar.close;
+        if (breakPrice > lastActiveHigh.price) {
+          const isChoch = currentTrend === 'bearish' || currentTrend === null;
+          const type = isChoch ? 'choch' : 'bos';
+          const label = isChoch
+            ? (cfg.labelMode === 'mss' ? 'MSS' : 'CHoCH')
+            : 'BOS';
+
+          structures.push({
+            id: `ms_${lastActiveHigh.timeSec}_${bar.timeSec}_bull`,
+            type,
+            side: 'bullish',
+            label,
+            swingIndex: lastActiveHigh.index,
+            swingTimeSec: lastActiveHigh.timeSec,
+            breakIndex: b,
+            breakTimeSec: bar.timeSec,
+            price: lastActiveHigh.price
+          });
+
+          currentTrend = 'bullish';
+          lastActiveHigh = null; // Consumed
+        }
+      }
+
+      // Check for Bearish Break below lastActiveLow
+      if (lastActiveLow && b > lastActiveLow.index) {
+        const breakPrice = isWickBreak ? bar.low : bar.close;
+        if (breakPrice < lastActiveLow.price) {
+          const isChoch = currentTrend === 'bullish' || currentTrend === null;
+          const type = isChoch ? 'choch' : 'bos';
+          const label = isChoch
+            ? (cfg.labelMode === 'mss' ? 'MSS' : 'CHoCH')
+            : 'BOS';
+
+          structures.push({
+            id: `ms_${lastActiveLow.timeSec}_${bar.timeSec}_bear`,
+            type,
+            side: 'bearish',
+            label,
+            swingIndex: lastActiveLow.index,
+            swingTimeSec: lastActiveLow.timeSec,
+            breakIndex: b,
+            breakTimeSec: bar.timeSec,
+            price: lastActiveLow.price
+          });
+
+          currentTrend = 'bearish';
+          lastActiveLow = null; // Consumed
+        }
+      }
+    }
+
+    const filtered = structures.filter(s => {
+      if (s.type === 'bos' && !cfg.showBos) return false;
+      if (s.type === 'choch' && !cfg.showChoch) return false;
+      return true;
+    });
+
+    return filtered.slice(-cfg.maxStructureLines);
+  }
+
+  function renderMarketStructureOnCanvas(ctx, structures, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
+    if (!structures || !structures.length || !ctx) return;
+    const cfg = normalizeMarketStructureConfig(config);
+
+    ctx.save();
+    for (let i = 0; i < structures.length; i++) {
+      const s = structures[i];
+      const y = Math.round(priceToY(s.price));
+      if (y < 4 || y > cssHeight - 4) continue;
+
+      const x1 = Math.round(barToX(s.swingTimeSec));
+      const x2 = cfg.extendLines ? (cssWidth - 6) : Math.round(barToX(s.breakTimeSec));
+
+      if (x2 < 0 || x1 > cssWidth) continue;
+
+      const strokeColor = s.side === 'bullish' ? cfg.bullishColor : cfg.bearishColor;
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = cfg.lineWidth;
+      if (cfg.lineStyle === 'dashed') {
+        ctx.setLineDash([5, 4]);
+      } else {
+        ctx.setLineDash([]);
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y);
+      ctx.lineTo(x2, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Small anchor dot at swing origin
+      ctx.fillStyle = strokeColor;
+      ctx.beginPath();
+      ctx.arc(x1, y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Clean badge label centered on or at the break of the line
+      const midX = Math.round(Math.max(x1 + 18, Math.min(x2 - 18, (x1 + x2) / 2)));
+      const badgeText = s.label;
+      const fontSize = cfg.fontSize;
+      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const textMetrics = ctx.measureText(badgeText);
+      const textW = textMetrics.width;
+      const pillW = Math.round(textW + 10);
+      const pillH = Math.round(fontSize + 6);
+      const pillX = Math.round(midX - pillW / 2);
+      const pillY = Math.round(y - pillH / 2);
+
+      // Badge background pill
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const r = 3;
+      ctx.moveTo(pillX + r, pillY);
+      ctx.lineTo(pillX + pillW - r, pillY);
+      ctx.quadraticCurveTo(pillX + pillW, pillY, pillX + pillW, pillY + r);
+      ctx.lineTo(pillX + pillW, pillY + pillH - r);
+      ctx.quadraticCurveTo(pillX + pillW, pillY + pillH, pillX + pillW - r, pillY + pillH);
+      ctx.lineTo(pillX + r, pillY + pillH);
+      ctx.quadraticCurveTo(pillX, pillY + pillH, pillX, pillY + pillH - r);
+      ctx.lineTo(pillX, pillY + r);
+      ctx.quadraticCurveTo(pillX, pillY, pillX + r, pillY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Badge text
+      ctx.fillStyle = strokeColor;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(badgeText, midX, y);
+    }
     ctx.restore();
   }
 
@@ -10527,11 +10760,13 @@
     const config = currentSettings && currentSettings.sessionIndicators;
     const cortexConfig = currentSettings && currentSettings.cortexIndicator;
     const orderBlocksConfig = currentSettings && currentSettings.orderBlocks;
+    const marketStructureConfig = currentSettings && currentSettings.marketStructure;
     const fvgConfig = currentSettings && currentSettings.autoFvg;
     const candleOhlcConfig = currentSettings && currentSettings.candleOhlc;
     const failLinesEnabled = Boolean(currentSettings && currentSettings.failLines && currentSettings.failLines.enabled);
     const cortexIndicatorEnabled = Boolean(cortexConfig && cortexConfig.enabled);
     const orderBlocksEnabled = Boolean(orderBlocksConfig && orderBlocksConfig.enabled);
+    const marketStructureEnabled = Boolean(marketStructureConfig && marketStructureConfig.enabled);
     if (!failLinesEnabled) removeFailPriceLineButtons();
     if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
     const sessionsEnabled = Boolean(config && config.enabled && isIntradayChartResolution());
@@ -10544,7 +10779,7 @@
       cleanupNativeAutoFvgShapes(null);
     }
 
-    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled) {
+    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
       if (ictSessionsCanvas) {
         const ctx = ictSessionsCanvas.getContext('2d');
@@ -10622,6 +10857,8 @@
         cachedComputedOrderBlocks = computeOrderBlocksFromBars(bars, orderBlocksConfig);
         cachedOrderBlocksSignature = obSig;
 
+      
+
         if (cachedComputedOrderBlocks.length > 0 && (orderBlocksConfig.voiceAlertEnabled !== false || orderBlocksConfig.chimeAlertEnabled !== false)) {
           for (let oi = 0; oi < cachedComputedOrderBlocks.length; oi++) {
             const ob = cachedComputedOrderBlocks[oi];
@@ -10651,6 +10888,20 @@
       cachedComputedOrderBlocks = [];
     }
 
+    if (marketStructureEnabled) {
+      const tfLabel = formatCurrentResolutionLabel();
+      const msSig = `${barsSig}_${tfLabel}_${JSON.stringify(marketStructureConfig)}`;
+      if (
+        ictSessionsNeedsFullRecompute ||
+        msSig !== cachedMarketStructureSignature
+      ) {
+        cachedComputedMarketStructure = computeMarketStructureFromBars(bars, marketStructureConfig);
+        cachedMarketStructureSignature = msSig;
+      }
+    } else {
+      cachedComputedMarketStructure = [];
+    }
+
     ictSessionsNeedsFullRecompute = false;
 
     const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
@@ -10673,7 +10924,8 @@
 
     const hasCanvasFvgs = autoFvgEnabled && !fvgConfig.syncNativeDrawings && cachedComputedAutoFvgs.length > 0;
     const hasCanvasOrderBlocks = orderBlocksEnabled && cachedComputedOrderBlocks.length > 0;
-    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !hasCanvasOrderBlocks && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
+    const hasCanvasMarketStructure = marketStructureEnabled && cachedComputedMarketStructure.length > 0;
+    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !hasCanvasOrderBlocks && !hasCanvasMarketStructure && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
       clearIctPriceScaleBadges();
       ctx.restore();
@@ -11439,6 +11691,11 @@
       renderOrderBlocksOnCanvas(ctx, cachedComputedOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
     }
 
+    // 5A-2. Render Market Structure (BOS / MSS / CHoCH) on canvas
+    if (hasCanvasMarketStructure) {
+      renderMarketStructureOnCanvas(ctx, cachedComputedMarketStructure, marketStructureConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+    }
+
     // 5B. Render Custom-Sized Candles in-place without zooming or resizing the chart time axis!
     if (customCandleWidthEnabled) {
       renderCustomWidthCandlesOnCanvas(ctx, bars, candleOhlcConfig, barToX, priceToY, barSpacing, cssWidth, cssHeight, mainSeries);
@@ -11709,6 +11966,8 @@
     cachedComputedAutoFvgs = [];
     cachedOrderBlocksSignature = '';
     cachedComputedOrderBlocks = [];
+    cachedMarketStructureSignature = '';
+    cachedComputedMarketStructure = [];
     sentOrderBlockAlerts.clear();
     cachedTargetChartCanvas = null;
     cachedPriceAxisHost = null;

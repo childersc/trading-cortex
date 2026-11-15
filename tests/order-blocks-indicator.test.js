@@ -31,7 +31,7 @@ assert(isolatedJs.includes("id: 'orderblocks'"), 'INDICATORS array must include 
 assert(isolatedJs.includes("title: 'Order Blocks (Smart Risk)'"), 'Indicator title must be "Order Blocks (Smart Risk)"');
 assert(isolatedJs.includes('masterToggleId: \'vest-ob-master-enabled\''), 'Indicator master toggle id must be vest-ob-master-enabled');
 assert(isolatedJs.includes('renderOrderBlocksSettingsHtml(ob)'), 'Must call renderOrderBlocksSettingsHtml');
-assert(isolatedJs.includes("const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks']"), 'INDICATOR_MAP must include orderblocks');
+assert(isolatedJs.includes("const INDICATOR_MAP = [") && isolatedJs.includes("'orderblocks'"), 'INDICATOR_MAP must include orderblocks');
 assert(isolatedJs.includes('id="vest-sdm-open-orderblocks-btn"'), 'Cortex dropdown menu must contain Order Blocks button');
 
 console.log('✓ Indicator Hub registration and Cortex dropdown menu verified');

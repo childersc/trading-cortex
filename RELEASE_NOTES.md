@@ -1,3 +1,9 @@
+Trading Cortex v1.1.79 — Market Structure (BOS / MSS / CHoCH) & Order Block Origin Candle Fix
+
+- **Market Structure Indicator (`v1.1.79`)**: Real-time Break of Structure (BOS) and Change of Character (CHoCH / MSS) on-chart indicator with configurable swing lookback (3–20 bars), close vs. wick break mode, label styles (BOS/CHoCH or BOS/MSS), dashed/solid lines, and custom colors.
+- **Unified Hub & Shortcut Integration (`v1.1.79`)**: Fully integrated into Charting Indicators hub with live draft syncing, on-demand settings drawer, and quick Studio dropdown menu entry.
+- **Fixed Order Block Origin Candle Selection (`v1.1.79`)**: Fixed swing peak origin selection in `computeOrderBlocksFromBars` to search backward for the true last up (bullish/green) candle before downward displacement, eliminating erroneous red candles marked as bearish order blocks.
+
 Trading Cortex v1.1.78 — Update Center compareSemver & Double "vv" Fix
 
 - **Resolved `compareSemver is not defined` (`v1.1.78`)**: Fixed a ReferenceError when the GitHub dev channel falls back to unmetered Raw CDN during API rate limits.

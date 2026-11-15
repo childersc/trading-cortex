@@ -1,6 +1,33 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.78`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.79`) are documented in this file.
+
+---
+
+## [v1.1.79] — 2026-11-15
+
+### 🚀 New Indicator: Market Structure (BOS / MSS / CHoCH)
+- **Market Structure Engine**:
+  1. *Real-Time Structure Identification*: Tracks confirmed swing highs and swing lows using an adjustable lookback window (default 5 bars, range 3–20 bars).
+  2. *Trend Continuation vs. Reversal*:
+     - **BOS (Break of Structure)**: Flags trend continuations when price breaks higher in a bullish trend or lower in a bearish trend.
+     - **CHoCH / MSS (Change of Character / Market Structure Shift)**: Flags trend changes when price violates the opposing confirmed swing low or swing high.
+  3. *Configurable Trigger Modes*:
+     - **Close Break**: Requires candle body close beyond the swing point for strict confirmation.
+     - **Wick Break**: Triggers immediately on candle wick high/low intrusion beyond the level.
+  4. *Customizable Display & Aesthetics*:
+     - Configurable label styles: `both` (BOS & CHoCH), `mss` (BOS & MSS), `bos` only, or `choch` only.
+     - Dedicated color pickers for Bullish (`#10b981`) and Bearish (`#ef4444`) breaks.
+     - Dashed or solid line rendering with configurable line width and font size.
+     - Optional line extension toward the right edge of the chart.
+  5. *Unified Hub Integration*: Registered in Charting Indicators hub with dedicated toggle switch, context-aware tile click, on-demand Settings drawer, and Studio Dropdown menu shortcut.
+
+### 🐛 Order Block Origin Candle Selection Fix
+- **Corrected Bearish & Bullish Order Block Identification**:
+  1. *Eliminated Erroneous Red Candle Order Blocks*: Fixed an issue in `computeOrderBlocksFromBars` where swing peaks whose highest candle closed bearish (red) resulted in a forward scan selecting subsequent drop candles as the order block.
+  2. *Backward Pivot Search*: Implemented backward search from swing pivots up to 4 bars back:
+     - **Bearish Order Block**: Accurately selects the last UP (bullish/green) candle prior to the downward impulse.
+     - **Bullish Order Block**: Accurately selects the last DOWN (bearish/red) candle prior to the upward impulse.
 
 ---
 
