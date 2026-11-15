@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.74`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.75`) are documented in this file.
+
+---
+
+## [v1.1.75] — 2026-11-15
+
+### 🚀 Institutional Order Blocks Indicator (Smart Risk Strategy)
+- **Institutional Order Blocks Engine**:
+  1. *Smart Risk Methodology*: Detects high-probability institutional supply & demand zones based on origin candle identification (last down candle before bullish impulse, last up candle before bearish impulse), displacement leaving Fair Value Gaps (FVG), and structural breakouts (BOS / ChoCH).
+  2. *Single-Use Mitigation Retest*: Accurately tracks initial mitigation touches, tagging zones as mitigated and terminating single-use blocks or continuing extension to chart right edge per user preference.
+  3. *On-Chart Order Entry Badges*: Renders crisp `▲ BUY OB` (green) and `▼ SELL OB` (red) order entry badges directly on the mitigation bar, complete with projected Stop Loss lines (placed at the opposite wick of the order block) and Take Profit target lines with configurable Risk:Reward ratio (default 1:2.0).
+  4. *Audible Alerts (Voice & Chime)*: Real-time spoken speech synthesis alerts (*"Bullish Order Block Mitigated. Enter Long."* / *"Bearish Order Block Mitigated. Enter Short."*) and harmonic ascending/descending Web Audio chimes with deduplication across timeframe switches.
+  5. *Charting Indicators Hub Integration*: Configurable within the unified Charting Indicators panel with on-demand Settings button, unpersisted drawer collapse, reset defaults, and test alert trigger.
 
 ---
 
