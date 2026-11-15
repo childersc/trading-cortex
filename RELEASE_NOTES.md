@@ -1,3 +1,8 @@
+Trading Cortex v1.1.80 — Strict Order Block Gap Anchor Alignment
+
+- **Strict FVG Anchor Alignment (`v1.1.80`)**: Corrected `computeOrderBlocksFromBars` to strictly anchor Order Blocks to the candle immediately preceding the displacement candle that creates the Fair Value Gap (`obIdx = g - 1`).
+- **Eliminated Disconnected Zones & Erroneous Badges (`v1.1.80`)**: Fixed downstream drift that drew Order Block zones on candles disconnected from the gap or during unrelated mid-trend consolidations, ensuring mitigation badges (`▲ BUY OB` / `▼ SELL OB`) fire accurately on true origin candle retests.
+
 Trading Cortex v1.1.79 — Market Structure (BOS / MSS / CHoCH) & Order Block Origin Candle Fix
 
 - **Market Structure Indicator (`v1.1.79`)**: Real-time Break of Structure (BOS) and Change of Character (CHoCH / MSS) on-chart indicator with configurable swing lookback (3–20 bars), close vs. wick break mode, label styles (BOS/CHoCH or BOS/MSS), dashed/solid lines, and custom colors.
