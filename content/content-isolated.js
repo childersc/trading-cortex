@@ -4808,60 +4808,6 @@
       }
 
     function renderRightPaneContent() {
-      
-      if (activeTab === 'chartingindicators') {
-        const indToggles = overlay.querySelectorAll('.vest-ind-master-toggle');
-        indToggles.forEach(toggle => {
-          toggle.addEventListener('change', (e) => {
-            e.stopPropagation();
-            const indId = toggle.getAttribute('data-indicator-id');
-            const isChecked = toggle.checked;
-
-            const tile = overlay.querySelector(`#vest-ind-tile-${indId}`);
-            if (tile) {
-              tile.classList.toggle('is-enabled', isChecked);
-              const badge = tile.querySelector('.vest-indicator-status-badge');
-              if (badge) {
-                badge.textContent = isChecked ? 'ON' : 'OFF';
-                badge.className = `vest-indicator-status-badge ${isChecked ? 'on' : 'off'}`;
-              }
-            }
-
-            const drawer = overlay.querySelector(`#vest-ind-drawer-${indId}`);
-            if (drawer) {
-              drawer.style.display = isChecked ? 'block' : 'none';
-            }
-
-            if (indId === 'sessions' && draftSettings.sessionIndicators) draftSettings.sessionIndicators.enabled = isChecked;
-            else if (indId === 'autofvg' && draftSettings.autoFvg) draftSettings.autoFvg.enabled = isChecked;
-            else if (indId === 'news' && draftSettings.newsBox) draftSettings.newsBox.enabled = isChecked;
-            else if (indId === 'trades' && draftSettings.tradesBox) draftSettings.tradesBox.enabled = isChecked;
-            else if (indId === 'candleohlc' && draftSettings.candleOhlc) draftSettings.candleOhlc.enabled = isChecked;
-            else if (indId === 'positionhud' && draftSettings.positionHud) draftSettings.positionHud.enabled = isChecked;
-            else if (indId === 'faillines' && draftSettings.failLines) draftSettings.failLines.enabled = isChecked;
-            else if (indId === 'cortexindicator' && draftSettings.cortexIndicator) draftSettings.cortexIndicator.enabled = isChecked;
-
-            syncCurrentPaneToDraft();
-            broadcastLiveSessionDraft();
-            renderStudioHeaderPill();
-          });
-        });
-
-        const tileHeaders = overlay.querySelectorAll('.vest-indicator-tile-header');
-        tileHeaders.forEach(header => {
-          header.addEventListener('click', (e) => {
-            if (e.target.closest('.vest-tvs-switch') || e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') {
-              return;
-            }
-            const toggle = header.querySelector('.vest-ind-master-toggle');
-            if (toggle) {
-              toggle.checked = !toggle.checked;
-              toggle.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          });
-        });
-      }
-
       if (activeTab === 'alertsvoice') {
         const cfg = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
         draftSettings.cortexIndicator = cfg;
@@ -6641,6 +6587,10 @@
         setTimeout(() => {
           const tile = overlay.querySelector(`#vest-ind-tile-${targetIndicatorToScroll}`);
           if (tile) {
+            const drawer = overlay.querySelector(`#vest-ind-drawer-${targetIndicatorToScroll}`);
+            if (drawer && drawer.style.display === 'none') {
+              drawer.style.display = 'block';
+            }
             tile.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             tile.style.transition = 'box-shadow 0.3s ease, border-color 0.3s ease';
             tile.style.boxShadow = '0 0 0 2px rgba(56, 189, 248, 0.6), 0 4px 20px rgba(56, 189, 248, 0.2)';
@@ -7285,6 +7235,60 @@
             .map(item => ({ resolution: item.value, label: labels.get(item.value) || item.value }));
         });
       });
+
+      // Master toggle & tile header click handling on Charting Indicators hub
+      if (activeTab === 'chartingindicators') {
+        const indToggles = overlay.querySelectorAll('.vest-ind-master-toggle');
+        indToggles.forEach(toggle => {
+          toggle.addEventListener('change', (e) => {
+            e.stopPropagation();
+            const indId = toggle.getAttribute('data-indicator-id');
+            const isChecked = toggle.checked;
+
+            const tile = overlay.querySelector(`#vest-ind-tile-${indId}`);
+            if (tile) {
+              tile.classList.toggle('is-enabled', isChecked);
+              const badge = tile.querySelector('.vest-indicator-status-badge');
+              if (badge) {
+                badge.textContent = isChecked ? 'ON' : 'OFF';
+                badge.className = `vest-indicator-status-badge ${isChecked ? 'on' : 'off'}`;
+              }
+            }
+
+            const drawer = overlay.querySelector(`#vest-ind-drawer-${indId}`);
+            if (drawer) {
+              drawer.style.display = isChecked ? 'block' : 'none';
+            }
+
+            if (indId === 'sessions' && draftSettings.sessionIndicators) draftSettings.sessionIndicators.enabled = isChecked;
+            else if (indId === 'autofvg' && draftSettings.autoFvg) draftSettings.autoFvg.enabled = isChecked;
+            else if (indId === 'news' && draftSettings.newsBox) draftSettings.newsBox.enabled = isChecked;
+            else if (indId === 'trades' && draftSettings.tradesBox) draftSettings.tradesBox.enabled = isChecked;
+            else if (indId === 'candleohlc' && draftSettings.candleOhlc) draftSettings.candleOhlc.enabled = isChecked;
+            else if (indId === 'positionhud' && draftSettings.positionHud) draftSettings.positionHud.enabled = isChecked;
+            else if (indId === 'faillines' && draftSettings.failLines) draftSettings.failLines.enabled = isChecked;
+            else if (indId === 'cortexindicator' && draftSettings.cortexIndicator) draftSettings.cortexIndicator.enabled = isChecked;
+
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+            renderStudioHeaderPill();
+          });
+        });
+
+        const tileHeaders = overlay.querySelectorAll('.vest-indicator-tile-header');
+        tileHeaders.forEach(header => {
+          header.addEventListener('click', (e) => {
+            if (e.target.closest('.vest-tvs-switch') || e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') {
+              return;
+            }
+            const toggle = header.querySelector('.vest-ind-master-toggle');
+            if (toggle) {
+              toggle.checked = !toggle.checked;
+              toggle.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+        });
+      }
 
       // Live preview & range label updates on Session Indicators tab
       if (activeTab === 'sessions' || activeTab === 'chartingindicators') {
