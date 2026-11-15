@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.73`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.74`) are documented in this file.
+
+---
+
+## [v1.1.74] — 2026-11-15
+
+### 🚀 Enhancements & Charting Indicators Settings Button
+- **Interactive Settings Button on Indicator Tiles**:
+  1. *Dynamic Settings Button*: Toggling an indicator ON now displays a dedicated **Settings** button next to the master toggle switch (with an SVG gear icon and hover animation), rather than automatically expanding the settings drawer below it.
+  2. *On-Demand Settings Drawer*: Clicking the Settings button toggles the settings drawer open or closed for that specific indicator, marking the button with an active indicator glow (`.is-active`).
+  3. *Unpersisted Collapsed State on Open*: Indicator drawers start collapsed (`display: none`) every time the Settings dialog is opened, even if the indicator is already enabled. The drawer expansion state is purely transient and not persisted across dialog closures, keeping the panel clean and clutter-free until the user explicitly clicks Settings.
+  4. *Automatic Collapse on Disable*: Toggling an indicator OFF instantly hides its Settings button and collapses its settings drawer.
 
 ---
 

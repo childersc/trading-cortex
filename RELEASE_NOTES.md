@@ -1,3 +1,9 @@
+Trading Cortex v1.1.74 — Charting Indicators On-Demand Settings Button & Transient Expansion
+
+- **On-Demand Settings Button (`v1.1.74`)**: Toggling an indicator ON displays a sleek "Settings" button next to the master toggle slider instead of immediately dropping down the full settings form.
+- **Click-to-Configure Settings Drawer (`v1.1.74`)**: Clicking the Settings button smoothly opens or closes the configuration drawer for that specific indicator.
+- **Unpersisted Collapsed State (`v1.1.74`)**: All indicator drawers remain cleanly collapsed when opening the Settings dialog, returning to collapsed state whenever the dialog is closed and reopened.
+
 Trading Cortex v1.1.73 — Settings Dialog Drag-Resizing, Glass Opacity Slider & Unload Violation Fix
 
 - **Drag-Resizable Settings Box (`v1.1.73`)**: The settings dialog can now be made significantly smaller (`min-width: 440px`, `min-height: 320px`) with responsive layout scaling and a dedicated bottom-right drag grip handle (`.vest-tvs-resize-handle`).

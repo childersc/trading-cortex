@@ -68,11 +68,15 @@ for (const ind of expectedIndicators) {
 }
 console.log('✓ All 8 indicators rendered as individual tile boxes with master slider switches');
 
-// 5. Verify master toggle sliders drop down settings box when enabled and collapse when disabled
-assert(isolatedJs.includes("drawer.style.display = isChecked ? 'block' : 'none'"), 'Toggling switch must show or hide settings drawer below indicator');
+// 5. Verify master toggle displays Settings button next to toggle, keeps drawer collapsed on open, and wires settings button click
+assert(templateCss.includes('.vest-indicator-settings-btn'), 'template-bar.css must define .vest-indicator-settings-btn');
+assert(isolatedJs.includes('vest-indicator-settings-btn'), 'content-isolated.js must render .vest-indicator-settings-btn');
+assert(isolatedJs.includes("settingsBtn.style.display = isChecked ? 'inline-flex' : 'none'"), 'Toggling switch must show or hide settings button next to toggle');
+assert(isolatedJs.includes('class="vest-indicator-settings-drawer" id="vest-ind-drawer-${ind.id}" style="display: none;"'), 'Indicator drawer must default to collapsed (display: none) without persisting open state');
+assert(isolatedJs.includes('settingsBtns.forEach(btn => {'), 'wireDialogEvents must wire settings button clicks');
 assert(isolatedJs.includes("tile.classList.toggle('is-enabled', isChecked)"), 'Toggling switch must toggle is-enabled on tile');
 assert(isolatedJs.includes("badge.textContent = isChecked ? 'ON' : 'OFF'"), 'Toggling switch must update badge text to ON/OFF');
-console.log('✓ Toggle ON/OFF drops down settings drawer below indicator and updates status badge');
+console.log('✓ Master toggle controls Settings button display, keeps drawer collapsed on dialog open, and wires Settings click');
 
 // 6. Verify wireDialogEvents attaches handlers when activeTab === 'chartingindicators'
 const wireDialogEventsMatch = isolatedJs.match(/function wireDialogEvents\(\) \{([\s\S]*?)\n    function commitDraftAndClose/);
