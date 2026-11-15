@@ -37,6 +37,7 @@ const DEFAULT_PERP_FIRMS = [
     matchPatterns: ["myfundedperpetuals.com"],
     enabled: true,
     isBuiltin: true,
+    enableTimeframeFavorites: false,
     accountTier: "Evaluation / Funded",
     topBarMode: "auto",
     customTopBarOffsetPx: 0,
@@ -53,6 +54,7 @@ const DEFAULT_PERP_FIRMS = [
     matchPatterns: ["next.vestmarkets.com", "vestmarkets.com"],
     enabled: true,
     isBuiltin: true,
+    enableTimeframeFavorites: true,
     accountTier: "Live DEX",
     topBarMode: "auto",
     customTopBarOffsetPx: 0,
@@ -69,6 +71,7 @@ const DEFAULT_PERP_FIRMS = [
     matchPatterns: ["pro.kalshi.com", "kalshi.com"],
     enabled: true,
     isBuiltin: true,
+    enableTimeframeFavorites: false,
     accountTier: "Perpetuals",
     topBarMode: "auto",
     customTopBarOffsetPx: 0,
@@ -100,6 +103,9 @@ function normalizePerpFirmsConfig(rawList) {
       matchPatterns: Array.isArray(existing.matchPatterns) && existing.matchPatterns.length > 0 ? existing.matchPatterns.slice() : def.matchPatterns.slice(),
       enabled: existing.enabled !== false,
       isBuiltin: true,
+      enableTimeframeFavorites: typeof existing.enableTimeframeFavorites === 'boolean'
+        ? existing.enableTimeframeFavorites
+        : (typeof def.enableTimeframeFavorites === 'boolean' ? def.enableTimeframeFavorites : true),
       restoreSelectedAccount: existing.restoreSelectedAccount !== false
     });
     seenIds.add(def.id);
@@ -113,6 +119,7 @@ function normalizePerpFirmsConfig(rawList) {
       url: String(item.url || '').trim(),
       enabled: item.enabled !== false,
       isBuiltin: false,
+      enableTimeframeFavorites: typeof item.enableTimeframeFavorites === 'boolean' ? item.enableTimeframeFavorites : true,
       restoreSelectedAccount: item.restoreSelectedAccount !== false
     });
     seenIds.add(item.id);
@@ -125,11 +132,14 @@ function normalizePerpFirmsConfig(rawList) {
 const initial = normalizePerpFirmsConfig(null);
 assert.strictEqual(initial.length, 3);
 assert.strictEqual(initial[0].id, 'myfundedperpetuals');
+assert.strictEqual(initial[0].enableTimeframeFavorites, false, 'MFP timeframe favoriting should be disabled by default');
 assert.strictEqual(initial[1].id, 'vestmarkets');
+assert.strictEqual(initial[1].enableTimeframeFavorites, true, 'Vest Markets timeframe favoriting should be enabled by default');
 assert.strictEqual(initial[2].id, 'kalshipro');
 assert.strictEqual(initial[2].name, 'Kalshi Pro');
+assert.strictEqual(initial[2].enableTimeframeFavorites, false, 'Kalshi Pro timeframe favoriting should be disabled by default');
 assert.strictEqual(initial[1].restoreSelectedAccount, true);
-console.log('✓ Initial default firms normalized with Kalshi Pro and restoreSelectedAccount enabled');
+console.log('✓ Initial default firms normalized with Kalshi Pro and timeframe favoriting disabled on MFP and Kalshi Pro');
 
 // Test B: Vest Exchange cleanup & migration
 const legacyListWithVestExchange = [
@@ -172,5 +182,14 @@ assert.strictEqual(isolatedContent.includes('Bleeding Edge'), true, 'Bleeding Ed
 assert.strictEqual(isolatedContent.includes('Production'), true, 'Production title must be in dropdown');
 assert.strictEqual(isolatedContent.includes(': `v${cleanVer}`'), true, 'Pill subText must show version number instead of dev');
 console.log('✓ Dev branch red glow and Bleeding Edge dropdown title bar verified');
+
+// 7. Verify Timeframe Favoriting configuration & native platform detection
+assert.strictEqual(isolatedContent.includes('vest-pf-input-enable-timeframes'), true, 'Per-firm timeframe toggle input must exist in isolated UI');
+assert.strictEqual(isolatedContent.includes('enableTimeframeFavorites: false'), true, 'Default MFP and Kalshi Pro should disable custom timeframe favoriting');
+assert.strictEqual(isolatedContent.includes('enableTimeframeFavorites: true'), true, 'Default Vest Markets should enable custom timeframe favoriting');
+assert.strictEqual(mainContent.includes('function isTimeframeFavoritingDisabled()'), true, 'isTimeframeFavoritingDisabled helper must exist in content-main.js');
+assert.strictEqual(mainContent.includes('function cleanupTimeframeFavorites()'), true, 'cleanupTimeframeFavorites helper must exist in content-main.js');
+assert.strictEqual(mainContent.includes('myfundedperpetuals') && mainContent.includes('kalshi'), true, 'content-main.js must detect MFP and Kalshi');
+console.log('✓ Per-firm timeframe favoriting and native platform detection verified');
 
 console.log('All Prop Firms Management, Account Restoration & Toolbar Tests Passed!');

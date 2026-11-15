@@ -1330,6 +1330,7 @@
       matchPatterns: ["myfundedperpetuals.com"],
       enabled: true,
       isBuiltin: true,
+      enableTimeframeFavorites: false,
       accountTier: "Evaluation / Funded",
       topBarMode: "auto",
       customTopBarOffsetPx: 0,
@@ -1348,6 +1349,7 @@
       matchPatterns: ["next.vestmarkets.com", "vestmarkets.com"],
       enabled: true,
       isBuiltin: true,
+      enableTimeframeFavorites: true,
       accountTier: "Live DEX",
       topBarMode: "auto",
       customTopBarOffsetPx: 0,
@@ -1366,6 +1368,7 @@
       matchPatterns: ["pro.kalshi.com", "kalshi.com"],
       enabled: true,
       isBuiltin: true,
+      enableTimeframeFavorites: false,
       accountTier: "Perpetuals",
       topBarMode: "auto",
       customTopBarOffsetPx: 0,
@@ -1399,6 +1402,9 @@
         matchPatterns: Array.isArray(existing.matchPatterns) && existing.matchPatterns.length > 0 ? existing.matchPatterns.slice() : def.matchPatterns.slice(),
         enabled: existing.enabled !== false,
         isBuiltin: true,
+        enableTimeframeFavorites: typeof existing.enableTimeframeFavorites === 'boolean'
+          ? existing.enableTimeframeFavorites
+          : (typeof def.enableTimeframeFavorites === 'boolean' ? def.enableTimeframeFavorites : true),
         accountTier: String(existing.accountTier || def.accountTier || ''),
         topBarMode: existing.topBarMode === 'custom' ? 'custom' : 'auto',
         customTopBarOffsetPx: Number.isFinite(existing.customTopBarOffsetPx) ? Math.max(0, Math.min(300, existing.customTopBarOffsetPx)) : def.customTopBarOffsetPx,
@@ -1428,6 +1434,7 @@
         matchPatterns,
         enabled: item.enabled !== false,
         isBuiltin: false,
+        enableTimeframeFavorites: typeof item.enableTimeframeFavorites === 'boolean' ? item.enableTimeframeFavorites : true,
         accountTier: String(item.accountTier || 'Perp Account'),
         topBarMode: item.topBarMode === 'custom' ? 'custom' : 'auto',
         customTopBarOffsetPx: Number.isFinite(item.customTopBarOffsetPx) ? Math.max(0, Math.min(300, item.customTopBarOffsetPx)) : 0,
@@ -4538,6 +4545,9 @@
         settings.dialogGlassEffect = draftSettings.dialogGlassEffect;
         applyDialogGlassEffect(draftSettings.dialogGlassEffect);
       }
+      if (draftSettings.perpFirms) {
+        settings.perpFirms = normalizePerpFirmsConfig(draftSettings.perpFirms);
+      }
       queueSettingsSave({
         sessionIndicators: settings.sessionIndicators,
         autoFvg: settings.autoFvg,
@@ -4549,7 +4559,8 @@
         cortexIndicator: settings.cortexIndicator,
         diagnosticsBox: settings.diagnosticsBox,
         debugMode: settings.debugMode,
-        dialogGlassEffect: settings.dialogGlassEffect
+        dialogGlassEffect: settings.dialogGlassEffect,
+        perpFirms: settings.perpFirms
       });
       renderStudioHeaderPill();
       if (typeof renderChartNewsBox === 'function') {
@@ -4788,6 +4799,23 @@
                 </div>
                 <label class="vest-tvs-switch" title="Toggle Positions & Orders Panel Management">
                   <input type="checkbox" id="vest-pf-input-manage-positions" ${firm.managePositionsPanel !== false ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Section 6: Chart Timeframe Favoriting -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px; margin-top:12px;">
+              <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                Chart Timeframe Favoriting
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="max-width:80%;">
+                  <div style="font-size:12px; font-weight:600; color:#f8fafc;">Custom Timeframe Favorites Bar</div>
+                  <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Injects Cortex timeframe quick-action chips into the chart toolbar. Keep disabled for platforms with native timeframe favoriting (like My Funded Perpetuals and Kalshi Pro) so native stars and chips are used instead.</div>
+                </div>
+                <label class="vest-tvs-switch" title="Toggle custom timeframe favorites bar for this firm">
+                  <input type="checkbox" id="vest-pf-input-enable-timeframes" ${firm.enableTimeframeFavorites !== false ? 'checked' : ''} />
                   <span class="vest-tvs-switch-slider"></span>
                 </label>
               </div>
@@ -6643,9 +6671,14 @@
       if (restoreAccountEl) firm.restoreSelectedAccount = Boolean(restoreAccountEl.checked);
       const managePositionsEl = overlay.querySelector('#vest-pf-input-manage-positions');
       if (managePositionsEl) firm.managePositionsPanel = Boolean(managePositionsEl.checked);
+      const enableTimeframesEl = overlay.querySelector('#vest-pf-input-enable-timeframes');
+      if (enableTimeframesEl) firm.enableTimeframeFavorites = Boolean(enableTimeframesEl.checked);
       if (notesEl) firm.notes = notesEl.value.trim();
     }
     function syncCurrentPaneToDraft() {
+      if (activeTab === 'perpfirms') {
+        syncCurrentFirmToDraft();
+      }
       const remToggle = overlay.querySelector('#vest-tvs-remember-tools-toggle');
       if (remToggle) {
         draftSettings.rememberSidebarTools = Boolean(remToggle.checked);

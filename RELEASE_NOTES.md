@@ -1,3 +1,10 @@
+Trading Cortex v1.1.68 — Native Timeframe Favoriting on MFP & Kalshi Pro
+
+- **Native Timeframe Favoriting on MFP & Kalshi Pro (`v1.1.68`)**: Disabled injected timeframe buttons and star indicators on My Funded Perpetuals and Kalshi Pro so their native TradingView timeframe favorite stars and buttons work natively without duplicate buttons or event interception.
+- **Deep Frame & Origin Detection (`v1.1.68`)**: Added multi-tier frame detection (including `ancestorOrigins`, `referrer`, and top origin inspection) ensuring nested chart iframes accurately inherit platform rules.
+- **Per-Firm Timeframe Favorites Setting (`v1.1.68`)**: Added an explicit "Chart Timeframe Favoriting" toggle in Perp Firm Settings for every firm (default `false` on MFP and Kalshi Pro, `true` on Vest Markets).
+- **DOM Cleanup & Preservation on Vest (`v1.1.68`)**: Existing injected timeframe containers are immediately removed from DOM when native favoriting is active, while full custom timeframe favoriting remains supported on Vest Markets.
+
 Trading Cortex v1.1.67 — Kalshi Pro Integration & Perp Firm Settings Streamlining
 
 - **Kalshi Pro Support (`v1.1.67`)**: Added full support for Kalshi Pro (`pro.kalshi.com`, `kalshi.com`), featuring Cortex bar top-anchoring below the navigation header, TradingView chart enhancement, and automatic market symbol detection.
