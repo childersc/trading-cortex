@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.71`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.72`) are documented in this file.
+
+---
+
+## [v1.1.72] — 2026-11-15
+
+### 🐛 Bug Fixes & Trade Duration Helper Resolution
+- **Fixed `formatTradeDurationHuman` ReferenceError on Charting Indicators Panel**:
+  1. *Resolved Missing Function Name*: Fixed an `Uncaught ReferenceError: formatTradeDurationHuman is not defined` that occurred when clicking the "Charting Indicators" tab whenever closed trades existed in the active trading session.
+  2. *Corrected Call Site*: Replaced the call to `formatTradeDurationHuman(t.durationMs)` in `renderTradesBoxSettingsHtml` with `formatTradeDuration(t.durationMs)`.
+  3. *Added Backward-Compatible Alias*: Added `const formatTradeDurationHuman = formatTradeDuration;` next to the core `formatTradeDuration()` implementation to safeguard against any future mismatched call sites.
+  4. *Automated Test Verification*: Extended `tests/charting-indicators-hub.test.js` with a comprehensive VM execution test that pre-populates active closed positions and validates that the modal renders without any ReferenceErrors or uncaught exceptions.
 
 ---
 

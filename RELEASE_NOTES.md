@@ -1,3 +1,9 @@
+Trading Cortex v1.1.72 — Charting Indicators Trade Duration ReferenceError Fix
+
+- **Resolved `formatTradeDurationHuman` ReferenceError (`v1.1.72`)**: Fixed an `Uncaught ReferenceError: formatTradeDurationHuman is not defined` that triggered when clicking the "Charting Indicators" tab if closed positions existed in the current session.
+- **Unified Function Names & Compatibility Alias (`v1.1.72`)**: Standardized the duration formatting call to `formatTradeDuration(t.durationMs)` and exported `const formatTradeDurationHuman = formatTradeDuration` as a resilient alias.
+- **VM Regression Test Suite (`v1.1.72`)**: Added end-to-end VM modal rendering tests with populated closed trades in `tests/charting-indicators-hub.test.js` to prevent any runtime indicator drawer crashes.
+
 Trading Cortex v1.1.71 — Charting Indicators Tile Expansion & Master Toggle Lifecycle Fix
 
 - **Event Listener Lifecycle Resolution (`v1.1.71`)**: Fixed an issue where master toggle sliders and tile header accordion clicks on the Charting Indicators panel did not respond due to listeners being queried during template rendering prior to DOM insertion.
