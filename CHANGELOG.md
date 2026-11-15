@@ -1,6 +1,23 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.66`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.67`) are documented in this file.
+
+---
+
+## [v1.1.67] — 2026-11-14
+
+### 🚀 New Features & Enhancements
+- **Added Kalshi Pro to Supported Perpetual Firms & Cortex Bar Integration**:
+  1. *Kalshi Pro Built-In Support*: Added **Kalshi Pro** (`pro.kalshi.com`, `kalshi.com`) to Trading Cortex's built-in perpetual firm directory with full host permissions, main-world TradingView hooks, and isolated-world UI execution.
+  2. *Top-Bar Anchoring on Kalshi Pro*: Integrated header detection for Kalshi Pro's top navigation bar (`Kalshi Pro · MARKETS · TAPE · CANVAS · PERPETUALS · PORTFOLIO`), anchoring the Cortex bar directly below the navigation bar and preserving spacing for the ticker and chart.
+  3. *Kalshi Pro Official Vector Logo*: Designed and implemented a vector SVG logo in Kalshi's signature vibrant green (`#00D26A`), displayed in the Perp Firm Settings grid and configuration cards.
+  4. *Pair & Leverage Pattern Matching*: Extended market selector detection to automatically detect Kalshi perpetual symbols and leverage formats (e.g., `HYPE PERP 24X`, `KXHYPEPERP`).
+
+- **Streamlined Perp Firm Settings UI**:
+  1. *Clean Tile Configuration on Any Browser*: Streamlined the interactive tile grid across all supported firms (**My Funded Perpetuals**, **Vest Markets**, and **Kalshi Pro**). Clicking any tile from any open browser window instantly selects it and presents its complete configuration card.
+  2. *Removed "Add Perp Firm" & Clutter*: Eliminated the "+ Add Perp Firm" tile and draft forms to maintain a focused, high-performance experience tailored to supported platforms.
+  3. *Removed Delete Buttons*: Removed all tile deletion buttons (`✕`) and detail card removal actions, preventing accidental firm deletions while ensuring all configuration settings remain fully editable and persistent.
+  4. *Removed Vest Exchange*: Cleanly removed legacy Vest Exchange from default firm configurations and migration-stripped any historical records from stored preferences.
 
 ---
 

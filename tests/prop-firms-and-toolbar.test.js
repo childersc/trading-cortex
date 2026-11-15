@@ -63,26 +63,25 @@ const DEFAULT_PERP_FIRMS = [
     defaultLeverage: "10x"
   },
   {
-    id: "vestexchange",
-    name: "Vest Exchange",
-    url: "https://vest.exchange",
-    matchPatterns: ["vest.exchange"],
+    id: "kalshipro",
+    name: "Kalshi Pro",
+    url: "https://pro.kalshi.com",
+    matchPatterns: ["pro.kalshi.com", "kalshi.com"],
     enabled: true,
     isBuiltin: true,
-    accountTier: "Exchange App",
+    accountTier: "Perpetuals",
     topBarMode: "auto",
     customTopBarOffsetPx: 0,
     barMarginBottom: 8,
     headerHeightPx: 48,
     rememberOrderAmount: true,
     restoreSelectedAccount: true,
-    defaultLeverage: "10x"
+    defaultLeverage: "24x"
   }
 ];
 
-function normalizePerpFirmsConfig(rawList, deletedIds = null) {
+function normalizePerpFirmsConfig(rawList) {
   const list = Array.isArray(rawList) ? rawList : [];
-  const deletedSet = new Set(Array.isArray(deletedIds) ? deletedIds : []);
   const result = [];
   const seenIds = new Set();
   const existingById = new Map();
@@ -93,7 +92,6 @@ function normalizePerpFirmsConfig(rawList, deletedIds = null) {
   }
 
   for (const def of DEFAULT_PERP_FIRMS) {
-    if (deletedSet.has(def.id)) continue;
     const existing = existingById.get(def.id) || {};
     result.push({
       id: def.id,
@@ -108,7 +106,7 @@ function normalizePerpFirmsConfig(rawList, deletedIds = null) {
   }
 
   for (const item of list) {
-    if (!item || !item.id || seenIds.has(item.id) || deletedSet.has(item.id)) continue;
+    if (!item || !item.id || seenIds.has(item.id) || item.id === 'vestexchange' || item.id === 'vest_exchange') continue;
     result.push({
       id: item.id,
       name: String(item.name || item.id).trim(),
@@ -124,40 +122,31 @@ function normalizePerpFirmsConfig(rawList, deletedIds = null) {
 }
 
 // Test A: Initial population
-const initial = normalizePerpFirmsConfig(null, []);
+const initial = normalizePerpFirmsConfig(null);
 assert.strictEqual(initial.length, 3);
 assert.strictEqual(initial[0].id, 'myfundedperpetuals');
 assert.strictEqual(initial[1].id, 'vestmarkets');
-assert.strictEqual(initial[2].id, 'vestexchange');
+assert.strictEqual(initial[2].id, 'kalshipro');
+assert.strictEqual(initial[2].name, 'Kalshi Pro');
 assert.strictEqual(initial[1].restoreSelectedAccount, true);
-console.log('✓ Initial default firms normalized with restoreSelectedAccount enabled');
+console.log('✓ Initial default firms normalized with Kalshi Pro and restoreSelectedAccount enabled');
 
-// Test B: Deleting a default firm (e.g. vestexchange)
-const deletedIds = ['vestexchange'];
-const filteredList = initial.filter(f => f.id !== 'vestexchange');
-const afterDelete = normalizePerpFirmsConfig(filteredList, deletedIds);
-assert.strictEqual(afterDelete.length, 2);
-assert.strictEqual(afterDelete.some(f => f.id === 'vestexchange'), false, 'Deleted default firm must NOT respawn');
-console.log('✓ Deleted default firm stays permanently removed');
-
-// Test C: Adding and deleting a custom firm
-const customList = [...afterDelete, { id: 'custom_123', name: 'Apex Trader', url: 'https://apextrader.com' }];
-const withCustom = normalizePerpFirmsConfig(customList, deletedIds);
-assert.strictEqual(withCustom.length, 3);
-assert.strictEqual(withCustom[2].id, 'custom_123');
-
-const deletedIds2 = [...deletedIds, 'custom_123'];
-const withoutCustom = normalizePerpFirmsConfig(withCustom.filter(f => f.id !== 'custom_123'), deletedIds2);
-assert.strictEqual(withoutCustom.length, 2);
-assert.strictEqual(withoutCustom.some(f => f.id === 'custom_123'), false);
-console.log('✓ Custom firm addition and deletion verified');
+// Test B: Vest Exchange cleanup & migration
+const legacyListWithVestExchange = [
+  ...initial,
+  { id: 'vestexchange', name: 'Vest Exchange', url: 'https://vest.exchange' }
+];
+const cleanedList = normalizePerpFirmsConfig(legacyListWithVestExchange);
+assert.strictEqual(cleanedList.length, 3);
+assert.strictEqual(cleanedList.some(f => f.id === 'vestexchange'), false, 'Legacy vestexchange must be stripped');
+console.log('✓ Legacy Vest Exchange cleanly stripped from configuration');
 
 // 3. Verify getPropFirmLogoSvg produces valid vector SVG for all firms
 assert.strictEqual(isolatedContent.includes('function getPropFirmLogoSvg(firmId, size = 22)'), true);
 assert.strictEqual(isolatedContent.includes('myfundedperpetuals'), true);
 assert.strictEqual(isolatedContent.includes('vestmarkets'), true);
-assert.strictEqual(isolatedContent.includes('vestexchange'), true);
-console.log('✓ Official prop firm logos (MFP, Vest Markets, Vest Exchange) verified');
+assert.strictEqual(isolatedContent.includes('kalshi'), true);
+console.log('✓ Official prop firm logos (MFP, Vest Markets, Kalshi Pro) verified');
 
 // 4. Verify Vest account tracking & auto-restoration functions exist in content-isolated.js
 assert.strictEqual(isolatedContent.includes('function trackActiveAccount()'), true);

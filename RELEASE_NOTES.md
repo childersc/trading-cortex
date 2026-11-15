@@ -1,3 +1,10 @@
+Trading Cortex v1.1.67 — Kalshi Pro Integration & Perp Firm Settings Streamlining
+
+- **Kalshi Pro Support (`v1.1.67`)**: Added full support for Kalshi Pro (`pro.kalshi.com`, `kalshi.com`), featuring Cortex bar top-anchoring below the navigation header, TradingView chart enhancement, and automatic market symbol detection.
+- **Official Kalshi Pro Vector Branding (`v1.1.67`)**: Added custom Kalshi Pro SVG logo in signature `#00D26A` green across the firm grid and settings card.
+- **Streamlined Interactive Tiles (`v1.1.67`)**: Removed "+ Add Perp Firm" and delete buttons. Users can seamlessly click any tile from any open browser window to configure its layout, offsets, margin, leverage, and account persistence.
+- **Removed Legacy Vest Exchange (`v1.1.67`)**: Removed Vest Exchange from default configurations and cleansed stored settings.
+
 Trading Cortex v1.1.66 — Left Drawing Toolbar Persistence & Desync Self-Healing
 
 - **DOM Ground-Truth Visibility (`v1.1.66`)**: Rewrote toolbar visibility detection to check actual DOM container elements, magnet buttons, and group slots rather than internal TradingView JS state flags, eliminating false-positive reports in the dropdown menu.
