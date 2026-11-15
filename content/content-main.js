@@ -165,8 +165,12 @@
     lastChartSettings: {},
     favoriteTimeframes: [],
     cortexIndicator: { enabled: false },
+    orderBlocks: { enabled: false },
     debugMode: false
   };
+  const sentOrderBlockAlerts = new Set();
+  let cachedOrderBlocksSignature = '';
+  let cachedComputedOrderBlocks = [];
   let currentGlobalDrawings = [];
   const globalDrawingEntityMap = new Map(); // chart entity id -> persistent global drawing id
   const globalDrawingRestoreSuppression = new Set();
@@ -8404,6 +8408,385 @@
     return combinedFvgs;
   }
 
+  // -------------------------------------------------------------
+  // Institutional Order Blocks (Smart Risk Strategy) Engine
+  // -------------------------------------------------------------
+  const DEFAULT_ORDER_BLOCKS = {
+    enabled: false,
+    swingLookback: 5,
+    minFvgTicks: 1,
+    maxBlocks: 10,
+    extendMode: 'mitigation', // 'mitigation' | 'right'
+    bullishColor: '#10b981',
+    bullishOpacity: 20,
+    bearishColor: '#ef4444',
+    bearishOpacity: 20,
+    showOrderEntryIcon: true,
+    orderIconSize: 13,
+    voiceAlertEnabled: true,
+    chimeAlertEnabled: true,
+    voiceURI: '',
+    showTargetLines: true,
+    riskRewardRatio: 2.0
+  };
+
+  function normalizeOrderBlocksConfig(rawCfg) {
+    const cfg = { ...DEFAULT_ORDER_BLOCKS, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    return {
+      enabled: Boolean(cfg.enabled),
+      swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
+      minFvgTicks: Math.max(0, Math.min(20, Math.round(Number(cfg.minFvgTicks) || 1))),
+      maxBlocks: Math.max(3, Math.min(30, Math.round(Number(cfg.maxBlocks) || 10))),
+      extendMode: cfg.extendMode === 'right' ? 'right' : 'mitigation',
+      bullishColor: typeof cfg.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bullishColor) ? cfg.bullishColor : '#10b981',
+      bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
+      bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
+      bearishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bearishOpacity) || 20))),
+      showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
+      orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
+      voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
+      chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
+      voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
+      showTargetLines: cfg.showTargetLines !== false,
+      riskRewardRatio: Math.max(1.0, Math.min(5.0, Number(cfg.riskRewardRatio) || 2.0))
+    };
+  }
+
+  function computeOrderBlocksFromBars(bars, config) {
+    if (!bars || bars.length < 15 || !config || !config.enabled) return [];
+    const cfg = normalizeOrderBlocksConfig(config);
+    const lookback = cfg.swingLookback;
+    const maxBlocks = cfg.maxBlocks;
+
+    // 1. Identify swing highs and swing lows across available bars
+    const swingHighs = [];
+    const swingLows = [];
+
+    for (let i = lookback; i < bars.length - lookback; i++) {
+      const curH = bars[i].high;
+      const curL = bars[i].low;
+      let isHigh = true;
+      let isLow = true;
+
+      for (let j = i - lookback; j <= i + lookback; j++) {
+        if (j === i) continue;
+        if (bars[j].high >= curH) isHigh = false;
+        if (bars[j].low <= curL) isLow = false;
+      }
+
+      if (isHigh) swingHighs.push({ index: i, timeSec: bars[i].timeSec, price: curH });
+      if (isLow) swingLows.push({ index: i, timeSec: bars[i].timeSec, price: curL });
+    }
+
+    const orderBlocks = [];
+
+    // 2. Scan for Break of Structure (BOS / ChoCH) and back-trace candidate Order Blocks
+    // Bullish Order Blocks:
+    for (let s = 0; s < swingHighs.length; s++) {
+      const sh = swingHighs[s];
+      for (let b = sh.index + 1; b < bars.length; b++) {
+        if (bars[b].close > sh.price) {
+          // Breakout found! Find the lowest point in this leg
+          let lowestIdx = sh.index;
+          let lowestPrice = bars[sh.index].low;
+          for (let k = sh.index; k < b; k++) {
+            if (bars[k].low < lowestPrice) {
+              lowestPrice = bars[k].low;
+              lowestIdx = k;
+            }
+          }
+
+          let obIdx = lowestIdx;
+          while (obIdx < b && bars[obIdx].close >= bars[obIdx].open) {
+            obIdx++;
+          }
+          if (obIdx >= b) obIdx = lowestIdx;
+
+          // Check for displacement creating Inefficiency (FVG) within 3 candles
+          let hasFvg = false;
+          for (let f = obIdx; f < Math.min(b + 1, bars.length - 2); f++) {
+            if (bars[f + 2].low > bars[f].high) {
+              hasFvg = true;
+              break;
+            }
+          }
+
+          if (hasFvg) {
+            const obTop = Math.max(bars[obIdx].high, bars[obIdx].open);
+            const obBottom = bars[obIdx].low;
+            const id = `bull_ob_${bars[obIdx].timeSec}_${obTop.toFixed(4)}`;
+
+            if (!orderBlocks.some(x => x.id === id)) {
+              orderBlocks.push({
+                id,
+                side: 'long',
+                type: 'bullish',
+                barIndex: obIdx,
+                timeSec: bars[obIdx].timeSec,
+                top: obTop,
+                bottom: obBottom,
+                breakBarIndex: b,
+                breakTimeSec: bars[b].timeSec,
+                isMitigated: false,
+                mitigatedBarIndex: -1,
+                mitigatedTimeSec: 0,
+                mitigatedPrice: 0,
+                isInvalidated: false
+              });
+            }
+          }
+          break; // First structural break for this swing high
+        }
+      }
+    }
+
+    // Bearish Order Blocks:
+    for (let s = 0; s < swingLows.length; s++) {
+      const sl = swingLows[s];
+      for (let b = sl.index + 1; b < bars.length; b++) {
+        if (bars[b].close < sl.price) {
+          let highestIdx = sl.index;
+          let highestPrice = bars[sl.index].high;
+          for (let k = sl.index; k < b; k++) {
+            if (bars[k].high > highestPrice) {
+              highestPrice = bars[k].high;
+              highestIdx = k;
+            }
+          }
+
+          let obIdx = highestIdx;
+          while (obIdx < b && bars[obIdx].close <= bars[obIdx].open) {
+            obIdx++;
+          }
+          if (obIdx >= b) obIdx = highestIdx;
+
+          let hasFvg = false;
+          for (let f = obIdx; f < Math.min(b + 1, bars.length - 2); f++) {
+            if (bars[f + 2].high < bars[f].low) {
+              hasFvg = true;
+              break;
+            }
+          }
+
+          if (hasFvg) {
+            const obTop = bars[obIdx].high;
+            const obBottom = Math.min(bars[obIdx].low, bars[obIdx].open);
+            const id = `bear_ob_${bars[obIdx].timeSec}_${obTop.toFixed(4)}`;
+
+            if (!orderBlocks.some(x => x.id === id)) {
+              orderBlocks.push({
+                id,
+                side: 'short',
+                type: 'bearish',
+                barIndex: obIdx,
+                timeSec: bars[obIdx].timeSec,
+                top: obTop,
+                bottom: obBottom,
+                breakBarIndex: b,
+                breakTimeSec: bars[b].timeSec,
+                isMitigated: false,
+                mitigatedBarIndex: -1,
+                mitigatedTimeSec: 0,
+                mitigatedPrice: 0,
+                isInvalidated: false
+              });
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    // 3. Track Mitigation & Invalidation forward in time (Smart Risk: 1-time touch zone)
+    for (let o = 0; o < orderBlocks.length; o++) {
+      const ob = orderBlocks[o];
+      for (let m = ob.breakBarIndex + 1; m < bars.length; m++) {
+        const bar = bars[m];
+        if (ob.side === 'long') {
+          if (!ob.isMitigated && bar.low <= ob.top && bar.high >= ob.bottom) {
+            ob.isMitigated = true;
+            ob.mitigatedBarIndex = m;
+            ob.mitigatedTimeSec = bar.timeSec;
+            ob.mitigatedPrice = Math.min(ob.top, bar.high);
+            break;
+          } else if (bar.close < ob.bottom) {
+            ob.isInvalidated = true;
+            break;
+          }
+        } else {
+          if (!ob.isMitigated && bar.high >= ob.bottom && bar.low <= ob.top) {
+            ob.isMitigated = true;
+            ob.mitigatedBarIndex = m;
+            ob.mitigatedTimeSec = bar.timeSec;
+            ob.mitigatedPrice = Math.max(ob.bottom, bar.low);
+            break;
+          } else if (bar.close > ob.top) {
+            ob.isInvalidated = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Keep active / mitigated order blocks sorted by recent timeSec
+    orderBlocks.sort((a, b) => b.timeSec - a.timeSec);
+    return orderBlocks.slice(0, maxBlocks);
+  }
+
+  function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
+    if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
+    const cfg = normalizeOrderBlocksConfig(config);
+
+    ctx.save();
+
+    for (let i = 0; i < orderBlocks.length; i++) {
+      const ob = orderBlocks[i];
+      if (ob.isInvalidated) continue;
+
+      const rawStartX = barToX(ob.barIndex, ob.timeSec);
+      if (rawStartX === null) continue;
+
+      const topY = priceToY(ob.top);
+      const bottomY = priceToY(ob.bottom);
+      if (topY === null || bottomY === null) continue;
+
+      const boxLeft = rawStartX - halfBarW;
+      let boxRight;
+
+      if (ob.isMitigated) {
+        const mitX = barToX(ob.mitigatedBarIndex, ob.mitigatedTimeSec);
+        boxRight = mitX !== null ? mitX + halfBarW : cssWidth;
+      } else if (cfg.extendMode === 'right') {
+        boxRight = cssWidth;
+      } else {
+        const lastBar = bars && bars.length > 0 ? bars[bars.length - 1] : null;
+        const lastX = lastBar ? barToX(bars.length - 1, lastBar.timeSec) : cssWidth;
+        boxRight = lastX !== null ? lastX + halfBarW * 4 : cssWidth;
+      }
+
+      if (boxRight < 0 || boxLeft > cssWidth) continue;
+
+      const boxTop = Math.min(topY, bottomY);
+      const boxHeight = Math.max(2, Math.abs(bottomY - topY));
+      const boxWidth = Math.max(4, boxRight - boxLeft);
+
+      const isBull = ob.side === 'long';
+      const baseColor = isBull ? cfg.bullishColor : cfg.bearishColor;
+      const opacityPct = isBull ? cfg.bullishOpacity : cfg.bearishOpacity;
+
+      // 1. Shaded Order Block Box
+      ctx.fillStyle = hexToRgbaString(baseColor, opacityPct);
+      ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
+
+      // 2. Dashed Border
+      ctx.strokeStyle = hexToRgbaString(baseColor, Math.min(100, opacityPct + 35));
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+      ctx.setLineDash([]);
+
+      // 3. Zone Label
+      ctx.font = '600 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.fillStyle = baseColor;
+      const labelText = isBull ? 'Bullish OB' : 'Bearish OB';
+      ctx.fillText(labelText, boxLeft + 6, boxTop + 12);
+
+      if (ob.isMitigated) {
+        ctx.font = '700 8.5px monospace';
+        ctx.fillStyle = hexToRgbaString(baseColor, 80);
+        ctx.fillText('MITIGATED', boxLeft + 6, boxTop + boxHeight - 5);
+      }
+
+      // 4. Order Entry Icon on the mitigation bar
+      if (ob.isMitigated && cfg.showOrderEntryIcon && ob.mitigatedBarIndex >= 0) {
+        const mitBar = bars && bars[ob.mitigatedBarIndex];
+        const mitX = barToX(ob.mitigatedBarIndex, ob.mitigatedTimeSec);
+        if (mitBar && mitX !== null) {
+          const iconSize = cfg.orderIconSize;
+          const badgeText = isBull ? '▲ BUY OB' : '▼ SELL OB';
+
+          ctx.font = `bold ${Math.max(9, iconSize - 2)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          const textMetrics = ctx.measureText(badgeText);
+          const badgeW = textMetrics.width + 14;
+          const badgeH = iconSize + 6;
+
+          let badgeY;
+          if (isBull) {
+            const lowY = priceToY(mitBar.low);
+            badgeY = (lowY !== null ? lowY : bottomY) + 14;
+          } else {
+            const highY = priceToY(mitBar.high);
+            badgeY = (highY !== null ? highY : topY) - badgeH - 14;
+          }
+
+          const badgeX = mitX - badgeW / 2;
+
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 5);
+          } else {
+            ctx.rect(badgeX, badgeY, badgeW, badgeH);
+          }
+          ctx.fillStyle = isBull ? 'rgba(16, 185, 129, 0.94)' : 'rgba(239, 68, 68, 0.94)';
+          ctx.fill();
+          ctx.strokeStyle = isBull ? '#34d399' : '#f87171';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + badgeH / 2);
+          ctx.textAlign = 'start';
+          ctx.textBaseline = 'alphabetic';
+
+          // 5. Projected Target (TP) & Stop Loss (SL) Lines
+          if (cfg.showTargetLines) {
+            const entryPrice = ob.mitigatedPrice;
+            const stopPrice = isBull ? ob.bottom : ob.top;
+            const risk = Math.abs(entryPrice - stopPrice);
+            const targetPrice = isBull
+              ? entryPrice + risk * cfg.riskRewardRatio
+              : entryPrice - risk * cfg.riskRewardRatio;
+
+            const stopY = priceToY(stopPrice);
+            const targetY = priceToY(targetPrice);
+            const lineEndX = Math.min(cssWidth - 10, mitX + 110);
+
+            if (stopY !== null) {
+              ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
+              ctx.lineWidth = 1.2;
+              ctx.setLineDash([3, 3]);
+              ctx.beginPath();
+              ctx.moveTo(mitX, stopY);
+              ctx.lineTo(lineEndX, stopY);
+              ctx.stroke();
+              ctx.font = '600 9px monospace';
+              ctx.fillStyle = '#ef4444';
+              ctx.fillText(`SL ${stopPrice.toFixed(2)}`, lineEndX + 3, stopY + 3);
+            }
+
+            if (targetY !== null) {
+              ctx.strokeStyle = 'rgba(52, 211, 153, 0.85)';
+              ctx.lineWidth = 1.2;
+              ctx.setLineDash([3, 3]);
+              ctx.beginPath();
+              ctx.moveTo(mitX, targetY);
+              ctx.lineTo(lineEndX, targetY);
+              ctx.stroke();
+              ctx.font = '600 9px monospace';
+              ctx.fillStyle = '#10b981';
+              ctx.fillText(`TP (${cfg.riskRewardRatio.toFixed(1)}R) ${targetPrice.toFixed(2)}`, lineEndX + 3, targetY + 3);
+            }
+            ctx.setLineDash([]);
+          }
+        }
+      }
+    }
+
+    ctx.restore();
+  }
+
   function normalizeEpochSec(rawTime) {
     const n = Number(rawTime);
     if (!isFinite(n) || n <= 0) return NaN;
@@ -10143,10 +10526,12 @@
 
     const config = currentSettings && currentSettings.sessionIndicators;
     const cortexConfig = currentSettings && currentSettings.cortexIndicator;
+    const orderBlocksConfig = currentSettings && currentSettings.orderBlocks;
     const fvgConfig = currentSettings && currentSettings.autoFvg;
     const candleOhlcConfig = currentSettings && currentSettings.candleOhlc;
     const failLinesEnabled = Boolean(currentSettings && currentSettings.failLines && currentSettings.failLines.enabled);
     const cortexIndicatorEnabled = Boolean(cortexConfig && cortexConfig.enabled);
+    const orderBlocksEnabled = Boolean(orderBlocksConfig && orderBlocksConfig.enabled);
     if (!failLinesEnabled) removeFailPriceLineButtons();
     if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
     const sessionsEnabled = Boolean(config && config.enabled && isIntradayChartResolution());
@@ -10159,7 +10544,7 @@
       cleanupNativeAutoFvgShapes(null);
     }
 
-    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled) {
+    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
       if (ictSessionsCanvas) {
         const ctx = ictSessionsCanvas.getContext('2d');
@@ -10227,6 +10612,45 @@
       cachedComputedAutoFvgs = [];
     }
 
+    if (orderBlocksEnabled) {
+      const tfLabel = formatCurrentResolutionLabel();
+      const obSig = `${barsSig}_${tfLabel}_${JSON.stringify(orderBlocksConfig)}`;
+      if (
+        ictSessionsNeedsFullRecompute ||
+        obSig !== cachedOrderBlocksSignature
+      ) {
+        cachedComputedOrderBlocks = computeOrderBlocksFromBars(bars, orderBlocksConfig);
+        cachedOrderBlocksSignature = obSig;
+
+        if (cachedComputedOrderBlocks.length > 0 && (orderBlocksConfig.voiceAlertEnabled !== false || orderBlocksConfig.chimeAlertEnabled !== false)) {
+          for (let oi = 0; oi < cachedComputedOrderBlocks.length; oi++) {
+            const ob = cachedComputedOrderBlocks[oi];
+            if (ob.isMitigated && ob.mitigatedBarIndex >= bars.length - 2) {
+              const alertKey = `${symbolKey}:${tfLabel}:${ob.id}:${ob.mitigatedTimeSec}`;
+              if (!sentOrderBlockAlerts.has(alertKey)) {
+                sentOrderBlockAlerts.add(alertKey);
+                postToIsolated({
+                  type: 'VEST_TV_OB_MITIGATED',
+                  payload: {
+                    id: ob.id,
+                    side: ob.side,
+                    symbol: symbolKey,
+                    resolution: tfLabel,
+                    price: ob.mitigatedPrice,
+                    timeSec: ob.mitigatedTimeSec,
+                    top: ob.top,
+                    bottom: ob.bottom
+                  }
+                });
+              }
+            }
+          }
+        }
+      }
+    } else {
+      cachedComputedOrderBlocks = [];
+    }
+
     ictSessionsNeedsFullRecompute = false;
 
     const overlay = ensureIctSessionsOverlayCanvas(targetCanvas);
@@ -10248,7 +10672,8 @@
     ctx.scale(dpr, dpr);
 
     const hasCanvasFvgs = autoFvgEnabled && !fvgConfig.syncNativeDrawings && cachedComputedAutoFvgs.length > 0;
-    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
+    const hasCanvasOrderBlocks = orderBlocksEnabled && cachedComputedOrderBlocks.length > 0;
+    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !hasCanvasOrderBlocks && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
       clearIctPriceScaleBadges();
       ctx.restore();
@@ -11009,6 +11434,11 @@
       renderAutoFvgsOnCanvas(ctx, cachedComputedAutoFvgs, fvgConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
     }
 
+    // 5A. Render Institutional Order Blocks (Smart Risk) on canvas
+    if (hasCanvasOrderBlocks) {
+      renderOrderBlocksOnCanvas(ctx, cachedComputedOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+    }
+
     // 5B. Render Custom-Sized Candles in-place without zooming or resizing the chart time axis!
     if (customCandleWidthEnabled) {
       renderCustomWidthCandlesOnCanvas(ctx, bars, candleOhlcConfig, barToX, priceToY, barSpacing, cssWidth, cssHeight, mainSeries);
@@ -11277,6 +11707,9 @@
     cachedIctComputedSessions = [];
     cachedAutoFvgSignature = '';
     cachedComputedAutoFvgs = [];
+    cachedOrderBlocksSignature = '';
+    cachedComputedOrderBlocks = [];
+    sentOrderBlockAlerts.clear();
     cachedTargetChartCanvas = null;
     cachedPriceAxisHost = null;
     cachedPriceAxisTargetCanvas = null;
@@ -12184,7 +12617,8 @@
         currentSettings.candleOhlc.customCandleWidthEnabled ||
         currentSettings.candleOhlc.clickCandleToToggle !== false ||
         toggledCandleOhlcSet.size > 0 ||
-        (currentSettings.cortexIndicator && currentSettings.cortexIndicator.enabled))
+        (currentSettings.cortexIndicator && currentSettings.cortexIndicator.enabled) ||
+        (currentSettings.orderBlocks && currentSettings.orderBlocks.enabled))
     ) {
       setupIctSessionIndicators();
     }

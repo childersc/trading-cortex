@@ -657,6 +657,47 @@
     };
   }
 
+  const DEFAULT_ORDER_BLOCKS = {
+    enabled: false,
+    swingLookback: 5,
+    minFvgTicks: 1,
+    maxBlocks: 10,
+    extendMode: 'mitigation', // 'mitigation' | 'right'
+    bullishColor: '#10b981',
+    bullishOpacity: 20,
+    bearishColor: '#ef4444',
+    bearishOpacity: 20,
+    showOrderEntryIcon: true,
+    orderIconSize: 13,
+    voiceAlertEnabled: true,
+    chimeAlertEnabled: true,
+    voiceURI: '',
+    showTargetLines: true,
+    riskRewardRatio: 2.0
+  };
+
+  function normalizeOrderBlocksConfig(rawCfg) {
+    const cfg = { ...DEFAULT_ORDER_BLOCKS, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    return {
+      enabled: Boolean(cfg.enabled),
+      swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
+      minFvgTicks: Math.max(0, Math.min(20, Math.round(Number(cfg.minFvgTicks) || 1))),
+      maxBlocks: Math.max(3, Math.min(30, Math.round(Number(cfg.maxBlocks) || 10))),
+      extendMode: cfg.extendMode === 'right' ? 'right' : 'mitigation',
+      bullishColor: typeof cfg.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bullishColor) ? cfg.bullishColor : '#10b981',
+      bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
+      bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
+      bearishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bearishOpacity) || 20))),
+      showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
+      orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
+      voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
+      chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
+      voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
+      showTargetLines: cfg.showTargetLines !== false,
+      riskRewardRatio: Math.max(1.0, Math.min(5.0, Number(cfg.riskRewardRatio) || 2.0))
+    };
+  }
+
   let lastSentFailPrices = '';
   const ORDER_AMOUNT_MEMORY_PREFIX = '__trading_cortex_order_amount__:';
   function getOrderTicketPanel() {
@@ -1562,6 +1603,7 @@
     positionHud: JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD)),
     failLines: JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES)),
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
+    orderBlocks: JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS)),
     debugMode: false,
     dialogGlassEffect: false,
     dialogGlassOpacity: 78,
@@ -2678,12 +2720,63 @@
       : `${message.side === 'long' ? 'Buy' : 'Sell'} signal forming`, ci.signalAlertVoiceURI);
   }
 
+  function playOrderBlockChime(side) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      if (side === 'long') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.14);
+      } else {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(659.25, now);
+        osc.frequency.exponentialRampToValueAtTime(440.00, now + 0.14);
+      }
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+      osc.start(now);
+      osc.stop(now + 0.38);
+    } catch (e) {}
+  }
+
+  function handleOrderBlockMitigatedAlert(payload) {
+    if (!isTopWindow || !payload || !['long', 'short'].includes(payload.side)) return;
+    const obConfig = normalizeOrderBlocksConfig(settings.orderBlocks);
+    if (!obConfig.enabled) return;
+    const alertKey = `${payload.symbol || ''}:${payload.resolution || ''}:${payload.id || ''}:${payload.timeSec || ''}`;
+    const dedupeKey = `__trading_cortex_ob_alert__:${payload.symbol || ''}:${payload.resolution || ''}`;
+    try {
+      const recentKeys = JSON.parse(window.localStorage.getItem(dedupeKey) || '[]');
+      if (Array.isArray(recentKeys) && recentKeys.includes(alertKey)) return;
+      const nextKeys = (Array.isArray(recentKeys) ? recentKeys : []).concat(alertKey).slice(-24);
+      window.localStorage.setItem(dedupeKey, JSON.stringify(nextKeys));
+    } catch (e) {}
+    if (obConfig.chimeAlertEnabled !== false) {
+      playOrderBlockChime(payload.side);
+    }
+    if (obConfig.voiceAlertEnabled !== false) {
+      const phrase = payload.side === 'long'
+        ? 'Bullish Order Block Mitigated. Enter Long.'
+        : 'Bearish Order Block Mitigated. Enter Short.';
+      speakCortexVoicePhrase(phrase, obConfig.voiceURI);
+    }
+  }
+
   // Listen for messages from MAIN world
   window.addEventListener('message', async (event) => {
     if (!event.data || typeof event.data !== 'object') return;
     const { type, templateId, template, updates } = event.data;
 
-    if (type === 'VEST_TV_CI_SIGNAL_FORMING') {
+    if (type === 'VEST_TV_OB_MITIGATED') {
+      handleOrderBlockMitigatedAlert(event.data.payload || {});
+    } else if (type === 'VEST_TV_CI_SIGNAL_FORMING') {
       speakCortexSignalAlert(event.data.payload || {}, false);
     } else if (type === 'VEST_TV_CI_SIGNAL_CONFIRMED') {
       speakCortexSignalAlert(event.data.payload || {}, true);
@@ -4080,6 +4173,17 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.tradesBox && settings.tradesBox.enabled ? 'on' : ''}">${settings.tradesBox && settings.tradesBox.enabled ? 'ON' : 'OFF'}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-orderblocks-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#10b981;">
+              <rect x="3" y="5" width="8" height="6" rx="1"></rect>
+              <rect x="13" y="13" width="8" height="6" rx="1"></rect>
+              <polyline points="7 14 11 10 17 10"></polyline>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Order Blocks (Smart Risk)...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.orderBlocks && settings.orderBlocks.enabled ? 'on' : ''}">${settings.orderBlocks && settings.orderBlocks.enabled ? 'ON' : 'OFF'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-candleohlc-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#f59e0b;">
@@ -4224,6 +4328,12 @@
     menuEl.querySelector('#vest-sdm-open-trades-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('chartingindicators', 'trades');
+    });
+
+    // Order Blocks Button -> opens Settings Dialog directly on Order Blocks
+    menuEl.querySelector('#vest-sdm-open-orderblocks-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('chartingindicators', 'orderblocks');
     });
 
     // Candle OHLC Values Button -> opens Settings Dialog directly on Candle OHLC tab
@@ -4419,7 +4529,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator'];
+    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks'];
     let targetIndicatorToScroll = targetIndicatorId;
     if (INDICATOR_MAP.includes(initialTab)) {
       targetIndicatorToScroll = initialTab;
@@ -4527,6 +4637,9 @@
       if (draftSettings.cortexIndicator) {
         settings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
       }
+      if (draftSettings.orderBlocks) {
+        settings.orderBlocks = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+      }
       if (draftSettings.diagnosticsBox) {
         settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
       }
@@ -4549,6 +4662,7 @@
         positionHud: settings.positionHud,
         failLines: settings.failLines,
         cortexIndicator: settings.cortexIndicator,
+        orderBlocks: settings.orderBlocks,
         diagnosticsBox: settings.diagnosticsBox,
         debugMode: settings.debugMode,
         dialogGlassEffect: settings.dialogGlassEffect,
@@ -6255,6 +6369,101 @@
         `;
       }
 
+
+      function renderOrderBlocksSettingsHtml(ob) {
+        const range = (id, label, min, max, step, value, unit = '') => `
+          <label for="${id}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">${label}<span id="${id}-value" style="color:#10b981;">${value}${unit}</span></label>
+          <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" style="width:100%;accent-color:#10b981;" />`;
+
+        const voices = (typeof window.speechSynthesis !== 'undefined') ? window.speechSynthesis.getVoices() : [];
+
+        return `
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-ob-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
+          </div>
+
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">
+            Identifies high-probability institutional supply &amp; demand origin candles that generate aggressive displacement, leave Fair Value Gaps (FVG), and cause Market Structure Breakouts (BOS / ChoCH) based on Smart Risk methodology. Features real-time on-chart order entry badges and voice/chime alerts upon first mitigation / retest.
+          </p>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">STRUCTURE &amp; DETECTION</div>
+            ${range('vest-ob-swing-lookback', 'Swing High/Low Lookback', 3, 15, 1, ob.swingLookback, ' bars')}
+            ${range('vest-ob-max-blocks', 'Maximum Active Order Blocks', 3, 30, 1, ob.maxBlocks, ' blocks')}
+            ${range('vest-ob-min-fvg-ticks', 'Minimum FVG Imbalance Size', 0, 20, 1, ob.minFvgTicks, ' ticks')}
+            <label for="vest-ob-extend-mode" style="display:block;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">Zone Extension Mode</label>
+            <select id="vest-ob-extend-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+              <option value="mitigation" ${ob.extendMode !== 'right' ? 'selected' : ''}>Stop at initial mitigation / retest (Single-Use)</option>
+              <option value="right" ${ob.extendMode === 'right' ? 'selected' : ''}>Extend indefinitely to right edge</option>
+            </select>
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">ZONE COLORS &amp; OPACITY</div>
+            <div style="display:flex;gap:12px;margin-bottom:8px;">
+              <div style="flex:1;">
+                <label for="vest-ob-bull-color" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">Bullish OB Color</label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="color" id="vest-ob-bull-color" value="${ob.bullishColor}" style="width:36px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;" />
+                  <span style="font-size:11px;color:#cbd5e1;">${ob.bullishColor}</span>
+                </div>
+              </div>
+              <div style="flex:1;">
+                <label for="vest-ob-bear-color" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">Bearish OB Color</label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="color" id="vest-ob-bear-color" value="${ob.bearishColor}" style="width:36px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;" />
+                  <span style="font-size:11px;color:#cbd5e1;">${ob.bearishColor}</span>
+                </div>
+              </div>
+            </div>
+            ${range('vest-ob-bull-opacity', 'Bullish Zone Fill Opacity', 5, 80, 5, ob.bullishOpacity, '%')}
+            ${range('vest-ob-bear-opacity', 'Bearish Zone Fill Opacity', 5, 80, 5, ob.bearishOpacity, '%')}
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">ORDER ENTRY &amp; TARGETS</div>
+            <div style="display:flex;flex-direction:column;gap:9px;">
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ob-show-entry-icon" ${ob.showOrderEntryIcon ? 'checked' : ''} />
+                <span>Show on-chart Order Entry badges (▲ BUY OB / ▼ SELL OB) upon mitigation</span>
+              </label>
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ob-show-target-lines" ${ob.showTargetLines ? 'checked' : ''} />
+                <span>Project Stop Loss (opposite wick) and Take Profit target lines</span>
+              </label>
+            </div>
+            ${range('vest-ob-icon-size', 'Entry Badge Font / Icon Size', 10, 24, 1, ob.orderIconSize, ' px')}
+            ${range('vest-ob-rr-ratio', 'Take Profit Risk:Reward Ratio', 1.0, 5.0, 0.25, ob.riskRewardRatio, ' R:R')}
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">AUDIBLE ALERTS (VOICE &amp; CHIME)</div>
+            <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:12px;">
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ob-voice-alert" ${ob.voiceAlertEnabled ? 'checked' : ''} />
+                <span>Spoken voice alert ("Bullish Order Block Mitigated. Enter Long." / "Bearish Order Block Mitigated. Enter Short.")</span>
+              </label>
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ob-chime-alert" ${ob.chimeAlertEnabled ? 'checked' : ''} />
+                <span>Synthesized Web Audio ascending/descending chime</span>
+              </label>
+            </div>
+            <label for="vest-ob-voice-uri" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Alert Voice</label>
+            <div style="display:flex;gap:8px;">
+              <select id="vest-ob-voice-uri" style="flex:1;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+                <option value="">Browser Default Voice</option>
+                ${voices.map(v => `<option value="${escapeHtml(v.voiceURI)}" ${ob.voiceURI === v.voiceURI ? 'selected' : ''}>${escapeHtml(v.name)}${v.lang ? ` (${v.lang})` : ''}</option>`).join('')}
+              </select>
+              <button type="button" class="vest-tvs-action-btn" id="vest-ob-test-voice-btn" style="height:35px;padding:0 12px;font-size:11px;">
+                Test Alert
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
       function renderChartingIndicatorsHtml() {
         const sc = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
         draftSettings.sessionIndicators = sc;
@@ -6289,6 +6498,9 @@
 
         const ci = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
         draftSettings.cortexIndicator = ci;
+
+        const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+        draftSettings.orderBlocks = ob;
 
         const INDICATORS = [
           {
@@ -6378,6 +6590,17 @@
             masterToggleId: 'vest-ci-enabled',
             isEnabled: Boolean(ci.enabled),
             renderSettings: () => renderCortexIndicatorSettingsHtml(ci)
+          },
+          {
+            id: 'orderblocks',
+            title: 'Order Blocks (Smart Risk)',
+            desc: 'High-probability institutional order blocks with displacement, FVG, BOS, order entry icons &amp; audible alerts',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="8" height="6" rx="1"/><rect x="13" y="13" width="8" height="6" rx="1"/><polyline points="7 14 11 10 17 10"/></svg>`,
+            accentColor: '#10b981',
+            bgTint: 'rgba(16, 185, 129, 0.12)',
+            masterToggleId: 'vest-ob-master-enabled',
+            isEnabled: Boolean(ob.enabled),
+            renderSettings: () => renderOrderBlocksSettingsHtml(ob)
           }
         ];
 
@@ -6424,7 +6647,7 @@
         `;
       }
 
-      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator'].includes(activeTab)) {
+      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks'].includes(activeTab)) {
         return renderChartingIndicatorsHtml();
       }
       if (activeTab === 'perpfirms') {
@@ -7405,6 +7628,7 @@
             else if (indId === 'positionhud' && draftSettings.positionHud) draftSettings.positionHud.enabled = isChecked;
             else if (indId === 'faillines' && draftSettings.failLines) draftSettings.failLines.enabled = isChecked;
             else if (indId === 'cortexindicator' && draftSettings.cortexIndicator) draftSettings.cortexIndicator.enabled = isChecked;
+            else if (indId === 'orderblocks' && draftSettings.orderBlocks) draftSettings.orderBlocks.enabled = isChecked;
 
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -8050,6 +8274,38 @@
           broadcastLiveSessionDraft();
         });
         ['#vest-ci-stop-points', '#vest-ci-target-spacing', '#vest-ci-level-font-size', '#vest-ci-level-box-scale', '#vest-ci-reversal-ignore-bars'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+      }
+
+      if (activeTab === 'orderblocks' || activeTab === 'chartingindicators') {
+        overlay.querySelector('#vest-ob-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+          draftSettings.orderBlocks.enabled = true;
+          targetIndicatorToScroll = 'orderblocks';
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Order Blocks settings to defaults');
+        });
+
+        overlay.querySelector('#vest-ob-test-voice-btn')?.addEventListener('click', () => {
+          playOrderBlockChime('long');
+          const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+          const voiceUri = overlay.querySelector('#vest-ob-voice-uri')?.value || ob.voiceURI;
+          speakCortexVoicePhrase('Bullish Order Block Mitigated. Enter Long.', voiceUri);
+        });
+
+        ['#vest-ob-master-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-voice-alert', '#vest-ob-chime-alert', '#vest-ob-extend-mode', '#vest-ob-voice-uri', '#vest-ob-bull-color', '#vest-ob-bear-color'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+
+        ['#vest-ob-swing-lookback', '#vest-ob-max-blocks', '#vest-ob-min-fvg-ticks', '#vest-ob-bull-opacity', '#vest-ob-bear-opacity', '#vest-ob-icon-size', '#vest-ob-rr-ratio'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -14227,6 +14483,7 @@ if (activeTab === 'diagnostics') {
           candleOhlc: normalizeCandleOhlcConfig(data.settings.candleOhlc),
           failLines: normalizeFailLinesConfig(data.settings.failLines),
           cortexIndicator: normalizeCortexIndicatorConfig(data.settings.cortexIndicator),
+          orderBlocks: normalizeOrderBlocksConfig(data.settings.orderBlocks),
           diagnosticsBox: normalizeDiagnosticsBoxConfig(data.settings.diagnosticsBox),
           debugMode: Boolean(data.settings.debugMode),
           dialogGlassEffect: Boolean(data.settings.dialogGlassEffect),

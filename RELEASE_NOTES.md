@@ -1,3 +1,10 @@
+Trading Cortex v1.1.75 — Institutional Order Blocks (Smart Risk) with On-Chart Order Entry & Audible Alerts
+
+- **Institutional Order Blocks Engine (`v1.1.75`)**: Built complete indicator adhering to the Smart Risk strategy rules (Origin candle selection + aggressive displacement + Fair Value Gap + BOS/ChoCH breakout).
+- **On-Chart Order Entry Badges (`v1.1.75`)**: Visualizes real-time `▲ BUY OB` and `▼ SELL OB` order entry icons with projected opposite-wick Stop Loss and configurable Risk:Reward (default 1:2.0) Take Profit target lines.
+- **Audible Alerts (`v1.1.75`)**: Dual-layer alert system featuring synthesized voice callouts (*"Bullish Order Block Mitigated. Enter Long."* / *"Bearish Order Block Mitigated. Enter Short."*) and Web Audio chimes.
+- **Charting Indicators Hub (`v1.1.75`)**: Integrated into the unified indicators drawer with on-demand Settings button, unpersisted collapsed drawer state, test alert button, and full slider parameter customization.
+
 Trading Cortex v1.1.74 — Charting Indicators On-Demand Settings Button & Transient Expansion
 
 - **On-Demand Settings Button (`v1.1.74`)**: Toggling an indicator ON displays a sleek "Settings" button next to the master toggle slider instead of immediately dropping down the full settings form.
