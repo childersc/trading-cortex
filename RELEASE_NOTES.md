@@ -1,3 +1,8 @@
+Trading Cortex v1.1.77 — Charting Indicators Tile Click: Toggle Settings When ON, Turn ON When OFF
+
+- **Context-Aware Tile Click (`v1.1.77`)**: Clicking an indicator tile now toggles its settings drawer open/closed if the indicator is already ON. If the indicator is OFF, clicking it enables the indicator.
+- **Accidental Disabling Protection (`v1.1.77`)**: Prevents clicking an indicator to configure it from inadvertently turning it off, while preserving the master toggle switch on the right for explicit on/off control.
+
 Trading Cortex v1.1.76 — Settings Box 80% Default Sizing & 8-Directional Edge/Corner Resizing
 
 - **80% Default Open Dimensions (`v1.1.76`)**: Settings box now opens at a full 80% of viewport size (`80vw` x `80vh`), removing restrictive pixel caps.
