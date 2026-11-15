@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.67`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.68`) are documented in this file.
+
+---
+
+## [v1.1.68] — 2026-11-15
+
+### 🚀 Enhancements & Native Platform Support
+- **Disabled Cortex Timeframe Favoriting on My Funded Perpetuals & Kalshi Pro**:
+  1. *Native Platform Favoriting Prioritized*: Disabled Trading Cortex's injected timeframe quick-action chips (`#vest-timeframe-favorites`) and star injection on **My Funded Perpetuals** (`myfundedperpetuals.com`, `myfundedperps`) and **Kalshi Pro** (`pro.kalshi.com`, `kalshi.com`), allowing both platforms' native TradingView timeframe favorite stars and buttons to work without visual duplication or event interference.
+  2. *Deep Ancestor & Iframe Context Detection*: Implemented robust domain and context detection in `content-main.js` that checks `window.location`, `window.top`, `document.referrer`, `window.location.ancestorOrigins`, and configured firm match patterns across nested chart iframes and blob URLs.
+  3. *DOM Cleanup & Event Guarding*: Actively cleans up any existing `#vest-timeframe-favorites` container or injected star buttons when running on platforms with native support, and ensures Cortex capture listeners never intercept or suppress native TradingView star or interval clicks.
+  4. *Per-Firm Configurable Switch*: Added `enableTimeframeFavorites` to `DEFAULT_PERP_FIRMS` (default `false` on MFP and Kalshi Pro, `true` on Vest Markets) with a user toggle under "Chart Timeframe Favoriting" in Perp Firm Settings.
+  5. *Preserved on Vest Markets*: Retained custom timeframe favoriting chips and star toggles on **Vest Markets** (`next.vestmarkets.com`), which lacks native TradingView interval favoriting.
 
 ---
 

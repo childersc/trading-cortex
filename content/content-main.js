@@ -199,8 +199,55 @@
     } catch (e) {}
   }
 
+  function isTimeframeFavoritingDisabled() {
+    try {
+      const candidates = [];
+      if (window.location && window.location.hostname) candidates.push(window.location.hostname);
+      if (window.location && window.location.href) candidates.push(window.location.href);
+      if (window.top && window.top !== window) {
+        try {
+          if (window.top.location && window.top.location.hostname) candidates.push(window.top.location.hostname);
+          if (window.top.location && window.top.location.href) candidates.push(window.top.location.href);
+        } catch (e) {}
+      }
+      if (window.location && window.location.ancestorOrigins && window.location.ancestorOrigins.length) {
+        for (let i = 0; i < window.location.ancestorOrigins.length; i++) {
+          candidates.push(window.location.ancestorOrigins[i]);
+        }
+      }
+      if (document.referrer) candidates.push(document.referrer);
+      const combined = candidates.join(' ').toLowerCase();
+
+      const firms = Array.isArray(currentSettings.perpFirms) ? currentSettings.perpFirms : [];
+      for (const firm of firms) {
+        if (!firm || firm.enabled === false) continue;
+        const patterns = Array.isArray(firm.matchPatterns) ? firm.matchPatterns : [];
+        if (patterns.some(p => p && combined.includes(p.toLowerCase()))) {
+          if (firm.enableTimeframeFavorites === false) return true;
+          if (firm.enableTimeframeFavorites === true) return false;
+        }
+      }
+
+      if (combined.includes('myfundedperpetuals') || combined.includes('myfundedperps') || combined.includes('kalshi')) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function cleanupTimeframeFavorites() {
+    const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
+    docs.forEach(doc => {
+      try {
+        const existing = doc.getElementById('vest-timeframe-favorites');
+        if (existing) existing.remove();
+        doc.querySelectorAll('[data-tc-timeframe-star]').forEach(star => star.remove());
+      } catch (e) {}
+    });
+  }
+
   function installTimeframeFavoriteCapture(doc) {
-    if (!doc || timeframeFavoriteCaptureDocs.has(doc)) return;
+    if (!doc || isTimeframeFavoritingDisabled() || timeframeFavoriteCaptureDocs.has(doc)) return;
     timeframeFavoriteCaptureDocs.add(doc);
     const view = doc.defaultView;
     if (!view) return;
@@ -236,6 +283,10 @@
   }
 
   function enhanceTimeframeMenu() {
+    if (isTimeframeFavoritingDisabled()) {
+      cleanupTimeframeFavorites();
+      return;
+    }
     const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
     const favoriteSet = new Set(getTimeframeFavorites().map(item => item.resolution));
     docs.forEach(doc => {
@@ -278,7 +329,7 @@
   }
 
   function installTimeframeStarCapture(doc) {
-    if (!doc || timeframeStarCaptureDocs.has(doc)) return;
+    if (!doc || isTimeframeFavoritingDisabled() || timeframeStarCaptureDocs.has(doc)) return;
     timeframeStarCaptureDocs.add(doc);
     const view = doc.defaultView;
     if (!view) return;
@@ -303,6 +354,10 @@
   }
 
   function enhanceTimeframeFavoritesBar() {
+    if (isTimeframeFavoritingDisabled()) {
+      cleanupTimeframeFavorites();
+      return;
+    }
     const docs = typeof getSidebarDocuments === 'function' ? getSidebarDocuments() : [document];
     const favorites = getTimeframeFavorites();
     docs.forEach(doc => {
@@ -416,6 +471,10 @@
   }
 
   function enhanceTimeframeControls() {
+    if (isTimeframeFavoritingDisabled()) {
+      cleanupTimeframeFavorites();
+      return;
+    }
     enhanceTimeframeMenu();
     enhanceTimeframeFavoritesBar();
   }
@@ -3672,7 +3731,11 @@
           updateGlobalDrawingsSnapshot(payload.globalDrawings);
         }
         hasReceivedConfigUpdate = true;
-        enhanceTimeframeFavoritesBar();
+        if (isTimeframeFavoritingDisabled()) {
+          cleanupTimeframeFavorites();
+        } else {
+          enhanceTimeframeFavoritesBar();
+        }
         restoreGlobalDrawings();
 
         const activeTpl = getActiveTemplate();
