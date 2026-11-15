@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trading Cortex",
-  "version": "1.1.66",
+  "version": "1.1.67",
   "description": "Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges.",
   "icons": {
     "16": "icons/icon16.png",
@@ -30,8 +30,8 @@
     "https://*.myfundedperpetuals.com/*",
     "https://*.vestmarkets.com/*",
     "https://vestmarkets.com/*",
-    "https://*.vest.exchange/*",
-    "https://vest.exchange/*",
+    "https://*.kalshi.com/*",
+    "https://kalshi.com/*",
     "https://api.github.com/*",
     "https://github.com/*",
     "https://*.github.com/*",
@@ -48,10 +48,10 @@
       "matches": [
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
-        "https://*.vest.exchange/*",
-        "https://vest.exchange/*",
         "https://*.myfundedperpetuals.com/*",
-        "https://myfundedperpetuals.com/*"
+        "https://myfundedperpetuals.com/*",
+        "https://*.kalshi.com/*",
+        "https://kalshi.com/*"
       ],
       "js": [
         "content/content-main.js"
@@ -66,10 +66,10 @@
       "matches": [
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
-        "https://*.vest.exchange/*",
-        "https://vest.exchange/*",
         "https://*.myfundedperpetuals.com/*",
-        "https://myfundedperpetuals.com/*"
+        "https://myfundedperpetuals.com/*",
+        "https://*.kalshi.com/*",
+        "https://kalshi.com/*"
       ],
       "js": [
         "content/cortex-execution.js",
@@ -93,10 +93,10 @@
       "matches": [
         "https://*.vestmarkets.com/*",
         "https://vestmarkets.com/*",
-        "https://*.vest.exchange/*",
-        "https://vest.exchange/*",
         "https://*.myfundedperpetuals.com/*",
-        "https://myfundedperpetuals.com/*"
+        "https://myfundedperpetuals.com/*",
+        "https://*.kalshi.com/*",
+        "https://kalshi.com/*"
       ]
     }
   ],
