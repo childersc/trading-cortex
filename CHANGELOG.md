@@ -1,6 +1,26 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.72`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.73`) are documented in this file.
+
+---
+
+## [v1.1.73] — 2026-11-15
+
+### 🚀 Enhancements & Dialog Improvements
+- **Interactive Settings Dialog Drag-Resizing**:
+  1. *Compact & Freely Resizable Footprint*: Users can resize the Settings modal down to a much smaller size (`min-width: 440px`, `min-height: 320px`, down from `760px x 520px`). The sidebar width scales adaptively with `width: clamp(170px, 26%, 245px)` so indicator controls remain clear even in ultra-compact viewports.
+  2. *Corner Drag Handle*: Added a dedicated visual drag-resize grip handle in the bottom-right corner (`.vest-tvs-resize-handle`) in addition to native bidirectional CSS resizing (`resize: both`).
+  3. *Size Memory*: The modal preserves user-defined dimensions across tab navigation during an active session.
+
+- **Frosted Glass Backdrop Opacity Slider**:
+  1. *Configurable Opacity*: Added an interactive Opacity Slider under the "Dialog Glass Effect" section in the About tab, allowing fine-tuning of background translucency from 15% (ultra-sheer) to 95% (heavy frost), defaulting to 78%.
+  2. *Live Dynamic Styling*: Connected the slider to `--vest-dialog-glass-op` CSS custom variable on `:root` and `document.documentElement` for instantaneous visual feedback across settings cards, detached panels, and floating indicator boxes.
+  3. *Settings Persistence*: Saved to `settings.dialogGlassOpacity` with automatic defaults and bounds validation.
+
+### 🐛 Bug Fixes & Permission Policy Violations
+- **Prevented Deprecated `unload` Event Listener Violations**:
+  1. *Dropped Chrome Unload Warning*: Intercepted `window.addEventListener('unload')` calls in `content/content-main.js` and dropped them cleanly prior to reaching the native event registry.
+  2. *Permissions Policy Compliance*: Completely eliminated the Chrome Extensions error `Permissions policy violation: unload is not allowed in this document` triggered on Vest and TradingView pages.
 
 ---
 

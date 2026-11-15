@@ -19,6 +19,11 @@
   try {
     const originalWindowAddEventListener = window.addEventListener;
     window.addEventListener = function (type, listener, options) {
+      if (type === 'unload') {
+        // Modern Chrome Permissions-Policy deprecates and blocks 'unload' events in documents.
+        // Silently dropping registration prevents "Permissions policy violation: unload is not allowed in this document".
+        return;
+      }
       if (type === 'storage' && typeof listener === 'function') {
         const wrappedStorageListener = function (event) {
           try {

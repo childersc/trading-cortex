@@ -49,13 +49,18 @@ assert.strictEqual(
   true,
   'settings.dialogGlassEffect must default to false (solid opaque backdrop)'
 );
-console.log('✓ settings.dialogGlassEffect default (false) verified');
+assert.strictEqual(
+  isolatedContent.includes('dialogGlassOpacity: 78'),
+  true,
+  'settings.dialogGlassOpacity must default to 78% opacity'
+);
+console.log('✓ settings.dialogGlassEffect and opacity defaults verified');
 
 // 5. Verify applyDialogGlassEffect helper
 assert.strictEqual(
-  isolatedContent.includes('function applyDialogGlassEffect(enabled)'),
+  isolatedContent.includes('function applyDialogGlassEffect(enabled, opacity)'),
   true,
-  'applyDialogGlassEffect helper must be implemented'
+  'applyDialogGlassEffect helper must be implemented with opacity support'
 );
 console.log('✓ applyDialogGlassEffect helper verified');
 
@@ -69,17 +74,41 @@ assert.strictEqual(
 );
 console.log('✓ Cortex dropdown menu Dialog Glass Effect toggle verified');
 
-// 7. Verify Cortex Settings dialog About tab setting
+// 7. Verify Cortex Settings dialog About tab setting & Opacity slider
 assert.strictEqual(
   isolatedContent.includes('DISPLAY &amp; DIALOG APPEARANCE') &&
   isolatedContent.includes('id="vest-tvs-dialog-glass-toggle"') &&
-  isolatedContent.includes("overlay.querySelector('#vest-tvs-dialog-glass-toggle')"),
+  isolatedContent.includes("overlay.querySelector('#vest-tvs-dialog-glass-toggle')") &&
+  isolatedContent.includes('id="vest-tvs-dialog-glass-op-range"') &&
+  isolatedContent.includes("overlay.querySelector('#vest-tvs-dialog-glass-op-range')"),
   true,
-  'Cortex Settings About tab must contain DISPLAY & DIALOG APPEARANCE section with switch'
+  'Cortex Settings About tab must contain DISPLAY & DIALOG APPEARANCE section with switch and opacity slider'
 );
-console.log('✓ Cortex Settings About tab Dialog Glass Effect control verified');
+console.log('✓ Cortex Settings About tab Dialog Glass Effect and opacity slider verified');
 
-// 8. Verify z-index lifting on drag & interaction
+// 8. Verify dialog drag resizing and handle
+assert.strictEqual(
+  cssContent.includes('.vest-tvs-resize-handle') &&
+  cssContent.includes('min-width: 440px') &&
+  cssContent.includes('min-height: 320px') &&
+  isolatedContent.includes('vest-tvs-resize-handle') &&
+  isolatedContent.includes('isResizingModal'),
+  true,
+  'Settings dialog must support drag resizing, min dimensions 440x320, and custom resize handle'
+);
+console.log('✓ Settings dialog drag-resizable footprint and corner handle verified');
+
+// 9. Verify unload event listener interception in content-main.js to avoid permissions policy violation
+const mainContent = fs.readFileSync(path.join(__dirname, '..', 'content', 'content-main.js'), 'utf8');
+assert.strictEqual(
+  mainContent.includes("if (type === 'unload')") &&
+  mainContent.includes("Permissions policy violation: unload is not allowed in this document"),
+  true,
+  'content-main.js must drop window unload event listeners to prevent Chrome Permissions Policy violation'
+);
+console.log('✓ window.addEventListener unload interception verified');
+
+// 10. Verify z-index lifting on drag & interaction
 assert.strictEqual(
   isolatedContent.includes("panel.style.setProperty('z-index', '2147483640', 'important')") &&
   isolatedContent.includes("panel.style.setProperty('z-index', '2147483645', 'important')"),

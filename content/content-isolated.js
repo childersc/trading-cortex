@@ -1564,6 +1564,7 @@
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     debugMode: false,
     dialogGlassEffect: false,
+    dialogGlassOpacity: 78,
     minimizedWindowOrder: [],
     diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
     bottomPanelStates: {},
@@ -1593,10 +1594,15 @@
   let isCollapsed = false;
   let latestDrawingToolbarVisible = true;
 
-  function applyDialogGlassEffect(enabled) {
+  function applyDialogGlassEffect(enabled, opacity) {
     try {
       if (typeof document === 'undefined' || !document.body) return;
       document.body.classList.toggle('vest-dialog-glass-mode', Boolean(enabled));
+      const op = typeof opacity === 'number'
+        ? Math.max(15, Math.min(95, Math.round(opacity)))
+        : (typeof settings.dialogGlassOpacity === 'number' ? settings.dialogGlassOpacity : 78);
+      document.documentElement.style.setProperty('--vest-dialog-glass-op', (op / 100).toFixed(2));
+      document.documentElement.style.setProperty('--vest-dialog-glass-op-pct', `${op}%`);
     } catch (e) {}
   }
 
@@ -4251,7 +4257,7 @@
     // Dialog Glass Effect Toggle Button -> toggles solid vs frosted glass backdrop on all dialogs
     menuEl.querySelector('#vest-sdm-toggle-glass-btn')?.addEventListener('click', () => {
       settings.dialogGlassEffect = !settings.dialogGlassEffect;
-      applyDialogGlassEffect(settings.dialogGlassEffect);
+      applyDialogGlassEffect(settings.dialogGlassEffect, settings.dialogGlassOpacity);
       queueSettingsSave({ dialogGlassEffect: settings.dialogGlassEffect });
       safeStorageSet({ settings });
       showToast(
@@ -4430,6 +4436,9 @@
     }
     if (typeof draftSettings.rememberLastChartSettings !== 'boolean') {
       draftSettings.rememberLastChartSettings = true;
+    }
+    if (typeof draftSettings.dialogGlassOpacity !== 'number') {
+      draftSettings.dialogGlassOpacity = 78;
     }
     draftSettings.sessionIndicators = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
     draftSettings.autoFvg = normalizeAutoFvgConfig(draftSettings.autoFvg);
@@ -4914,6 +4923,17 @@
                   <input type="checkbox" id="vest-tvs-dialog-glass-toggle" ${draftSettings.dialogGlassEffect ? 'checked' : ''} />
                   <span class="vest-tvs-switch-slider"></span>
                 </label>
+              </div>
+
+              <div id="vest-tvs-dialog-glass-opacity-box" style="margin-top:10px; padding:10px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; display: ${draftSettings.dialogGlassEffect ? 'block' : 'none'};">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span style="font-size:12px; font-weight:600; color:#e2e8f0;">Glass Backdrop Opacity</span>
+                  <span id="vest-tvs-dialog-glass-op-val" style="font-size:11.5px; font-weight:700; color:#38bdf8; font-family:'JetBrains Mono', monospace;">${draftSettings.dialogGlassOpacity || 78}%</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <input type="range" id="vest-tvs-dialog-glass-op-range" min="15" max="95" step="1" value="${draftSettings.dialogGlassOpacity || 78}" style="flex:1; accent-color:#38bdf8; cursor:pointer;" />
+                  <span style="font-size:11px; color:#94a3b8;">15% (Translucent) – 95% (Near Opaque)</span>
+                </div>
               </div>
             </div>
 
@@ -6495,9 +6515,13 @@
     }
 
     let modalOffset = { x: 0, y: 0 };
+    let modalSize = { width: null, height: null };
     let isDraggingModal = false;
+    let isResizingModal = false;
     let dragStartMouse = { x: 0, y: 0 };
     let dragStartOffset = { x: 0, y: 0 };
+    let resizeStartMouse = { x: 0, y: 0 };
+    let resizeStartSize = { width: 0, height: 0 };
     let justFinishedDragging = false;
 
     function closeSettingsOverlay() {
@@ -6514,28 +6538,50 @@
       notifyMainWorldConfig();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
-      applyDialogGlassEffect(settings.dialogGlassEffect);
+      applyDialogGlassEffect(settings.dialogGlassEffect, settings.dialogGlassOpacity);
     }
 
     function onModalMouseMove(e) {
-      if (!isDraggingModal) return;
-      const dx = e.clientX - dragStartMouse.x;
-      const dy = e.clientY - dragStartMouse.y;
-      modalOffset.x = dragStartOffset.x + dx;
-      modalOffset.y = dragStartOffset.y + dy;
-      const cardEl = overlay.querySelector('.vest-tvs-card');
-      if (cardEl) {
-        cardEl.style.transform = `translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0)`;
+      if (isDraggingModal) {
+        const dx = e.clientX - dragStartMouse.x;
+        const dy = e.clientY - dragStartMouse.y;
+        modalOffset.x = dragStartOffset.x + dx;
+        modalOffset.y = dragStartOffset.y + dy;
+        const cardEl = overlay.querySelector('.vest-tvs-card');
+        if (cardEl) {
+          cardEl.style.transform = `translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0)`;
+        }
+      } else if (isResizingModal) {
+        const dx = e.clientX - resizeStartMouse.x;
+        const dy = e.clientY - resizeStartMouse.y;
+        const newW = Math.max(440, Math.min(window.innerWidth * 0.96, resizeStartSize.width + dx));
+        const newH = Math.max(320, Math.min(window.innerHeight * 0.94, resizeStartSize.height + dy));
+        modalSize.width = Math.round(newW);
+        modalSize.height = Math.round(newH);
+        const cardEl = overlay.querySelector('.vest-tvs-card');
+        if (cardEl) {
+          cardEl.style.width = `${modalSize.width}px`;
+          cardEl.style.height = `${modalSize.height}px`;
+        }
       }
     }
 
     function onModalMouseUp() {
-      if (!isDraggingModal) return;
-      isDraggingModal = false;
-      justFinishedDragging = true;
-      setTimeout(() => {
-        justFinishedDragging = false;
-      }, 60);
+      if (isDraggingModal) {
+        isDraggingModal = false;
+        justFinishedDragging = true;
+        setTimeout(() => {
+          justFinishedDragging = false;
+        }, 60);
+      }
+      if (isResizingModal) {
+        isResizingModal = false;
+        const cardEl = overlay.querySelector('.vest-tvs-card');
+        if (cardEl) {
+          modalSize.width = Math.round(cardEl.offsetWidth);
+          modalSize.height = Math.round(cardEl.offsetHeight);
+        }
+      }
     }
 
     window.addEventListener('mousemove', onModalMouseMove, true);
@@ -6546,8 +6592,10 @@
         window.speechSynthesis.removeEventListener('voiceschanged', voicesChangedHandler);
         voicesChangedHandler = null;
       }
+      const cardW = modalSize.width ? `${modalSize.width}px` : 'min(980px, 80vw)';
+      const cardH = modalSize.height ? `${modalSize.height}px` : 'min(680px, 80vh)';
       overlay.innerHTML = `
-        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: 80vw; height: 80vh; max-width: 80vw; max-height: 80vh; min-width: min(760px, 94vw); min-height: min(520px, 92vh); transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: ${cardW}; height: ${cardH}; max-width: 96vw; max-height: 94vh; min-width: 440px; min-height: 320px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
           <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move">
             <div class="vest-tvs-title">Settings</div>
             <button type="button" class="vest-tvs-close-btn" id="vest-tvs-close" title="Close">
@@ -6578,6 +6626,11 @@
               <button type="button" class="vest-tvs-btn-cancel" id="vest-tvs-cancel">Cancel</button>
               <button type="button" class="vest-tvs-btn-ok" id="vest-tvs-ok">Save Settings</button>
             </div>
+          </div>
+          <div class="vest-tvs-resize-handle" id="vest-tvs-resize-handle" title="Drag to resize dialog">
+            <svg viewBox="0 0 16 16" fill="currentColor">
+              <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM10 10H8V8H10V10ZM6 14H4V12H6V14Z"/>
+            </svg>
           </div>
         </div>
       `;
@@ -6678,6 +6731,10 @@
       const glassToggle = overlay.querySelector('#vest-tvs-dialog-glass-toggle');
       if (glassToggle) {
         draftSettings.dialogGlassEffect = Boolean(glassToggle.checked);
+      }
+      const glassOpRange = overlay.querySelector('#vest-tvs-dialog-glass-op-range');
+      if (glassOpRange) {
+        draftSettings.dialogGlassOpacity = Math.max(15, Math.min(95, parseInt(glassOpRange.value, 10) || 78));
       }
       const favoriteTimeframeInputs = overlay.querySelectorAll('.vest-tvs-favorite-timeframe');
       if (favoriteTimeframeInputs.length) {
@@ -7161,7 +7218,7 @@
         ...settings,
         ...draftSettings
       };
-      applyDialogGlassEffect(settings.dialogGlassEffect);
+      applyDialogGlassEffect(settings.dialogGlassEffect, settings.dialogGlassOpacity);
       safeStorageSet({ templates, settings });
       notifyMainWorldConfig();
       if (settings.rememberSidebarTools !== false) {
@@ -7196,6 +7253,63 @@
           dragStartMouse = { x: e.clientX, y: e.clientY };
           dragStartOffset = { x: modalOffset.x, y: modalOffset.y };
           e.preventDefault();
+        });
+      }
+
+      // Dialog resize handle
+      const resizeHandle = overlay.querySelector('#vest-tvs-resize-handle');
+      if (resizeHandle) {
+        resizeHandle.addEventListener('mousedown', (e) => {
+          if (e.button !== 0) return;
+          const cardEl = overlay.querySelector('.vest-tvs-card');
+          if (!cardEl) return;
+          isResizingModal = true;
+          resizeStartMouse = { x: e.clientX, y: e.clientY };
+          resizeStartSize = { width: cardEl.offsetWidth, height: cardEl.offsetHeight };
+          e.preventDefault();
+          e.stopPropagation();
+        });
+      }
+
+      // Live ResizeObserver sync for native browser resize grip
+      const cardEl = overlay.querySelector('.vest-tvs-card');
+      if (cardEl && typeof ResizeObserver !== 'undefined') {
+        try {
+          const ro = new ResizeObserver(entries => {
+            for (const entry of entries) {
+              if (!isResizingModal && entry.contentRect && entry.contentRect.width && entry.contentRect.height) {
+                modalSize.width = Math.round(cardEl.offsetWidth);
+                modalSize.height = Math.round(cardEl.offsetHeight);
+              }
+            }
+          });
+          ro.observe(cardEl);
+        } catch (e) {}
+      }
+
+      // Glass effect toggle & opacity slider on About tab
+      const glassToggle = overlay.querySelector('#vest-tvs-dialog-glass-toggle');
+      const glassOpBox = overlay.querySelector('#vest-tvs-dialog-glass-opacity-box');
+      if (glassToggle) {
+        glassToggle.addEventListener('change', () => {
+          draftSettings.dialogGlassEffect = Boolean(glassToggle.checked);
+          if (glassOpBox) {
+            glassOpBox.style.display = draftSettings.dialogGlassEffect ? 'block' : 'none';
+          }
+          applyDialogGlassEffect(draftSettings.dialogGlassEffect, draftSettings.dialogGlassOpacity);
+        });
+      }
+
+      const glassOpRange = overlay.querySelector('#vest-tvs-dialog-glass-op-range');
+      const glassOpVal = overlay.querySelector('#vest-tvs-dialog-glass-op-val');
+      if (glassOpRange) {
+        glassOpRange.addEventListener('input', () => {
+          const val = Math.max(15, Math.min(95, parseInt(glassOpRange.value, 10) || 78));
+          draftSettings.dialogGlassOpacity = val;
+          if (glassOpVal) {
+            glassOpVal.textContent = `${val}%`;
+          }
+          applyDialogGlassEffect(draftSettings.dialogGlassEffect, val);
         });
       }
 
@@ -14092,7 +14206,7 @@ if (activeTab === 'diagnostics') {
         settings.dialogGlassEffect = Boolean(settings.dialogGlassEffect);
         settings.favoriteTimeframes = normalizeFavoriteTimeframes(settings.favoriteTimeframes);
       }
-      applyDialogGlassEffect(settings.dialogGlassEffect);
+      applyDialogGlassEffect(settings.dialogGlassEffect, settings.dialogGlassOpacity);
       // Persist cleaned templates & settings so legacy defaults are permanently removed
       safeStorageSet({ templates, settings });
 
