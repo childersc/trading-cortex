@@ -1,3 +1,10 @@
+Trading Cortex v1.1.69 — Unified "Charting Indicators" Hub & Expandable Settings Tiles
+
+- **Consolidated "Charting Indicators" Hub (`v1.1.69`)**: Moved all 8 on-chart indicators (`sessions`, `autofvg`, `news`, `trades`, `candleohlc`, `positionhud`, `faillines`, `cortexindicator`) from separate left sidebar tabs into a single unified navigation section titled "Charting Indicators".
+- **Interactive Indicator Tile Boxes (`v1.1.69`)**: Each indicator is presented in an individual tile card featuring its accent color icon, title, description, live `ON` / `OFF` status badge, and a master toggle slider switch.
+- **Dynamic Expandable Settings Drawers (`v1.1.69`)**: Toggled OFF indicators show a clean collapsed card with no clutter. Toggling an indicator ON smoothly drops down its complete settings box right below the title header with all configuration controls, sliders, and color pickers.
+- **Header Click & Deep Linking (`v1.1.69`)**: Clicking anywhere on the tile header toggles the master switch. Deep links and menu actions smoothly scroll directly to that indicator tile and apply an accent glow.
+
 Trading Cortex v1.1.68 — Native Timeframe Favoriting on MFP & Kalshi Pro
 
 - **Native Timeframe Favoriting on MFP & Kalshi Pro (`v1.1.68`)**: Disabled injected timeframe buttons and star indicators on My Funded Perpetuals and Kalshi Pro so their native TradingView timeframe favorite stars and buttons work natively without duplicate buttons or event interception.

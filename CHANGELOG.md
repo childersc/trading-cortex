@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.68`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.69`) are documented in this file.
+
+---
+
+## [v1.1.69] — 2026-11-15
+
+### 🚀 Major UX Redesign: Consolidated "Charting Indicators" Hub & Expandable Tiles
+- **Unified "Charting Indicators" Sub-Section**:
+  1. *Clean Left Navigation Sidebar*: Consolidated all 8 separate on-chart indicators (`sessions`, `autofvg`, `news`, `trades`, `candleohlc`, `positionhud`, `faillines`, `cortexindicator`) from individual sidebar tabs into a single unified navigation section titled **"Charting Indicators"** (`id: 'chartingindicators'`).
+  2. *Individual Indicator Tile Boxes*: Rendered each indicator as an individual card/tile featuring its custom accent color icon, title, short description, real-time status badge (`ON` / `OFF`), and master ON/OFF toggle slider switch placed immediately to the right of the title.
+  3. *Expandable Drawer with Smooth Slide-Down*: When toggled OFF, the settings box is collapsed and hidden (`display: none;`). When toggled ON, an expandable settings drawer drops down right below the tile header (`display: block;` with smooth CSS slide-down animation) revealing all parameters, color swatches, opacity ranges, and action buttons.
+  4. *Tile Header Click & Slider Wiring*: Clicking anywhere on a tile header toggles the master switch and expands or collapses the drawer. Live slider changes dynamically update draft settings, sync to chart overlays, and refresh header status pills.
+  5. *Backward Compatibility & Smooth Scroll Navigation*: Deep links and dropdown menu triggers (e.g. `openStudioSettingsModal('sessions')`) automatically route to the `chartingindicators` tab, scroll that indicator tile into view, and briefly highlight it with an accent glow.
+  6. *Dedicated In-Drawer Action Bars*: Each indicator drawer features dedicated action buttons (Reset Defaults, Center/Reset Position, Sync Positions History, Clear Clicked Candles) aligned cleanly at the top of the drawer.
 
 ---
 
