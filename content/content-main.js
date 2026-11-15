@@ -8455,156 +8455,155 @@
   }
 
   function computeOrderBlocksFromBars(bars, config) {
-    if (!bars || bars.length < 15 || !config || !config.enabled) return [];
+    if (!bars || bars.length < 5 || !config || !config.enabled) return [];
     const cfg = normalizeOrderBlocksConfig(config);
     const lookback = cfg.swingLookback;
     const maxBlocks = cfg.maxBlocks;
 
-    // 1. Identify swing highs and swing lows across available bars
+    // 1. Identify swing points across available bars
     const swingHighs = [];
     const swingLows = [];
-
     for (let i = lookback; i < bars.length - lookback; i++) {
       const curH = bars[i].high;
       const curL = bars[i].low;
       let isHigh = true;
       let isLow = true;
-
       for (let j = i - lookback; j <= i + lookback; j++) {
         if (j === i) continue;
         if (bars[j].high >= curH) isHigh = false;
         if (bars[j].low <= curL) isLow = false;
       }
-
       if (isHigh) swingHighs.push({ index: i, timeSec: bars[i].timeSec, price: curH });
       if (isLow) swingLows.push({ index: i, timeSec: bars[i].timeSec, price: curL });
     }
 
     const orderBlocks = [];
 
-    // 2. Scan for Break of Structure (BOS / ChoCH) and back-trace candidate Order Blocks
-    // Bullish Order Blocks:
-    for (let s = 0; s < swingHighs.length; s++) {
-      const sh = swingHighs[s];
-      for (let b = sh.index + 1; b < bars.length; b++) {
-        if (bars[b].close > sh.price) {
-          // Breakout found! Find the lowest point in this leg
-          let lowestIdx = sh.index;
-          let lowestPrice = bars[sh.index].low;
-          for (let k = sh.index; k < b; k++) {
-            if (bars[k].low < lowestPrice) {
-              lowestPrice = bars[k].low;
-              lowestIdx = k;
-            }
-          }
+    // 2. Scan every bar g for Fair Value Gaps (FVG) creating inefficiency
+    // Core SMC Rule: An Order Block is strictly valid on the bar before the bar that creates a gap (obIdx = g - 1)
+    for (let g = 1; g < bars.length - 1; g++) {
+      const obIdx = g - 1; // Strictly the bar before the displacement bar that creates the gap!
 
-          let obIdx = lowestIdx;
-          if (bars[lowestIdx].close >= bars[lowestIdx].open) {
-            // Lowest candle was bullish/up; search backward for the last bearish/down candle before the push
-            for (let k = lowestIdx; k >= Math.max(0, lowestIdx - 4); k--) {
-              if (bars[k].close < bars[k].open) {
-                obIdx = k;
+      // A. Bearish Order Block candidate:
+      // Bar g is downward displacement candle (close < open) creating gap between bars[g - 1].low and bars[g + 1].high
+      if (bars[g].close < bars[g].open && bars[g + 1].high < bars[g - 1].low) {
+        // Structure break check: The impulsive move starting from g must break a recent swing low or recent low before obIdx
+        let targetLow = Infinity;
+        for (let s = swingLows.length - 1; s >= 0; s--) {
+          if (swingLows[s].index < obIdx) {
+            targetLow = swingLows[s].price;
+            break;
+          }
+        }
+        if (!isFinite(targetLow)) {
+          for (let k = Math.max(0, obIdx - lookback * 2); k < obIdx; k++) {
+            if (bars[k].low < targetLow) targetLow = bars[k].low;
+          }
+        }
+
+        let breakBarIndex = -1;
+        for (let b = g; b < Math.min(bars.length, g + 12); b++) {
+          if (bars[b].close < targetLow) {
+            breakBarIndex = b;
+            break;
+          }
+        }
+
+        if (breakBarIndex >= 0) {
+          // Highest candle was bearish/down; search backward for the last bullish/up candle
+          let originIdx = obIdx;
+          if (bars[obIdx].close <= bars[obIdx].open) {
+            for (let k = obIdx; k >= Math.max(0, obIdx - 4); k--) {
+              if (bars[k].close > bars[k].open) {
+                originIdx = k;
                 break;
               }
             }
           }
 
-          // Check for displacement creating Inefficiency (FVG) within 3 candles
-          let hasFvg = false;
-          for (let f = obIdx; f < Math.min(b + 1, bars.length - 2); f++) {
-            if (bars[f + 2].low > bars[f].high) {
-              hasFvg = true;
-              break;
-            }
-          }
+          const obTop = bars[originIdx].high;
+          const obBottom = Math.min(bars[originIdx].low, bars[originIdx].open);
+          const id = "bear_ob_" + (bars[originIdx].timeSec || originIdx) + "_" + obTop.toFixed(4);
 
-          if (hasFvg) {
-            const obTop = Math.max(bars[obIdx].high, bars[obIdx].open);
-            const obBottom = bars[obIdx].low;
-            const id = `bull_ob_${bars[obIdx].timeSec}_${obTop.toFixed(4)}`;
-
-            if (!orderBlocks.some(x => x.id === id)) {
-              orderBlocks.push({
-                id,
-                side: 'long',
-                type: 'bullish',
-                barIndex: obIdx,
-                timeSec: bars[obIdx].timeSec,
-                top: obTop,
-                bottom: obBottom,
-                breakBarIndex: b,
-                breakTimeSec: bars[b].timeSec,
-                isMitigated: false,
-                mitigatedBarIndex: -1,
-                mitigatedTimeSec: 0,
-                mitigatedPrice: 0,
-                isInvalidated: false
-              });
-            }
+          if (!orderBlocks.some(x => x.id === id)) {
+            orderBlocks.push({
+              id,
+              side: "short",
+              type: "bearish",
+              barIndex: originIdx,
+              timeSec: bars[originIdx].timeSec || 0,
+              top: obTop,
+              bottom: obBottom,
+              breakBarIndex,
+              breakTimeSec: bars[breakBarIndex].timeSec || 0,
+              isMitigated: false,
+              mitigatedBarIndex: -1,
+              mitigatedTimeSec: 0,
+              mitigatedPrice: 0,
+              isInvalidated: false
+            });
           }
-          break; // First structural break for this swing high
         }
       }
-    }
 
-    // Bearish Order Blocks:
-    for (let s = 0; s < swingLows.length; s++) {
-      const sl = swingLows[s];
-      for (let b = sl.index + 1; b < bars.length; b++) {
-        if (bars[b].close < sl.price) {
-          let highestIdx = sl.index;
-          let highestPrice = bars[sl.index].high;
-          for (let k = sl.index; k < b; k++) {
-            if (bars[k].high > highestPrice) {
-              highestPrice = bars[k].high;
-              highestIdx = k;
-            }
+      // B. Bullish Order Block candidate:
+      // Bar g is upward displacement candle (close > open) creating gap between bars[g - 1].high and bars[g + 1].low
+      if (bars[g].close > bars[g].open && bars[g + 1].low > bars[g - 1].high) {
+        let targetHigh = -Infinity;
+        for (let s = swingHighs.length - 1; s >= 0; s--) {
+          if (swingHighs[s].index < obIdx) {
+            targetHigh = swingHighs[s].price;
+            break;
           }
+        }
+        if (!isFinite(targetHigh)) {
+          for (let k = Math.max(0, obIdx - lookback * 2); k < obIdx; k++) {
+            if (bars[k].high > targetHigh) targetHigh = bars[k].high;
+          }
+        }
 
-          let obIdx = highestIdx;
-          if (bars[highestIdx].close <= bars[highestIdx].open) {
-            // Highest candle was bearish/down; search backward for the last bullish/up candle before the drop
-            for (let k = highestIdx; k >= Math.max(0, highestIdx - 4); k--) {
-              if (bars[k].close > bars[k].open) {
-                obIdx = k;
+        let breakBarIndex = -1;
+        for (let b = g; b < Math.min(bars.length, g + 12); b++) {
+          if (bars[b].close > targetHigh) {
+            breakBarIndex = b;
+            break;
+          }
+        }
+
+        if (breakBarIndex >= 0) {
+          // Lowest candle was bullish/up; search backward for the last bearish/down candle
+          let originIdx = obIdx;
+          if (bars[obIdx].close >= bars[obIdx].open) {
+            for (let k = obIdx; k >= Math.max(0, obIdx - 4); k--) {
+              if (bars[k].close < bars[k].open) {
+                originIdx = k;
                 break;
               }
             }
           }
 
-          let hasFvg = false;
-          for (let f = obIdx; f < Math.min(b + 1, bars.length - 2); f++) {
-            if (bars[f + 2].high < bars[f].low) {
-              hasFvg = true;
-              break;
-            }
-          }
+          const obTop = Math.max(bars[originIdx].high, bars[originIdx].open);
+          const obBottom = bars[originIdx].low;
+          const id = "bull_ob_" + (bars[originIdx].timeSec || originIdx) + "_" + obTop.toFixed(4);
 
-          if (hasFvg) {
-            const obTop = bars[obIdx].high;
-            const obBottom = Math.min(bars[obIdx].low, bars[obIdx].open);
-            const id = `bear_ob_${bars[obIdx].timeSec}_${obTop.toFixed(4)}`;
-
-            if (!orderBlocks.some(x => x.id === id)) {
-              orderBlocks.push({
-                id,
-                side: 'short',
-                type: 'bearish',
-                barIndex: obIdx,
-                timeSec: bars[obIdx].timeSec,
-                top: obTop,
-                bottom: obBottom,
-                breakBarIndex: b,
-                breakTimeSec: bars[b].timeSec,
-                isMitigated: false,
-                mitigatedBarIndex: -1,
-                mitigatedTimeSec: 0,
-                mitigatedPrice: 0,
-                isInvalidated: false
-              });
-            }
+          if (!orderBlocks.some(x => x.id === id)) {
+            orderBlocks.push({
+              id,
+              side: "long",
+              type: "bullish",
+              barIndex: originIdx,
+              timeSec: bars[originIdx].timeSec || 0,
+              top: obTop,
+              bottom: obBottom,
+              breakBarIndex,
+              breakTimeSec: bars[breakBarIndex].timeSec || 0,
+              isMitigated: false,
+              mitigatedBarIndex: -1,
+              mitigatedTimeSec: 0,
+              mitigatedPrice: 0,
+              isInvalidated: false
+            });
           }
-          break;
         }
       }
     }
@@ -8614,11 +8613,11 @@
       const ob = orderBlocks[o];
       for (let m = ob.breakBarIndex + 1; m < bars.length; m++) {
         const bar = bars[m];
-        if (ob.side === 'long') {
+        if (ob.side === "long") {
           if (!ob.isMitigated && bar.low <= ob.top && bar.high >= ob.bottom) {
             ob.isMitigated = true;
             ob.mitigatedBarIndex = m;
-            ob.mitigatedTimeSec = bar.timeSec;
+            ob.mitigatedTimeSec = bar.timeSec || 0;
             ob.mitigatedPrice = Math.min(ob.top, bar.high);
             break;
           } else if (bar.close < ob.bottom) {
@@ -8629,7 +8628,7 @@
           if (!ob.isMitigated && bar.high >= ob.bottom && bar.low <= ob.top) {
             ob.isMitigated = true;
             ob.mitigatedBarIndex = m;
-            ob.mitigatedTimeSec = bar.timeSec;
+            ob.mitigatedTimeSec = bar.timeSec || 0;
             ob.mitigatedPrice = Math.max(ob.bottom, bar.low);
             break;
           } else if (bar.close > ob.top) {
@@ -8644,7 +8643,6 @@
     orderBlocks.sort((a, b) => b.timeSec - a.timeSec);
     return orderBlocks.slice(0, maxBlocks);
   }
-
   function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
     if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
     const cfg = normalizeOrderBlocksConfig(config);

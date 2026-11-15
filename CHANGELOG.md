@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.79`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.80`) are documented in this file.
+
+---
+
+## [v1.1.80] — 2026-11-15
+
+### 🎯 Order Block Strict FVG Anchor Alignment
+- **Strictly Anchored to the Bar Before the Gap Bar**:
+  1. *Eliminated Downstream Drift*: Refactored `computeOrderBlocksFromBars` to strictly enforce the core SMC / Smart Risk principle: **An Order Block is only valid on the bar immediately preceding the displacement bar that creates the Fair Value Gap (`obIdx = g - 1`)**.
+  2. *Eliminated Mid-Cascade & Disconnected Zones*: Removed the detached backward/forward loop that previously selected candles multiple bars away from the gap or during mid-cascade consolidations.
+  3. *Aligned On-Chart Badges & Mitigations*: Mitigation touches (`▲ BUY OB` / `▼ SELL OB`) now precisely align with retests into the genuine origin candle that generated the imbalance, eliminating false badges during unrelated counter-trend rallies.
 
 ---
 
