@@ -206,15 +206,21 @@
   // Semver Comparison
   // -------------------------------------------------------------
   function cleanVersion(v) {
-    return String(v || '').trim().replace(/^v/i, '');
+    return String(v || '').trim().replace(/^v+/i, '');
+  }
+
+  function formatV(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    return raw.startsWith('v') || raw.startsWith('V') ? raw : `v${raw}`;
   }
 
   function getUpcomingDevVersion(baseVer = installedVersion) {
     const raw = String(baseVer || '1.1.44').trim();
     if (/alpha/i.test(raw)) {
-      return raw.startsWith('v') ? raw : `v${raw}`;
+      return formatV(raw);
     }
-    const clean = raw.replace(/^v/i, '');
+    const clean = raw.replace(/^v+/i, '');
     const parts = clean.split('.').map(n => parseInt(n, 10) || 0);
     const major = parts[0] || 1;
     const minor = parts[1] || 1;
@@ -222,7 +228,7 @@
     return `v${major}.${minor}.${patch} Alpha`;
   }
 
-  function compareVersions(a, b) {
+  function compareSemver(a, b) {
     const pa = cleanVersion(a).split('.').map(n => parseInt(n, 10) || 0);
     const pb = cleanVersion(b).split('.').map(n => parseInt(n, 10) || 0);
     const len = Math.max(pa.length, pb.length);
@@ -234,6 +240,7 @@
     }
     return 0;
   }
+  const compareVersions = compareSemver;
 
   // -------------------------------------------------------------
   // UI State Helpers
@@ -594,7 +601,7 @@
       }
     } catch (err) {
       statusEyebrow.textContent = 'STANDBY';
-      statusHeading.textContent = `Installed Build v${installedVersion}`;
+      statusHeading.textContent = `Installed Build ${formatV(installedVersion)}`;
       showError(`GitHub dev channel check (${DEFAULT_REPO}): ${err.message}`);
     } finally {
       if (btnCheckNow) {
@@ -720,25 +727,25 @@
         btnRunUpdate.disabled = false;
         chrome.action.setBadgeText({ text: 'NEW' });
         chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-        logTerm(`Update available: v${installedVersion} -> v${latestVer}`, 'ok');
+        logTerm(`Update available: ${formatV(installedVersion)} -> ${formatV(latestVer)}`, 'ok');
         if (isManualClick) {
-          showSuccess(`⚡ Update available! New release v${latestVer} is ready to deploy (installed: v${installedVersion}).`);
+          showSuccess(`⚡ Update available! New release ${formatV(latestVer)} is ready to deploy (installed: ${formatV(installedVersion)}).`);
         }
       } else {
         statusEyebrow.textContent = 'SYNCHRONIZED';
-        statusHeading.textContent = `Trading Cortex v${installedVersion} is up to date`;
-        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync v${latestVer}`;
+        statusHeading.textContent = `Trading Cortex ${formatV(installedVersion)} is up to date`;
+        if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = `Re-Sync ${formatV(latestVer)}`;
         btnRunUpdate.disabled = false;
         chrome.action.setBadgeText({ text: '' });
-        logTerm(`Local build v${installedVersion} matches latest GitHub release.`, 'ok');
+        logTerm(`Local build ${formatV(installedVersion)} matches latest GitHub release.`, 'ok');
         if (isManualClick) {
-          showSuccess(`✓ You're up to date! Trading Cortex v${installedVersion} is the latest release.`);
+          showSuccess(`✓ You're up to date! Trading Cortex ${formatV(installedVersion)} is the latest release.`);
         }
       }
     } catch (err) {
       statusEyebrow.textContent = 'STANDBY';
-      statusHeading.textContent = `Installed Build v${installedVersion}`;
-      vboxLatest.textContent = `v${installedVersion}`;
+      statusHeading.textContent = `Installed Build ${formatV(installedVersion)}`;
+      vboxLatest.textContent = formatV(installedVersion);
       vboxChanges.textContent = '0';
       showError(`GitHub channel check (${DEFAULT_REPO}): ${err.message}`);
     } finally {
@@ -1407,13 +1414,13 @@
     updateChannelUI(currentChannel);
 
     if (data.installedVersionOverride) {
-      installedVersion = data.installedVersionOverride;
+      installedVersion = formatV(cleanVersion(data.installedVersionOverride));
     }
     if (data.updaterState && data.updaterState.lastCheckedAt) {
       updateLastCheckedUI(data.updaterState.lastCheckedAt);
     }
 
-    vboxInstalled.textContent = installedVersion.startsWith('v') ? installedVersion : `v${installedVersion}`;
+    vboxInstalled.textContent = formatV(installedVersion);
     repoSlugDisplay.textContent = DEFAULT_REPO;
     allReleasesLink.href = `https://github.com/${DEFAULT_REPO}/releases`;
 
