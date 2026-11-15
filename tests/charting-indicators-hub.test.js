@@ -100,4 +100,79 @@ assert(isolatedJs.includes("activeTab === 'faillines' || activeTab === 'charting
 assert(isolatedJs.includes("activeTab === 'cortexindicator' || activeTab === 'chartingindicators'"), 'Cortex indicator events must wire on chartingindicators');
 console.log('✓ Full event wiring and live draft synchronization verified for all 8 indicators');
 
+// 7. Verify trade duration formatting function and runtime rendering with trades
+assert(isolatedJs.includes('function formatTradeDuration('), 'formatTradeDuration function must be defined');
+assert(isolatedJs.includes('const formatTradeDurationHuman = formatTradeDuration;') || isolatedJs.includes('function formatTradeDurationHuman('), 'formatTradeDurationHuman alias must be defined');
+assert(!isolatedJs.includes('formatTradeDurationHuman is not defined'), 'formatTradeDurationHuman must be valid');
+
+// Test VM execution with trades populated in tradesBox
+const vm = require('vm');
+let js = isolatedJs.replace('function openStudioSettingsModal(', 'window.openStudioSettingsModal = openStudioSettingsModal; function openStudioSettingsModal(');
+js = js.replace('let settings = {', 'window.__setTestSettings = (s) => { settings = s; }; let settings = {');
+let currentOverlay = null;
+const sandbox = {
+  console,
+  setTimeout: (fn) => typeof fn === 'function' && fn(),
+  clearTimeout: () => {},
+  setInterval: () => {},
+  clearInterval: () => {},
+  Date, Math, Number, String, Boolean, Array, Object, JSON, RegExp, Set, Map, WeakSet, WeakMap, Intl,
+  MutationObserver: class { observe() {} disconnect() {} },
+  location: { hostname: 'next.vestmarkets.com', href: 'https://next.vestmarkets.com/trade/HYPE-PERP' },
+  window: {
+    location: { hostname: 'next.vestmarkets.com', href: 'https://next.vestmarkets.com/trade/HYPE-PERP' },
+    addEventListener: () => {}, removeEventListener: () => {}, postMessage: () => {},
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    speechSynthesis: { getVoices: () => [] }
+  },
+  document: {
+    location: { hostname: 'next.vestmarkets.com', href: 'https://next.vestmarkets.com/trade/HYPE-PERP' },
+    createElement: (tag) => ({
+      tagName: tag.toUpperCase(), style: {}, dataset: {},
+      classList: { add: () => {}, remove: () => {}, toggle: () => {} },
+      setAttribute: () => {}, getAttribute: () => null, appendChild: () => {},
+      addEventListener: () => {}, removeEventListener: () => {},
+      querySelectorAll: () => [], querySelector: () => null, remove: () => {}
+    }),
+    body: { appendChild: (c) => { currentOverlay = c; } },
+    head: { appendChild: () => {} },
+    getElementById: (id) => null,
+    querySelectorAll: () => [], querySelector: () => null,
+    addEventListener: () => {}, removeEventListener: () => {}
+  },
+  chrome: {
+    runtime: { id: 'test_id', getManifest: () => ({ version: '1.1.72' }) },
+    storage: {
+      local: { get: (k, cb) => cb({}), set: () => {} },
+      sync: { get: (k, cb) => cb({}), set: () => {} },
+      onChanged: { addListener: () => {} }
+    }
+  }
+};
+sandbox.window.document = sandbox.document;
+sandbox.window.top = sandbox.window;
+sandbox.top = sandbox.window;
+sandbox.globalThis = sandbox;
+
+vm.createContext(sandbox);
+vm.runInContext(js, sandbox);
+// Seed sample closed trades to test renderTradesBoxSettingsHtml
+sandbox.window.__setTestSettings({
+  tradesBox: {
+    enabled: true,
+    filterCurrentInstrument: false,
+    filterCurrentSessionOnly: false,
+    trades: [
+      { id: 't1', source: 'manual', symbol: 'HYPE-PERP', symbolKey: 'HYPE', side: 'LONG', pnl: '25.40', durationMs: 125000, exitTime: Date.now() },
+      { id: 't2', source: 'manual', symbol: 'HYPE-PERP', symbolKey: 'HYPE', side: 'SHORT', pnl: '-10.15', durationMs: 45000, exitTime: Date.now() }
+    ]
+  }
+});
+sandbox.window.openStudioSettingsModal('chartingindicators');
+
+assert(currentOverlay && currentOverlay.innerHTML.includes('vest-indicator-tile'), 'Modal must render indicator tiles');
+assert(currentOverlay.innerHTML.includes('HYPE-PERP'), 'Rendered trades drawer must include trade symbols without ReferenceErrors');
+assert(currentOverlay.innerHTML.includes('25.40'), 'Rendered trades drawer must include formatted trade PnL');
+console.log('✓ VM execution test for openStudioSettingsModal with populated closed trades passed cleanly');
+
 console.log('All Charting Indicators Unified Hub & Expandable Tiles Tests Passed Successfully!');

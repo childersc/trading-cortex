@@ -5902,7 +5902,7 @@
               <div style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;">
                 ${matchingTrades.slice(0, 15).map(t => {
                   const isWin = Number(t.pnl) >= 0;
-                  const durStr = formatTradeDurationHuman(t.durationMs);
+                  const durStr = formatTradeDuration(t.durationMs);
                   return `
                     <div style="display:flex; align-items:center; justify-content:space-between; padding:5px 8px; background:rgba(255,255,255,0.03); border-radius:6px; font-size:11px;">
                       <div style="display:flex; align-items:center; gap:8px;">
@@ -9022,6 +9022,7 @@ if (activeTab === 'diagnostics') {
     const remHours = totalHours % 24;
     return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
   }
+  const formatTradeDurationHuman = formatTradeDuration;
 
   function buildSideBadgeInlineStyle(side, tc) {
     const isShort = side === 'SHORT';
