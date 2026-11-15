@@ -657,6 +657,41 @@
     };
   }
 
+  const DEFAULT_MARKET_STRUCTURE = {
+    enabled: false,
+    swingLookback: 5,
+    showBos: true,
+    showChoch: true,
+    breakMode: 'close', // 'close' | 'wick'
+    labelMode: 'both', // 'both' | 'mss' | 'bos' | 'choch'
+    bullishColor: '#10b981',
+    bearishColor: '#ef4444',
+    lineStyle: 'dashed', // 'dashed' | 'solid'
+    lineWidth: 1.5,
+    fontSize: 10,
+    maxStructureLines: 15,
+    extendLines: false
+  };
+
+  function normalizeMarketStructureConfig(rawCfg) {
+    const cfg = { ...DEFAULT_MARKET_STRUCTURE, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    return {
+      enabled: Boolean(cfg.enabled),
+      swingLookback: Math.max(3, Math.min(20, Math.round(Number(cfg.swingLookback) || 5))),
+      showBos: cfg.showBos !== false,
+      showChoch: cfg.showChoch !== false,
+      breakMode: cfg.breakMode === 'wick' ? 'wick' : 'close',
+      labelMode: ['both', 'mss', 'bos', 'choch'].includes(cfg.labelMode) ? cfg.labelMode : 'both',
+      bullishColor: typeof cfg.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bullishColor) ? cfg.bullishColor : '#10b981',
+      bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
+      lineStyle: cfg.lineStyle === 'solid' ? 'solid' : 'dashed',
+      lineWidth: Math.max(1, Math.min(3, Number(cfg.lineWidth) || 1.5)),
+      fontSize: Math.max(8, Math.min(16, Math.round(Number(cfg.fontSize) || 10))),
+      maxStructureLines: Math.max(5, Math.min(30, Math.round(Number(cfg.maxStructureLines) || 15))),
+      extendLines: Boolean(cfg.extendLines)
+    };
+  }
+
   const DEFAULT_ORDER_BLOCKS = {
     enabled: false,
     swingLookback: 5,
@@ -1604,6 +1639,7 @@
     failLines: JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES)),
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     orderBlocks: JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS)),
+    marketStructure: JSON.parse(JSON.stringify(DEFAULT_MARKET_STRUCTURE)),
     debugMode: false,
     dialogGlassEffect: false,
     dialogGlassOpacity: 78,
@@ -4173,6 +4209,15 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.tradesBox && settings.tradesBox.enabled ? 'on' : ''}">${settings.tradesBox && settings.tradesBox.enabled ? 'ON' : 'OFF'}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-marketstructure-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#06b6d4;">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Market Structure (BOS/CHoCH)...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.marketStructure && settings.marketStructure.enabled ? 'on' : ''}">${settings.marketStructure && settings.marketStructure.enabled ? 'ON' : 'OFF'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-orderblocks-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#10b981;">
@@ -4328,6 +4373,12 @@
     menuEl.querySelector('#vest-sdm-open-trades-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
       openStudioSettingsModal('chartingindicators', 'trades');
+    });
+
+    // Order Blocks Button -> opens Settings Dialog directly on Order Blocks
+    menuEl.querySelector('#vest-sdm-open-marketstructure-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('chartingindicators', 'marketstructure');
     });
 
     // Order Blocks Button -> opens Settings Dialog directly on Order Blocks
@@ -4529,7 +4580,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks'];
+    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure'];
     let targetIndicatorToScroll = targetIndicatorId;
     if (INDICATOR_MAP.includes(initialTab)) {
       targetIndicatorToScroll = initialTab;
@@ -4640,6 +4691,9 @@
       if (draftSettings.orderBlocks) {
         settings.orderBlocks = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
       }
+      if (draftSettings.marketStructure) {
+        settings.marketStructure = normalizeMarketStructureConfig(draftSettings.marketStructure);
+      }
       if (draftSettings.diagnosticsBox) {
         settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
       }
@@ -4663,6 +4717,7 @@
         failLines: settings.failLines,
         cortexIndicator: settings.cortexIndicator,
         orderBlocks: settings.orderBlocks,
+        marketStructure: settings.marketStructure,
         diagnosticsBox: settings.diagnosticsBox,
         debugMode: settings.debugMode,
         dialogGlassEffect: settings.dialogGlassEffect,
@@ -6370,6 +6425,86 @@
       }
 
 
+      
+      function renderMarketStructureSettingsHtml(ms) {
+        const range = (id, label, min, max, step, value, unit = '') => `
+          <label for="${id}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">${label}<span id="${id}-value" style="color:#06b6d4;">${value}${unit}</span></label>
+          <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" style="width:100%;accent-color:#06b6d4;" />`;
+
+        return `
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-ms-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
+          </div>
+
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">
+            Identifies trend continuation and reversal pivots using Smart Money Concepts (SMC): Break of Structure (BOS) confirms continuation, while Change of Character (CHoCH / MSS) signals institutional market structure shifts.
+          </p>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">STRUCTURE DETECTION &amp; SENSITIVITY</div>
+            ${range('vest-ms-swing-lookback', 'Swing High/Low Lookback', 3, 20, 1, ms.swingLookback, ' bars')}
+            ${range('vest-ms-max-lines', 'Maximum Active Structure Lines', 5, 30, 1, ms.maxStructureLines, ' lines')}
+            <label for="vest-ms-break-mode" style="display:block;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">Break Confirmation Trigger</label>
+            <select id="vest-ms-break-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+              <option value="close" ${ms.breakMode === 'close' ? 'selected' : ''}>Candle Close beyond swing (Standard SMC)</option>
+              <option value="wick" ${ms.breakMode === 'wick' ? 'selected' : ''}>Candle Wick beyond swing (Aggressive)</option>
+            </select>
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">DISPLAY &amp; LABELS</div>
+            <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:12px;">
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ms-show-bos" ${ms.showBos ? 'checked' : ''} />
+                <span>Show Break of Structure (BOS) continuation lines</span>
+              </label>
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ms-show-choch" ${ms.showChoch ? 'checked' : ''} />
+                <span>Show Change of Character (CHoCH / MSS) reversal lines</span>
+              </label>
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ms-extend-lines" ${ms.extendLines ? 'checked' : ''} />
+                <span>Extend structure lines across chart until broken</span>
+              </label>
+            </div>
+            <label for="vest-ms-label-mode" style="display:block;font-size:12px;color:#e4e4e7;margin:10px 0 6px;">Reversal Label Style</label>
+            <select id="vest-ms-label-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+              <option value="both" ${ms.labelMode === 'both' ? 'selected' : ''}>BOS &amp; CHoCH (Classic SMC)</option>
+              <option value="mss" ${ms.labelMode === 'mss' ? 'selected' : ''}>BOS &amp; MSS (Market Structure Shift)</option>
+              <option value="bos" ${ms.labelMode === 'bos' ? 'selected' : ''}>BOS Only</option>
+              <option value="choch" ${ms.labelMode === 'choch' ? 'selected' : ''}>CHoCH Only</option>
+            </select>
+            <label for="vest-ms-line-style" style="display:block;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">Line Style</label>
+            <select id="vest-ms-line-style" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+              <option value="dashed" ${ms.lineStyle === 'dashed' ? 'selected' : ''}>Dashed Line</option>
+              <option value="solid" ${ms.lineStyle === 'solid' ? 'selected' : ''}>Solid Line</option>
+            </select>
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">COLORS</div>
+            <div style="display:flex;gap:12px;">
+              <div style="flex:1;">
+                <label for="vest-ms-bull-color" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">Bullish Break Color</label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="color" id="vest-ms-bull-color" value="${ms.bullishColor}" style="width:36px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;" />
+                  <span style="font-size:11px;color:#cbd5e1;">${ms.bullishColor}</span>
+                </div>
+              </div>
+              <div style="flex:1;">
+                <label for="vest-ms-bear-color" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">Bearish Break Color</label>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="color" id="vest-ms-bear-color" value="${ms.bearishColor}" style="width:36px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;" />
+                  <span style="font-size:11px;color:#cbd5e1;">${ms.bearishColor}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
       function renderOrderBlocksSettingsHtml(ob) {
         const range = (id, label, min, max, step, value, unit = '') => `
           <label for="${id}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">${label}<span id="${id}-value" style="color:#10b981;">${value}${unit}</span></label>
@@ -6502,6 +6637,9 @@
         const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
         draftSettings.orderBlocks = ob;
 
+        const ms = normalizeMarketStructureConfig(draftSettings.marketStructure);
+        draftSettings.marketStructure = ms;
+
         const INDICATORS = [
           {
             id: 'sessions',
@@ -6601,6 +6739,17 @@
             masterToggleId: 'vest-ob-master-enabled',
             isEnabled: Boolean(ob.enabled),
             renderSettings: () => renderOrderBlocksSettingsHtml(ob)
+          },
+          {
+            id: 'marketstructure',
+            title: 'Market Structure (BOS / CHoCH / MSS)',
+            desc: 'Real-time Break of Structure (BOS) and Change of Character (CHoCH / MSS) lines with break confirmation',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
+            accentColor: '#06b6d4',
+            bgTint: 'rgba(6, 182, 212, 0.12)',
+            masterToggleId: 'vest-ms-master-enabled',
+            isEnabled: Boolean(ms.enabled),
+            renderSettings: () => renderMarketStructureSettingsHtml(ms)
           }
         ];
 
@@ -6647,7 +6796,7 @@
         `;
       }
 
-      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks'].includes(activeTab)) {
+      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure'].includes(activeTab)) {
         return renderChartingIndicatorsHtml();
       }
       if (activeTab === 'perpfirms') {
@@ -7675,6 +7824,7 @@
             else if (indId === 'faillines' && draftSettings.failLines) draftSettings.failLines.enabled = isChecked;
             else if (indId === 'cortexindicator' && draftSettings.cortexIndicator) draftSettings.cortexIndicator.enabled = isChecked;
             else if (indId === 'orderblocks' && draftSettings.orderBlocks) draftSettings.orderBlocks.enabled = isChecked;
+            else if (indId === 'marketstructure' && draftSettings.marketStructure) draftSettings.marketStructure.enabled = isChecked;
 
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -8335,6 +8485,31 @@
           broadcastLiveSessionDraft();
         });
         ['#vest-ci-stop-points', '#vest-ci-target-spacing', '#vest-ci-level-font-size', '#vest-ci-level-box-scale', '#vest-ci-reversal-ignore-bars'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+      }
+
+      if (activeTab === 'marketstructure' || activeTab === 'chartingindicators') {
+        overlay.querySelector('#vest-ms-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.marketStructure = JSON.parse(JSON.stringify(DEFAULT_MARKET_STRUCTURE));
+          draftSettings.marketStructure.enabled = true;
+          targetIndicatorToScroll = 'marketstructure';
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Market Structure settings to defaults');
+        });
+
+        ['#vest-ms-master-enabled', '#vest-ms-show-bos', '#vest-ms-show-choch', '#vest-ms-extend-lines', '#vest-ms-break-mode', '#vest-ms-label-mode', '#vest-ms-line-style', '#vest-ms-bull-color', '#vest-ms-bear-color'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+
+        ['#vest-ms-swing-lookback', '#vest-ms-max-lines'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -14545,6 +14720,7 @@ if (activeTab === 'diagnostics') {
           failLines: normalizeFailLinesConfig(data.settings.failLines),
           cortexIndicator: normalizeCortexIndicatorConfig(data.settings.cortexIndicator),
           orderBlocks: normalizeOrderBlocksConfig(data.settings.orderBlocks),
+          marketStructure: normalizeMarketStructureConfig(data.settings.marketStructure),
           diagnosticsBox: normalizeDiagnosticsBoxConfig(data.settings.diagnosticsBox),
           debugMode: Boolean(data.settings.debugMode),
           dialogGlassEffect: Boolean(data.settings.dialogGlassEffect),
