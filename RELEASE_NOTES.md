@@ -1,3 +1,8 @@
+Trading Cortex v1.1.76 — Settings Box 80% Default Sizing & 8-Directional Edge/Corner Resizing
+
+- **80% Default Open Dimensions (`v1.1.76`)**: Settings box now opens at a full 80% of viewport size (`80vw` x `80vh`), removing restrictive pixel caps.
+- **Drag-Resize From Any Side (`v1.1.76`)**: Added dedicated resize handles along all 4 edges (Top, Bottom, Left, Right) and all 4 corners (Top-Left, Top-Right, Bottom-Left, Bottom-Right) with smooth opposing-edge anchoring.
+
 Trading Cortex v1.1.75 — Institutional Order Blocks (Smart Risk) with On-Chart Order Entry & Audible Alerts
 
 - **Institutional Order Blocks Engine (`v1.1.75`)**: Built complete indicator adhering to the Smart Risk strategy rules (Origin candle selection + aggressive displacement + Fair Value Gap + BOS/ChoCH breakout).

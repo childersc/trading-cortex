@@ -98,6 +98,24 @@ assert.strictEqual(
 );
 console.log('✓ Settings dialog drag-resizable footprint and corner handle verified');
 
+// 8b. Verify 80% initial open size and multi-directional edge & corner resize handles
+assert.strictEqual(
+  isolatedContent.includes("cardW = modalSize.width ? `${modalSize.width}px` : '80vw'") &&
+  isolatedContent.includes("cardH = modalSize.height ? `${modalSize.height}px` : '80vh'") &&
+  isolatedContent.includes('class="vest-tvs-resize-edge top"') &&
+  isolatedContent.includes('class="vest-tvs-resize-edge bottom"') &&
+  isolatedContent.includes('class="vest-tvs-resize-edge left"') &&
+  isolatedContent.includes('class="vest-tvs-resize-edge right"') &&
+  cssContent.includes('.vest-tvs-resize-edge.top') &&
+  cssContent.includes('.vest-tvs-resize-edge.bottom') &&
+  cssContent.includes('.vest-tvs-resize-edge.left') &&
+  cssContent.includes('.vest-tvs-resize-edge.right') &&
+  cssContent.includes('.vest-tvs-resize-corner.top-left'),
+  true,
+  'Settings dialog must open at 80% (80vw x 80vh) and provide multi-directional resize edge handles for all sides'
+);
+console.log('✓ Settings dialog 80% open size and multi-directional edge/corner resize handles verified');
+
 // 9. Verify unload event listener interception in content-main.js to avoid permissions policy violation
 const mainContent = fs.readFileSync(path.join(__dirname, '..', 'content', 'content-main.js'), 'utf8');
 assert.strictEqual(
