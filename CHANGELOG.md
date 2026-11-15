@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.80`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.81`) are documented in this file.
+
+---
+
+## [v1.1.81] — 2026-11-15
+
+### 🎯 Order Block Origin Detection on Impulsive Moves
+- **Fixed Origin Candle Positioning at Impulsive Displacement Moves**:
+  1. *Immediate Swing Structure Break*: Replaced the macro swing low search (which required prices to crash through ancient swing lows from the bottom of the chart) with **immediate swing leg structure break** (`recentLow` / `recentHigh` over the lookback leg).
+  2. *Strict Origin Placement*: Verified on live 1h HYPE candles that every Order Block is accurately anchored to the exact origin candle immediately preceding the impulsive displacement bar (`obIdx = g - 1`):
+     - Peak at $75.24 on Nov 13 properly captured as Bearish OB.
+     - Midnight cascade at $71.86 properly captured as Bearish OB.
+     - V-bottom at $62.30 on Nov 15 properly captured as Bullish OB.
+     - Peak at $68.48 on Nov 15 properly captured as Bearish OB.
+  3. *Duplicate Stacking Prevention*: Added anti-spam grouping so consecutive candles in a prolonged impulse do not stack duplicate order blocks on top of each other.
 
 ---
 
