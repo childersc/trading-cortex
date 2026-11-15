@@ -1905,6 +1905,7 @@
   setTimeout(syncChartMemoryFocusState, 0);
 
   let settingsLoaded = false;
+  let lastChartSettingsMeta = null;
 
   function notifyMainWorldConfig() {
     if (!settingsLoaded) return;
@@ -1913,7 +1914,8 @@
       payload: {
         templates,
         settings,
-        globalDrawings
+        globalDrawings,
+        settingsMeta: lastChartSettingsMeta
       }
     });
     refreshCortexPaperStatsOnChart();
@@ -1987,6 +1989,9 @@
             ...incomingSettings,
             lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings)
           };
+        }
+        if (changes.lastChartSettingsMeta && changes.lastChartSettingsMeta.newValue) {
+          lastChartSettingsMeta = changes.lastChartSettingsMeta.newValue;
         }
         if (changes.globalDrawings && Array.isArray(changes.globalDrawings.newValue)) {
           globalDrawings = normalizeGlobalDrawings(changes.globalDrawings.newValue);
@@ -2866,7 +2871,13 @@
         const incoming = event.data.lastChartSettings;
         const prev = settings.lastChartSettings || {};
         settings.lastChartSettings = mergeLastChartSettings(prev, incoming);
-        queueSettingsSave({ lastChartSettings: settings.lastChartSettings });
+        if (event.data.meta) {
+          lastChartSettingsMeta = event.data.meta;
+        }
+        queueSettingsSave({
+          lastChartSettings: settings.lastChartSettings,
+          lastChartSettingsMeta
+        });
       }
     } else if (type === 'VEST_TV_SHOW_TOAST') {
       if (event.data.message) {

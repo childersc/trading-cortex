@@ -11,6 +11,37 @@
   if (window.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) return;
   window.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__ = true;
 
+  // -------------------------------------------------------------
+  // Multi-Window Timeframe Protection & Storage Event Guard
+  // Prevents TradingView's native cross-tab sync from forcing all charts
+  // on the same domain to adopt the interval/timeframe of whichever tab was clicked.
+  // -------------------------------------------------------------
+  try {
+    const originalWindowAddEventListener = window.addEventListener;
+    window.addEventListener = function (type, listener, options) {
+      if (type === 'storage' && typeof listener === 'function') {
+        const wrappedStorageListener = function (event) {
+          try {
+            if (
+              event &&
+              event.key &&
+              (event.key === 'tradingview.chartproperties' ||
+                event.key.startsWith('tradingview.chartproperties') ||
+                event.key === 'tradingview.IntervalWidget.quicks' ||
+                event.key.includes('IntervalWidget'))
+            ) {
+              // Block cross-tab interval sync from overriding active chart resolution
+              return;
+            }
+          } catch (e) {}
+          return listener.apply(this, arguments);
+        };
+        return originalWindowAddEventListener.call(this, type, wrappedStorageListener, options);
+      }
+      return originalWindowAddEventListener.apply(this, arguments);
+    };
+  } catch (e) {}
+
   const DEFAULT_TEMPLATES = [];
 
   const DRAWING_TYPE_LABELS = {
@@ -194,7 +225,13 @@
     try {
       const chart = activeChart || (activeChartApi && typeof activeChartApi.activeChart === 'function' ? activeChartApi.activeChart() : null);
       if (chart && typeof chart.setResolution === 'function') {
-        chart.setResolution(String(resolution), () => scheduleSaveCurrentChartSettings(200));
+        chart.setResolution(String(resolution), () => {
+          if (typeof handleChartIntervalChanged === 'function') {
+            handleChartIntervalChanged(resolution);
+          } else {
+            scheduleSaveCurrentChartSettings(200);
+          }
+        });
       }
     } catch (e) {}
   }
@@ -630,6 +667,15 @@
           let dirty = false;
           const cleanedEntries = {};
           Object.entries(parsedChart.localStorageEntries).forEach(([k, v]) => {
+            if (
+              k === 'tradingview.chartproperties' ||
+              k.startsWith('tradingview.chartproperties') ||
+              k.includes('IntervalWidget')
+            ) {
+              // Strictly strip raw chartproperties/interval keys from pre-hydration so each window retains its own timeframe
+              dirty = true;
+              return;
+            }
             if (isSafeTradingViewStorageKey(k)) {
               const safeVal = (k.toLowerCase().includes('toolbar') && (k.endsWith('.visible') || k.includes('visibility')) && v === 'false') ? 'true' : v;
               cleanedEntries[k] = safeVal;
@@ -3755,7 +3801,7 @@
           chartSettingsRestoreAttempts = 0;
           restoreLastChartSettings();
         } else if (isRememberingChart && hasCompletedInitialChartSettingsRestore) {
-          applyIncomingChartViewportIfNewer();
+          applyIncomingChartViewportIfNewer(payload && payload.settingsMeta);
         }
         if (currentSettings.candleOhlc && currentSettings.candleOhlc.customCandleWidthEnabled) {
           applyCustomCandleWidthToChart(currentSettings.candleOhlc.candleWidthPx, false);
@@ -5674,14 +5720,34 @@
     return null;
   }
 
-  function applyIncomingChartViewportIfNewer() {
+  function applyIncomingChartViewportIfNewer(meta = null) {
     if (currentSettings.rememberLastChartSettings === false || !activeChart) return;
     // The focused tab is authoritative. Background tabs follow its updates but never
     // push their own viewport back into the shared chart-memory record.
     if (chartMemoryTabFocused) return;
     const context = getActiveChartMemoryContext();
+    if (!context) return;
+
+    // Strict Timeframe Isolation: Never apply viewport updates across differing resolutions!
+    if (meta && meta.resolution) {
+      if (String(meta.resolution).toUpperCase() !== String(context.resolution).toUpperCase()) {
+        return;
+      }
+    }
+    if (meta && meta.symbol) {
+      if (String(meta.symbol).toUpperCase() !== String(context.symbol).toUpperCase()) {
+        return;
+      }
+    }
+
     const state = getSavedViewportForActiveChart(currentSettings.lastChartSettings || {});
-    if (!context || !state || !state.viewport || state.sourceTabId === chartMemoryTabId) return;
+    if (!state || !state.viewport || state.sourceTabId === chartMemoryTabId) return;
+
+    // Strict verification that stored state matches this chart's active resolution
+    if (state.resolution && String(state.resolution).toUpperCase() !== String(context.resolution).toUpperCase()) {
+      return;
+    }
+
     const updatedAt = Number(state.updatedAt) || 0;
     if (updatedAt <= (chartViewportAppliedAt.get(context.key) || 0)) return;
     chartViewportAppliedAt.set(context.key, updatedAt);
@@ -5987,8 +6053,6 @@
         const key = window.localStorage.key(i);
         if (!key) continue;
         if (
-          key.startsWith('tradingview.chartproperties') ||
-          key === 'tradingview.IntervalWidget.quicks' ||
           key === 'tradingview.StyleWidget.quicks'
         ) {
           const val = window.localStorage.getItem(key);
@@ -6001,6 +6065,74 @@
     return entries;
   }
 
+  let lastHandledIntervalKey = '';
+  let lastHandledIntervalTime = 0;
+
+  function handleChartIntervalChanged(targetResolution = null) {
+    if (isRestoringChartSettings) return;
+    if (!activeChart) return;
+
+    let resolution = targetResolution ? String(targetResolution).trim() : '';
+    if (!resolution) {
+      try {
+        if (typeof activeChart.resolution === 'function') {
+          resolution = String(activeChart.resolution() || '').trim();
+        }
+      } catch (e) {}
+    }
+    let symbol = '';
+    try {
+      if (typeof activeChart.symbol === 'function') {
+        symbol = String(activeChart.symbol() || '').trim();
+      }
+    } catch (e) {}
+    if (!symbol) symbol = getCurrentChartSymbolKey() || lastTrackedInstrument || '';
+    if (!symbol || !resolution) return;
+
+    const chartKey = `${symbol.toUpperCase()}|${resolution.toUpperCase()}`;
+    const now = Date.now();
+    if (chartKey === lastHandledIntervalKey && (now - lastHandledIntervalTime < 450)) {
+      return;
+    }
+    lastHandledIntervalKey = chartKey;
+    lastHandledIntervalTime = now;
+
+    log(`Chart interval changed to ${resolution} for ${symbol} (${chartKey})`);
+
+    // Pull last known focused chart settings for this specific symbol + resolution
+    const saved = currentSettings && currentSettings.lastChartSettings;
+    const savedState = (saved && saved.viewportsByChart && saved.viewportsByChart[chartKey])
+      || (lastKnownChartConfigs.has(chartKey) ? lastKnownChartConfigs.get(chartKey) : null);
+
+    if (savedState && (savedState.viewport || savedState.barSpacing)) {
+      const vp = savedState.viewport || savedState;
+      log(`Restoring last known focused chart settings for ${chartKey}:`, vp);
+      isRestoringChartSettings = true;
+      chartViewportAppliedAt.set(chartKey, Number(savedState.updatedAt) || now);
+
+      setTimeout(() => {
+        applyViewportStateToChart(vp);
+      }, 100);
+
+      setTimeout(() => {
+        applyViewportStateToChart(vp);
+        isRestoringChartSettings = false;
+        // This chart has adopted the last known settings for this resolution.
+        // If focused, it becomes the author for this timeframe.
+        if (chartMemoryTabFocused) {
+          scheduleSaveCurrentChartSettings(350);
+        }
+      }, 480);
+    } else {
+      // First time viewing this interval or no prior saved viewport
+      setTimeout(() => {
+        if (chartMemoryTabFocused) {
+          scheduleSaveCurrentChartSettings(300);
+        }
+      }, 500);
+    }
+  }
+
   function setupChartSettingsObserver() {
     if (chartSettingsObserverInitialized) return;
 
@@ -6009,8 +6141,8 @@
         if (typeof activeChart.onIntervalChanged === 'function') {
           const sub = activeChart.onIntervalChanged();
           if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => {
-              scheduleSaveCurrentChartSettings(200);
+            sub.subscribe(null, (newInterval) => {
+              handleChartIntervalChanged(newInterval);
             });
           }
         }
@@ -6219,7 +6351,13 @@
 
     postToIsolated({
       type: 'VEST_TV_CHART_SETTINGS_CHANGED',
-      lastChartSettings: nextSettings
+      lastChartSettings: nextSettings,
+      meta: {
+        symbol,
+        resolution,
+        chartKey,
+        sourceTabId: chartMemoryTabId
+      }
     });
   }
 
@@ -6258,23 +6396,31 @@
         try {
           Object.entries(saved.localStorageEntries).forEach(([k, v]) => {
             if (typeof v === 'string' && isSafeTradingViewStorageKey(k)) {
-              window.localStorage.setItem(k, v);
-              if (k === 'tradingview.chartproperties' && typeof activeChart.applyOverrides === 'function') {
-                try {
-                  const parsed = JSON.parse(v);
-                  if (parsed && parsed.paneProperties) {
-                    const flat = {};
-                    Object.entries(parsed.paneProperties).forEach(([pk, pv]) => {
-                      if (pv !== null && typeof pv !== 'object') {
-                        flat[`paneProperties.${pk}`] = pv;
+              if (
+                k === 'tradingview.chartproperties' ||
+                k.startsWith('tradingview.chartproperties') ||
+                k.includes('IntervalWidget')
+              ) {
+                // Strictly do NOT write raw chartproperties or IntervalWidget keys into window.localStorage as that overwrites the active chart interval!
+                if (k === 'tradingview.chartproperties' && typeof activeChart.applyOverrides === 'function') {
+                  try {
+                    const parsed = JSON.parse(v);
+                    if (parsed && parsed.paneProperties) {
+                      const flat = {};
+                      Object.entries(parsed.paneProperties).forEach(([pk, pv]) => {
+                        if (pv !== null && typeof pv !== 'object') {
+                          flat[`paneProperties.${pk}`] = pv;
+                        }
+                      });
+                      if (Object.keys(flat).length > 0) {
+                        activeChart.applyOverrides(flat);
                       }
-                    });
-                    if (Object.keys(flat).length > 0) {
-                      activeChart.applyOverrides(flat);
                     }
-                  }
-                } catch (e) {}
+                  } catch (e) {}
+                }
+                return;
               }
+              window.localStorage.setItem(k, v);
             }
           });
         } catch (e) {}
@@ -11132,18 +11278,17 @@
     lastPriceAxisBadgesHtml = '';
     ictSessionsNeedsFullRecompute = true;
 
-    // 3. Ensure the new symbol's price scale is in autoScale mode if the user hasn't explicitly locked this symbol's price range
+    // 3. Ensure the new symbol's price scale is in autoScale mode if the user hasn't explicitly locked this symbol/interval's price range
     try {
       const currentSym = getCurrentChartSymbolKey();
+      const currentRes = typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : '';
+      const chartKey = currentSym && currentRes ? `${String(currentSym).toUpperCase()}|${String(currentRes).toUpperCase()}` : null;
       const saved = currentSettings && currentSettings.lastChartSettings;
-      const hasExplicitLockedRangeForSymbol = Boolean(
-        currentSym &&
-        saved &&
-        saved.viewportsBySymbol &&
-        saved.viewportsBySymbol[currentSym] &&
-        saved.viewportsBySymbol[currentSym].isAutoScale === false
+      const hasExplicitLockedRange = Boolean(
+        (chartKey && saved && saved.viewportsByChart && saved.viewportsByChart[chartKey] && saved.viewportsByChart[chartKey].isAutoScale === false) ||
+        (currentSym && saved && saved.viewportsBySymbol && saved.viewportsBySymbol[currentSym] && saved.viewportsBySymbol[currentSym].isAutoScale === false)
       );
-      if (!hasExplicitLockedRangeForSymbol) {
+      if (!hasExplicitLockedRange) {
         const psApi = getPrimaryPriceScaleApi();
         if (psApi && typeof psApi.setAutoScale === 'function') {
           psApi.setAutoScale(true);
@@ -11249,8 +11394,11 @@
         if (typeof activeChart.onIntervalChanged === 'function') {
           const sub = activeChart.onIntervalChanged();
           if (sub && typeof sub.subscribe === 'function') {
-            sub.subscribe(null, () => {
+            sub.subscribe(null, (newInterval) => {
               handleInstrumentOrChartSwitch('interval_changed');
+              if (typeof handleChartIntervalChanged === 'function') {
+                handleChartIntervalChanged(newInterval);
+              }
             });
           }
         }
