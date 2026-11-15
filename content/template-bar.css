@@ -2043,11 +2043,11 @@ body.vest-cortex-top-bar-active {
 
 .vest-tvs-card {
   width: 80vw;
-  max-width: 80vw;
+  max-width: 96vw;
   height: 80vh;
-  max-height: 80vh;
-  min-width: min(760px, 94vw);
-  min-height: min(520px, 92vh);
+  max-height: 94vh;
+  min-width: 440px;
+  min-height: 320px;
   background: #0d121d !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -2063,6 +2063,34 @@ body.vest-cortex-top-bar-active {
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  resize: both;
+}
+
+.vest-tvs-resize-handle {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  color: rgba(148, 163, 184, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  z-index: 30;
+  pointer-events: auto;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.vest-tvs-resize-handle:hover {
+  color: #38bdf8;
+  transform: scale(1.15);
+}
+
+.vest-tvs-resize-handle svg {
+  width: 12px;
+  height: 12px;
 }
 
 .vest-tvs-header {
@@ -2120,7 +2148,8 @@ body.vest-cortex-top-bar-active {
 
 /* Left Sidebar Navigation */
 .vest-tvs-sidebar {
-  width: 245px;
+  width: clamp(170px, 26%, 245px);
+  min-width: 160px;
   padding: 12px 10px 16px 12px;
   border-right: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(10, 14, 24, 0.28);
@@ -4484,8 +4513,12 @@ body.vest-cortex-top-bar-active {
 /* Dialog Glass Effect Mode (Configurable via Cortex Settings)    */
 /* ============================================================= */
 
+:root {
+  --vest-dialog-glass-op: 0.78;
+}
+
 body.vest-dialog-glass-mode .vest-bottom-panel-detached {
-  background: rgba(11, 15, 25, 0.82) !important;
+  background: rgba(11, 15, 25, var(--vest-dialog-glass-op, 0.82)) !important;
   backdrop-filter: blur(20px) saturate(140%) !important;
   -webkit-backdrop-filter: blur(20px) saturate(140%) !important;
   border-color: rgba(56, 189, 248, 0.5) !important;
@@ -4505,7 +4538,7 @@ body.vest-dialog-glass-mode .vest-bottom-panel-detached > div:not(.vest-detached
 }
 
 body.vest-dialog-glass-mode .vest-tvs-card {
-  background: linear-gradient(145deg, rgba(19, 25, 38, 0.78) 0%, rgba(13, 18, 29, 0.72) 100%) !important;
+  background: linear-gradient(145deg, rgba(19, 25, 38, var(--vest-dialog-glass-op, 0.78)) 0%, rgba(13, 18, 29, var(--vest-dialog-glass-op, 0.72)) 100%) !important;
   backdrop-filter: blur(22px) saturate(165%) !important;
   -webkit-backdrop-filter: blur(22px) saturate(165%) !important;
   border-color: rgba(56, 189, 248, 0.4) !important;
@@ -4517,20 +4550,20 @@ body.vest-dialog-glass-mode .vest-tvs-card {
 }
 
 body.vest-dialog-glass-mode .vest-stm-dialog {
-  background: rgba(15, 23, 42, 0.85) !important;
+  background: rgba(15, 23, 42, var(--vest-dialog-glass-op, 0.85)) !important;
   backdrop-filter: blur(18px) !important;
   -webkit-backdrop-filter: blur(18px) !important;
 }
 
 body.vest-dialog-glass-mode #vest-chart-news-box,
 body.vest-dialog-glass-mode #vest-chart-trades-box {
-  background: rgba(19, 23, 34, 0.85) !important;
+  background: rgba(19, 23, 34, var(--vest-dialog-glass-op, 0.85)) !important;
   backdrop-filter: blur(14px) !important;
   -webkit-backdrop-filter: blur(14px) !important;
 }
 
 body.vest-dialog-glass-mode #vest-chart-diagnostics-box {
-  background: rgba(15, 23, 42, 0.88) !important;
+  background: rgba(15, 23, 42, var(--vest-dialog-glass-op, 0.88)) !important;
   backdrop-filter: blur(14px) !important;
   -webkit-backdrop-filter: blur(14px) !important;
 }

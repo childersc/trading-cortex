@@ -1,3 +1,9 @@
+Trading Cortex v1.1.73 — Settings Dialog Drag-Resizing, Glass Opacity Slider & Unload Violation Fix
+
+- **Drag-Resizable Settings Box (`v1.1.73`)**: The settings dialog can now be made significantly smaller (`min-width: 440px`, `min-height: 320px`) with responsive layout scaling and a dedicated bottom-right drag grip handle (`.vest-tvs-resize-handle`).
+- **Dialog Glass Opacity Slider (`v1.1.73`)**: Added a dynamic opacity slider (15% to 95%, default 78%) for the frosted glass backdrop under the About tab with live CSS variable updates and persistent storage.
+- **Eliminated `unload` Permissions Policy Warning (`v1.1.73`)**: Guarded `window.addEventListener('unload')` in `content/content-main.js` to silence Chrome's deprecated unload permissions policy violation warning.
+
 Trading Cortex v1.1.72 — Charting Indicators Trade Duration ReferenceError Fix
 
 - **Resolved `formatTradeDurationHuman` ReferenceError (`v1.1.72`)**: Fixed an `Uncaught ReferenceError: formatTradeDurationHuman is not defined` that triggered when clicking the "Charting Indicators" tab if closed positions existed in the current session.
