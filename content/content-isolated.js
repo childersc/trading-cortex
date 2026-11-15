@@ -6748,10 +6748,12 @@
     let modalSize = { width: null, height: null };
     let isDraggingModal = false;
     let isResizingModal = false;
+    let resizeDirection = 'bottom-right';
     let dragStartMouse = { x: 0, y: 0 };
     let dragStartOffset = { x: 0, y: 0 };
     let resizeStartMouse = { x: 0, y: 0 };
     let resizeStartSize = { width: 0, height: 0 };
+    let resizeStartOffset = { x: 0, y: 0 };
     let justFinishedDragging = false;
 
     function closeSettingsOverlay() {
@@ -6784,15 +6786,49 @@
       } else if (isResizingModal) {
         const dx = e.clientX - resizeStartMouse.x;
         const dy = e.clientY - resizeStartMouse.y;
-        const newW = Math.max(440, Math.min(window.innerWidth * 0.96, resizeStartSize.width + dx));
-        const newH = Math.max(320, Math.min(window.innerHeight * 0.94, resizeStartSize.height + dy));
+        const cardEl = overlay.querySelector('.vest-tvs-card');
+        if (!cardEl) return;
+
+        const minW = 440;
+        const maxW = Math.round(window.innerWidth * 0.96);
+        const minH = 320;
+        const maxH = Math.round(window.innerHeight * 0.94);
+
+        let newW = resizeStartSize.width;
+        let newH = resizeStartSize.height;
+        let newOffsetX = resizeStartOffset.x;
+        let newOffsetY = resizeStartOffset.y;
+
+        // Multi-directional Horizontal Resizing (Anchors opposing edge)
+        if (resizeDirection.includes('right')) {
+          newW = Math.max(minW, Math.min(maxW, resizeStartSize.width + dx));
+          const actualDeltaW = newW - resizeStartSize.width;
+          newOffsetX = resizeStartOffset.x + (actualDeltaW / 2);
+        } else if (resizeDirection.includes('left')) {
+          newW = Math.max(minW, Math.min(maxW, resizeStartSize.width - dx));
+          const actualDeltaW = newW - resizeStartSize.width;
+          newOffsetX = resizeStartOffset.x - (actualDeltaW / 2);
+        }
+
+        // Multi-directional Vertical Resizing (Anchors opposing edge)
+        if (resizeDirection.includes('bottom')) {
+          newH = Math.max(minH, Math.min(maxH, resizeStartSize.height + dy));
+          const actualDeltaH = newH - resizeStartSize.height;
+          newOffsetY = resizeStartOffset.y + (actualDeltaH / 2);
+        } else if (resizeDirection.includes('top')) {
+          newH = Math.max(minH, Math.min(maxH, resizeStartSize.height - dy));
+          const actualDeltaH = newH - resizeStartSize.height;
+          newOffsetY = resizeStartOffset.y - (actualDeltaH / 2);
+        }
+
         modalSize.width = Math.round(newW);
         modalSize.height = Math.round(newH);
-        const cardEl = overlay.querySelector('.vest-tvs-card');
-        if (cardEl) {
-          cardEl.style.width = `${modalSize.width}px`;
-          cardEl.style.height = `${modalSize.height}px`;
-        }
+        modalOffset.x = Math.round(newOffsetX);
+        modalOffset.y = Math.round(newOffsetY);
+
+        cardEl.style.width = `${modalSize.width}px`;
+        cardEl.style.height = `${modalSize.height}px`;
+        cardEl.style.transform = `translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0)`;
       }
     }
 
@@ -6822,8 +6858,8 @@
         window.speechSynthesis.removeEventListener('voiceschanged', voicesChangedHandler);
         voicesChangedHandler = null;
       }
-      const cardW = modalSize.width ? `${modalSize.width}px` : 'min(980px, 80vw)';
-      const cardH = modalSize.height ? `${modalSize.height}px` : 'min(680px, 80vh)';
+      const cardW = modalSize.width ? `${modalSize.width}px` : '80vw';
+      const cardH = modalSize.height ? `${modalSize.height}px` : '80vh';
       overlay.innerHTML = `
         <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: ${cardW}; height: ${cardH}; max-width: 96vw; max-height: 94vh; min-width: 440px; min-height: 320px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
           <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move">
@@ -6857,7 +6893,15 @@
               <button type="button" class="vest-tvs-btn-ok" id="vest-tvs-ok">Save Settings</button>
             </div>
           </div>
-          <div class="vest-tvs-resize-handle" id="vest-tvs-resize-handle" title="Drag to resize dialog">
+          <!-- Multi-Directional Edge & Corner Resize Handles -->
+          <div class="vest-tvs-resize-edge top" data-direction="top" title="Drag to resize top"></div>
+          <div class="vest-tvs-resize-edge right" data-direction="right" title="Drag to resize right"></div>
+          <div class="vest-tvs-resize-edge bottom" data-direction="bottom" title="Drag to resize bottom"></div>
+          <div class="vest-tvs-resize-edge left" data-direction="left" title="Drag to resize left"></div>
+          <div class="vest-tvs-resize-corner top-left" data-direction="top-left" title="Drag to resize"></div>
+          <div class="vest-tvs-resize-corner top-right" data-direction="top-right" title="Drag to resize"></div>
+          <div class="vest-tvs-resize-corner bottom-left" data-direction="bottom-left" title="Drag to resize"></div>
+          <div class="vest-tvs-resize-corner bottom-right vest-tvs-resize-handle" data-direction="bottom-right" id="vest-tvs-resize-handle" title="Drag to resize dialog">
             <svg viewBox="0 0 16 16" fill="currentColor">
               <path d="M14 14H12V12H14V14ZM14 10H12V8H14V10ZM10 14H8V12H10V14ZM14 6H12V4H14V6ZM10 10H8V8H10V10ZM6 14H4V12H6V14Z"/>
             </svg>
@@ -7491,20 +7535,22 @@
         });
       }
 
-      // Dialog resize handle
-      const resizeHandle = overlay.querySelector('#vest-tvs-resize-handle');
-      if (resizeHandle) {
-        resizeHandle.addEventListener('mousedown', (e) => {
+      // Multi-directional Dialog resize handles (top, bottom, left, right, and corners)
+      const resizeHandles = overlay.querySelectorAll('.vest-tvs-resize-edge, .vest-tvs-resize-corner, #vest-tvs-resize-handle');
+      resizeHandles.forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
           if (e.button !== 0) return;
           const cardEl = overlay.querySelector('.vest-tvs-card');
           if (!cardEl) return;
           isResizingModal = true;
+          resizeDirection = handle.getAttribute('data-direction') || 'bottom-right';
           resizeStartMouse = { x: e.clientX, y: e.clientY };
           resizeStartSize = { width: cardEl.offsetWidth, height: cardEl.offsetHeight };
+          resizeStartOffset = { x: modalOffset.x, y: modalOffset.y };
           e.preventDefault();
           e.stopPropagation();
         });
-      }
+      });
 
       // Live ResizeObserver sync for native browser resize grip
       const cardEl = overlay.querySelector('.vest-tvs-card');

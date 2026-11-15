@@ -2063,22 +2063,88 @@ body.vest-cortex-top-bar-active {
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  resize: both;
+  resize: none;
+}
+
+/* Multi-directional Edge Resize Handles */
+.vest-tvs-resize-edge {
+  position: absolute;
+  z-index: 35;
+  user-select: none;
+}
+.vest-tvs-resize-edge.top {
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.vest-tvs-resize-edge.bottom {
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.vest-tvs-resize-edge.left {
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.vest-tvs-resize-edge.right {
+  right: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+/* Multi-directional Corner Resize Handles */
+.vest-tvs-resize-corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 36;
+  user-select: none;
+}
+.vest-tvs-resize-corner.top-left {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.vest-tvs-resize-corner.top-right {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.vest-tvs-resize-corner.bottom-left {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+.vest-tvs-resize-corner.bottom-right {
+  bottom: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
 }
 
 .vest-tvs-resize-handle {
   position: absolute;
   right: 4px;
   bottom: 4px;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   cursor: nwse-resize;
   color: rgba(148, 163, 184, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   user-select: none;
-  z-index: 30;
+  z-index: 36;
   pointer-events: auto;
   transition: color 0.15s ease, transform 0.15s ease;
 }

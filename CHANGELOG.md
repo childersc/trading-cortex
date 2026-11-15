@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.75`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.76`) are documented in this file.
+
+---
+
+## [v1.1.76] — 2026-11-15
+
+### 🚀 Settings Box 80% Default Size & Multi-Directional Edge Resizing
+- **80% Viewport Default Opening Size**:
+  1. *Eliminated Hardcoded Pixel Caps*: Removed restrictive `min(980px, 80vw)` and `min(680px, 80vh)` caps that prematurely shrank the Settings dialog on wide and high-resolution monitors.
+  2. *True 80% Layout*: The Settings box now consistently opens at a generous 80% of viewport width and height (`width: 80vw; height: 80vh;`), providing abundant space for viewing and adjusting all indicator controls comfortably.
+- **Multi-Directional Drag-Resizing from Any Side or Corner**:
+  1. *Edge Resize Handles*: Added dedicated, smooth resize zones along all four sides: **Top** (`cursor: ns-resize`), **Bottom** (`cursor: ns-resize`), **Left** (`cursor: ew-resize`), and **Right** (`cursor: ew-resize`).
+  2. *Corner Resize Handles*: Added corner drag handles for **Top-Left**, **Top-Right**, **Bottom-Left**, and **Bottom-Right** (with the visible dotted grip icon).
+  3. *Opposing Edge Anchoring Math*: Implemented precise coordinate translation (`newOffsetX = startOffsetX ± actualDeltaW / 2`, `newOffsetY = startOffsetY ± actualDeltaH / 2`) so dragging any side or corner smoothly scales the dialog while locking the opposite edge/corner firmly in place.
 
 ---
 
