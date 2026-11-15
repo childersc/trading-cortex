@@ -4188,31 +4188,31 @@
     // Session Indicators Button -> opens Settings Dialog directly on Session Indicators tab
     menuEl.querySelector('#vest-sdm-open-sessions-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
-      openStudioSettingsModal('sessions');
+      openStudioSettingsModal('chartingindicators', 'sessions');
     });
 
     // Auto FVG's Button -> opens Settings Dialog directly on Auto FVG's tab
     menuEl.querySelector('#vest-sdm-open-autofvg-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
-      openStudioSettingsModal('autofvg');
+      openStudioSettingsModal('chartingindicators', 'autofvg');
     });
 
     // Economic News Box Button -> opens Settings Dialog directly on Economic News Box tab
     menuEl.querySelector('#vest-sdm-open-news-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
-      openStudioSettingsModal('news');
+      openStudioSettingsModal('chartingindicators', 'news');
     });
 
     // Instrument Trades Box Button -> opens Settings Dialog directly on Instrument Trades Box tab
     menuEl.querySelector('#vest-sdm-open-trades-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
-      openStudioSettingsModal('trades');
+      openStudioSettingsModal('chartingindicators', 'trades');
     });
 
     // Candle OHLC Values Button -> opens Settings Dialog directly on Candle OHLC tab
     menuEl.querySelector('#vest-sdm-open-candleohlc-btn')?.addEventListener('click', () => {
       closeStudioDropdown();
-      openStudioSettingsModal('candleohlc');
+      openStudioSettingsModal('chartingindicators', 'candleohlc');
     });
 
     // Diagnostics & Debug Button -> opens Settings Dialog directly on Diagnostics tab
@@ -4398,11 +4398,18 @@
   // -------------------------------------------------------------
   // TradingView-Style Multi-Tab "Settings" Dialog Box
   // -------------------------------------------------------------
-  function openStudioSettingsModal(initialTab = 'about') {
+  function openStudioSettingsModal(initialTab = 'about', targetIndicatorId = null) {
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    let activeTab = ['about', 'alertsvoice', 'memory', 'sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'diagnostics', 'perpfirms'].includes(initialTab) ? initialTab : 'about';
+    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator'];
+    let targetIndicatorToScroll = targetIndicatorId;
+    if (INDICATOR_MAP.includes(initialTab)) {
+      targetIndicatorToScroll = initialTab;
+      initialTab = 'chartingindicators';
+    }
+
+    let activeTab = ['about', 'chartingindicators', 'memory', 'alertsvoice', 'perpfirms', 'diagnostics'].includes(initialTab) ? initialTab : 'about';
     let voicesChangedHandler = null;
 
     // Working draft so "Cancel" discards or "Save Settings" commits
@@ -4449,9 +4456,9 @@
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`
       },
       {
-        id: 'alertsvoice',
-        label: 'Alerts & Voice Settings',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>`
+        id: 'chartingindicators',
+        label: 'Charting Indicators',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/><circle cx="12" cy="12" r="3"/><line x1="3" y1="12" x2="6" y2="12"/></svg>`
       },
       {
         id: 'memory',
@@ -4459,54 +4466,19 @@
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>`
       },
       {
-        id: 'sessions',
-        label: 'Session Indicators',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="20"/><line x1="16" y1="4" x2="16" y2="20"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`
-      },
-      {
-        id: 'autofvg',
-        label: "Auto FVG's",
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="18" height="10" rx="2"/><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2"/><line x1="6" y1="3" x2="6" y2="7"/><line x1="18" y1="17" x2="18" y2="21"/></svg>`
-      },
-      {
-        id: 'news',
-        label: 'Economic News Box',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`
-      },
-      {
-        id: 'trades',
-        label: 'Instrument Trades Box',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`
-      },
-      {
-        id: 'candleohlc',
-        label: 'Candle OHLC Values',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="9" y1="2" x2="9" y2="6"/><rect x="6" y="6" width="6" height="11" rx="1"/><line x1="9" y1="17" x2="9" y2="22"/><line x1="17" y1="4" x2="17" y2="9"/><rect x="14" y="9" width="6" height="8" rx="1"/><line x1="17" y1="17" x2="17" y2="21"/></svg>`
-      },
-      {
-        id: 'positionhud',
-        label: 'Active Position HUD',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 3"/><rect x="13" y="8" width="8" height="8" rx="1.5"/><line x1="15" y1="10" x2="19" y2="14"/><line x1="19" y1="10" x2="15" y2="14"/></svg>`
-      },
-      {
-        id: 'faillines',
-        label: 'Chart Trader Panel Settings',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18M3 17h18"/><path d="M6 5v4M18 15v4"/></svg>`
-      },
-      {
-        id: 'cortexindicator',
-        label: 'Cortex Indicator',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l5-6 4 3 7-9"/><path d="M3 21h18"/><path d="M5 7h4M15 17h4"/></svg>`
-      },
-      {
-        id: 'diagnostics',
-        label: 'Diagnostics & Debug',
-        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`
+        id: 'alertsvoice',
+        label: 'Alerts & Voice Settings',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>`
       },
       {
         id: 'perpfirms',
         label: 'Perp Firm Settings',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`
+      },
+      {
+        id: 'diagnostics',
+        label: 'Diagnostics & Debug',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`
       }
     ];
 
@@ -4825,6 +4797,60 @@
       }
 
     function renderRightPaneContent() {
+      
+      if (activeTab === 'chartingindicators') {
+        const indToggles = overlay.querySelectorAll('.vest-ind-master-toggle');
+        indToggles.forEach(toggle => {
+          toggle.addEventListener('change', (e) => {
+            e.stopPropagation();
+            const indId = toggle.getAttribute('data-indicator-id');
+            const isChecked = toggle.checked;
+
+            const tile = overlay.querySelector(`#vest-ind-tile-${indId}`);
+            if (tile) {
+              tile.classList.toggle('is-enabled', isChecked);
+              const badge = tile.querySelector('.vest-indicator-status-badge');
+              if (badge) {
+                badge.textContent = isChecked ? 'ON' : 'OFF';
+                badge.className = `vest-indicator-status-badge ${isChecked ? 'on' : 'off'}`;
+              }
+            }
+
+            const drawer = overlay.querySelector(`#vest-ind-drawer-${indId}`);
+            if (drawer) {
+              drawer.style.display = isChecked ? 'block' : 'none';
+            }
+
+            if (indId === 'sessions' && draftSettings.sessionIndicators) draftSettings.sessionIndicators.enabled = isChecked;
+            else if (indId === 'autofvg' && draftSettings.autoFvg) draftSettings.autoFvg.enabled = isChecked;
+            else if (indId === 'news' && draftSettings.newsBox) draftSettings.newsBox.enabled = isChecked;
+            else if (indId === 'trades' && draftSettings.tradesBox) draftSettings.tradesBox.enabled = isChecked;
+            else if (indId === 'candleohlc' && draftSettings.candleOhlc) draftSettings.candleOhlc.enabled = isChecked;
+            else if (indId === 'positionhud' && draftSettings.positionHud) draftSettings.positionHud.enabled = isChecked;
+            else if (indId === 'faillines' && draftSettings.failLines) draftSettings.failLines.enabled = isChecked;
+            else if (indId === 'cortexindicator' && draftSettings.cortexIndicator) draftSettings.cortexIndicator.enabled = isChecked;
+
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+            renderStudioHeaderPill();
+          });
+        });
+
+        const tileHeaders = overlay.querySelectorAll('.vest-indicator-tile-header');
+        tileHeaders.forEach(header => {
+          header.addEventListener('click', (e) => {
+            if (e.target.closest('.vest-tvs-switch') || e.target.tagName === 'INPUT' || e.target.tagName === 'LABEL') {
+              return;
+            }
+            const toggle = header.querySelector('.vest-ind-master-toggle');
+            if (toggle) {
+              toggle.checked = !toggle.checked;
+              toggle.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          });
+        });
+      }
+
       if (activeTab === 'alertsvoice') {
         const cfg = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
         draftSettings.cortexIndicator = cfg;
@@ -5011,34 +5037,17 @@
         `;
       }
 
-      if (activeTab === 'sessions') {
-        const sc = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
-        draftSettings.sessionIndicators = sc;
-
+      function renderSessionIndicatorsSettingsHtml(sc) {
         return `
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div class="vest-tvs-section-title" style="margin:0;">ICT KILLZONES & SESSION INDICATORS</div>
+          <div class="vest-ind-drawer-actions">
             <button type="button" class="vest-tvs-action-btn" id="vest-si-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
               Reset Defaults
             </button>
           </div>
 
-          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Enable ICT Session Boxes & High/Low Liquidity Lines</div>
-              <div class="vest-tvs-toggle-desc">
-                Draws shaded ICT session killzone boxes with centered watermarks (e.g. NY AM, NY Lunch, London, Asia). Extend uncleared High/Low lines to the right until the first sweep or close-through, or extend all levels after they are cleared.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Session Indicators on Chart">
-              <input type="checkbox" id="vest-si-master-enabled" ${sc.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
-          </div>
-
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
             <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Session Box & Watermark Font Styling
+              Session Box &amp; Watermark Font Styling
             </div>
             <div class="vest-ed-grid-3" style="margin-bottom:10px;">
               <div class="vest-ed-field">
@@ -5077,136 +5086,136 @@
                 <select class="vest-ed-select" id="vest-si-hl-style">
                   <option value="0" ${Number(sc.highLowLineStyle) === 0 ? 'selected' : ''}>Solid (───)</option>
                   <option value="1" ${Number(sc.highLowLineStyle) === 1 ? 'selected' : ''}>Dotted (···)</option>
-                  <option value="2" ${Number(sc.highLowLineStyle) === 2 ? 'selected' : ''}>Dashed (- - -)</option>
+                  <option value="2" ${Number(sc.highLowLineStyle) === 2 ? 'selected' : ''}>Dashed (---)</option>
                 </select>
               </div>
             </div>
 
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin-top:6px;">
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-show-watermark" ${sc.showWatermark !== false ? 'checked' : ''} />
-                <span>Show Centered Session Watermark</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-font-bold" ${sc.fontBold ? 'checked' : ''} />
-                <span>Bold Watermark Text</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-extend-hl" ${sc.extendHighLowLines !== false ? 'checked' : ''} />
-                <span>Solid H/L Line (Cut Off When Swept)</span>
-              </label>
-              <label class="vest-ed-field" style="min-width:270px; max-width:390px;">
-                <span class="vest-ed-label">Session H/L Right Extension</span>
-                <select class="vest-ed-select" id="vest-si-extend-hl-right" title="Choose which session High/Low levels extend to the chart's right edge">
-                  <option value="uncleared" ${sc.highLowLineExtensionMode !== 'all' ? 'selected' : ''}>Uncleared levels only (stop at sweep/close-through)</option>
-                  <option value="all" ${sc.highLowLineExtensionMode === 'all' ? 'selected' : ''}>All levels (continue after sweep/close-through)</option>
-                </select>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-show-perm-dotted" ${sc.showPermanentDottedHighLow !== false ? 'checked' : ''} />
-                <span>7-Day H/L Line to Far Right + Price Tag & Date</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-show-hl-labels" ${sc.showHighLowLabels !== false ? 'checked' : ''} />
-                <span>Show Box H/L Labels (e.g. NYAM.H / NYAM.L)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-show-midpoint" ${sc.showMidPoint ? 'checked' : ''} />
-                <span>Show Session Mid-Point (50% EQ)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-si-extend-midpoint" ${sc.extendMidPoint ? 'checked' : ''} />
-                <span>Extend Mid-Point Until Touched</span>
-              </label>
-            </div>
-          </div>
-
-          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              7-Day Extended Line & Date Label Styling (e.g. 10-19-26 NY AM High)
-            </div>
-            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+            <div class="vest-ed-grid-3">
               <div class="vest-ed-field">
-                <label class="vest-ed-label" title="Tokens: M (1-12), MM (01-12), MMM (Oct), MMMM (October), d (1-31), dd (01-31), y/yy (26), yyyy (2026)">
-                  Date Stamp Format
+                <label class="vest-ed-label">H/L Line Width: <span id="vest-si-hl-width-val">${sc.highLowLineWidth}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-hl-width" min="1" max="5" value="${sc.highLowLineWidth}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">H/L Text Alignment</label>
+                <select class="vest-ed-select" id="vest-si-hl-align">
+                  <option value="right" ${sc.highLowLabelAlign === 'right' ? 'selected' : ''}>Right (At line end)</option>
+                  <option value="left" ${sc.highLowLabelAlign === 'left' ? 'selected' : ''}>Left (At line origin)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-si-show-boxes" ${sc.showBoxes ? 'checked' : ''} />
+                  <span>Show Shaded Boxes</span>
                 </label>
-                <div style="display:flex; align-items:center; gap:5px;">
-                  <input
-                    type="text"
-                    class="vest-ed-input"
-                    id="vest-si-perm-date-format"
-                    value="${escapeHtml(sc.permDateFormat !== undefined ? sc.permDateFormat : 'M-d-y')}"
-                    placeholder="M-d-y"
-                    style="flex:1; min-width:74px; font-family:'JetBrains Mono', monospace; font-size:11.5px;"
-                    title="Custom date stamp format — e.g. M-d-y (10-19-26), MM/dd/yyyy (10/19/2026), MMM/d (Oct/19), yyyy-MM-dd"
-                  />
-                  <select class="vest-ed-select" id="vest-si-perm-date-preset" style="width:96px; padding:0 4px; font-size:11px;" title="Quick Date Format Presets">
-                    <option value="">Presets…</option>
-                    <option value="M-d-y" ${(sc.permDateFormat || 'M-d-y') === 'M-d-y' ? 'selected' : ''}>M-d-y (10-19-26)</option>
-                    <option value="MM-dd-yy" ${sc.permDateFormat === 'MM-dd-yy' ? 'selected' : ''}>MM-dd-yy (10-19-26)</option>
-                    <option value="M/d/y" ${sc.permDateFormat === 'M/d/y' ? 'selected' : ''}>M/d/y (10/19/26)</option>
-                    <option value="M-d-yyyy" ${sc.permDateFormat === 'M-d-yyyy' ? 'selected' : ''}>M-d-yyyy (10-19-2026)</option>
-                    <option value="MMM/d" ${sc.permDateFormat === 'MMM/d' ? 'selected' : ''}>MMM/d (Oct/19)</option>
-                    <option value="MMM d, y" ${sc.permDateFormat === 'MMM d, y' ? 'selected' : ''}>MMM d, y (Oct 19, 26)</option>
-                    <option value="yyyy-MM-dd" ${sc.permDateFormat === 'yyyy-MM-dd' ? 'selected' : ''}>yyyy-MM-dd</option>
-                    <option value="d-M-y" ${sc.permDateFormat === 'd-M-y' ? 'selected' : ''}>d-M-y (19-10-26)</option>
-                  </select>
-                </div>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Vertical Position</label>
-                <select class="vest-ed-select" id="vest-si-perm-vert-align">
-                  <option value="outside" ${(sc.permLabelVertAlign || 'outside') === 'outside' ? 'selected' : ''}>Auto (High = Top, Low = Bottom)</option>
-                  <option value="top" ${sc.permLabelVertAlign === 'top' ? 'selected' : ''}>Top (Above Line)</option>
-                  <option value="inline" ${sc.permLabelVertAlign === 'inline' ? 'selected' : ''}>Inline (On Line)</option>
-                  <option value="bottom" ${sc.permLabelVertAlign === 'bottom' ? 'selected' : ''}>Bottom (Below Line)</option>
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Horizontal Placement</label>
-                <select class="vest-ed-select" id="vest-si-perm-horz-align">
-                  <option value="right" ${(sc.permLabelHorzAlign || 'right') === 'right' ? 'selected' : ''}>Far Right (Near Price Axis)</option>
-                  <option value="center" ${sc.permLabelHorzAlign === 'center' ? 'selected' : ''}>Center (Middle of Line)</option>
-                  <option value="left" ${sc.permLabelHorzAlign === 'left' ? 'selected' : ''}>Left (Start of Dotted Line)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="vest-ed-grid-4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1.2fr; gap:10px;">
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">7-Day Line Style</label>
-                <select class="vest-ed-select" id="vest-si-perm-line-style">
-                  <option value="1" ${Number(sc.permanentLineStyle ?? 1) === 1 ? 'selected' : ''}>Dotted (· · · ·)</option>
-                  <option value="2" ${Number(sc.permanentLineStyle ?? 1) === 2 ? 'selected' : ''}>Dashed (- - - -)</option>
-                  <option value="0" ${Number(sc.permanentLineStyle ?? 1) === 0 ? 'selected' : ''}>Solid (─────)</option>
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Font Size: <span id="vest-si-perm-fontsize-val">${sc.permLabelFontSize || 11}px</span></label>
-                <input type="range" class="vest-ed-range" id="vest-si-perm-font-size" min="8" max="24" value="${sc.permLabelFontSize || 11}" />
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Font Style</label>
-                <select class="vest-ed-select" id="vest-si-perm-font-style">
-                  <option value="normal" ${sc.permLabelFontStyle === 'normal' ? 'selected' : ''}>Normal</option>
-                  <option value="bold" ${(sc.permLabelFontStyle || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
-                  <option value="italic" ${sc.permLabelFontStyle === 'italic' ? 'selected' : ''}>Italic</option>
-                  <option value="bold_italic" ${sc.permLabelFontStyle === 'bold_italic' ? 'selected' : ''}>Bold Italic</option>
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Date Label Color</label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <select class="vest-ed-select" id="vest-si-perm-color-mode" style="flex:1;">
-                    <option value="session" ${(sc.permLabelColorMode || 'session') === 'session' ? 'selected' : ''}>Match Session</option>
-                    <option value="custom" ${sc.permLabelColorMode === 'custom' ? 'selected' : ''}>Custom Color</option>
-                  </select>
-                  <input type="color" class="vest-ed-color" id="vest-si-perm-custom-color" value="${normalizeHexColor(sc.permLabelCustomColor, '#e2e8f0')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0; ${(sc.permLabelColorMode || 'session') === 'custom' ? '' : 'opacity:0.45;'}" title="Custom Date Label Text Color" />
-                </div>
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-si-show-labels" ${sc.showLabels ? 'checked' : ''} />
+                  <span>Show Watermarks</span>
+                </label>
               </div>
             </div>
           </div>
 
+          <!-- Permanent High / Low Lines Card -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              High / Low Session Lines &amp; Sweeps
+            </div>
+
+            <div class="vest-tvs-toggle-box" style="padding:10px 12px; margin-bottom:10px; background:rgba(255,255,255,0.03);">
+              <div class="vest-tvs-toggle-info">
+                <div class="vest-tvs-toggle-title">Keep High/Low Lines On Chart Until Swept</div>
+                <div class="vest-tvs-toggle-desc">
+                  Extends each session's High and Low liquidity lines to the right across multiple days until price touches or wicks through the level (unmitigated).
+                </div>
+              </div>
+              <label class="vest-tvs-switch" title="Keep uncleared H/L lines until swept">
+                <input type="checkbox" id="vest-si-perm-hl" ${sc.permanentHighLowLines ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+
+            <div class="vest-tvs-toggle-box" style="padding:10px 12px; margin-bottom:10px; background:rgba(255,255,255,0.03);">
+              <div class="vest-tvs-toggle-info">
+                <div class="vest-tvs-toggle-title">Extend All Past Session High/Low Lines Across Chart</div>
+                <div class="vest-tvs-toggle-desc">
+                  Draws permanent dotted/dashed reference lines for ALL historical session highs and lows across your lookback window, even after the level has been swept.
+                </div>
+              </div>
+              <label class="vest-tvs-switch" title="Show all historical session High/Low lines">
+                <input type="checkbox" id="vest-si-extend-all-perm" ${sc.extendAllPermanentLines ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+
+            <div class="vest-ed-grid-3" style="margin-bottom:8px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Past Lines Style</label>
+                <select class="vest-ed-select" id="vest-si-perm-style">
+                  <option value="2" ${Number(sc.permanentLineStyle) === 2 ? 'selected' : ''}>Dashed (---)</option>
+                  <option value="1" ${Number(sc.permanentLineStyle) === 1 ? 'selected' : ''}>Dotted (···)</option>
+                  <option value="0" ${Number(sc.permanentLineStyle) === 0 ? 'selected' : ''}>Solid (───)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Past Lines Width: <span id="vest-si-perm-width-val">${sc.permanentLineWidth || 1}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-perm-width" min="1" max="4" value="${sc.permanentLineWidth || 1}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Line Color Mode</label>
+                <select class="vest-ed-select" id="vest-si-perm-color-mode">
+                  <option value="session" ${(sc.permanentLineColorMode || 'session') === 'session' ? 'selected' : ''}>Match Session Color</option>
+                  <option value="custom" ${sc.permanentLineColorMode === 'custom' ? 'selected' : ''}>Custom Fixed Color</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-3" style="margin-bottom:8px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Custom Line Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-si-perm-custom-color" value="${normalizeHexColor(sc.permanentLineCustomColor, '#94a3b8')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(sc.permanentLineCustomColor, '#94a3b8')}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Price Tag Font Size: <span id="vest-si-perm-fontsize-val">${sc.permanentLabelFontSize || 10}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-si-perm-font-size" min="8" max="18" value="${sc.permanentLabelFontSize || 10}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Label Date Stamp Format</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="text" class="vest-ed-input" id="vest-si-perm-date-format" value="${escapeHtml(sc.permanentDateFormat || 'M-d-y')}" placeholder="M-d-y" style="height:28px; padding:2px 7px; font-size:11.5px; font-family:'JetBrains Mono', monospace; flex:1;" title="Format for the date in H/L labels (e.g. M-d-y, M-d, yyyy-MM-dd)" />
+                  <select class="vest-ed-select" id="vest-si-perm-date-preset" style="width:84px; height:28px; padding:2px 4px; font-size:11px;" title="Choose preset date format">
+                    <option value="">Presets...</option>
+                    <option value="M-d-y" ${(sc.permanentDateFormat || 'M-d-y') === 'M-d-y' ? 'selected' : ''}>M-d-y</option>
+                    <option value="M/d/y" ${sc.permanentDateFormat === 'M/d/y' ? 'selected' : ''}>M/d/y</option>
+                    <option value="M-d" ${sc.permanentDateFormat === 'M-d' ? 'selected' : ''}>M-d</option>
+                    <option value="yyyy-MM-dd" ${sc.permanentDateFormat === 'yyyy-MM-dd' ? 'selected' : ''}>yyyy-MM-dd</option>
+                    <option value="MM-dd" ${sc.permanentDateFormat === 'MM-dd' ? 'selected' : ''}>MM-dd</option>
+                    <option value="d MMM" ${sc.permanentDateFormat === 'd MMM' ? 'selected' : ''}>d MMM</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-top:10px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-perm-show-labels" ${sc.permanentShowLabels !== false ? 'checked' : ''} />
+                <span>Show Right-Axis Price &amp; Session Name Tags</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-perm-show-date" ${sc.permanentShowDateInLabel !== false ? 'checked' : ''} />
+                <span>Include Date Stamp In Labels</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-si-perm-show-swept" ${sc.permanentShowSweptTag !== false ? 'checked' : ''} />
+                <span>Show "[SWEPT]" Marker On Cleared Levels</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Individual ICT Sessions Table -->
           <div style="font-size:11px; font-weight:700; color:#93c5fd; text-transform:uppercase; letter-spacing:0.6px; margin:4px 0 8px 0;">
             Individual ICT Sessions (New York Time · EST/EDT)
           </div>
@@ -5215,7 +5224,7 @@
             ${sc.sessions.map((sess, idx) => `
               <div class="vest-tvs-toggle-box" data-sess-id="${escapeHtml(sess.id)}" style="padding:10px 14px; margin-bottom:0; gap:12px;">
                 <div style="display:flex; align-items:center; gap:10px; min-width:165px;">
-                  <input type="color" class="vest-ed-color vest-si-sess-color" data-idx="${idx}" data-opacity-input="#vest-si-box-opacity" value="${normalizeHexColor(sess.color, '#26a69a')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;" title="Session Box & High/Low Line Color" />
+                  <input type="color" class="vest-ed-color vest-si-sess-color" data-idx="${idx}" data-opacity-input="#vest-si-box-opacity" value="${normalizeHexColor(sess.color, '#26a69a')}" style="width:28px; height:28px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;" title="Session Box &amp; High/Low Line Color" />
                   <div style="display:flex; flex-direction:column; min-width:0;">
                     <span style="font-size:13px; font-weight:600; color:#f8fafc; white-space:nowrap;">${escapeHtml(sess.name)}</span>
                     <span style="font-size:10.5px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${escapeHtml(sess.shortTag)}.H / ${escapeHtml(sess.shortTag)}.L</span>
@@ -5244,36 +5253,17 @@
         `;
       }
 
-      if (activeTab === 'autofvg') {
-        const fc = normalizeAutoFvgConfig(draftSettings.autoFvg);
-        draftSettings.autoFvg = fc;
-
-        const rectTemplates = templates.filter(t => (t.drawingType || 'rectangle') === 'rectangle');
-
+      function renderAutoFvgSettingsHtml(fc, rectTemplates) {
         return `
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div class="vest-tvs-section-title" style="margin:0;">AUTO FAIR VALUE GAPS (ICT FVG)</div>
+          <div class="vest-ind-drawer-actions">
             <button type="button" class="vest-tvs-action-btn" id="vest-afvg-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
               Reset Defaults
             </button>
           </div>
 
-          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Enable Auto FVG Detection & Dynamic Extension</div>
-              <div class="vest-tvs-toggle-desc">
-                Automatically detects 3-candle Bullish & Bearish Fair Value Gaps on the active timeframe, extends them forward in real time until price reclaims them, and applies your matching timeframe FVG template (e.g. <code>5m FVG</code>) or default FVG styling.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Auto FVG's on Chart">
-              <input type="checkbox" id="vest-afvg-master-enabled" ${fc.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
-          </div>
-
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
             <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Template Matching & Label Rules
+              Template Matching &amp; Label Rules
             </div>
             <div style="font-size:11.5px; color:#94a3b8; line-height:1.45; margin-bottom:10px;">
               When set to <strong>Auto-Match by Timeframe</strong>, Trading Cortex automatically looks for a saved Rectangle template matching your current chart timeframe (for example, on the <strong>5m</strong> chart it looks for <code>5m Bullish FVG</code> / <code>5m Bearish FVG</code> &rarr; <code>5m FVG</code> &rarr; <code>FVG</code>). If none exists, it uses the Default FVG Template styling below.
@@ -5300,203 +5290,171 @@
                 </select>
               </div>
               <div class="vest-ed-field">
-                <label class="vest-ed-label" title="Used when no custom text label is defined on the matched template. Tokens: {tf} (e.g. 5m), {dir} (Bullish/Bearish)">
-                  Default Label Format
+                <label class="vest-ed-label">Auto-Match Scope</label>
+                <select class="vest-ed-select" id="vest-afvg-match-scope">
+                  <option value="timeframe-strict" ${fc.autoMatchScope === 'timeframe-strict' ? 'selected' : ''}>Strict Timeframe (e.g. "5m FVG")</option>
+                  <option value="timeframe-fallback" ${fc.autoMatchScope === 'timeframe-fallback' ? 'selected' : ''}>Timeframe &rarr; Generic "FVG"</option>
+                  <option value="always-default" ${fc.autoMatchScope === 'always-default' ? 'selected' : ''}>Always Use Built-In Default</option>
+                </select>
+              </div>
+            </div>
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Custom Label Prefix</label>
+                <input type="text" class="vest-ed-input" id="vest-afvg-label-prefix" value="${escapeHtml(fc.labelPrefix || '')}" placeholder="e.g. ICT or empty" />
+              </div>
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-afvg-include-tf" ${fc.includeTimeframeInLabel !== false ? 'checked' : ''} />
+                  <span>Include Timeframe In Label</span>
                 </label>
-                <input
-                  type="text"
-                  class="vest-ed-input"
-                  id="vest-afvg-label-format"
-                  value="${escapeHtml(fc.labelFormat || '{tf} FVG')}"
-                  placeholder="{tf} FVG"
-                  style="font-family:'JetBrains Mono', monospace; font-size:11.5px;"
-                />
+              </div>
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-afvg-remove-reclaimed" ${fc.removeOnReclaim ? 'checked' : ''} />
+                  <span>Auto-Remove Fully Reclaimed FVG's</span>
+                </label>
               </div>
             </div>
           </div>
 
+          <!-- Section 2: Dedicated Reclaimed FVG's Box -->
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
             <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Reclaim (Mitigation) & Extension Behavior
-            </div>
-            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Unreclaimed Extension Mode</label>
-                <select class="vest-ed-select" id="vest-afvg-extend-mode">
-                  <option value="right" ${(fc.extendMode || 'right') === 'right' ? 'selected' : ''}>Extend Far Right Until Reclaimed</option>
-                  <option value="current" ${fc.extendMode === 'current' ? 'selected' : ''}>Extend to Current Time (+ Bars)</option>
-                  <option value="template" ${fc.extendMode === 'template' ? 'selected' : ''}>Follow Matched Template Setting</option>
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label" title="How many additional bars to project active FVGs past the current time bar (e.g. 0 = stop at current bar, 5 = 5 bars past current bar)">
-                  Bars Past Current Bar
-                </label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <input
-                    type="number"
-                    class="vest-ed-input"
-                    id="vest-afvg-future-bars"
-                    min="0"
-                    max="200"
-                    step="1"
-                    value="${Number(fc.extendFutureBars ?? 0)}"
-                    style="width:72px; font-family:'JetBrains Mono', monospace; font-size:12px; ${(fc.extendMode || 'right') === 'right' ? 'opacity:0.55;' : ''}"
-                    title="Number of bars to extend past the current candle when using 'Extend to Current Time (+ Bars)'"
-                  />
-                  <span style="font-size:11px; color:#94a3b8; white-space:nowrap;">bars (+${Number(fc.extendFutureBars ?? 0)})</span>
-                </div>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Reclaim Condition</label>
-                <select class="vest-ed-select" id="vest-afvg-reclaim-mode">
-                  <option value="close" ${fc.reclaimMode === 'close' ? 'selected' : ''}>Candle Close Through FVG (Body)</option>
-                  <option value="wick" ${fc.reclaimMode === 'wick' ? 'selected' : ''}>Full Wick Fill Through FVG</option>
-                </select>
-              </div>
+              Reclaimed FVG's Box &amp; Custom Colors
             </div>
 
-            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Max Active Unreclaimed FVGs</label>
-                <select class="vest-ed-select" id="vest-afvg-max-active">
-                  ${[5, 10, 15, 20, 25, 35, 50, 75].map(n => `
-                    <option value="${n}" ${Number(fc.maxActiveFvgs) === n ? 'selected' : ''}>${n} Active FVGs</option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Bars Lookback</label>
-                <select class="vest-ed-select" id="vest-afvg-lookback">
-                  ${[200, 400, 600, 1000, 1500, 2500].map(n => `
-                    <option value="${n}" ${Number(fc.maxBarsLookback) === n ? 'selected' : ''}>Last ${n} Candles</option>
-                  `).join('')}
-                </select>
-              </div>
-            </div>
-
-            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-top:6px;">
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-afvg-sync-native" ${fc.syncNativeDrawings ? 'checked' : ''} />
-                <span>Also Sync as Selectable TradingView Rectangle Shapes</span>
-              </label>
-              <button
-                type="button"
-                class="vest-tvs-action-btn"
-                id="vest-afvg-clear-log-btn"
-                style="height:24px; padding:0 9px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.35);"
-                title="Clears the persistent log of previously created FVGs so deleted FVGs can be created again"
-              >
-                Clear Created FVG Log
-              </button>
-            </div>
-          </div>
-
-          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid ${fc.showReclaimed !== false ? 'rgba(56,189,248,0.35)' : 'rgba(148,163,184,0.16)'}; border-radius:10px; transition:border-color 0.15s ease;">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:14px;">
-              <div style="display:flex; flex-direction:column; gap:3px; min-width:0;">
-                <div style="font-size:13px; font-weight:700; color:#f8fafc; display:flex; align-items:center; gap:8px;">
-                  <span>Show Reclaimed FVG's</span>
-                  <span style="font-size:10px; font-weight:600; padding:1px 7px; border-radius:999px; background:${fc.showReclaimed !== false ? 'rgba(16,185,129,0.16)' : 'rgba(148,163,184,0.12)'}; border:1px solid ${fc.showReclaimed !== false ? 'rgba(16,185,129,0.4)' : 'rgba(148,163,184,0.22)'}; color:${fc.showReclaimed !== false ? '#34d399' : '#94a3b8'};">
-                    ${fc.showReclaimed !== false ? 'VISIBLE' : 'HIDDEN'}
-                  </span>
-                </div>
-                <div style="font-size:11.5px; color:#94a3b8; line-height:1.4;">
-                  Keep mitigated FVGs visible on the chart (cut off at the candle that reclaimed them) and automatically apply a custom reclaimed color.
+            <div class="vest-tvs-toggle-box" style="padding:10px 12px; margin-bottom:10px; background:rgba(255,255,255,0.03);">
+              <div class="vest-tvs-toggle-info">
+                <div class="vest-tvs-toggle-title">Show Reclaimed FVG's On Chart</div>
+                <div class="vest-tvs-toggle-desc">
+                  When enabled, Fair Value Gaps that have been mitigated/reclaimed remain visible on the chart using dedicated reclaimed styling and colors.
                 </div>
               </div>
-              <label class="vest-tvs-switch" title="Toggle Show Reclaimed FVG's">
+              <label class="vest-tvs-switch" title="Toggle Show Reclaimed FVG's on Chart">
                 <input type="checkbox" id="vest-afvg-show-reclaimed" ${fc.showReclaimed !== false ? 'checked' : ''} />
                 <span class="vest-tvs-switch-slider"></span>
               </label>
             </div>
 
-            <div id="vest-afvg-reclaimed-settings-body" style="display:${fc.showReclaimed !== false ? 'block' : 'none'}; margin-top:12px; padding-top:12px; border-top:1px solid rgba(148,163,184,0.14);">
-              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Reclaimed Color Mode</label>
-                  <select class="vest-ed-select" id="vest-afvg-reclaimed-color-mode">
-                    <option value="custom" ${(fc.reclaimedColorMode || 'custom') === 'custom' ? 'selected' : ''}>Custom Reclaimed Colors (Box, Border &amp; Midline)</option>
-                    <option value="dim" ${fc.reclaimedColorMode === 'dim' ? 'selected' : ''}>Keep Original FVG Colors (Dimmed)</option>
-                  </select>
-                </div>
-                <div class="vest-ed-field">
-                  <label class="vest-ed-label">Max Reclaimed History</label>
-                  <select class="vest-ed-select" id="vest-afvg-reclaimed-count">
-                    ${[5, 10, 15, 25, 40, 60].map(n => `
-                      <option value="${n}" ${Number(fc.showReclaimedHistoryCount ?? 15) === n ? 'selected' : ''}>Last ${n} Reclaimed FVGs</option>
-                    `).join('')}
-                  </select>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Reclaimed Bullish FVG Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-afvg-rec-bull-color" data-opacity-input="#vest-afvg-rec-opacity" value="${normalizeHexColor(fc.reclaimedBullishColor, '#0d9488')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedBullishColor, '#0d9488')}</span>
                 </div>
               </div>
-
-              <div class="vest-ed-grid-3" id="vest-afvg-reclaimed-color-grid" style="${(fc.reclaimedColorMode || 'custom') === 'dim' ? 'opacity:0.45; pointer-events:none;' : ''}">
-                <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
-                  <label class="vest-ed-label" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;">
-                    <span>Box Fill Color</span>
-                    <span id="vest-afvg-rec-box-op-val" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${Number(fc.reclaimedBoxOpacity ?? 18)}%</span>
-                  </label>
-                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                    <input
-                      type="color"
-                      class="vest-ed-color"
-                      id="vest-afvg-rec-box-color"
-                      data-opacity-input="#vest-afvg-rec-box-opacity"
-                      value="${normalizeHexColor(fc.reclaimedBoxColor || fc.reclaimedColor, '#787b86')}"
-                      style="width:32px; height:26px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;"
-                      title="Reclaimed Box Fill Color & Opacity"
-                    />
-                    <span id="vest-afvg-rec-box-hex" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedBoxColor || fc.reclaimedColor, '#787b86')}</span>
-                  </div>
-                  <input type="range" class="vest-ed-range" id="vest-afvg-rec-box-opacity" min="0" max="100" value="${Number(fc.reclaimedBoxOpacity ?? 18)}" title="Reclaimed Box Fill Opacity (%)" />
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Reclaimed Bearish FVG Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-afvg-rec-bear-color" data-opacity-input="#vest-afvg-rec-opacity" value="${normalizeHexColor(fc.reclaimedBearishColor, '#991b1b')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedBearishColor, '#991b1b')}</span>
                 </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Reclaimed Fill Opacity: <span id="vest-afvg-rec-opacity-val">${fc.reclaimedOpacity ?? 10}%</span></label>
+                <input type="range" class="vest-ed-range" id="vest-afvg-rec-opacity" min="0" max="85" value="${fc.reclaimedOpacity ?? 10}" />
+              </div>
+            </div>
 
-                <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
-                  <label class="vest-ed-label" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;">
-                    <span>Border Color</span>
-                    <span id="vest-afvg-rec-border-op-val" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${Number(fc.reclaimedBorderOpacity ?? 65)}%</span>
-                  </label>
-                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                    <input
-                      type="color"
-                      class="vest-ed-color"
-                      id="vest-afvg-rec-border-color"
-                      data-opacity-input="#vest-afvg-rec-border-opacity"
-                      value="${normalizeHexColor(fc.reclaimedBorderColor || fc.reclaimedColor, '#787b86')}"
-                      style="width:32px; height:26px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;"
-                      title="Reclaimed Border Color & Opacity"
-                    />
-                    <span id="vest-afvg-rec-border-hex" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedBorderColor || fc.reclaimedColor, '#787b86')}</span>
-                  </div>
-                  <input type="range" class="vest-ed-range" id="vest-afvg-rec-border-opacity" min="0" max="100" value="${Number(fc.reclaimedBorderOpacity ?? 65)}" title="Reclaimed Border Opacity (%)" />
-                </div>
-
-                <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
-                  <label class="vest-ed-label" style="margin-bottom:6px; display:flex; align-items:center; justify-content:space-between;">
-                    <span>Middle Line Color</span>
-                    <span id="vest-afvg-rec-mid-op-val" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${Number(fc.reclaimedMidlineOpacity ?? 60)}%</span>
-                  </label>
-                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                    <input
-                      type="color"
-                      class="vest-ed-color"
-                      id="vest-afvg-rec-mid-color"
-                      data-opacity-input="#vest-afvg-rec-mid-opacity"
-                      value="${normalizeHexColor(fc.reclaimedMidlineColor || fc.reclaimedColor, '#787b86')}"
-                      style="width:32px; height:26px; padding:0; border-radius:6px; cursor:pointer; flex-shrink:0;"
-                      title="Reclaimed Middle Line (50% CE) Color & Opacity"
-                    />
-                    <span id="vest-afvg-rec-mid-hex" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(fc.reclaimedMidlineColor || fc.reclaimedColor, '#787b86')}</span>
-                  </div>
-                  <input type="range" class="vest-ed-range" id="vest-afvg-rec-mid-opacity" min="0" max="100" value="${Number(fc.reclaimedMidlineOpacity ?? 60)}" title="Reclaimed Middle Line Opacity (%)" />
-                </div>
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Reclaimed Border Style</label>
+                <select class="vest-ed-select" id="vest-afvg-rec-border-style">
+                  <option value="solid" ${fc.reclaimedBorderStyle === 'solid' ? 'selected' : ''}>Solid Line</option>
+                  <option value="dashed" ${fc.reclaimedBorderStyle === 'dashed' ? 'selected' : ''}>Dashed Line (---)</option>
+                  <option value="dotted" ${fc.reclaimedBorderStyle === 'dotted' ? 'selected' : ''}>Dotted Line (···)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Reclaimed Border Width</label>
+                <select class="vest-ed-select" id="vest-afvg-rec-border-width">
+                  <option value="1" ${Number(fc.reclaimedBorderWidth) === 1 ? 'selected' : ''}>1px Thin</option>
+                  <option value="2" ${Number(fc.reclaimedBorderWidth) === 2 ? 'selected' : ''}>2px Medium</option>
+                  <option value="3" ${Number(fc.reclaimedBorderWidth) === 3 ? 'selected' : ''}>3px Thick</option>
+                </select>
+              </div>
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-afvg-rec-show-label" ${fc.reclaimedShowLabel !== false ? 'checked' : ''} />
+                  <span>Show "[RECLAIMED]" Tag</span>
+                </label>
               </div>
             </div>
           </div>
 
-          <div class="vest-ed-section" style="margin-bottom:4px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Default FVG Fallback Template Styling (Used When No Matching Template Exists)
+          <!-- Section 3: Dynamic FVG Extension & Reclaim Mode -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Dynamic FVG Extension &amp; Reclaim Mode
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Unreclaimed Extension Mode</label>
+                <select class="vest-ed-select" id="vest-afvg-ext-mode">
+                  <option value="far-right" ${(fc.unreclaimedExtensionMode || 'far-right') === 'far-right' ? 'selected' : ''}>Far Right Canvas Edge (Open-Ended)</option>
+                  <option value="current-candle" ${fc.unreclaimedExtensionMode === 'current-candle' ? 'selected' : ''}>To Current Forming Candle (+ Extra Bars)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Extra Future Bars Ahead: <span id="vest-afvg-extra-bars-val">${fc.extraBarsAhead ?? 5}</span></label>
+                <input type="range" class="vest-ed-range" id="vest-afvg-extra-bars" min="0" max="50" step="1" value="${fc.extraBarsAhead ?? 5}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">FVG Reclaim Fill Threshold</label>
+                <select class="vest-ed-select" id="vest-afvg-reclaim-mode">
+                  <option value="body-close" ${(fc.reclaimMode || 'body-close') === 'body-close' ? 'selected' : ''}>Candle Body Close (50% CE or Full)</option>
+                  <option value="wick-touch" ${fc.reclaimMode === 'wick-touch' ? 'selected' : ''}>Any Wick Touch (First Mitigation)</option>
+                  <option value="full-wick-fill" ${fc.reclaimMode === 'full-wick-fill' ? 'selected' : ''}>100% Full Wick Fill Through Box</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Auto FVG Scan Frequency & Candle History -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Scan Engine &amp; History Lookback
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:8px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Max Historical Candles to Scan</label>
+                <select class="vest-ed-select" id="vest-afvg-max-candles">
+                  ${[100, 200, 300, 500, 800, 1000].map(c => `
+                    <option value="${c}" ${Number(fc.maxCandlesToScan) === c ? 'selected' : ''}>${c} Candles</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Min FVG Gap Size (Ticks)</label>
+                <input type="number" class="vest-ed-input" id="vest-afvg-min-ticks" min="0" max="100" value="${fc.minGapTicks || 0}" placeholder="0 (All Gaps)" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Scan Frequency</label>
+                <select class="vest-ed-select" id="vest-afvg-scan-freq">
+                  <option value="on-new-candle" ${fc.scanFrequency === 'on-new-candle' ? 'selected' : ''}>On Every New Candle Close</option>
+                  <option value="interval-5s" ${fc.scanFrequency === 'interval-5s' ? 'selected' : ''}>Every 5 Seconds (Real-Time)</option>
+                  <option value="interval-15s" ${fc.scanFrequency === 'interval-15s' ? 'selected' : ''}>Every 15 Seconds</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.12);">
+              <span style="font-size:11px; color:#94a3b8;">Trading Cortex tracks generated FVG IDs in local storage to prevent duplicate boxes on reload.</span>
+              <button type="button" class="vest-tvs-action-btn" id="vest-afvg-clear-log-btn" style="height:24px; padding:0 8px; font-size:10.5px; color:#f87171; border-color:rgba(239,68,68,0.3);">
+                Clear FVG History Cache
+              </button>
+            </div>
+          </div>
+
+          <!-- Section 5: Default Fallback FVG Template Styling -->
+          <div class="vest-ed-section" style="padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px;">
+              Default FVG Fallback Styling
+            </div>
+            <div style="font-size:11.5px; color:#94a3b8; line-height:1.4; margin-bottom:10px;">
+              Used when no matching named Rectangle template is found on the current timeframe.
             </div>
             <div class="vest-ed-grid-3" style="margin-bottom:10px;">
               <div class="vest-ed-field">
@@ -5533,10 +5491,7 @@
         `;
       }
 
-      if (activeTab === 'news') {
-        const nc = normalizeNewsBoxConfig(draftSettings.newsBox);
-        draftSettings.newsBox = nc;
-
+      function renderNewsBoxSettingsHtml(nc) {
         const renderMiniFolderSvg = (colorHex) => `
           <svg viewBox="0 0 24 24" width="16" height="15" style="flex-shrink:0; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45));">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="${colorHex}" stroke="rgba(255,255,255,0.28)" stroke-width="1.3"/>
@@ -5544,194 +5499,202 @@
         `;
 
         return `
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div class="vest-tvs-section-title" style="margin:0;">ECONOMIC NEWS BOX (ON-CHART WIDGET)</div>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <button type="button" class="vest-tvs-action-btn" id="vest-nb-refresh-feed-btn" style="height:26px; padding:0 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.4);">
-                ↻ Refresh Live Feed
-              </button>
-              <button type="button" class="vest-tvs-action-btn" id="vest-nb-reset-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#cbd5e1;" title="Snap News Box back to the top-left of the screen">
-                Center / Reset Position
-              </button>
-              <button type="button" class="vest-tvs-action-btn" id="vest-nb-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
-                Reset Defaults
-              </button>
-            </div>
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-nb-refresh-feed-btn" style="height:26px; padding:0 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.4);">
+              ↻ Refresh Live Feed
+            </button>
+            <button type="button" class="vest-tvs-action-btn" id="vest-nb-reset-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#cbd5e1;" title="Snap News Box back to the top-left of the screen">
+              Center / Reset Position
+            </button>
+            <button type="button" class="vest-tvs-action-btn" id="vest-nb-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
           </div>
 
-          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Enable Moveable Economic News Box on Chart</div>
-              <div class="vest-tvs-toggle-desc">
-                Displays a draggable upcoming economic news widget anywhere on screen with event time, country of origin, and Red / Yellow / Green impact folder icons. Its screen position is remembered, and minimizing docks it into the Cortex bottom bar.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Economic News Box on Chart">
-              <input type="checkbox" id="vest-nb-master-enabled" ${nc.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
-          </div>
-
+          <!-- Section 1: Impact Filter & Event Count -->
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#f87171; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              News Folder Impact Filters &amp; Folder Icon Colors
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Economic Impact Filters &amp; Display Limits
             </div>
-            <div class="vest-ed-grid-3" style="margin-bottom:4px;">
-              <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                  <label class="vest-ed-checkbox-label" style="font-size:12px; font-weight:600; color:#f8fafc;">
-                    <input type="checkbox" id="vest-nb-show-red" ${nc.showRedFolder !== false ? 'checked' : ''} />
-                    ${renderMiniFolderSvg(nc.redFolderColor)}
-                    <span>Red Folder (High)</span>
-                  </label>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="color" class="vest-ed-color" id="vest-nb-red-color" value="${normalizeHexColor(nc.redFolderColor, '#f23645')}" style="width:28px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.redFolderColor, '#f23645')}</span>
-                </div>
-              </div>
+            <div style="font-size:11.5px; color:#94a3b8; line-height:1.45; margin-bottom:10px;">
+              Filter which news tiers appear in the on-chart widget. High-impact Red Folder events (e.g. CPI, FOMC, NFP) provide maximum volatility.
+            </div>
 
-              <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                  <label class="vest-ed-checkbox-label" style="font-size:12px; font-weight:600; color:#f8fafc;">
-                    <input type="checkbox" id="vest-nb-show-yellow" ${nc.showYellowFolder !== false ? 'checked' : ''} />
-                    ${renderMiniFolderSvg(nc.yellowFolderColor)}
-                    <span>Yellow Folder (Med)</span>
-                  </label>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="color" class="vest-ed-color" id="vest-nb-yellow-color" value="${normalizeHexColor(nc.yellowFolderColor, '#ff9800')}" style="width:28px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.yellowFolderColor, '#ff9800')}</span>
-                </div>
-              </div>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-bottom:12px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px; display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="vest-nb-show-red" ${nc.showRedFolders !== false ? 'checked' : ''} />
+                ${renderMiniFolderSvg(nc.redFolderColor)}
+                <span style="font-weight:600; color:#f87171;">Red Folder (High Impact)</span>
+              </label>
 
-              <div class="vest-ed-field" style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                  <label class="vest-ed-checkbox-label" style="font-size:12px; font-weight:600; color:#f8fafc;">
-                    <input type="checkbox" id="vest-nb-show-green" ${nc.showGreenFolder !== false ? 'checked' : ''} />
-                    ${renderMiniFolderSvg(nc.greenFolderColor)}
-                    <span>Green Folder (Low)</span>
-                  </label>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="color" class="vest-ed-color" id="vest-nb-green-color" value="${normalizeHexColor(nc.greenFolderColor, '#26a69a')}" style="width:28px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.greenFolderColor, '#26a69a')}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+              <label class="vest-ed-checkbox-label" style="font-size:12px; display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="vest-nb-show-yellow" ${nc.showYellowFolders ? 'checked' : ''} />
+                ${renderMiniFolderSvg(nc.yellowFolderColor)}
+                <span style="font-weight:600; color:#fbbf24;">Yellow Folder (Medium Impact)</span>
+              </label>
 
-          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px;">
-                Countries of Origin Filter
-              </div>
-              <div style="display:flex; gap:6px;">
-                <button type="button" class="vest-tvs-action-btn" id="vest-nb-countries-all" style="height:22px; padding:0 8px; font-size:10.5px;">Select All</button>
-                <button type="button" class="vest-tvs-action-btn" id="vest-nb-countries-usd" style="height:22px; padding:0 8px; font-size:10.5px;">USD Only</button>
-              </div>
+              <label class="vest-ed-checkbox-label" style="font-size:12px; display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="vest-nb-show-green" ${nc.showGreenFolders ? 'checked' : ''} />
+                ${renderMiniFolderSvg(nc.greenFolderColor)}
+                <span style="font-weight:600; color:#34d399;">Green Folder (Low Impact)</span>
+              </label>
             </div>
-            <div style="display:flex; flex-wrap:wrap; gap:8px;">
-              ${NEWS_ALL_COUNTRIES.map(code => {
-                const checked = nc.countries.includes(code);
-                return `
-                  <label class="vest-ed-checkbox-label" style="padding:4px 9px; border-radius:6px; background:${checked ? 'rgba(56,189,248,0.14)' : 'rgba(255,255,255,0.03)'}; border:1px solid ${checked ? 'rgba(56,189,248,0.4)' : 'rgba(255,255,255,0.08)'}; font-size:11.5px; font-family:'JetBrains Mono', monospace; font-weight:600;">
-                    <input type="checkbox" class="vest-nb-country-chk" value="${code}" ${checked ? 'checked' : ''} />
-                    <span>${getCountryFlagEmoji(code)} ${code}</span>
-                  </label>
-                `;
-              }).join('')}
-            </div>
-          </div>
 
-          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Box Appearance, Timezone &amp; Viewport Clamping
-            </div>
-            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+            <div class="vest-ed-grid-3">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Header Title</label>
-                <input type="text" class="vest-ed-input" id="vest-nb-title" value="${escapeHtml(nc.boxTitle)}" placeholder="Upcoming News" />
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Timezone Display</label>
-                <select class="vest-ed-select" id="vest-nb-tz">
-                  <option value="ny" ${nc.timeZoneMode === 'ny' ? 'selected' : ''}>New York (EST/EDT)</option>
-                  <option value="local" ${nc.timeZoneMode === 'local' ? 'selected' : ''}>Local Browser Time</option>
-                  <option value="utc" ${nc.timeZoneMode === 'utc' ? 'selected' : ''}>UTC</option>
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Time Format</label>
-                <select class="vest-ed-select" id="vest-nb-time-fmt">
-                  <option value="12h" ${nc.timeFormat === '12h' ? 'selected' : ''}>12-Hour (8:30am)</option>
-                  <option value="24h" ${nc.timeFormat === '24h' ? 'selected' : ''}>24-Hour (08:30)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="vest-ed-grid-4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Max Visible Events</label>
+                <label class="vest-ed-label">Max Events Shown</label>
                 <select class="vest-ed-select" id="vest-nb-max-events">
-                  ${[3, 4, 5, 6, 8, 10, 12, 15, 20].map(n => `
+                  ${[3, 4, 5, 6, 8, 10, 12, 15].map(n => `
                     <option value="${n}" ${Number(nc.maxEvents) === n ? 'selected' : ''}>${n} Events</option>
                   `).join('')}
                 </select>
               </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Width: <span id="vest-nb-width-val">${nc.boxWidth}px</span></label>
-                <input type="range" class="vest-ed-range" id="vest-nb-width" min="250" max="480" value="${nc.boxWidth}" />
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Background &amp; Opacity</label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <input type="color" class="vest-ed-color" id="vest-nb-bg-color" data-opacity-input="#vest-nb-bg-opacity" value="${normalizeHexColor(nc.bgColor, '#131722')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span id="vest-nb-bg-op-badge" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${nc.bgOpacity}%</span>
-                  <input type="range" id="vest-nb-bg-opacity" min="25" max="100" value="${nc.bgOpacity}" style="display:none;" />
-                </div>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Border Color</label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <input type="color" class="vest-ed-color" id="vest-nb-border-color" value="${normalizeHexColor(nc.borderColor, '#38bdf8')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.borderColor, '#38bdf8')}</span>
-                </div>
-              </div>
-            </div>
 
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px;">
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-nb-show-countdown" ${nc.showCountdown !== false ? 'checked' : ''} />
-                <span>Show Live Countdown Badge (e.g. <code>in 14m</code> / <code>2h 10m</code>)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-nb-show-flag" ${nc.showCountryFlag !== false ? 'checked' : ''} />
-                <span>Show Country Flag Next to Currency Code</span>
-              </label>
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-nb-show-countdown" ${nc.showCountdown !== false ? 'checked' : ''} />
+                  <span>Show Live Countdown (e.g. <code>2h 15m</code>)</span>
+                </label>
+              </div>
+
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-nb-show-flag" ${nc.showCountryFlag !== false ? 'checked' : ''} />
+                  <span>Show Country Flag &amp; Currency</span>
+                </label>
+              </div>
             </div>
           </div>
 
-          <div class="vest-ed-section" style="margin-bottom:4px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
-              Add Custom Scheduled News Event
+          <!-- Section 2: Timezone, Time Format & Live Countdowns -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Timezone &amp; Clock Formatting
             </div>
-            <div style="display:grid; grid-template-columns: 95px 86px 115px 1fr auto; gap:8px; align-items:center;">
-              <input type="time" class="vest-ed-input" id="vest-nb-cust-time" value="08:30" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11.5px;" title="Event Time" />
-              <select class="vest-ed-select" id="vest-nb-cust-country" style="height:28px; font-size:11.5px;">
-                ${NEWS_ALL_COUNTRIES.map(c => `<option value="${c}">${c}</option>`).join('')}
-              </select>
-              <select class="vest-ed-select" id="vest-nb-cust-folder" style="height:28px; font-size:11.5px;">
-                <option value="red">🔴 Red Folder</option>
-                <option value="yellow">🟡 Yellow Folder</option>
-                <option value="green">🟢 Green Folder</option>
-              </select>
-              <input type="text" class="vest-ed-input" id="vest-nb-cust-title" placeholder="e.g. CPI m/m, FOMC Statement..." style="height:28px; font-size:11.5px;" />
-              <button type="button" class="vest-tvs-action-btn" id="vest-nb-cust-add-btn" style="height:28px; padding:0 12px; border-color:#10b981; color:#34d399; font-size:11.5px;">
-                + Add
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Timezone Mode</label>
+                <select class="vest-ed-select" id="vest-nb-tz">
+                  <option value="ny" ${nc.timeZoneMode === 'ny' ? 'selected' : ''}>New York (EST/EDT)</option>
+                  <option value="local" ${nc.timeZoneMode === 'local' ? 'selected' : ''}>Browser Local Time</option>
+                  <option value="utc" ${nc.timeZoneMode === 'utc' ? 'selected' : ''}>UTC / GMT</option>
+                </select>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Time Format</label>
+                <select class="vest-ed-select" id="vest-nb-time-fmt">
+                  <option value="12h" ${nc.timeFormat === '12h' ? 'selected' : ''}>12-Hour (8:30 AM)</option>
+                  <option value="24h" ${nc.timeFormat === '24h' ? 'selected' : ''}>24-Hour (08:30)</option>
+                </select>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Title</label>
+                <input type="text" class="vest-ed-input" id="vest-nb-title" value="${escapeHtml(nc.boxTitle || 'Upcoming Economic News')}" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Widget Width, Colors & Opacity -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Widget Dimensions &amp; Styling
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Width (px): <span id="vest-nb-width-val">${nc.boxWidth || 325}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-nb-width" min="260" max="500" step="5" value="${nc.boxWidth || 325}" />
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Card Background &amp; Opacity (<span id="vest-nb-bg-op-badge">${nc.bgOpacity}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-bg-color" data-opacity-input="#vest-nb-bg-opacity" value="${normalizeHexColor(nc.bgColor, '#131722')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <input type="range" class="vest-ed-range" id="vest-nb-bg-opacity" min="25" max="100" step="1" value="${nc.bgOpacity}" style="flex:1;" />
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Border Accent Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-border-color" value="${normalizeHexColor(nc.borderColor, '#38bdf8')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.borderColor, '#38bdf8')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Red Folder Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-red-color" value="${normalizeHexColor(nc.redFolderColor, '#ef4444')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.redFolderColor, '#ef4444')}</span>
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Yellow Folder Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-yellow-color" value="${normalizeHexColor(nc.yellowFolderColor, '#eab308')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.yellowFolderColor, '#eab308')}</span>
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Green Folder Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-nb-green-color" value="${normalizeHexColor(nc.greenFolderColor, '#22c55e')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(nc.greenFolderColor, '#22c55e')}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Add Custom Economic News Event -->
+          <div class="vest-ed-section" style="padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px;">
+              Add Custom Economic News Event
+            </div>
+            <div style="font-size:11.5px; color:#94a3b8; line-height:1.4; margin-bottom:10px;">
+              Need to track an unlisted market catalyst, custom speech, or earnings release? Add your own timestamped event below.
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:8px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Event Time (NY Time)</label>
+                <input type="time" class="vest-ed-input" id="vest-nb-new-time" value="08:30" style="height:28px; font-family:'JetBrains Mono', monospace;" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Country / Currency</label>
+                <select class="vest-ed-select" id="vest-nb-new-country">
+                  <option value="USD">🇺🇸 USD (United States)</option>
+                  <option value="EUR">🇪🇺 EUR (Euro Area)</option>
+                  <option value="GBP">🇬🇧 GBP (United Kingdom)</option>
+                  <option value="JPY">🇯🇵 JPY (Japan)</option>
+                  <option value="CAD">🇨🇦 CAD (Canada)</option>
+                  <option value="AUD">🇦🇺 AUD (Australia)</option>
+                  <option value="NZD">🇳🇿 NZD (New Zealand)</option>
+                  <option value="CHF">🇨🇭 CHF (Switzerland)</option>
+                  <option value="CNY">🇨🇳 CNY (China)</option>
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Impact Tier</label>
+                <select class="vest-ed-select" id="vest-nb-new-folder">
+                  <option value="red">🔴 Red Folder (High)</option>
+                  <option value="yellow">🟡 Yellow Folder (Medium)</option>
+                  <option value="green">🟢 Green Folder (Low)</option>
+                </select>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" class="vest-ed-input" id="vest-nb-new-title" placeholder="Event title (e.g. CPI m/m, Unemployment Rate)" style="flex:1;" />
+              <button type="button" class="vest-tvs-action-btn" id="vest-nb-add-event-btn" style="height:28px; padding:0 12px; font-size:11.5px; border-color:rgba(56,189,248,0.4); color:#38bdf8;">
+                + Add Event
               </button>
             </div>
-            ${nc.customEvents.length > 0 ? `
+
+            ${Array.isArray(nc.customEvents) && nc.customEvents.length > 0 ? `
               <div style="display:flex; flex-direction:column; gap:4px; margin-top:8px;">
                 ${nc.customEvents.map((ev, idx) => `
                   <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 8px; background:rgba(255,255,255,0.04); border-radius:6px; font-size:11.5px;">
@@ -5750,331 +5713,267 @@
         `;
       }
 
-      if (activeTab === 'trades') {
-        const tc = normalizeTradesBoxConfig(draftSettings.tradesBox);
-        draftSettings.tradesBox = tc;
-        const activeSymLabel = formatInstrumentDisplayLabel(currentInstrument || 'BTC-PERP');
-        const activeSymKey = normalizeInstrumentKey(currentInstrument || 'BTC-PERP');
-        const sessionBounds = getCurrentEtTradingSessionBounds();
-        const matchingTrades = tc.trades.filter(t => {
-          if (!t) return false;
-          if (tc.filterCurrentInstrument && activeSymKey && t.symbolKey && t.symbolKey !== activeSymKey) return false;
-          if (tc.filterCurrentSessionOnly !== false && !isTradeWithinCurrentEtSession(t, sessionBounds)) return false;
-          return true;
-        });
-
+      function renderTradesBoxSettingsHtml(tc, activeSymLabel, matchingTrades) {
         return `
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div class="vest-tvs-section-title" style="margin:0;">INSTRUMENT TRADES BOX (ON-CHART PNL &amp; DURATION)</div>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <button type="button" class="vest-tvs-action-btn" id="vest-tb-scan-now-btn" style="height:26px; padding:0 10px; font-size:11px; color:#34d399; border-color:rgba(16,185,129,0.4);">
-                ↻ Sync Positions History
-              </button>
-              <button type="button" class="vest-tvs-action-btn" id="vest-tb-reset-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.35);">
-                Reset Box Position
-              </button>
-              <button type="button" class="vest-tvs-action-btn" id="vest-tb-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
-                Reset Defaults
-              </button>
-            </div>
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-tb-scan-now-btn" style="height:26px; padding:0 10px; font-size:11px; color:#34d399; border-color:rgba(16,185,129,0.4);">
+              ↻ Sync Positions History
+            </button>
+            <button type="button" class="vest-tvs-action-btn" id="vest-tb-reset-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#38bdf8; border-color:rgba(56,189,248,0.35);">
+              Reset Box Position
+            </button>
+            <button type="button" class="vest-tvs-action-btn" id="vest-tb-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
           </div>
 
-          <div class="vest-tvs-toggle-box" style="padding:13px 16px; margin-bottom:12px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Enable Moveable Instrument Trades Box on Chart</div>
-              <div class="vest-tvs-toggle-desc">
-                Prepopulates once from <strong>Positions History</strong> for your currently selected instrument (<strong>${escapeHtml(activeSymLabel)}</strong>) within the active trading session (<strong>6:00 PM ET Prev Night – 4:59 PM ET Today</strong>), highlighting wins green and losses red with aligned Side, Entry, Exit, Duration, and PnL columns.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Instrument Trades Box on Chart">
-              <input type="checkbox" id="vest-tb-master-enabled" ${tc.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
-          </div>
-
-          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Winning &amp; Losing Trade Row Highlighting
-            </div>
-            <div class="vest-ed-grid-2" style="margin-bottom:8px;">
-              <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:8px; background:${hexToRgba(tc.winRowColor, tc.winRowOpacity / 100)}; border:1px solid ${hexToRgba(tc.winRowColor, 0.5)};">
-                <div style="display:flex; flex-direction:column; gap:2px;">
-                  <span style="font-size:12.5px; font-weight:700; color:#f8fafc;">Winning Trade Row (Green)</span>
-                  <span style="font-size:10.5px; color:#cbd5e1;">Applied when Trade PnL &gt; $0.00</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:7px;">
-                  <input type="color" class="vest-ed-color" id="vest-tb-win-color" data-opacity-input="#vest-tb-win-opacity" value="${normalizeHexColor(tc.winRowColor, '#10b981')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span id="vest-tb-win-op-badge" style="font-size:11px; color:#e2e8f0; font-family:'JetBrains Mono', monospace;">${tc.winRowOpacity}%</span>
-                  <input type="range" id="vest-tb-win-opacity" min="8" max="85" value="${tc.winRowOpacity}" style="display:none;" />
-                </div>
-              </div>
-
-              <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:8px; background:${hexToRgba(tc.lossRowColor, tc.lossRowOpacity / 100)}; border:1px solid ${hexToRgba(tc.lossRowColor, 0.5)};">
-                <div style="display:flex; flex-direction:column; gap:2px;">
-                  <span style="font-size:12.5px; font-weight:700; color:#f8fafc;">Losing Trade Row (Red)</span>
-                  <span style="font-size:10.5px; color:#cbd5e1;">Applied when Trade PnL &lt; $0.00</span>
-                </div>
-                <div style="display:flex; align-items:center; gap:7px;">
-                  <input type="color" class="vest-ed-color" id="vest-tb-loss-color" data-opacity-input="#vest-tb-loss-opacity" value="${normalizeHexColor(tc.lossRowColor, '#f23645')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span id="vest-tb-loss-op-badge" style="font-size:11px; color:#e2e8f0; font-family:'JetBrains Mono', monospace;">${tc.lossRowOpacity}%</span>
-                  <input type="range" id="vest-tb-loss-opacity" min="8" max="85" value="${tc.lossRowOpacity}" style="display:none;" />
-                </div>
-              </div>
-            </div>
-          </div>
-
+          <!-- Section 1: Instrument & Session Filtering -->
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
             <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Long &amp; Short Side Badge Colors &amp; Font Styling
+              Session &amp; Instrument Filtering
             </div>
-            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
-              <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);">
-                <div style="display:flex; align-items:center; justify-content:space-between;">
-                  <span style="font-size:12px; font-weight:700; color:#f8fafc;">LONG Side Badge</span>
-                  <span class="vest-ctb-side-badge long" id="vest-tb-long-badge-preview" style="${buildSideBadgeInlineStyle('LONG', tc)}">LONG</span>
-                </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Text Color</label>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                      <input type="color" class="vest-ed-color" id="vest-tb-long-text-color" value="${normalizeHexColor(tc.longBadgeTextColor, '#38bdf8')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.longBadgeTextColor, '#38bdf8')}</span>
-                    </div>
-                  </div>
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Fill &amp; Opacity</label>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                      <input type="color" class="vest-ed-color" id="vest-tb-long-bg-color" data-opacity-input="#vest-tb-long-bg-opacity" value="${normalizeHexColor(tc.longBadgeBgColor, '#0f172a')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                      <span id="vest-tb-long-bg-op-badge" style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${tc.longBadgeBgOpacity}%</span>
-                      <input type="range" id="vest-tb-long-bg-opacity" min="0" max="100" value="${tc.longBadgeBgOpacity}" style="display:none;" />
-                    </div>
-                  </div>
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Border Color</label>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                      <input type="color" class="vest-ed-color" id="vest-tb-long-border-color" value="${normalizeHexColor(tc.longBadgeBorderColor, '#38bdf8')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.longBadgeBorderColor, '#38bdf8')}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-bottom:10px;">
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-filter-inst" ${tc.filterCurrentInstrument !== false ? 'checked' : ''} />
+                <span>Filter to current instrument only (<strong>${escapeHtml(activeSymLabel)}</strong>)</span>
+              </label>
 
-              <div style="display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-radius:8px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08);">
-                <div style="display:flex; align-items:center; justify-content:space-between;">
-                  <span style="font-size:12px; font-weight:700; color:#f8fafc;">SHORT Side Badge</span>
-                  <span class="vest-ctb-side-badge short" id="vest-tb-short-badge-preview" style="${buildSideBadgeInlineStyle('SHORT', tc)}">SHORT</span>
-                </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Text Color</label>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                      <input type="color" class="vest-ed-color" id="vest-tb-short-text-color" value="${normalizeHexColor(tc.shortBadgeTextColor, '#fbbf24')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.shortBadgeTextColor, '#fbbf24')}</span>
-                    </div>
-                  </div>
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Fill &amp; Opacity</label>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                      <input type="color" class="vest-ed-color" id="vest-tb-short-bg-color" data-opacity-input="#vest-tb-short-bg-opacity" value="${normalizeHexColor(tc.shortBadgeBgColor, '#0f172a')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                      <span id="vest-tb-short-bg-op-badge" style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${tc.shortBadgeBgOpacity}%</span>
-                      <input type="range" id="vest-tb-short-bg-opacity" min="0" max="100" value="${tc.shortBadgeBgOpacity}" style="display:none;" />
-                    </div>
-                  </div>
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Border Color</label>
-                    <div style="display:flex; align-items:center; gap:5px;">
-                      <input type="color" class="vest-ed-color" id="vest-tb-short-border-color" value="${normalizeHexColor(tc.shortBadgeBorderColor, '#fbbf24')}" style="width:26px; height:24px; padding:0; border-radius:5px; cursor:pointer;" />
-                      <span style="font-size:10.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.shortBadgeBorderColor, '#fbbf24')}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-filter-session" ${tc.filterCurrentSessionOnly !== false ? 'checked' : ''} />
+                <span>Current ET Trading Session only (<strong>6 PM ET &rarr; 4:59 PM ET</strong>)</span>
+              </label>
+
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-tb-auto-capture" ${tc.autoCaptureTrades !== false ? 'checked' : ''} />
+                <span>Auto-capture newly closed positions in background</span>
+              </label>
             </div>
-
             <div class="vest-ed-grid-3">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Side Badge Font Family</label>
-                <select class="vest-ed-select" id="vest-tb-side-font-family">
-                  ${SESSION_FONT_FAMILIES.map(f => `
-                    <option value="${escapeHtml(f.id)}" ${f.id === tc.sideBadgeFontFamily ? 'selected' : ''}>${escapeHtml(f.label)}</option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Badge Font Size: <span id="vest-tb-side-fontsize-val">${tc.sideBadgeFontSize}px</span></label>
-                <input type="range" class="vest-ed-range" id="vest-tb-side-font-size" min="7" max="14" step="0.5" value="${tc.sideBadgeFontSize}" />
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Badge Font Style</label>
-                <select class="vest-ed-select" id="vest-tb-side-font-style">
-                  <option value="normal" ${tc.sideBadgeFontStyle === 'normal' ? 'selected' : ''}>Normal</option>
-                  <option value="bold" ${(tc.sideBadgeFontStyle || 'bold') === 'bold' ? 'selected' : ''}>Bold</option>
-                  <option value="italic" ${tc.sideBadgeFontStyle === 'italic' ? 'selected' : ''}>Italic</option>
-                  <option value="bold_italic" ${tc.sideBadgeFontStyle === 'bold_italic' ? 'selected' : ''}>Bold Italic</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
-            <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Box Appearance, Timezone &amp; Instrument Filtering
-            </div>
-            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Header Title</label>
-                <input type="text" class="vest-ed-input" id="vest-tb-title" value="${escapeHtml(tc.boxTitle)}" placeholder="Instrument Trades" />
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Timezone Display</label>
+                <label class="vest-ed-label">Timezone</label>
                 <select class="vest-ed-select" id="vest-tb-tz">
                   <option value="ny" ${tc.timeZoneMode === 'ny' ? 'selected' : ''}>New York (EST/EDT)</option>
-                  <option value="local" ${tc.timeZoneMode === 'local' ? 'selected' : ''}>Local Browser Time</option>
-                  <option value="utc" ${tc.timeZoneMode === 'utc' ? 'selected' : ''}>UTC</option>
+                  <option value="local" ${tc.timeZoneMode === 'local' ? 'selected' : ''}>Browser Local Time</option>
+                  <option value="utc" ${tc.timeZoneMode === 'utc' ? 'selected' : ''}>UTC / GMT</option>
                 </select>
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Time Format</label>
                 <select class="vest-ed-select" id="vest-tb-time-fmt">
-                  <option value="12h" ${tc.timeFormat === '12h' ? 'selected' : ''}>12-Hour (9:30am)</option>
-                  <option value="24h" ${tc.timeFormat === '24h' ? 'selected' : ''}>24-Hour (09:30)</option>
+                  <option value="12h" ${tc.timeFormat === '12h' ? 'selected' : ''}>12-Hour (8:30 AM)</option>
+                  <option value="24h" ${tc.timeFormat === '24h' ? 'selected' : ''}>24-Hour (08:30)</option>
                 </select>
               </div>
-            </div>
-
-            <div class="vest-ed-grid-4" style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Max Visible Trades</label>
+                <label class="vest-ed-label">Max Trades Listed</label>
                 <select class="vest-ed-select" id="vest-tb-max-trades">
                   ${[4, 6, 8, 10, 12, 15, 20, 30].map(n => `
                     <option value="${n}" ${Number(tc.maxTrades) === n ? 'selected' : ''}>${n} Trades</option>
                   `).join('')}
                 </select>
               </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Width: <span id="vest-tb-width-val">${tc.boxWidth}px</span></label>
-                <input type="range" class="vest-ed-range" id="vest-tb-width" min="430" max="660" value="${tc.boxWidth}" />
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Background &amp; Opacity</label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <input type="color" class="vest-ed-color" id="vest-tb-bg-color" data-opacity-input="#vest-tb-bg-opacity" value="${normalizeHexColor(tc.bgColor, '#131722')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span id="vest-tb-bg-op-badge" style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${tc.bgOpacity}%</span>
-                  <input type="range" id="vest-tb-bg-opacity" min="25" max="100" value="${tc.bgOpacity}" style="display:none;" />
-                </div>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Border Color</label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <input type="color" class="vest-ed-color" id="vest-tb-border-color" value="${normalizeHexColor(tc.borderColor, '#38bdf8')}" style="width:30px; height:26px; padding:0; border-radius:5px; cursor:pointer;" />
-                  <span style="font-size:11px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.borderColor, '#38bdf8')}</span>
-                </div>
-              </div>
-            </div>
-
-            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:16px;">
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-tb-filter-inst" ${tc.filterCurrentInstrument !== false ? 'checked' : ''} />
-                <span>Filter to Currently Selected Instrument Only (<strong>${escapeHtml(activeSymLabel)}</strong>)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-tb-filter-session" ${tc.filterCurrentSessionOnly !== false ? 'checked' : ''} />
-                <span>Current Trading Session Only (<strong>6:00 PM ET Prev Night – 4:59 PM ET Today</strong>)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-tb-show-side" ${tc.showSideBadge !== false ? 'checked' : ''} />
-                <span>Show Long / Short Badge</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-tb-show-summary" ${tc.showSummaryFooter !== false ? 'checked' : ''} />
-                <span>Show Net PnL &amp; Win Rate Footer</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px;">
-                <input type="checkbox" id="vest-tb-auto-capture" ${tc.autoCaptureTrades !== false ? 'checked' : ''} />
-                <span>Auto-Populate Once from Positions History</span>
-              </label>
             </div>
           </div>
 
-          <div class="vest-ed-section" style="margin-bottom:4px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+          <!-- Section 2: Trades Box Title & Dimensions -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Trades Box Title &amp; Dimensions
+            </div>
+            <div class="vest-ed-grid-3">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Custom Box Title</label>
+                <input type="text" class="vest-ed-input" id="vest-tb-title" value="${escapeHtml(tc.boxTitle || 'Instrument Trades')}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Box Width (px): <span id="vest-tb-width-val">${tc.boxWidth || 505}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-tb-width" min="360" max="680" step="5" value="${tc.boxWidth || 505}" />
+              </div>
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-tb-show-summary" ${tc.showSummaryFooter !== false ? 'checked' : ''} />
+                  <span>Show Total PnL &amp; Win Rate Summary Footer</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Background & Row Highlight Colors -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Background &amp; Row Highlight Colors
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Card Background &amp; Opacity (<span id="vest-tb-bg-op-badge">${tc.bgOpacity}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-bg-color" data-opacity-input="#vest-tb-bg-opacity" value="${normalizeHexColor(tc.bgColor, '#131722')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <input type="range" class="vest-ed-range" id="vest-tb-bg-opacity" min="25" max="100" step="1" value="${tc.bgOpacity}" style="flex:1;" />
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Border Accent Color</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-border-color" value="${normalizeHexColor(tc.borderColor, '#38bdf8')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <span style="font-size:11.5px; color:#cbd5e1; font-family:'JetBrains Mono', monospace;">${normalizeHexColor(tc.borderColor, '#38bdf8')}</span>
+                </div>
+              </div>
+
+              <div class="vest-ed-field" style="display:flex; align-items:center; gap:8px; padding-top:14px;">
+                <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                  <input type="checkbox" id="vest-tb-show-side" ${tc.showSideBadge !== false ? 'checked' : ''} />
+                  <span>Show Long / Short Side Badges</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="vest-ed-grid-2">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Winning Trade Row Tint &amp; Opacity (<span id="vest-tb-win-op-badge">${tc.winRowOpacity}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-win-color" data-opacity-input="#vest-tb-win-opacity" value="${normalizeHexColor(tc.winRowColor, '#10b981')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <input type="range" class="vest-ed-range" id="vest-tb-win-opacity" min="8" max="85" step="1" value="${tc.winRowOpacity}" style="flex:1;" />
+                </div>
+              </div>
+
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Losing Trade Row Tint &amp; Opacity (<span id="vest-tb-loss-op-badge">${tc.lossRowOpacity}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-loss-color" data-opacity-input="#vest-tb-loss-opacity" value="${normalizeHexColor(tc.lossRowColor, '#f23645')}" style="width:34px; height:28px; padding:0; border-radius:6px; cursor:pointer;" />
+                  <input type="range" class="vest-ed-range" id="vest-tb-loss-opacity" min="8" max="85" step="1" value="${tc.lossRowOpacity}" style="flex:1;" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Long/Short Pill Badges Styling -->
+          <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+              Long / Short Pill Badges Styling
+            </div>
+            <div class="vest-ed-grid-3" style="margin-bottom:10px;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Side Badge Font Family</label>
+                <select class="vest-ed-select" id="vest-tb-side-font-family">
+                  ${SESSION_FONT_FAMILIES.map(f => `
+                    <option value="${escapeHtml(f.id)}" ${f.id === (tc.sideBadgeFontFamily || 'Inter') ? 'selected' : ''}>${escapeHtml(f.label)}</option>
+                  `).join('')}
+                </select>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Badge Font Size: <span id="vest-tb-side-fontsize-val">${tc.sideBadgeFontSize ?? 9.5}px</span></label>
+                <input type="range" class="vest-ed-range" id="vest-tb-side-font-size" min="7" max="15" step="0.5" value="${tc.sideBadgeFontSize ?? 9.5}" />
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Font Weight / Style</label>
+                <select class="vest-ed-select" id="vest-tb-side-font-style">
+                  <option value="bold" ${(tc.sideBadgeFontStyle || 'bold') === 'bold' ? 'selected' : ''}>Bold (700)</option>
+                  <option value="600" ${tc.sideBadgeFontStyle === '600' ? 'selected' : ''}>Semi-Bold (600)</option>
+                  <option value="normal" ${tc.sideBadgeFontStyle === 'normal' ? 'selected' : ''}>Normal (400)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Long Badge Controls -->
+            <div class="vest-ed-grid-3" style="margin-bottom:8px; padding:8px 10px; background:rgba(56,189,248,0.06); border-radius:8px; align-items:center;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">LONG Text Color</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-long-text-color" value="${normalizeHexColor(tc.longBadgeTextColor, '#38bdf8')}" style="width:28px; height:24px; padding:0; border-radius:5px;" />
+                  <span style="font-size:11px; color:#cbd5e1; font-family:monospace;">${normalizeHexColor(tc.longBadgeTextColor, '#38bdf8')}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">LONG Background &amp; Opacity (<span id="vest-tb-long-bg-op-badge">${tc.longBadgeBgOpacity ?? 85}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-long-bg-color" data-opacity-input="#vest-tb-long-bg-opacity" value="${normalizeHexColor(tc.longBadgeBgColor, '#0f172a')}" style="width:28px; height:24px; padding:0; border-radius:5px;" />
+                  <input type="range" class="vest-ed-range" id="vest-tb-long-bg-opacity" min="0" max="100" step="5" value="${tc.longBadgeBgOpacity ?? 85}" style="flex:1;" />
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">LONG Border &amp; Preview</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-long-border-color" value="${normalizeHexColor(tc.longBadgeBorderColor, '#38bdf8')}" style="width:28px; height:24px; padding:0; border-radius:5px;" />
+                  <span id="vest-tb-long-badge-preview" style="${buildSideBadgeInlineStyle('LONG', tc)}">LONG</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Short Badge Controls -->
+            <div class="vest-ed-grid-3" style="padding:8px 10px; background:rgba(251,191,36,0.06); border-radius:8px; align-items:center;">
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">SHORT Text Color</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-short-text-color" value="${normalizeHexColor(tc.shortBadgeTextColor, '#fbbf24')}" style="width:28px; height:24px; padding:0; border-radius:5px;" />
+                  <span style="font-size:11px; color:#cbd5e1; font-family:monospace;">${normalizeHexColor(tc.shortBadgeTextColor, '#fbbf24')}</span>
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">SHORT Background &amp; Opacity (<span id="vest-tb-short-bg-op-badge">${tc.shortBadgeBgOpacity ?? 85}%</span>)</label>
+                <div style="display:flex; align-items:center; gap:6px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-short-bg-color" data-opacity-input="#vest-tb-short-bg-opacity" value="${normalizeHexColor(tc.shortBadgeBgColor, '#0f172a')}" style="width:28px; height:24px; padding:0; border-radius:5px;" />
+                  <input type="range" class="vest-ed-range" id="vest-tb-short-bg-opacity" min="0" max="100" step="5" value="${tc.shortBadgeBgOpacity ?? 85}" style="flex:1;" />
+                </div>
+              </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">SHORT Border &amp; Preview</label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="color" class="vest-ed-color" id="vest-tb-short-border-color" value="${normalizeHexColor(tc.shortBadgeBorderColor, '#fbbf24')}" style="width:28px; height:24px; padding:0; border-radius:5px;" />
+                  <span id="vest-tb-short-badge-preview" style="${buildSideBadgeInlineStyle('SHORT', tc)}">SHORT</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 5: Current ET Session Closed Trades -->
+          <div class="vest-ed-section" style="padding:12px 14px; background:rgba(15,23,42,0.55); border:1px solid rgba(148,163,184,0.16); border-radius:10px;">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
               <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px;">
-                Log Trade for ${escapeHtml(activeSymLabel)} (${matchingTrades.length} Recorded)
+                Captured Closed Positions (${matchingTrades.length} in Active Session)
               </div>
-              ${tc.trades.length > 0 ? `
-                <button type="button" class="vest-tvs-action-btn" id="vest-tb-clear-all-btn" style="height:22px; padding:0 8px; font-size:10.5px; color:#f87171; border-color:rgba(248,113,113,0.35);">
-                  Clear All Trades
-                </button>
-              ` : ''}
-            </div>
-            <div style="display:grid; grid-template-columns: 92px 76px 96px 96px 1fr auto; gap:6px; align-items:center;">
-              <input type="text" class="vest-ed-input" id="vest-tb-add-symbol" value="${escapeHtml(activeSymLabel)}" placeholder="Symbol" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11.5px;" title="Instrument Symbol" />
-              <select class="vest-ed-select" id="vest-tb-add-side" style="height:28px; font-size:11.5px;">
-                <option value="LONG">LONG</option>
-                <option value="SHORT">SHORT</option>
-              </select>
-              <input type="time" class="vest-ed-input" id="vest-tb-add-entry" value="09:35" step="1" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11px;" title="Entry Time" />
-              <input type="time" class="vest-ed-input" id="vest-tb-add-exit" value="09:52" step="1" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11px;" title="Exit Time" />
-              <input type="number" class="vest-ed-input" id="vest-tb-add-pnl" step="0.01" placeholder="PnL ($) e.g. 245.50 or -110" style="height:28px; font-family:'JetBrains Mono', monospace; font-size:11.5px;" title="Realized PnL in USD (+ for Win, - for Loss)" />
-              <button type="button" class="vest-tvs-action-btn" id="vest-tb-add-btn" style="height:28px; padding:0 12px; border-color:#10b981; color:#34d399; font-size:11.5px;">
-                + Add Trade
+              <button type="button" class="vest-tvs-action-btn" id="vest-tb-clear-history-btn" style="height:24px; padding:0 8px; font-size:10.5px; color:#f87171; border-color:rgba(239,68,68,0.3);">
+                Clear Trades History
               </button>
             </div>
-            ${matchingTrades.length > 0 ? `
-              <div style="display:flex; flex-direction:column; gap:4px; margin-top:8px; max-height:140px; overflow-y:auto;">
-                ${matchingTrades.slice(0, 20).map((tr) => {
-                  const isWin = tr.pnl > 0;
-                  const isLoss = tr.pnl < 0;
-                  const rowBg = isWin
-                    ? hexToRgba(tc.winRowColor, Math.min(45, tc.winRowOpacity) / 100)
-                    : isLoss
-                      ? hexToRgba(tc.lossRowColor, Math.min(45, tc.lossRowOpacity) / 100)
-                      : 'rgba(255,255,255,0.04)';
-                  const pnlFormatted = `${tr.pnl >= 0 ? '+' : '-'}$${Math.abs(tr.pnl).toFixed(2)}`;
-                  const dateFormatted = formatTradeDateShort(tr.exitTime || tr.entryTime, tc);
-                  const sideBadgeStyle = buildSideBadgeInlineStyle(tr.side, tc);
+
+            ${matchingTrades.length === 0 ? `
+              <div style="padding:16px; text-align:center; font-size:12px; color:#94a3b8; background:rgba(255,255,255,0.02); border-radius:8px;">
+                No closed positions recorded for <strong>${escapeHtml(activeSymLabel)}</strong> in the active session yet. Newly closed trades are captured automatically, or click <strong>Sync Positions History</strong> above.
+              </div>
+            ` : `
+              <div style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;">
+                ${matchingTrades.slice(0, 15).map(t => {
+                  const isWin = Number(t.pnl) >= 0;
+                  const durStr = formatTradeDurationHuman(t.durationMs);
                   return `
-                    <div style="display:grid; grid-template-columns: 52px minmax(0, 1fr); gap:8px; align-items:center;">
-                      <span class="vest-ctb-side-badge ${tr.side === 'SHORT' ? 'short' : 'long'}" style="${sideBadgeStyle}">${escapeHtml(tr.side)}</span>
-                      <div style="display:flex; align-items:center; justify-content:space-between; padding:4px 8px; background:${rowBg}; border-left:3px solid ${isWin ? tc.winRowColor : isLoss ? tc.lossRowColor : '#64748b'}; border-radius:5px; font-size:11.5px;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                          <span style="font-family:'JetBrains Mono', monospace; font-weight:700; color:#f8fafc;">${escapeHtml(tr.symbol)}</span>
-                          <span style="font-family:'JetBrains Mono', monospace; color:#cbd5e1;">${escapeHtml(dateFormatted)}</span>
-                          <span style="font-family:'JetBrains Mono', monospace; color:#e2e8f0;">${escapeHtml(formatTradeTimeShort(tr.entryTime, tc))} → ${escapeHtml(formatTradeTimeShort(tr.exitTime, tc))}</span>
-                          <span style="font-family:'JetBrains Mono', monospace; color:#94a3b8;">(${escapeHtml(formatTradeDuration(tr.durationMs || (tr.exitTime - tr.entryTime)))})</span>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:8px;">
-                          <span style="font-family:'JetBrains Mono', monospace; font-weight:700; color:${isWin ? '#4ade80' : isLoss ? '#fca5a5' : '#cbd5e1'};">${escapeHtml(pnlFormatted)}</span>
-                          <button type="button" class="vest-cnb-icon-btn vest-tb-del-trade" data-id="${escapeHtml(tr.id)}" title="Delete trade" style="color:#f87171;">×</button>
-                        </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between; padding:5px 8px; background:rgba(255,255,255,0.03); border-radius:6px; font-size:11px;">
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="${buildSideBadgeInlineStyle(t.side, tc)}">${escapeHtml(t.side)}</span>
+                        <span style="font-family:'JetBrains Mono', monospace; font-weight:600; color:#f8fafc;">${escapeHtml(t.symbol || activeSymLabel)}</span>
+                        <span style="color:#94a3b8; font-size:10px;">${durStr}</span>
+                      </div>
+                      <div style="font-family:'JetBrains Mono', monospace; font-weight:700; color:${isWin ? '#34d399' : '#f87171'};">
+                        ${Number(t.pnl) >= 0 ? '+' : ''}$${Number(t.pnl).toFixed(2)}
                       </div>
                     </div>
                   `;
                 }).join('')}
               </div>
-            ` : ''}
+            `}
           </div>
         `;
       }
 
-      if (activeTab === 'candleohlc') {
-        const co = normalizeCandleOhlcConfig(draftSettings.candleOhlc);
-        draftSettings.candleOhlc = co;
-
+      function renderCandleOhlcSettingsHtml(co) {
         return `
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div>
-              <div class="vest-tvs-section-title" style="margin-bottom:2px;">CANDLE OHLC, NUMBERING &amp; WIDTH SETTINGS</div>
-              <div style="font-size:11.5px; color:#868993;">Display OHLC values, label candles #1–#${co.candleNumbersMax} in an outlined box below each candle, and adjust candle width.</div>
-            </div>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <button type="button" class="vest-tvs-action-btn" id="vest-co-clear-clicked-btn" style="height:28px; padding:0 10px; font-size:11.5px;" title="Turn off all individually clicked candle OHLC labels">
-                Clear Clicked Candles
-              </button>
-              <button type="button" class="vest-tvs-action-btn" id="vest-co-reset-defaults-btn" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(248,113,113,0.35); color:#f87171;" title="Reset Candle settings to factory defaults">
-                Reset Defaults
-              </button>
-            </div>
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-co-clear-clicked-btn" style="height:28px; padding:0 10px; font-size:11.5px;" title="Turn off all individually clicked candle OHLC labels">
+              Clear Clicked Candles
+            </button>
+            <button type="button" class="vest-tvs-action-btn" id="vest-co-reset-defaults-btn" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(248,113,113,0.35); color:#f87171;" title="Reset Candle settings to factory defaults">
+              Reset Defaults
+            </button>
           </div>
 
           <div class="vest-tvs-toggle-box" style="margin-bottom:10px;">
@@ -6097,32 +5996,28 @@
               </div>
               <label class="vest-ed-checkbox-label" style="font-size:11.5px; color:#e2e8f0;" title="Resize candle bodies &amp; proportionally space out adjacent candles left and right so they never overlap">
                 <input type="checkbox" id="vest-co-custom-width-enabled" ${co.customCandleWidthEnabled ? 'checked' : ''} />
-                <span>Custom Candle Size &amp; Spacing</span>
+                <span>Scale Width &amp; Space Out Candles</span>
               </label>
             </div>
 
             <div class="vest-ed-grid-3" style="margin-bottom:10px;">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Candle Width Scale (<span id="vest-co-width-val">${co.candleWidthPx}%</span>)</label>
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <button type="button" class="vest-tvs-action-btn" id="vest-co-width-dec-btn" style="height:24px; width:26px; padding:0; font-weight:700;" title="Make candles narrower and tighter">−</button>
-                  <input type="range" class="vest-ed-range" id="vest-co-candle-width" min="40" max="260" step="5" value="${co.candleWidthPx}" style="flex:1;" />
-                  <button type="button" class="vest-tvs-action-btn" id="vest-co-width-inc-btn" style="height:24px; width:26px; padding:0; font-weight:700;" title="Make candles wider and space out left &amp; right">+</button>
-                </div>
-              </div>
-              <div class="vest-ed-field">
-                <label class="vest-ed-label">Max Numbered Candles (<span id="vest-co-num-max-val">#1–#${co.candleNumbersMax}</span>)</label>
-                <input type="number" class="vest-ed-input" id="vest-co-num-max" min="10" max="300" step="5" value="${co.candleNumbersMax}" style="height:28px; font-family:'JetBrains Mono', monospace;" />
+                <label class="vest-ed-label">Candle Numbers Range (<span id="vest-co-num-max-val">#1–#${co.candleNumbersMax}</span>)</label>
+                <input type="range" class="vest-ed-range" id="vest-co-num-max" min="10" max="300" step="5" value="${co.candleNumbersMax}" />
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Number Font Size (<span id="vest-co-num-fontsize-val">${co.candleNumberFontSize}px</span>)</label>
                 <input type="range" class="vest-ed-range" id="vest-co-num-font-size" min="7.5" max="14" step="0.5" value="${co.candleNumberFontSize}" />
               </div>
+              <div class="vest-ed-field">
+                <label class="vest-ed-label">Candle Width Scale (<span id="vest-co-width-val">${co.candleWidthPx || 140}%</span>)</label>
+                <input type="range" class="vest-ed-range" id="vest-co-candle-width" min="40" max="260" step="5" value="${co.candleWidthPx || 140}" />
+              </div>
             </div>
 
             <div class="vest-ed-grid-3">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Outline / Border Color</label>
+                <label class="vest-ed-label">Number Box Glow Border</label>
                 <div class="vest-ed-color-wrap" style="height:28px; padding:0 8px;">
                   <input type="color" id="vest-co-num-glow-color" value="${co.candleNumberGlowColor}" />
                   <span style="font-size:11px; font-family:monospace; color:#d1d4dc;">${co.candleNumberGlowColor}</span>
@@ -6136,82 +6031,60 @@
                 </div>
               </div>
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Box Fill &amp; Opacity (<span id="vest-co-num-bg-op-val">${co.candleNumberBgOpacity}%</span>)</label>
+                <label class="vest-ed-label">Box Background &amp; Opacity (<span id="vest-co-num-bg-op-val">${co.candleNumberBgOpacity ?? 90}%</span>)</label>
                 <div style="display:flex; align-items:center; gap:8px;">
                   <input type="color" id="vest-co-num-bg-color" value="${co.candleNumberBgColor}" style="width:28px; height:26px; border:none; background:transparent; cursor:pointer; padding:0;" />
-                  <input type="range" class="vest-ed-range" id="vest-co-num-bg-opacity" min="20" max="100" step="1" value="${co.candleNumberBgOpacity}" style="flex:1;" />
+                  <input type="range" class="vest-ed-range" id="vest-co-num-bg-opacity" min="20" max="100" step="5" value="${co.candleNumberBgOpacity ?? 90}" style="flex:1;" />
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="vest-tvs-toggle-box" style="margin-bottom:10px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Show OHLC Values on All Visible Candles</div>
-              <div class="vest-tvs-toggle-desc">
-                When enabled, automatically displays High, Low, Open, and Close values on every visible candle on the chart. You can still click any candle to turn its individual OHLC display off or back on.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Show OHLC Values on All Visible Candles">
-              <input type="checkbox" id="vest-co-master-enabled" ${co.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
-          </div>
-
-          <div class="vest-tvs-toggle-box" style="margin-bottom:12px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Click Any Candle to Toggle Its OHLC Values ON / OFF</div>
-              <div class="vest-tvs-toggle-desc">
-                Simply click directly on any candle body or wick (or its OHLC label) on the chart to toggle that specific candle's Open, High, Low, and Close values ON or OFF.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Click Any Candle to Toggle OHLC">
-              <input type="checkbox" id="vest-co-click-toggle" ${co.clickCandleToToggle !== false ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
-          </div>
-
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius:10px;">
             <div style="font-size:11px; font-weight:700; color:#868993; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-              Displayed Values &amp; Layout Style
+              Values Displayed &amp; Click Behavior
             </div>
-            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px;">
-              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
-                <input type="checkbox" id="vest-co-show-open" ${co.showOpen !== false ? 'checked' : ''} />
-                <span>Open (O)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
-                <input type="checkbox" id="vest-co-show-high" ${co.showHigh !== false ? 'checked' : ''} />
-                <span>High (H)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
-                <input type="checkbox" id="vest-co-show-low" ${co.showLow !== false ? 'checked' : ''} />
-                <span>Low (L)</span>
-              </label>
-              <label class="vest-ed-checkbox-label" style="font-size:12px; padding:6px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px;">
-                <input type="checkbox" id="vest-co-show-close" ${co.showClose !== false ? 'checked' : ''} />
-                <span>Close (C)</span>
+            <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-co-click-toggle" ${co.clickCandleToToggle ? 'checked' : ''} />
+                <span>Click individual candles to toggle their OHLC label ON / OFF</span>
               </label>
             </div>
-
-            <div class="vest-ed-grid-3" style="margin-bottom:4px;">
+            <div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:10px;">
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-co-show-open" ${co.showOpen ? 'checked' : ''} />
+                <span>Show Open (O)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-co-show-high" ${co.showHigh ? 'checked' : ''} />
+                <span>Show High (H)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-co-show-low" ${co.showLow ? 'checked' : ''} />
+                <span>Show Low (L)</span>
+              </label>
+              <label class="vest-ed-checkbox-label" style="font-size:12px;">
+                <input type="checkbox" id="vest-co-show-close" ${co.showClose ? 'checked' : ''} />
+                <span>Show Close (C)</span>
+              </label>
+            </div>
+            <div class="vest-ed-grid-3">
               <div class="vest-ed-field">
-                <label class="vest-ed-label">Display Mode</label>
+                <label class="vest-ed-label">Display Style</label>
                 <select class="vest-ed-select" id="vest-co-display-mode">
-                  <option value="badge" ${co.displayMode !== 'levels' ? 'selected' : ''}>Stacked OHLC Callout Card</option>
-                  <option value="levels" ${co.displayMode === 'levels' ? 'selected' : ''}>Price Tags at Exact O/H/L/C Levels</option>
+                  <option value="badge" ${co.displayMode === 'badge' ? 'selected' : ''}>Compact Card (Above / Below Candle)</option>
+                  <option value="levels" ${co.displayMode === 'levels' ? 'selected' : ''}>Level Tags (On O/H/L/C)</option>
                 </select>
               </div>
               <div class="vest-ed-field">
                 <label class="vest-ed-label">Price Decimals</label>
                 <select class="vest-ed-select" id="vest-co-decimals">
-                  <option value="auto" ${co.decimals === 'auto' ? 'selected' : ''}>Auto-Detect Instrument Tick</option>
-                  <option value="0" ${co.decimals === '0' ? 'selected' : ''}>0 Decimals (12345)</option>
-                  <option value="1" ${co.decimals === '1' ? 'selected' : ''}>1 Decimal (12345.6)</option>
-                  <option value="2" ${co.decimals === '2' ? 'selected' : ''}>2 Decimals (12345.67)</option>
-                  <option value="3" ${co.decimals === '3' ? 'selected' : ''}>3 Decimals (1.234)</option>
-                  <option value="4" ${co.decimals === '4' ? 'selected' : ''}>4 Decimals (1.2345)</option>
-                  <option value="5" ${co.decimals === '5' ? 'selected' : ''}>5 Decimals (1.23456)</option>
+                  <option value="auto" ${co.decimals === 'auto' ? 'selected' : ''}>Auto (Instrument Precision)</option>
+                  <option value="0" ${co.decimals === '0' ? 'selected' : ''}>0 (e.g. 68000)</option>
+                  <option value="1" ${co.decimals === '1' ? 'selected' : ''}>1 (e.g. 68000.5)</option>
+                  <option value="2" ${co.decimals === '2' ? 'selected' : ''}>2 (e.g. 68000.50)</option>
+                  <option value="3" ${co.decimals === '3' ? 'selected' : ''}>3 (e.g. 68000.500)</option>
+                  <option value="4" ${co.decimals === '4' ? 'selected' : ''}>4 (e.g. 68000.5000)</option>
                 </select>
               </div>
               <div class="vest-ed-field">
@@ -6258,32 +6131,12 @@
         `;
       }
 
-      if (activeTab === 'positionhud') {
-        const ph = normalizePositionHudConfig(draftSettings.positionHud);
-        draftSettings.positionHud = ph;
-
+      function renderPositionHudSettingsHtml(ph) {
         return `
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-            <div>
-              <div class="vest-tvs-section-title" style="margin-bottom:2px;">ACTIVE POSITION CHART HUD &amp; QUICK FLATTEN</div>
-              <div style="font-size:11.5px; color:#868993;">Live estimated PnL following the yellow price line, one-click position flatten [ ✕ ], and unclipped entry box PnL badge.</div>
-            </div>
+          <div class="vest-ind-drawer-actions">
             <button type="button" class="vest-tvs-action-btn" id="vest-ph-reset-defaults-btn" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(248,113,113,0.35); color:#f87171;" title="Reset Position HUD to factory defaults">
               Reset Defaults
             </button>
-          </div>
-
-          <div class="vest-tvs-toggle-box" style="margin-bottom:12px;">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Enable Active Position Chart Overlay HUD</div>
-              <div class="vest-tvs-toggle-desc">
-                When you have an open trade, tracks the position in real time on the chart with interactive PnL overlays and one-click execution.
-              </div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle Active Position Chart Overlay HUD">
-              <input type="checkbox" id="vest-ph-master-enabled" ${ph.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
           </div>
 
           <div class="vest-ed-section" style="margin-bottom:12px; padding:12px 14px; background:rgba(234,179,8,0.04); border:1px solid rgba(234,179,8,0.2); border-radius:10px;">
@@ -6355,22 +6208,15 @@
         `;
       }
 
-      if (activeTab === 'faillines') {
-        const cfg = normalizeFailLinesConfig(draftSettings.failLines);
-        draftSettings.failLines = cfg;
+      function renderFailLinesSettingsHtml(cfg) {
         return `
-          <div class="vest-tvs-section-title">CHART TRADER PANEL SETTINGS</div>
-          <p style="font-size:12px;color:#a1a1aa;line-height:1.5;margin:0 0 14px;">Shows Vest's current Long and Short fail prices as horizontal chart lines. The lines update as the prices in the order panel change.</p>
-          <div class="vest-tvs-toggle-box">
-            <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Show Long and Short Fail Price Lines</div>
-              <div class="vest-tvs-toggle-desc">Reads the live fail prices from the Vest trading panel and keeps both labeled lines aligned with their chart prices.</div>
-            </div>
-            <label class="vest-tvs-switch" title="Toggle live fail price chart lines">
-              <input type="checkbox" id="vest-fail-lines-enabled" ${cfg.enabled ? 'checked' : ''} />
-              <span class="vest-tvs-switch-slider"></span>
-            </label>
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-fail-lines-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
           </div>
+
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.5;margin:0 0 14px;">Shows Vest's current Long and Short fail prices as horizontal chart lines. The lines update as the prices in the order panel change.</p>
           <div style="margin-top:16px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
             <label for="vest-fail-lines-label-size" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin-bottom:8px;">Label size <span id="vest-fail-lines-label-size-value" style="color:#38bdf8;">${cfg.labelSize}%</span></label>
             <input id="vest-fail-lines-label-size" type="range" min="75" max="150" step="5" value="${cfg.labelSize}" style="width:100%;accent-color:#0ea5e9;" />
@@ -6380,19 +6226,19 @@
         `;
       }
 
-      if (activeTab === 'cortexindicator') {
-        const cfg = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
-        draftSettings.cortexIndicator = cfg;
+      function renderCortexIndicatorSettingsHtml(cfg) {
         const range = (id, label, min, max, step, value, unit = '') => `
           <label for="${id}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:14px 0 7px;">${label}<span id="${id}-value" style="color:#38bdf8;">${value}${unit}</span></label>
           <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" style="width:100%;accent-color:#0ea5e9;" />`;
+
         return `
-          <div class="vest-tvs-section-title">CORTEX INDICATOR</div>
-          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">A configurable trend-following prototype inspired by the supplied chart: ATR trend bands, a shaded EMA channel, trend-flip markers, projected risk/targets, and multi-timeframe direction. The original indicator’s private formula is unknown, so this is an approximation.</p>
-          <div class="vest-tvs-toggle-box">
-            <div class="vest-tvs-toggle-info"><div class="vest-tvs-toggle-title">Show Cortex Indicator</div><div class="vest-tvs-toggle-desc">Draw the indicator over the current chart candles.</div></div>
-            <label class="vest-tvs-switch"><input type="checkbox" id="vest-ci-enabled" ${cfg.enabled ? 'checked' : ''} /><span class="vest-tvs-switch-slider"></span></label>
+          <div class="vest-ind-drawer-actions">
+            <button type="button" class="vest-tvs-action-btn" id="vest-ci-reset-defaults-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+              Reset Defaults
+            </button>
           </div>
+
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">A configurable trend-following prototype inspired by the supplied chart: ATR trend bands, a shaded EMA channel, trend-flip markers, projected risk/targets, and multi-timeframe direction.</p>
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
             ${range('vest-ci-ema-length', 'EMA channel length', 5, 100, 1, cfg.emaLength)}
             ${range('vest-ci-atr-length', 'ATR length', 3, 50, 1, cfg.atrLength)}
@@ -6432,8 +6278,171 @@
         `;
       }
 
+      function renderChartingIndicatorsHtml() {
+        const sc = normalizeSessionIndicatorsConfig(draftSettings.sessionIndicators);
+        draftSettings.sessionIndicators = sc;
 
+        const fc = normalizeAutoFvgConfig(draftSettings.autoFvg);
+        draftSettings.autoFvg = fc;
+        const rectTemplates = templates.filter(t => (t.drawingType || 'rectangle') === 'rectangle');
 
+        const nc = normalizeNewsBoxConfig(draftSettings.newsBox);
+        draftSettings.newsBox = nc;
+
+        const tc = normalizeTradesBoxConfig(draftSettings.tradesBox);
+        draftSettings.tradesBox = tc;
+        const activeSymLabel = formatInstrumentDisplayLabel(currentInstrument || 'BTC-PERP');
+        const activeSymKey = normalizeInstrumentKey(currentInstrument || 'BTC-PERP');
+        const sessionBounds = getCurrentEtTradingSessionBounds();
+        const matchingTrades = tc.trades.filter(t => {
+          if (!t) return false;
+          if (tc.filterCurrentInstrument && activeSymKey && t.symbolKey && t.symbolKey !== activeSymKey) return false;
+          if (tc.filterCurrentSessionOnly !== false && !isTradeWithinCurrentEtSession(t, sessionBounds)) return false;
+          return true;
+        });
+
+        const co = normalizeCandleOhlcConfig(draftSettings.candleOhlc);
+        draftSettings.candleOhlc = co;
+
+        const ph = normalizePositionHudConfig(draftSettings.positionHud);
+        draftSettings.positionHud = ph;
+
+        const fl = normalizeFailLinesConfig(draftSettings.failLines);
+        draftSettings.failLines = fl;
+
+        const ci = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
+        draftSettings.cortexIndicator = ci;
+
+        const INDICATORS = [
+          {
+            id: 'sessions',
+            title: 'ICT Killzones &amp; Session Indicators',
+            desc: 'Shaded session boxes (Asia, London, NY AM/Lunch/PM) with centered watermarks &amp; liquidity rays',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="8" y1="4" x2="8" y2="20"/><line x1="16" y1="4" x2="16" y2="20"/><line x1="3" y1="12" x2="21" y2="12"/></svg>`,
+            accentColor: '#38bdf8',
+            bgTint: 'rgba(56, 189, 248, 0.12)',
+            masterToggleId: 'vest-si-master-enabled',
+            isEnabled: Boolean(sc.enabled),
+            renderSettings: () => renderSessionIndicatorsSettingsHtml(sc)
+          },
+          {
+            id: 'autofvg',
+            title: "Auto FVG's Engine",
+            desc: 'Automatically identifies 3-candle Fair Value Gaps with timeframe templates &amp; reclaim tracking',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="18" height="10" rx="2"/><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 2"/><line x1="6" y1="3" x2="6" y2="7"/><line x1="18" y1="17" x2="18" y2="21"/></svg>`,
+            accentColor: '#c084fc',
+            bgTint: 'rgba(192, 132, 252, 0.12)',
+            masterToggleId: 'vest-afvg-master-enabled',
+            isEnabled: Boolean(fc.enabled),
+            renderSettings: () => renderAutoFvgSettingsHtml(fc, rectTemplates)
+          },
+          {
+            id: 'news',
+            title: 'Economic News Box',
+            desc: 'Draggable news calendar overlay with live event countdowns and impact tier filtering',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+            accentColor: '#f87171',
+            bgTint: 'rgba(248, 113, 113, 0.12)',
+            masterToggleId: 'vest-nb-master-enabled',
+            isEnabled: Boolean(nc.enabled),
+            renderSettings: () => renderNewsBoxSettingsHtml(nc)
+          },
+          {
+            id: 'trades',
+            title: 'Instrument Trades Box',
+            desc: 'Draggable recent fills and order flow tape showing executed buy/sell size and liquidity',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+            accentColor: '#34d399',
+            bgTint: 'rgba(52, 211, 153, 0.12)',
+            masterToggleId: 'vest-tb-master-enabled',
+            isEnabled: Boolean(tc.enabled),
+            renderSettings: () => renderTradesBoxSettingsHtml(tc, activeSymLabel, matchingTrades)
+          },
+          {
+            id: 'candleohlc',
+            title: 'Candle OHLC Values',
+            desc: 'Interactive on-chart OHLC click inspection badges, backwards numbering, and width scaling',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="9" y1="2" x2="9" y2="6"/><rect x="6" y="6" width="6" height="11" rx="1"/><line x1="9" y1="17" x2="9" y2="22"/><line x1="17" y1="4" x2="17" y2="9"/><rect x="14" y="9" width="6" height="8" rx="1"/><line x1="17" y1="17" x2="17" y2="21"/></svg>`,
+            accentColor: '#fbbf24',
+            bgTint: 'rgba(251, 191, 36, 0.12)',
+            masterToggleId: 'vest-co-master-enabled',
+            isEnabled: Boolean(co.enabled),
+            renderSettings: () => renderCandleOhlcSettingsHtml(co)
+          },
+          {
+            id: 'positionhud',
+            title: 'Active Position HUD',
+            desc: 'Floating on-chart HUD displaying live position size, entry price, liquidation, and PnL',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="3 3"/><rect x="13" y="8" width="8" height="8" rx="1.5"/><line x1="15" y1="10" x2="19" y2="14"/><line x1="19" y1="10" x2="15" y2="14"/></svg>`,
+            accentColor: '#38bdf8',
+            bgTint: 'rgba(56, 189, 248, 0.12)',
+            masterToggleId: 'vest-ph-master-enabled',
+            isEnabled: Boolean(ph.enabled),
+            renderSettings: () => renderPositionHudSettingsHtml(ph)
+          },
+          {
+            id: 'faillines',
+            title: 'Chart Trader Panel &amp; Fail Lines',
+            desc: 'Fail price liquidity lines and embedded quick trading execution buttons directly on the chart',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18M3 17h18"/><path d="M6 5v4M18 15v4"/></svg>`,
+            accentColor: '#f43f5e',
+            bgTint: 'rgba(244, 63, 94, 0.12)',
+            masterToggleId: 'vest-fail-lines-enabled',
+            isEnabled: Boolean(fl.enabled),
+            renderSettings: () => renderFailLinesSettingsHtml(fl)
+          },
+          {
+            id: 'cortexindicator',
+            title: 'Cortex Indicator',
+            desc: 'Proprietary momentum, divergence, and trend indicator signals with real-time chart overlays',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l5-6 4 3 7-9"/><path d="M3 21h18"/><path d="M5 7h4M15 17h4"/></svg>`,
+            accentColor: '#a855f7',
+            bgTint: 'rgba(168, 85, 247, 0.12)',
+            masterToggleId: 'vest-ci-enabled',
+            isEnabled: Boolean(ci.enabled),
+            renderSettings: () => renderCortexIndicatorSettingsHtml(ci)
+          }
+        ];
+
+        return `
+          <div class="vest-tvs-section-title">CHARTING INDICATORS</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 16px;">
+            Enable and configure all on-chart indicators, liquidity tools, and overlays in one unified workspace. Toggle any indicator ON to reveal its full settings drawer right below.
+          </p>
+
+          <div class="vest-indicators-container">
+            ${INDICATORS.map(ind => `
+              <div class="vest-indicator-tile ${ind.isEnabled ? 'is-enabled' : ''}" id="vest-ind-tile-${ind.id}" data-indicator-id="${ind.id}">
+                <div class="vest-indicator-tile-header" data-indicator-id="${ind.id}">
+                  <div class="vest-indicator-tile-left">
+                    <div class="vest-indicator-tile-icon" style="color: ${ind.accentColor}; background: ${ind.bgTint};">
+                      ${ind.icon}
+                    </div>
+                    <div class="vest-indicator-tile-info">
+                      <div class="vest-indicator-tile-title">${ind.title}</div>
+                      <div class="vest-indicator-tile-desc">${ind.desc}</div>
+                    </div>
+                  </div>
+                  <div class="vest-indicator-tile-right">
+                    <span class="vest-indicator-status-badge ${ind.isEnabled ? 'on' : 'off'}">${ind.isEnabled ? 'ON' : 'OFF'}</span>
+                    <label class="vest-tvs-switch" title="Toggle ${ind.title}">
+                      <input type="checkbox" class="vest-ind-master-toggle" id="${ind.masterToggleId}" data-indicator-id="${ind.id}" ${ind.isEnabled ? 'checked' : ''} />
+                      <span class="vest-tvs-switch-slider"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="vest-indicator-settings-drawer" id="vest-ind-drawer-${ind.id}" style="display: ${ind.isEnabled ? 'block' : 'none'};">
+                  ${ind.renderSettings()}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator'].includes(activeTab)) {
+        return renderChartingIndicatorsHtml();
+      }
       if (activeTab === 'perpfirms') {
         return renderPerpFirmsHtml();
       }
@@ -6617,6 +6626,24 @@
       `;
 
       wireDialogEvents();
+      if (activeTab === 'chartingindicators' && targetIndicatorToScroll) {
+        setTimeout(() => {
+          const tile = overlay.querySelector(`#vest-ind-tile-${targetIndicatorToScroll}`);
+          if (tile) {
+            tile.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            tile.style.transition = 'box-shadow 0.3s ease, border-color 0.3s ease';
+            tile.style.boxShadow = '0 0 0 2px rgba(56, 189, 248, 0.6), 0 4px 20px rgba(56, 189, 248, 0.2)';
+            tile.style.borderColor = 'rgba(56, 189, 248, 0.8)';
+            setTimeout(() => {
+              if (tile) {
+                tile.style.boxShadow = '';
+                tile.style.borderColor = '';
+              }
+            }, 1800);
+          }
+          targetIndicatorToScroll = null;
+        }, 120);
+      }
       if (activeTab === 'alertsvoice' && typeof window.speechSynthesis !== 'undefined') {
         voicesChangedHandler = () => {
           const select = overlay.querySelector('#vest-ci-alert-voice');
@@ -7249,7 +7276,7 @@
       });
 
       // Live preview & range label updates on Session Indicators tab
-      if (activeTab === 'sessions') {
+      if (activeTab === 'sessions' || activeTab === 'chartingindicators') {
         const dateFmtInput = overlay.querySelector('#vest-si-perm-date-format');
         const datePresetSelect = overlay.querySelector('#vest-si-perm-date-preset');
         if (datePresetSelect && dateFmtInput) {
@@ -7329,13 +7356,14 @@
         overlay.querySelector('#vest-si-reset-defaults-btn')?.addEventListener('click', () => {
           draftSettings.sessionIndicators = JSON.parse(JSON.stringify(DEFAULT_SESSION_INDICATORS));
           draftSettings.sessionIndicators.enabled = true;
+          targetIndicatorToScroll = 'sessions';
           renderDialog();
           broadcastLiveSessionDraft();
           showToast('Reset Session Indicators to ICT defaults');
         });
       }
 
-      if (activeTab === 'autofvg') {
+      if (activeTab === 'autofvg' || activeTab === 'chartingindicators') {
         const opRange = overlay.querySelector('#vest-afvg-opacity');
         const opVal = overlay.querySelector('#vest-afvg-opacity-val');
         if (opRange && opVal) {
@@ -7398,13 +7426,14 @@
         overlay.querySelector('#vest-afvg-reset-defaults-btn')?.addEventListener('click', () => {
           draftSettings.autoFvg = JSON.parse(JSON.stringify(DEFAULT_AUTO_FVG));
           draftSettings.autoFvg.enabled = true;
+          targetIndicatorToScroll = 'autofvg';
           renderDialog();
           broadcastLiveSessionDraft();
           showToast("Reset Auto FVG's to defaults");
         });
       }
 
-      if (activeTab === 'news') {
+      if (activeTab === 'news' || activeTab === 'chartingindicators') {
         const widthRange = overlay.querySelector('#vest-nb-width');
         const widthVal = overlay.querySelector('#vest-nb-width-val');
         if (widthRange && widthVal) {
@@ -7515,7 +7544,7 @@
         }
       }
 
-      if (activeTab === 'trades') {
+      if (activeTab === 'trades' || activeTab === 'chartingindicators') {
         const widthRange = overlay.querySelector('#vest-tb-width');
         const widthVal = overlay.querySelector('#vest-tb-width-val');
         if (widthRange && widthVal) {
@@ -7646,7 +7675,7 @@
         }
       }
 
-      if (activeTab === 'candleohlc') {
+      if (activeTab === 'candleohlc' || activeTab === 'chartingindicators') {
         const fontSizeRange = overlay.querySelector('#vest-co-font-size');
         const fontSizeVal = overlay.querySelector('#vest-co-fontsize-val');
         if (fontSizeRange && fontSizeVal) {
@@ -7739,6 +7768,8 @@
 
         overlay.querySelector('#vest-co-reset-defaults-btn')?.addEventListener('click', () => {
           draftSettings.candleOhlc = JSON.parse(JSON.stringify(DEFAULT_CANDLE_OHLC));
+          draftSettings.candleOhlc.enabled = true;
+          targetIndicatorToScroll = 'candleohlc';
           renderDialog();
           broadcastLiveSessionDraft();
           showToast('Reset Candle settings to defaults');
@@ -7759,7 +7790,7 @@
         }
       }
 
-      if (activeTab === 'positionhud') {
+      if (activeTab === 'positionhud' || activeTab === 'chartingindicators') {
         ['#vest-ph-master-enabled', '#vest-ph-price-line', '#vest-ph-flatten-btn', '#vest-ph-entry-badge', '#vest-ph-pnl-percent', '#vest-ph-auto-confirm'].forEach(sel => {
           const chk = overlay.querySelector(sel);
           if (chk) {
@@ -7772,6 +7803,8 @@
 
         overlay.querySelector('#vest-ph-reset-defaults-btn')?.addEventListener('click', () => {
           draftSettings.positionHud = JSON.parse(JSON.stringify(DEFAULT_POSITION_HUD));
+          draftSettings.positionHud.enabled = true;
+          targetIndicatorToScroll = 'positionhud';
           renderDialog();
           broadcastLiveSessionDraft();
           showToast('Reset Active Position HUD settings to defaults');
@@ -7786,7 +7819,16 @@
         }
       }
 
-      if (activeTab === 'faillines') {
+      if (activeTab === 'faillines' || activeTab === 'chartingindicators') {
+        
+        overlay.querySelector('#vest-fail-lines-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.failLines = JSON.parse(JSON.stringify(DEFAULT_FAIL_LINES));
+          draftSettings.failLines.enabled = true;
+          targetIndicatorToScroll = 'faillines';
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Fail Lines settings to defaults');
+        });
         overlay.querySelector('#vest-fail-lines-enabled')?.addEventListener('change', () => {
           syncCurrentPaneToDraft();
           broadcastLiveSessionDraft();
@@ -7799,7 +7841,16 @@
         });
       }
 
-      if (activeTab === 'cortexindicator') {
+      if (activeTab === 'cortexindicator' || activeTab === 'chartingindicators') {
+        
+        overlay.querySelector('#vest-ci-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.cortexIndicator = JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR));
+          draftSettings.cortexIndicator.enabled = true;
+          targetIndicatorToScroll = 'cortexindicator';
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Cortex Indicator settings to defaults');
+        });
         ['#vest-ci-enabled', '#vest-ci-show-signals', '#vest-ci-show-targets', '#vest-ci-show-table', '#vest-ci-execution-enabled', '#vest-ci-live-armed'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('change', () => {
             syncCurrentPaneToDraft();
