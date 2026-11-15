@@ -7714,9 +7714,24 @@
             ) {
               return;
             }
+            const indId = header.getAttribute('data-indicator-id');
             const toggle = header.querySelector('.vest-ind-master-toggle');
-            if (toggle) {
-              toggle.checked = !toggle.checked;
+            if (!toggle) return;
+
+            if (toggle.checked) {
+              // Indicator is already ON -> toggle settings drawer
+              const drawer = overlay.querySelector(`#vest-ind-drawer-${indId}`);
+              const settingsBtn = overlay.querySelector(`#vest-ind-settings-btn-${indId}`);
+              if (drawer) {
+                const isOpen = drawer.style.display !== 'none';
+                drawer.style.display = isOpen ? 'none' : 'block';
+                if (settingsBtn) {
+                  settingsBtn.classList.toggle('is-active', !isOpen);
+                }
+              }
+            } else {
+              // Indicator is not on -> toggle indicator ON
+              toggle.checked = true;
               toggle.dispatchEvent(new Event('change', { bubbles: true }));
             }
           });

@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.76`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.77`) are documented in this file.
+
+---
+
+## [v1.1.77] — 2026-11-15
+
+### 🚀 Charting Indicators Tile Click Interaction Refinement
+- **Context-Aware Indicator Tile Click Behavior**:
+  1. *Toggle Settings Drawer When Already ON*: Clicking anywhere on an indicator tile header (title, icon, or description) when the indicator is already enabled now opens or closes its specific settings drawer and synchronizes the active state on the Settings button, avoiding accidental toggling off.
+  2. *Turn ON When Currently OFF*: If the indicator is disabled, clicking the tile header immediately switches the indicator ON, displays its Settings button, and activates the live draft.
+  3. *Dedicated Master Switch for Toggling OFF*: Disabling the indicator remains accessible at any time via the dedicated master toggle slider on the right side of the tile header.
 
 ---
 

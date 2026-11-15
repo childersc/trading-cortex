@@ -84,6 +84,11 @@ const wireDialogEventsMatch = isolatedJs.match(/function wireDialogEvents\(\) \{
 assert(isolatedJs.includes("activeTab === 'chartingindicators'"), 'wireDialogEvents must handle chartingindicators tab');
 assert(isolatedJs.includes("const indToggles = overlay.querySelectorAll('.vest-ind-master-toggle');"), 'wireDialogEvents must wire master toggle switches');
 assert(isolatedJs.includes("const tileHeaders = overlay.querySelectorAll('.vest-indicator-tile-header');"), 'wireDialogEvents must wire tile header clicks');
+assert(isolatedJs.includes("if (toggle.checked) {") &&
+  isolatedJs.includes("// Indicator is already ON -> toggle settings drawer") &&
+  isolatedJs.includes("toggle.checked = true;"),
+  'Clicking tile header must toggle settings drawer if indicator is already ON, and toggle indicator ON if it is not on'
+);
 
 // Verify renderRightPaneContent does NOT contain stranded event listeners
 const renderRightPaneMatch = isolatedJs.match(/function renderRightPaneContent\(\) \{([\s\S]*?)\n    function renderPerpFirmsHtml/);
