@@ -1,3 +1,9 @@
+Trading Cortex v1.1.83 — Institutional Order Block Color Validation & Range Capping
+
+- **Strict Opposite-Color Candle Rule (`v1.1.83`)**: Enforces that Bullish Order Blocks must be down/bearish candles (`close <= open`) and Bearish Order Blocks must be up/bullish candles (`close >= open`), eliminating false order blocks on continuation candles during prolonged rallies/selloffs.
+- **Anomalous Mega-Candle Range Capping (`v1.1.83`)**: Automatically caps outlier candles (> 3x average candle range, e.g. 560-point NQ drop) to the actual absorption zone, preventing oversized boxes from covering half the chart.
+- **Cleaned Up Mid-Air Clustered Blocks (`v1.1.83`)**: Pure trend expansion candles with gaps without a preceding opposite-color base candle are rejected as continuation gaps rather than valid institutional order blocks.
+
 Trading Cortex v1.1.82 — Order Block Strict Coordinate Anchoring & Zero Left/Right Drift
 
 - **Zero Leftward Drift (`v1.1.82`)**: Fixed coordinate mapping in `barToX` to prioritize `timeToCoordinate(timeSec)` and harmonized internal array indices with TradingView `TimePointIndex`, completely eliminating the bug where order blocks stretched thousands of pixels to the left.

@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.82`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.83`) are documented in this file.
+
+---
+
+## [v1.1.83] — 2026-11-15
+
+### 🎯 Institutional Order Block Color Validation & Range Capping
+- **Strict Opposite-Color Candle Rule**:
+  1. *Bullish Order Blocks*: The origin candle must strictly be a **bearish / down candle** (`close <= open`). When displacement occurs with an FVG at candle `g`, if `g - 1` is bullish (green), the engine searches backward up to `swingLookback` bars for the true last down candle at the base. If no down candle exists (pure continuation green bars), the setup is rejected, completely eliminating stacked green boxes in the middle of an uptrend.
+  2. *Bearish Order Blocks*: The origin candle must strictly be a **bullish / up candle** (`close >= open`). Pure red continuation bars with gaps are prevented from generating false bearish order blocks.
+- **Anomalous Mega-Candle Range Capping**:
+  - Implemented dynamic average candle range calculation (`avgRange`).
+  - When an origin candle range exceeds 3x `avgRange` (e.g., a 560-point crash/spike bar on 1h NQ), the order block zone is capped to the actual absorption zone (`avgRange * 2`), preventing massive boxes from covering half the chart.
+- **Structure Break Re-evaluation**:
+  - Evaluates structural breaks against the swing high/low of the leg leading into the origin candle, ensuring only true institutional accumulation/distribution moves qualify.
 
 ---
 
