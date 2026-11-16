@@ -1,3 +1,9 @@
+Trading Cortex v1.1.85 — Range Detector Audible Alerts Enhanced with Instrument, Venue & Timeframe
+
+- **Full Context Voice Speech Announcement (`v1.1.85`)**: Voice synthesis alert triggered when entering a new consolidation range now explicitly states the **Instrument** (e.g. `HYPE Perpetual`, `NQ`), **Venue** (`Vest Markets`, `MyFundedPerpetuals`, `Kalshi Pro`), and **Timeframe** in natural speech (`"15 minute"`, `"1 hour"`, `"daily"`).
+  - Example spoken alert: *"Range detected on HYPE on Vest Markets, 15 minute timeframe."*
+- **Synchronized Visual Toast (`v1.1.85`)**: Screen toast notification updated to match the venue and natural timeframe format.
+
 Trading Cortex v1.1.84 — Range Detector (Multi-Timeframe) with Glowing Blue Box & Audible Alerts
 
 - **Multi-Timeframe Range Detector Engine (`v1.1.84`)**: Evaluates market consolidation vs. trending expansion across multiple timeframes (`5m`, `15m`, `1h`, `4h`, `1D`) using Choppiness Index (CHOP), ADX, and channel containment.

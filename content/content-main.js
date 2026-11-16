@@ -11200,11 +11200,17 @@
           const alertKey = `${symbolKey}:${tfLabel}:${Math.floor(Date.now() / 60000)}`;
           if (!sentRangeAlerts.has(alertKey)) {
             sentRangeAlerts.add(alertKey);
+            const venueName = (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname.includes('vest'))
+              ? 'Vest Markets'
+              : (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname.includes('kalshi')
+                ? 'Kalshi Pro'
+                : 'MyFundedPerpetuals');
             postToIsolated({
               type: 'VEST_TV_RANGE_ALERT',
               payload: {
                 symbol: symbolKey,
                 resolution: tfLabel,
+                venue: venueName,
                 rangeHigh: activeTfResult ? activeTfResult.rangeHigh : null,
                 rangeLow: activeTfResult ? activeTfResult.rangeLow : null,
                 chop: activeTfResult ? activeTfResult.chop : 50,
