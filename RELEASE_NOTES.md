@@ -1,3 +1,8 @@
+Trading Cortex v1.1.86 — Web Audio Autoplay Policy & AudioContext Extension Error Fix
+
+- **Chrome Autoplay Policy Compliance (`v1.1.86`)**: Eliminated the Chrome extension error *"The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page"*. Web Audio context creation is guarded by `canPlayWebAudio()` and user activation status.
+- **Shared Singleton AudioContext (`v1.1.86`)**: Replaced per-chime `new AudioContext()` instantiation with a shared singleton that passively unlocks on the first user interaction, preventing audio context exhaustion and memory leaks.
+
 Trading Cortex v1.1.85 — Range Detector Audible Alerts Enhanced with Instrument, Venue & Timeframe
 
 - **Full Context Voice Speech Announcement (`v1.1.85`)**: Voice synthesis alert triggered when entering a new consolidation range now explicitly states the **Instrument** (e.g. `HYPE Perpetual`, `NQ`), **Venue** (`Vest Markets`, `MyFundedPerpetuals`, `Kalshi Pro`), and **Timeframe** in natural speech (`"15 minute"`, `"1 hour"`, `"daily"`).
