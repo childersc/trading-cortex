@@ -54,14 +54,31 @@ const expectedControls = [
   '#vest-ob-chime-alert',
   '#vest-ob-voice-uri',
   '#vest-ob-test-voice-btn',
-  '#vest-ob-reset-defaults-btn'
+  '#vest-ob-reset-defaults-btn',
+  '#vest-ob-show-stats-box',
+  '#vest-ob-stats-rr-ratio',
+  '#vest-ob-reset-stats-pos-btn'
 ];
 
 for (const ctrl of expectedControls) {
   assert(isolatedJs.includes(ctrl), `Settings drawer & events must include control '${ctrl}'`);
 }
 
-console.log('✓ All 17 Order Blocks settings drawer inputs, sliders, and buttons verified');
+console.log('✓ All 20 Order Blocks settings drawer inputs, sliders, and buttons verified');
+
+// 3b. Verify On-Chart Order Block Performance Stats Screen (1:3 RR)
+assert(isolatedJs.includes('function renderChartOrderBlockStatsBox('), 'Must define renderChartOrderBlockStatsBox');
+assert(isolatedJs.includes('function clampAndPositionChartOrderBlockStatsBox('), 'Must define clampAndPositionChartOrderBlockStatsBox');
+assert(isolatedJs.includes('function wireChartOrderBlockStatsBoxEvents('), 'Must define wireChartOrderBlockStatsBoxEvents');
+assert(isolatedJs.includes('vest-chart-ob-stats-box'), 'Must render container #vest-chart-ob-stats-box');
+assert(isolatedJs.includes('vest-cosb-pin-btn'), 'Must include sticky/pin button #vest-cosb-pin-btn');
+assert(isolatedJs.includes('vest-cosb-btn-collapse'), 'Must include minimize button #vest-cosb-btn-collapse');
+assert(isolatedJs.includes('vest-cosb-btn-settings'), 'Must include settings gear button #vest-cosb-btn-settings');
+assert(isolatedJs.includes('vest-cosb-btn-close'), 'Must include close button #vest-cosb-btn-close');
+assert(isolatedJs.includes('vest-cosb-restore-btn'), 'Must include minimized pill restore button #vest-cosb-restore-btn');
+assert(isolatedJs.includes('openStudioSettingsModal(\'chartingindicators\', \'orderblocks\')'), 'Settings button must deep-link directly to Order Blocks settings drawer');
+
+console.log('✓ On-chart 1:3 RR Order Block Performance Stats screen (sticky, drag, minimize, deep-link settings) verified');
 
 // 4. Verify Audible Voice & Web Audio Chime Alerts with Autoplay Policy Protection
 assert(isolatedJs.includes('function playOrderBlockChime('), 'Must define playOrderBlockChime for synthesized audio feedback');
@@ -114,10 +131,12 @@ const extractFn = (name, src) => {
 
 const normFnCode = extractFn('normalizeOrderBlocksConfig', mainJs);
 const computeFnCode = extractFn('computeOrderBlocksFromBars', mainJs);
+const statsFnCode = extractFn('computeOrderBlockPerformanceStats', mainJs);
 
 const sandbox = {
   console,
   Math,
+  isFinite,
   DEFAULT_ORDER_BLOCKS: {
     enabled: true,
     swingLookback: 3,
@@ -134,12 +153,14 @@ const sandbox = {
     chimeAlertEnabled: true,
     voiceURI: '',
     showTargetLines: true,
-    riskRewardRatio: 2.0
+    riskRewardRatio: 3.0,
+    showStatsBox: true,
+    statsRrRatio: 3.0
   }
 };
 
 vm.createContext(sandbox);
-vm.runInContext(`${normFnCode}\n${computeFnCode}`, sandbox);
+vm.runInContext(`${normFnCode}\n${computeFnCode}\n${statsFnCode}`, sandbox);
 
 // Synthetic bars generating a swing high followed by a bullish breakout with an FVG
 // Bars 0-5: consolidation around 100
@@ -188,5 +209,42 @@ assert.strictEqual(bullOb.mitigatedBarIndex, 10, 'Mitigation must occur at bar 1
 assert.strictEqual(bullOb.mitigatedPrice, 101.5, 'Mitigated price must be top of OB');
 
 console.log('✓ VM algorithm test passed: detected Bullish OB with FVG, BOS break, and Bar 10 mitigation');
+
+// 7. Verify computeOrderBlockPerformanceStats 1:3 RR Logic
+console.log('Testing computeOrderBlockPerformanceStats 1:3 RR performance evaluation...');
+const stats1 = sandbox.computeOrderBlockPerformanceStats(computed, syntheticBars, 3.0);
+assert.strictEqual(stats1.totalBlocks, computed.length);
+assert.strictEqual(stats1.mitigatedCount, 1);
+assert.strictEqual(stats1.wins, 1, 'Mitigated bullish OB must hit 1:3 RR take profit at bar 11');
+assert.strictEqual(stats1.losses, 0);
+assert.strictEqual(stats1.winRate, 100);
+assert.strictEqual(stats1.netR, 3.0, 'Net R for 1 win at 1:3 RR must equal +3.0R');
+assert.strictEqual(stats1.rrRatio, 3.0);
+assert.strictEqual(stats1.long.wins, 1);
+assert.strictEqual(stats1.long.winRate, 100);
+
+// Add a simulated losing Bearish OB:
+// Entry 100, SL 105, Risk 5, 1:3 TP 85. Price moves up to 106, stopping out!
+const mockBearishOb = {
+  side: 'short',
+  top: 105,
+  bottom: 100,
+  isMitigated: true,
+  mitigatedArrayIndex: 10
+};
+const mixedBlocks = [...computed, mockBearishOb];
+const stats2 = sandbox.computeOrderBlockPerformanceStats(mixedBlocks, syntheticBars, 3.0);
+assert.strictEqual(stats2.mitigatedCount, 2);
+assert.strictEqual(stats2.wins, 1, 'Long OB was winner');
+assert.strictEqual(stats2.losses, 1, 'Bearish OB was stopped out (loss)');
+assert.strictEqual(stats2.closedTrades, 2);
+assert.strictEqual(stats2.winRate, 50, '1 win out of 2 closed trades must equal 50% win rate');
+assert.strictEqual(stats2.netR, 2.0, '1 win at 3R minus 1 loss at 1R = +2.0R net return');
+assert.strictEqual(stats2.profitFactor, 3.0, 'Profit factor (3R / 1R) must equal 3.0');
+assert.strictEqual(stats2.expectancy, '+1.00R', 'Expectancy (+2R / 2) must equal +1.00R');
+assert.strictEqual(stats2.short.losses, 1);
+assert.strictEqual(stats2.short.winRate, 0);
+
+console.log('✓ computeOrderBlockPerformanceStats accurately evaluates 1:3 RR win/loss/netR/expectancy for Long and Short OBs');
 
 console.log('All Institutional Order Blocks Indicator Tests Passed Successfully!');

@@ -763,7 +763,16 @@
     chimeAlertEnabled: true,
     voiceURI: '',
     showTargetLines: true,
-    riskRewardRatio: 2.0
+    riskRewardRatio: 3.0,
+    showStatsBox: true,
+    statsRrRatio: 3.0,
+    statsBoxWidth: 290,
+    statsBoxPinned: false,
+    statsBoxPinnedLeft: null,
+    statsBoxPinnedTop: null,
+    statsBoxCollapsed: false,
+    statsBoxRelX: 0.04,
+    statsBoxRelY: 0.54
   };
 
   function normalizeOrderBlocksConfig(rawCfg) {
@@ -784,7 +793,16 @@
       chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
       voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
       showTargetLines: cfg.showTargetLines !== false,
-      riskRewardRatio: Math.max(1.0, Math.min(5.0, Number(cfg.riskRewardRatio) || 2.0))
+      riskRewardRatio: Math.max(1.0, Math.min(10.0, Number(cfg.riskRewardRatio) || 3.0)),
+      showStatsBox: cfg.showStatsBox !== false,
+      statsRrRatio: Math.max(1.0, Math.min(10.0, Number(cfg.statsRrRatio) || 3.0)),
+      statsBoxWidth: Math.max(240, Math.min(450, Math.round(Number(cfg.statsBoxWidth) || 290))),
+      statsBoxPinned: Boolean(cfg.statsBoxPinned),
+      statsBoxPinnedLeft: typeof cfg.statsBoxPinnedLeft === 'number' && Number.isFinite(cfg.statsBoxPinnedLeft) ? cfg.statsBoxPinnedLeft : null,
+      statsBoxPinnedTop: typeof cfg.statsBoxPinnedTop === 'number' && Number.isFinite(cfg.statsBoxPinnedTop) ? cfg.statsBoxPinnedTop : null,
+      statsBoxCollapsed: Boolean(cfg.statsBoxCollapsed),
+      statsBoxRelX: typeof cfg.statsBoxRelX === 'number' && Number.isFinite(cfg.statsBoxRelX) ? Math.max(0, Math.min(1, cfg.statsBoxRelX)) : 0.04,
+      statsBoxRelY: typeof cfg.statsBoxRelY === 'number' && Number.isFinite(cfg.statsBoxRelY) ? Math.max(0, Math.min(1, cfg.statsBoxRelY)) : 0.54
     };
   }
 
@@ -2927,6 +2945,11 @@
       latestRangeDetectorTelemetry = event.data.payload || {};
       if (settings.rangeDetector && settings.rangeDetector.enabled) {
         renderChartRangeBox();
+      }
+    } else if (type === 'VEST_TV_ORDER_BLOCKS_UPDATE') {
+      latestOrderBlocksTelemetry = event.data.payload || {};
+      if (settings.orderBlocks && settings.orderBlocks.enabled && settings.orderBlocks.showStatsBox !== false) {
+        renderChartOrderBlockStatsBox();
       }
     } else if (type === 'VEST_TV_RANGE_ALERT') {
       handleRangeDetectedAlert(event.data.payload || {});
@@ -6763,6 +6786,22 @@
           </div>
 
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">PERFORMANCE STATS BOX (1:3 RR)</div>
+            <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:10px;">
+              <label class="vest-ed-checkbox-label">
+                <input type="checkbox" id="vest-ob-show-stats-box" ${ob.showStatsBox !== false ? 'checked' : ''} />
+                <span>Show on-chart Order Block Performance Stats Screen</span>
+              </label>
+            </div>
+            ${range('vest-ob-stats-rr-ratio', 'Stats Target Risk:Reward Ratio', 1.0, 10.0, 0.5, ob.statsRrRatio || 3.0, ' RR')}
+            <div style="margin-top:10px;">
+              <button type="button" class="vest-tvs-action-btn" id="vest-ob-reset-stats-pos-btn" style="height:26px; padding:0 10px; font-size:11px; color:#94a3b8;">
+                Reset Stats Box Position
+              </button>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
             <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">AUDIBLE ALERTS (VOICE &amp; CHIME)</div>
             <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:12px;">
               <label class="vest-ed-checkbox-label">
@@ -7118,6 +7157,7 @@
       overlay.remove();
       // Restore committed settings to main world in case user cancelled after previewing
       if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
+      if (typeof renderChartOrderBlockStatsBox === 'function') renderChartOrderBlockStatsBox();
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       notifyMainWorldConfig();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
@@ -7854,6 +7894,8 @@
         if (q('#vest-ob-voice-uri')) ob.voiceURI = q('#vest-ob-voice-uri').value || '';
         if (q('#vest-ob-show-target-lines')) ob.showTargetLines = Boolean(q('#vest-ob-show-target-lines').checked);
         if (q('#vest-ob-rr-ratio')) ob.riskRewardRatio = Number(q('#vest-ob-rr-ratio').value) || 2.0;
+        if (q('#vest-ob-show-stats-box')) ob.showStatsBox = Boolean(q('#vest-ob-show-stats-box').checked);
+        if (q('#vest-ob-stats-rr-ratio')) ob.statsRrRatio = Number(q('#vest-ob-stats-rr-ratio').value) || 3.0;
         draftSettings.orderBlocks = normalizeOrderBlocksConfig(ob);
       }
 
@@ -7927,6 +7969,7 @@
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
       if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
+      if (typeof renderChartOrderBlockStatsBox === 'function') renderChartOrderBlockStatsBox();
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       showToast('Settings saved');
       if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
@@ -8833,6 +8876,19 @@
           showToast('Reset Order Blocks settings to defaults');
         });
 
+        overlay.querySelector('#vest-ob-reset-stats-pos-btn')?.addEventListener('click', () => {
+          if (!draftSettings.orderBlocks) draftSettings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+          draftSettings.orderBlocks.statsBoxRelX = 0.04;
+          draftSettings.orderBlocks.statsBoxRelY = 0.54;
+          draftSettings.orderBlocks.statsBoxPinned = false;
+          draftSettings.orderBlocks.statsBoxPinnedLeft = null;
+          draftSettings.orderBlocks.statsBoxPinnedTop = null;
+          settings.orderBlocks = JSON.parse(JSON.stringify(draftSettings.orderBlocks));
+          saveSettingsDebounced();
+          renderChartOrderBlockStatsBox();
+          showToast('Order Block Stats Box position reset');
+        });
+
         overlay.querySelector('#vest-ob-test-voice-btn')?.addEventListener('click', () => {
           playOrderBlockChime('long');
           const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
@@ -8840,14 +8896,14 @@
           speakCortexVoicePhrase('Bullish Order Block Mitigated. Enter Long.', voiceUri);
         });
 
-        ['#vest-ob-master-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-voice-alert', '#vest-ob-chime-alert', '#vest-ob-extend-mode', '#vest-ob-voice-uri', '#vest-ob-bull-color', '#vest-ob-bear-color'].forEach(sel => {
+        ['#vest-ob-master-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-show-stats-box', '#vest-ob-voice-alert', '#vest-ob-chime-alert', '#vest-ob-extend-mode', '#vest-ob-voice-uri', '#vest-ob-bull-color', '#vest-ob-bear-color'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('change', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
           });
         });
 
-        ['#vest-ob-swing-lookback', '#vest-ob-max-blocks', '#vest-ob-min-fvg-ticks', '#vest-ob-bull-opacity', '#vest-ob-bear-opacity', '#vest-ob-icon-size', '#vest-ob-rr-ratio'].forEach(sel => {
+        ['#vest-ob-swing-lookback', '#vest-ob-max-blocks', '#vest-ob-min-fvg-ticks', '#vest-ob-bull-opacity', '#vest-ob-bear-opacity', '#vest-ob-icon-size', '#vest-ob-rr-ratio', '#vest-ob-stats-rr-ratio'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -9217,6 +9273,12 @@ if (activeTab === 'diagnostics') {
     if (settings.diagnosticsBox && settings.diagnosticsBox.enabled && settings.diagnosticsBox.collapsed) {
       activeCollapsed.push('diagnostics');
     }
+    if (settings.rangeDetector && settings.rangeDetector.enabled && settings.rangeDetector.collapsed) {
+      activeCollapsed.push('range_detector');
+    }
+    if (settings.orderBlocks && settings.orderBlocks.enabled && settings.orderBlocks.showStatsBox !== false && settings.orderBlocks.statsBoxCollapsed) {
+      activeCollapsed.push('order_blocks_stats');
+    }
 
     const order = current.filter(id => activeCollapsed.includes(id));
     activeCollapsed.forEach(id => {
@@ -9272,6 +9334,12 @@ if (activeTab === 'diagnostics') {
       } else if (type === 'diagnostics') {
         el = chartDiagnosticsBoxEl;
         defaultW = 245;
+      } else if (type === 'range_detector') {
+        el = chartRangeBoxEl;
+        defaultW = 220;
+      } else if (type === 'order_blocks_stats') {
+        el = chartOrderBlockStatsBoxEl;
+        defaultW = 230;
       }
 
       const boxW = (el && el.offsetWidth) || (type === boxType && boxEl && boxEl.offsetWidth) || defaultW;
@@ -9321,6 +9389,12 @@ if (activeTab === 'diagnostics') {
       } else if (boxType === 'diagnostics') {
         el = chartDiagnosticsBoxEl;
         defaultW = 245;
+      } else if (boxType === 'range_detector') {
+        el = chartRangeBoxEl;
+        defaultW = 220;
+      } else if (boxType === 'order_blocks_stats') {
+        el = chartOrderBlockStatsBoxEl;
+        defaultW = 230;
       } else if (boxType === 'positions') {
         el = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
         defaultW = 195;
@@ -9842,6 +9916,12 @@ if (activeTab === 'diagnostics') {
       }
       if (settings.diagnosticsBox && settings.diagnosticsBox.enabled && !settings.diagnosticsBox.collapsed) {
         clampAndPositionChartDiagnosticsBox();
+      }
+      if (settings.rangeDetector && settings.rangeDetector.enabled && !settings.rangeDetector.collapsed) {
+        clampAndPositionChartRangeBox();
+      }
+      if (settings.orderBlocks && settings.orderBlocks.enabled && settings.orderBlocks.showStatsBox !== false && !settings.orderBlocks.statsBoxCollapsed) {
+        clampAndPositionChartOrderBlockStatsBox();
       }
       repositionAllMinimizedBoxes();
     });
@@ -11534,6 +11614,360 @@ if (activeTab === 'diagnostics') {
           window.removeEventListener('mousemove', onMove);
           window.removeEventListener('mouseup', onUp);
           queueSettingsSave({ rangeDetector: settings.rangeDetector });
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Floating On-Chart Order Block Performance Stats Box Component
+  // -------------------------------------------------------------
+  let chartOrderBlockStatsBoxEl = null;
+  let activeObStatsBoxDrag = null;
+  let latestOrderBlocksTelemetry = null;
+
+  function clampAndPositionChartOrderBlockStatsBox() {
+    if (!chartOrderBlockStatsBoxEl || chartOrderBlockStatsBoxEl.style.display === 'none' || activeObStatsBoxDrag) return;
+    const ob = normalizeOrderBlocksConfig(settings.orderBlocks);
+    const vp = getScreenBoundsRect();
+
+    if (ob.statsBoxCollapsed) {
+      const minPos = getMinimizedCortexBarCoords('order_blocks_stats', chartOrderBlockStatsBoxEl);
+      chartOrderBlockStatsBoxEl.style.left = `${minPos.left}px`;
+      chartOrderBlockStatsBoxEl.style.top = `${minPos.top}px`;
+      return;
+    }
+
+    const boxW = chartOrderBlockStatsBoxEl.offsetWidth || ob.statsBoxWidth || 290;
+    const boxH = chartOrderBlockStatsBoxEl.offsetHeight || 260;
+
+    let targetLeft;
+    let targetTop;
+    if (ob.statsBoxPinned && ob.statsBoxPinnedLeft !== null && ob.statsBoxPinnedTop !== null) {
+      targetLeft = ob.statsBoxPinnedLeft;
+      targetTop = ob.statsBoxPinnedTop;
+    } else {
+      const maxOffsetX = Math.max(0, vp.width - boxW);
+      const maxOffsetY = Math.max(0, vp.height - boxH);
+      const relX = typeof ob.statsBoxRelX === 'number' ? ob.statsBoxRelX : 0.04;
+      const relY = typeof ob.statsBoxRelY === 'number' ? ob.statsBoxRelY : 0.54;
+      targetLeft = Math.round(vp.left + relX * maxOffsetX);
+      targetTop = Math.round(vp.top + relY * maxOffsetY);
+    }
+
+    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
+    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
+
+    chartOrderBlockStatsBoxEl.style.left = `${clampedLeft}px`;
+    chartOrderBlockStatsBoxEl.style.top = `${clampedTop}px`;
+  }
+
+  function renderChartOrderBlockStatsBox(animateFromRect = null) {
+    if (!isTopWindow) return;
+
+    const ob = normalizeOrderBlocksConfig(settings.orderBlocks);
+    settings.orderBlocks = ob;
+
+    if (!ob.enabled || ob.showStatsBox === false) {
+      if (chartOrderBlockStatsBoxEl) {
+        chartOrderBlockStatsBoxEl.style.display = 'none';
+      }
+      return;
+    }
+
+    if (!chartOrderBlockStatsBoxEl || !chartOrderBlockStatsBoxEl.isConnected) {
+      chartOrderBlockStatsBoxEl = document.getElementById('vest-chart-ob-stats-box');
+      if (!chartOrderBlockStatsBoxEl) {
+        chartOrderBlockStatsBoxEl = document.createElement('div');
+        chartOrderBlockStatsBoxEl.id = 'vest-chart-ob-stats-box';
+        document.body.appendChild(chartOrderBlockStatsBoxEl);
+      }
+    }
+
+    chartOrderBlockStatsBoxEl.style.display = 'block';
+    chartOrderBlockStatsBoxEl.style.position = 'fixed';
+    chartOrderBlockStatsBoxEl.style.zIndex = '10002';
+    chartOrderBlockStatsBoxEl.style.width = ob.statsBoxCollapsed ? 'auto' : `${ob.statsBoxWidth || 290}px`;
+    chartOrderBlockStatsBoxEl.style.background = 'rgba(11, 15, 25, 0.92)';
+    chartOrderBlockStatsBoxEl.style.backdropFilter = 'blur(12px)';
+    chartOrderBlockStatsBoxEl.style.borderRadius = '8px';
+    chartOrderBlockStatsBoxEl.style.border = '1px solid rgba(16, 185, 129, 0.55)';
+    chartOrderBlockStatsBoxEl.style.boxShadow = '0 0 16px rgba(16, 185, 129, 0.38), 0 0 32px rgba(5, 150, 105, 0.18)';
+    chartOrderBlockStatsBoxEl.style.overflow = 'hidden';
+    chartOrderBlockStatsBoxEl.style.userSelect = 'none';
+    chartOrderBlockStatsBoxEl.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+    const telem = latestOrderBlocksTelemetry || {};
+    const stats = telem.stats || {
+      totalBlocks: 0,
+      mitigatedCount: 0,
+      wins: 0,
+      losses: 0,
+      pending: 0,
+      closedTrades: 0,
+      winRate: 0,
+      netR: 0,
+      profitFactor: 0,
+      expectancy: '+0.00R',
+      rrRatio: ob.statsRrRatio || 3.0,
+      long: { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 },
+      short: { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 }
+    };
+
+    const targetRr = stats.rrRatio || ob.statsRrRatio || 3.0;
+    const wins = stats.wins || 0;
+    const losses = stats.losses || 0;
+    const pending = stats.pending || 0;
+    const closed = stats.closedTrades || 0;
+    const winRate = stats.winRate || 0;
+    const netR = typeof stats.netR === 'number' ? stats.netR : 0;
+    const pf = typeof stats.profitFactor === 'number' ? stats.profitFactor : 0;
+    const expectancy = stats.expectancy || '+0.00R';
+
+    const totalTracked = wins + losses + pending;
+    const winPct = totalTracked > 0 ? (wins / totalTracked) * 100 : 0;
+    const lossPct = totalTracked > 0 ? (losses / totalTracked) * 100 : 0;
+    const pendingPct = totalTracked > 0 ? (pending / totalTracked) * 100 : 0;
+
+    const rateColor = closed > 0 ? (winRate >= 50 ? '#34d399' : (winRate >= 33.3 ? '#fbbf24' : '#f87171')) : '#94a3b8';
+    const netRColor = netR > 0 ? '#34d399' : (netR < 0 ? '#f87171' : '#94a3b8');
+
+    if (ob.statsBoxCollapsed) {
+      chartOrderBlockStatsBoxEl.innerHTML = `
+        <div class="vest-cosb-min-pill" id="vest-cosb-restore-btn" style="
+          display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+          background: linear-gradient(135deg, #059669, #047857); color: #ffffff;
+          cursor: pointer; border-radius: 8px; font-size: 11.5px; font-weight: 700;
+        " title="Click to expand Order Block Performance Stats">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: ${rateColor}; box-shadow: 0 0 8px ${rateColor};"></span>
+          <span>OB STATS: ${closed > 0 ? `${winRate}% WIN` : `${wins}W / ${losses}L`} (1:${targetRr} RR)</span>
+          <span style="opacity: 0.8;">↗</span>
+        </div>
+      `;
+    } else {
+      chartOrderBlockStatsBoxEl.innerHTML = `
+        <!-- Emerald Title Bar with White Text -->
+        <div id="vest-cosb-title-bar" style="
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 8px 12px; background: linear-gradient(135deg, #059669, #047857);
+          color: #ffffff; cursor: move; border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        ">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width: 15px; height: 15px; color: #ffffff;">
+              <path d="M3 3v18h18"></path>
+              <path d="M18 17V9"></path>
+              <path d="M13 17V5"></path>
+              <path d="M8 17v-3"></path>
+            </svg>
+            <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.4px; text-transform: uppercase;">OB Stats (1:${targetRr} RR)</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <button type="button" class="vest-cosb-icon-btn ${ob.statsBoxPinned ? 'is-pinned' : ''}" id="vest-cosb-pin-btn" style="background: ${ob.statsBoxPinned ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.15)'}; border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;" title="${ob.statsBoxPinned ? 'Sticky / Pinned to screen (click to unpin)' : 'Make Sticky / Pin window to exact screen position'}">
+              <svg viewBox="0 0 24 24" fill="${ob.statsBoxPinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+              </svg>
+            </button>
+            <button type="button" id="vest-cosb-btn-collapse" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; line-height: 1;" title="Minimize Window">_</button>
+            <button type="button" id="vest-cosb-btn-settings" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;" title="Order Block Settings">⚙</button>
+            <button type="button" id="vest-cosb-btn-close" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;" title="Close Stats Screen">✕</button>
+          </div>
+        </div>
+
+        <!-- Box Body: Performance Metrics -->
+        <div style="padding: 10px 12px;">
+          <!-- Hero Banner: Win Rate & Net R -->
+          <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px;">
+            <div>
+              <div style="font-size: 20px; font-weight: 800; color: ${rateColor}; line-height: 1.1;">
+                ${closed > 0 ? `${winRate}%` : '--%'}
+              </div>
+              <div style="font-size: 9.5px; font-weight: 600; color: #94a3b8; letter-spacing: 0.4px; text-transform: uppercase;">
+                Win Rate (${wins}W - ${losses}L)
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 16px; font-weight: 800; color: ${netRColor}; font-family: monospace;">
+                ${netR >= 0 ? '+' : ''}${netR.toFixed(1)}R
+              </div>
+              <div style="font-size: 9.5px; font-weight: 600; color: #94a3b8; letter-spacing: 0.4px; text-transform: uppercase;">
+                Net Return
+              </div>
+            </div>
+          </div>
+
+          <!-- Segmented Win/Loss/Pending Bar -->
+          <div style="display: flex; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.08); margin: 6px 0 10px;">
+            <div style="width: ${winPct}%; background: #10b981; transition: width 0.3s ease;" title="Wins: ${wins}"></div>
+            <div style="width: ${lossPct}%; background: #ef4444; transition: width 0.3s ease;" title="Losses: ${losses}"></div>
+            <div style="width: ${pendingPct}%; background: #64748b; transition: width 0.3s ease;" title="Pending: ${pending}"></div>
+          </div>
+
+          <!-- Key Metrics Grid -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 9px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Profit Factor</div>
+              <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; font-family: monospace;">${pf > 0 ? pf.toFixed(2) : '--'}</div>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 9px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Expectancy</div>
+              <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; font-family: monospace;">${expectancy}</div>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 9px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Closed Trades</div>
+              <div style="font-size: 12.5px; font-weight: 700; color: #38bdf8; font-family: monospace;">${closed} <span style="font-size: 9.5px; color: #64748b; font-weight: normal;">(${pending} in play)</span></div>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 9px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Risk : Reward</div>
+              <div style="font-size: 12.5px; font-weight: 700; color: #a78bfa; font-family: monospace;">1 : ${targetRr}</div>
+            </div>
+          </div>
+
+          <!-- Long vs Short Breakdown -->
+          <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 5px; font-size: 10px;">
+              <span style="font-weight: 700; color: #34d399;">▲ LONG OBs</span>
+              <span style="font-family: monospace; color: #e2e8f0;">${stats.long ? (stats.long.wins || 0) : 0}W - ${stats.long ? (stats.long.losses || 0) : 0}L <span style="color: #94a3b8;">(${stats.long ? (stats.long.winRate || 0) : 0}%)</span></span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.22); border-radius: 5px; font-size: 10px;">
+              <span style="font-weight: 700; color: #f87171;">▼ SHORT OBs</span>
+              <span style="font-family: monospace; color: #e2e8f0;">${stats.short ? (stats.short.wins || 0) : 0}W - ${stats.short ? (stats.short.losses || 0) : 0}L <span style="color: #94a3b8;">(${stats.short ? (stats.short.winRate || 0) : 0}%)</span></span>
+            </div>
+          </div>
+
+          <!-- Footer / Context -->
+          <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.07); font-size: 9.5px; color: #64748b;">
+            <span>${escapeHtml(telem.symbol || currentInstrument || 'CHART')} • ${escapeHtml(telem.resolution || currentResolution || '1h')}</span>
+            <span>${stats.mitigatedCount || 0} / ${stats.totalBlocks || 0} Mitigated</span>
+          </div>
+        </div>
+      `;
+    }
+
+    wireChartOrderBlockStatsBoxEvents();
+    clampAndPositionChartOrderBlockStatsBox();
+  }
+
+  function wireChartOrderBlockStatsBoxEvents() {
+    if (!chartOrderBlockStatsBoxEl) return;
+
+    const restoreBtn = chartOrderBlockStatsBoxEl.querySelector('#vest-cosb-restore-btn');
+    if (restoreBtn) {
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.orderBlocks) settings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+        settings.orderBlocks.statsBoxCollapsed = false;
+        markWindowAsRestored('order_blocks_stats');
+        queueSettingsSave({ orderBlocks: settings.orderBlocks });
+        renderChartOrderBlockStatsBox();
+      });
+      return;
+    }
+
+    const pinBtn = chartOrderBlockStatsBoxEl.querySelector('#vest-cosb-pin-btn');
+    if (pinBtn) {
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.orderBlocks) settings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+        const nextPinned = !settings.orderBlocks.statsBoxPinned;
+        settings.orderBlocks.statsBoxPinned = nextPinned;
+        if (nextPinned && chartOrderBlockStatsBoxEl) {
+          const rect = chartOrderBlockStatsBoxEl.getBoundingClientRect();
+          settings.orderBlocks.statsBoxPinnedLeft = Math.round(rect.left);
+          settings.orderBlocks.statsBoxPinnedTop = Math.round(rect.top);
+        }
+        queueSettingsSave({ orderBlocks: settings.orderBlocks });
+        renderChartOrderBlockStatsBox();
+        showToast(nextPinned ? 'Order Block Stats Box pinned (sticky)' : 'Order Block Stats Box unpinned');
+      });
+    }
+
+    const collapseBtn = chartOrderBlockStatsBoxEl.querySelector('#vest-cosb-btn-collapse');
+    if (collapseBtn) {
+      collapseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.orderBlocks) settings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+        settings.orderBlocks.statsBoxCollapsed = true;
+        markWindowAsMinimized('order_blocks_stats');
+        queueSettingsSave({ orderBlocks: settings.orderBlocks });
+        renderChartOrderBlockStatsBox();
+      });
+    }
+
+    const settingsBtn = chartOrderBlockStatsBoxEl.querySelector('#vest-cosb-btn-settings');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openStudioSettingsModal('chartingindicators', 'orderblocks');
+      });
+    }
+
+    const closeBtn = chartOrderBlockStatsBoxEl.querySelector('#vest-cosb-btn-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.orderBlocks) settings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+        settings.orderBlocks.showStatsBox = false;
+        queueSettingsSave({ orderBlocks: settings.orderBlocks });
+        renderChartOrderBlockStatsBox();
+        notifyMainWorldConfig();
+        showToast('Order Block Stats Screen hidden (re-enable in settings)');
+      });
+    }
+
+    const dragHandle = chartOrderBlockStatsBoxEl.querySelector('#vest-cosb-title-bar');
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button, input, label')) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = chartOrderBlockStatsBoxEl.getBoundingClientRect();
+        activeObStatsBoxDrag = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+          if (!activeObStatsBoxDrag || !chartOrderBlockStatsBoxEl) return;
+          const vp = getScreenBoundsRect();
+          const boxW = chartOrderBlockStatsBoxEl.offsetWidth || 290;
+          const boxH = chartOrderBlockStatsBoxEl.offsetHeight || 260;
+
+          const rawLeft = ev.clientX - activeObStatsBoxDrag.offsetX;
+          const rawTop = ev.clientY - activeObStatsBoxDrag.offsetY;
+
+          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
+          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
+
+          chartOrderBlockStatsBoxEl.style.left = `${Math.round(clampedLeft)}px`;
+          chartOrderBlockStatsBoxEl.style.top = `${Math.round(clampedTop)}px`;
+
+          const maxOffsetX = Math.max(1, vp.width - boxW);
+          const maxOffsetY = Math.max(1, vp.height - boxH);
+          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
+          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
+
+          if (!settings.orderBlocks) settings.orderBlocks = JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS));
+          settings.orderBlocks.statsBoxRelX = Math.round(relX * 10000) / 10000;
+          settings.orderBlocks.statsBoxRelY = Math.round(relY * 10000) / 10000;
+          if (settings.orderBlocks.statsBoxPinned) {
+            settings.orderBlocks.statsBoxPinnedLeft = Math.round(clampedLeft);
+            settings.orderBlocks.statsBoxPinnedTop = Math.round(clampedTop);
+          }
+        };
+
+        const onUp = () => {
+          activeObStatsBoxDrag = null;
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          queueSettingsSave({ orderBlocks: settings.orderBlocks });
         };
 
         window.addEventListener('mousemove', onMove);
@@ -15522,6 +15956,8 @@ if (activeTab === 'diagnostics') {
         initBottomPositionsPanelManager();
         renderChartNewsBox();
         renderChartTradesBox();
+        renderChartRangeBox();
+        renderChartOrderBlockStatsBox();
         renderChartDiagnosticsBox();
         setupIsolatedActionTracking();
         initVestAccountTracker();

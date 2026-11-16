@@ -1,6 +1,34 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.87`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.88`) are documented in this file.
+
+---
+
+## [v1.1.88] — 2026-11-16
+
+### 📈 Institutional Order Block On-Chart Performance Stats Screen (1:3 RR)
+- **Floating Performance Stats Screen (`#vest-chart-ob-stats-box`)**:
+  - Added an interactive on-chart stats box inside the TradingView chart viewport for the Institutional Order Blocks indicator.
+  - Automatically evaluates all mitigated order block setups forward in time from mitigation:
+    - **Bullish Order Blocks (Long)**: Entry at `ob.top`, Stop Loss at `ob.bottom`, Risk = `ob.top - ob.bottom`. Target 1:3 RR TP = `ob.top + 3 * risk`. If `bar.high >= tp` before `bar.low <= sl` $\rightarrow$ **WINNER**. If `bar.low <= sl` before `bar.high >= tp` $\rightarrow$ **LOSER**. Otherwise $\rightarrow$ **PENDING**.
+    - **Bearish Order Blocks (Short)**: Entry at `ob.bottom`, Stop Loss at `ob.top`, Risk = `ob.top - ob.bottom`. Target 1:3 RR TP = `ob.bottom - 3 * risk`. If `bar.low <= tp` before `bar.high >= sl` $\rightarrow$ **WINNER**. If `bar.high >= sl` before `bar.low <= tp` $\rightarrow$ **LOSER**. Otherwise $\rightarrow$ **PENDING**.
+- **Performance Metrics Display**:
+  - **Hero Metric Banner**: Displays overall Win Rate percentage (emerald $\ge 50\%$, amber $\ge 33.3\%$, red $< 33.3\%$) and Net R-Multiple return (e.g. `+12.0R`).
+  - **Segmented Progress Meter**: Visual win/loss/pending distribution bar.
+  - **Key Metrics Grid**: Profit Factor, Expectancy, Closed Trades with pending count, and configurable Target Risk:Reward Ratio (default 1:3).
+  - **Directional Breakdown**: Separate win/loss records and win rates for Long OBs vs Short OBs.
+  - **Context Footer**: Active Symbol & Timeframe with mitigated count out of total order blocks.
+- **Controls & Window Management**:
+  - **Title Bar**: Emerald gradient (`linear-gradient(135deg, #059669, #047857)`) with white text and draggable title bar clamped to chart viewport bounds.
+  - **Sticky Pin Button (`#vest-cosb-pin-btn`)**: Locks the box to exact screen coordinates (`statsBoxPinnedLeft`, `statsBoxPinnedTop`).
+  - **Minimize Button (`#vest-cosb-btn-collapse`)**: Minimizes to a compact pill (`#vest-cosb-restore-btn`) docked into the Cortex top bar slot or chart header.
+  - **Direct Settings Routing (`#vest-cosb-btn-settings`)**: Gear icon button directly opens Settings to the Charting Indicators tab and highlights the Order Blocks drawer.
+  - **Close Button (`#vest-cosb-btn-close`)**: Closes the stats box and persists preference (`showStatsBox: false`).
+- **Settings Drawer Integration**:
+  - Added `PERFORMANCE STATS BOX (1:3 RR)` section in Order Blocks settings drawer with:
+    - `Show on-chart Order Block Performance Stats Screen` toggle (`#vest-ob-show-stats-box`).
+    - `Stats Target Risk:Reward Ratio` slider (`#vest-ob-stats-rr-ratio`, 1.0 to 10.0 RR).
+    - `Reset Stats Box Position` button (`#vest-ob-reset-stats-pos-btn`).
 
 ---
 
