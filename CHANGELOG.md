@@ -1,6 +1,25 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.83`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.84`) are documented in this file.
+
+---
+
+## [v1.1.84] — 2026-11-15
+
+### 🎯 Range Detector (Multi-Timeframe) with On-Chart Glowing Blue Box & Audible Alerts
+- **New Range Detector Engine**:
+  1. *Mathematical Consolidation Scoring*: Implemented Choppiness Index (CHOP), Average Directional Index (ADX), and Price Channel Containment to reliably detect when market conditions are ranging/consolidating vs. expanding/trending.
+  2. *Multi-Timeframe Detection*: Evaluates multiple timeframes simultaneously (e.g. `5m`, `15m`, `1h`, `4h`, `1D`) with automatic bar aggregation from the base resolution.
+- **On-Chart Floating Range Detector Widget (`#vest-chart-range-box`)**:
+  - *Blue Title Bar with White Text*: Styled with a sleek blue gradient (`#2563eb` to `#1d4ed8`) and uppercase white header title.
+  - *Slight Blue Glow Effect*: Features a subtle blue ambient halo glow (`box-shadow: 0 0 16px rgba(59, 130, 246, 0.42), 0 0 32px rgba(37, 99, 235, 0.22)`).
+  - *Color-Coded Status Indicators*: Displays a **green indicator** (`🟢 RANGING`) when the market is in a range, and a **red indicator** (`🔴 TRENDING`) when the market is not ranging.
+  - *Interactive Controls*: Fully draggable with screen clamping, position memory, collapse to minimal pill, and close buttons.
+- **Audible Alerts on New Range Formation**:
+  - Automatically announces when the market transitions into a new range via voice speech synthesis (*"Range detected on [Symbol] [Timeframe]"*) and Web Audio chime alert.
+- **Charting Indicators Hub Integration**:
+  - Added dedicated tile in the Charting Indicators hub with master slider switch, live draft syncing, and settings drawer (lookback period, Choppiness threshold, ADX threshold, detection mode, box opacity/width, and audible alert toggles).
+  - Added direct shortcut button in the Studio Dropdown Menu (`Range Detector...`).
 
 ---
 
