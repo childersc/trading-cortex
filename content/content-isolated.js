@@ -1486,7 +1486,7 @@
       barMarginBottom: 8,
       headerHeightPx: 48,
       rememberOrderAmount: true,
-      restoreSelectedAccount: true,
+      restoreSelectedAccount: false,
       managePositionsPanel: true,
       defaultLeverage: "5x",
       notes: "Top-bar anchored below primary navbar and above ticker row"
@@ -1505,7 +1505,7 @@
       barMarginBottom: 8,
       headerHeightPx: 48,
       rememberOrderAmount: true,
-      restoreSelectedAccount: true,
+      restoreSelectedAccount: false,
       managePositionsPanel: true,
       defaultLeverage: "10x",
       notes: "Arbitrum perpetual DEX on Vest"
@@ -1524,7 +1524,7 @@
       barMarginBottom: 8,
       headerHeightPx: 48,
       rememberOrderAmount: true,
-      restoreSelectedAccount: true,
+      restoreSelectedAccount: false,
       managePositionsPanel: true,
       defaultLeverage: "24x",
       notes: "Kalshi Pro prediction markets & perpetuals terminal"
@@ -1560,7 +1560,7 @@
         barMarginBottom: Number.isFinite(existing.barMarginBottom) ? Math.max(0, Math.min(100, existing.barMarginBottom)) : def.barMarginBottom,
         headerHeightPx: Number.isFinite(existing.headerHeightPx) ? Math.max(0, Math.min(200, existing.headerHeightPx)) : def.headerHeightPx,
         rememberOrderAmount: existing.rememberOrderAmount !== false,
-        restoreSelectedAccount: existing.restoreSelectedAccount !== false,
+        restoreSelectedAccount: typeof existing.restoreSelectedAccount === 'boolean' ? existing.restoreSelectedAccount : Boolean(def.restoreSelectedAccount),
         managePositionsPanel: existing.managePositionsPanel !== false,
         defaultLeverage: String(existing.defaultLeverage || def.defaultLeverage || '10x'),
         notes: String(existing.notes || def.notes || '')
@@ -1590,7 +1590,7 @@
         barMarginBottom: Number.isFinite(item.barMarginBottom) ? Math.max(0, Math.min(100, item.barMarginBottom)) : 8,
         headerHeightPx: Number.isFinite(item.headerHeightPx) ? Math.max(0, Math.min(200, item.headerHeightPx)) : 48,
         rememberOrderAmount: item.rememberOrderAmount !== false,
-        restoreSelectedAccount: item.restoreSelectedAccount !== false,
+        restoreSelectedAccount: typeof item.restoreSelectedAccount === 'boolean' ? item.restoreSelectedAccount : false,
         managePositionsPanel: item.managePositionsPanel !== false,
         defaultLeverage: String(item.defaultLeverage || '10x'),
         notes: String(item.notes || '')
@@ -2796,20 +2796,24 @@
   }
 
   function speakCortexVoicePhrase(text, voiceURI) {
-    if (typeof window.speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return false;
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const isIrishPreset = voiceURI === CORTEX_IRISH_VOICE_PRESET;
-    const voice = isIrishPreset
-      ? findCortexIrishVoice(voices)
-      : voices.find(item => item.voiceURI === voiceURI) || voices.find(item => item.default) || voices[0];
-    if (isIrishPreset && !voice) return false;
-    if (voice) utterance.voice = voice;
-    utterance.rate = 1;
-    utterance.pitch = isIrishPreset ? 1.1 : 1;
-    utterance.volume = 1;
-    window.speechSynthesis.speak(utterance);
-    return true;
+    try {
+      if (typeof window === 'undefined' || typeof window.speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return false;
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices();
+      const isIrishPreset = voiceURI === CORTEX_IRISH_VOICE_PRESET;
+      const voice = isIrishPreset
+        ? findCortexIrishVoice(voices)
+        : voices.find(item => item.voiceURI === voiceURI) || voices.find(item => item.default) || voices[0];
+      if (isIrishPreset && !voice) return false;
+      if (voice) utterance.voice = voice;
+      utterance.rate = 1;
+      utterance.pitch = isIrishPreset ? 1.1 : 1;
+      utterance.volume = 1;
+      window.speechSynthesis.speak(utterance);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   function speakCortexSignalAlert(message, confirmed) {
@@ -2835,9 +2839,17 @@
 
   function markUserInteractionForAudio() {
     userHasInteractedWithPage = true;
-    if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'suspended') {
-      sharedCortexAudioContext.resume().catch(() => {});
-    }
+    try {
+      if (!sharedCortexAudioContext || sharedCortexAudioContext.state === 'closed') {
+        const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
+        if (AudioCtx) {
+          sharedCortexAudioContext = new AudioCtx();
+        }
+      }
+      if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'suspended') {
+        sharedCortexAudioContext.resume().catch(() => {});
+      }
+    } catch (e) {}
   }
 
   // Register passive interaction listeners on window to unlock Web Audio on first gesture
@@ -2850,7 +2862,7 @@
   function canPlayWebAudio() {
     if (userHasInteractedWithPage) return true;
     if (typeof navigator !== 'undefined' && navigator.userActivation) {
-      return Boolean(navigator.userActivation.hasBeenActive);
+      return Boolean(navigator.userActivation.isActive);
     }
     return false;
   }
@@ -2860,12 +2872,12 @@
       return null;
     }
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
       if (!AudioCtx) return null;
       if (!sharedCortexAudioContext || sharedCortexAudioContext.state === 'closed') {
         sharedCortexAudioContext = new AudioCtx();
       }
-      if (sharedCortexAudioContext.state === 'suspended') {
+      if (sharedCortexAudioContext.state === 'suspended' && userHasInteractedWithPage) {
         sharedCortexAudioContext.resume().catch(() => {});
       }
       return sharedCortexAudioContext;
@@ -2880,7 +2892,7 @@
       if (!ctx) return;
       if (ctx.state === 'running') {
         playFn(ctx);
-      } else if (ctx.state === 'suspended') {
+      } else if (ctx.state === 'suspended' && userHasInteractedWithPage) {
         ctx.resume().then(() => {
           if (ctx.state === 'running') {
             playFn(ctx);
@@ -2891,26 +2903,28 @@
   }
 
   function playOrderBlockChime(side) {
-    playWithAudioContext((ctx) => {
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      if (side === 'long') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(523.25, now);
-        osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.14);
-      } else {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(659.25, now);
-        osc.frequency.exponentialRampToValueAtTime(440.00, now + 0.14);
-      }
-      gain.gain.setValueAtTime(0.22, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-      osc.start(now);
-      osc.stop(now + 0.38);
-    });
+    try {
+      playWithAudioContext((ctx) => {
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        if (side === 'long') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, now);
+          osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.14);
+        } else {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(659.25, now);
+          osc.frequency.exponentialRampToValueAtTime(440.00, now + 0.14);
+        }
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+        osc.start(now);
+        osc.stop(now + 0.38);
+      });
+    } catch (e) {}
   }
 
   function handleOrderBlockMitigatedAlert(payload) {
@@ -11229,21 +11243,23 @@ if (activeTab === 'diagnostics') {
   }
 
   function playRangeChime() {
-    playWithAudioContext((ctx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      const now = ctx.currentTime;
-      osc.frequency.setValueAtTime(523.25, now); // C5
-      osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.14); // G5
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.linearRampToValueAtTime(0.18, now + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.42);
-    });
+    try {
+      playWithAudioContext((ctx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        const now = ctx.currentTime;
+        osc.frequency.setValueAtTime(523.25, now); // C5
+        osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.14); // G5
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.linearRampToValueAtTime(0.18, now + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.42);
+      });
+    } catch (e) {}
   }
 
   function formatTimeframeForSpeech(tf) {
@@ -15774,7 +15790,7 @@ if (activeTab === 'diagnostics') {
     if (!isExtensionValid()) return;
 
     const currentFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
-    if (!currentFirm || currentFirm.restoreSelectedAccount === false) {
+    if (!currentFirm || currentFirm.restoreSelectedAccount !== true) {
       hasCompletedAccountRestoration = true;
       return;
     }
@@ -15785,11 +15801,21 @@ if (activeTab === 'diagnostics') {
       return;
     }
 
+    // Safety guard: reject generic words or too-short names that could match "Disconnect Account" or other generic labels
+    const trimmedSavedName = String(saved.name).trim();
+    if (!trimmedSavedName || /^(account|wallet|evaluation|funded|capital|dex|user|profile)$/i.test(trimmedSavedName) || trimmedSavedName.length < 3) {
+      cortexDebugLog(`Skipping automated account restore: saved name "${trimmedSavedName}" is too generic.`);
+      hasCompletedAccountRestoration = true;
+      return;
+    }
+
     const trigger = getActiveAccountTriggerElement();
     if (!trigger) {
-      if (restoreAccountAttempts < 15) {
+      if (restoreAccountAttempts < 5) {
         restoreAccountAttempts++;
         setTimeout(attemptRestoreSelectedAccount, 400);
+      } else {
+        hasCompletedAccountRestoration = true;
       }
       return;
     }
@@ -15810,14 +15836,21 @@ if (activeTab === 'diagnostics') {
         '[data-testid^="account-item-"], [role="menuitem"], [class*="menu-item"], [class*="account-item"], [class*="DropdownMenuItem"]'
       );
       let matchedItem = null;
+      const DANGEROUS_ACTIONS = /disconnect|logout|log out|sign out|exit|leave|unlink|switch wallet|revoke|remove/i;
+
       for (const item of items) {
         const itemText = (item.innerText || '').trim();
+        // NEVER click disconnect, log out, or wallet unlinking buttons
+        if (DANGEROUS_ACTIONS.test(itemText)) {
+          continue;
+        }
+
         const copyAttr = item.querySelector('[text]')?.getAttribute('text');
         if (
           (saved.id && copyAttr === saved.id) ||
           (saved.id && item.getAttribute('data-testid')?.includes(saved.id)) ||
-          itemText.includes(saved.name) ||
-          (saved.name && itemText.toLowerCase().includes(saved.name.toLowerCase()))
+          itemText === saved.name ||
+          (itemText.toLowerCase().includes(trimmedSavedName.toLowerCase()) && !DANGEROUS_ACTIONS.test(itemText))
         ) {
           matchedItem = item;
           break;
@@ -15831,13 +15864,9 @@ if (activeTab === 'diagnostics') {
         showToast(`Restored account: ${saved.name}`, 3000);
         cortexDebugLog(`Successfully restored account to "${saved.name}"`);
       } else {
+        // Close menu if open and do not retry repeatedly
         trigger.click();
-        if (restoreAccountAttempts < 8) {
-          restoreAccountAttempts++;
-          setTimeout(attemptRestoreSelectedAccount, 800);
-        } else {
-          hasCompletedAccountRestoration = true;
-        }
+        hasCompletedAccountRestoration = true;
       }
     }, 150);
   }

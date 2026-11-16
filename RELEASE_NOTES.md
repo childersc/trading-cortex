@@ -1,3 +1,10 @@
+Trading Cortex v1.1.89 — DEX Session Logout Elimination & Web Audio Autoplay Hardening
+
+- **Zero-Disruption Update Engine (`v1.1.89`)**: Removed forced `chrome.tabs.reload()` during self-updates. Active trading tabs on Vest Markets, My Funded Perpetuals, and Kalshi Pro remain open and active without reload interruptions, preventing severed Privy/Turnkey Web3 wallet session signers.
+- **Account Switcher & Auto-Restoration Safety (`v1.1.89`)**: Changed default `restoreSelectedAccount` to `false` for all DEX/prop platforms and enforced a strict `DANGEROUS_ACTIONS` blacklist preventing automated menu scanners from ever clicking disconnect or log out buttons. Generic account labels are safely ignored.
+- **Chrome Autoplay Policy Hardening (`v1.1.89`)**: Completely resolved `The AudioContext was not allowed to start` errors appearing in `chrome://extensions`. AudioContext instantiation and `.resume()` are strictly gated to user gestures (`pointerdown`, `keydown`, `click`), and background alert chimes only fire when the context is active and running.
+- **Fail-Safe Alert Protection (`v1.1.89`)**: Wrapped voice synthesis (`SpeechSynthesis`) and Web Audio oscillators in protective boundary blocks to ensure background trading and price alerts never throw unhandled extension exceptions.
+
 Trading Cortex v1.1.88 — Institutional Order Block On-Chart Performance Stats Screen (1:3 RR)
 
 - **On-Chart Performance Stats Screen (`v1.1.88`)**: Added an interactive floating stats screen (`#vest-chart-ob-stats-box`) inside the TradingView chart viewport for the Institutional Order Blocks indicator.
