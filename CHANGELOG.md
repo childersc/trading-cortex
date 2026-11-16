@@ -1,6 +1,27 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.88`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.89`) are documented in this file.
+
+---
+
+## [v1.1.89] — 2026-11-16
+
+### 🛡️ DEX Session Logout Elimination & Web Audio Autoplay Hardening
+- **Zero-Disruption Update Engine (`update/update.js`)**:
+  - Eliminated the forced tab reload (`chrome.tabs.reload()`) during Stage 4 of self-updates.
+  - Active trading tabs on Vest Markets, My Funded Perpetuals, and Kalshi Pro are now preserved completely intact without interruption.
+  - Prevents severance of ephemeral Web3 session signer keys (Privy / Turnkey delegated wallets) and avoids orphaned extension context disconnects.
+  - Updated completion status banner to inform users that tabs are preserved without disruptive reload, allowing traders to refresh when convenient.
+- **Account Switcher & Auto-Restoration Safety (`content/content-isolated.js`)**:
+  - Changed default `restoreSelectedAccount` to `false` for `vestmarkets`, `myfundedperpetuals`, and `kalshipro` so native platform wallet sessions remain in complete control.
+  - Added strict `DANGEROUS_ACTIONS` blacklist (`/disconnect|logout|log out|sign out|exit|leave|unlink|switch wallet|revoke|remove/i`) ensuring automated menu scanners NEVER click disconnect or logout buttons.
+  - Added safeguard rejecting generic account names (e.g., `"Account"`, `"Wallet"`, `"DEX"`) from fuzzy matching to prevent accidental session termination.
+  - Capped menu matching retries to prevent repeated dropdown toggles from interfering with active DEX authentication handshakes.
+- **Chrome Autoplay Policy Hardening (`content/content-isolated.js`)**:
+  - Resolved `The AudioContext was not allowed to start` errors appearing in `chrome://extensions`.
+  - Tied `new AudioContext()` and `sharedCortexAudioContext.resume()` strictly to user gestures (`pointerdown`, `mousedown`, `keydown`, `touchstart`).
+  - Automated alert chimes (Order Block mitigations, Range Detector state shifts) only execute when `AudioContext` is in an active `'running'` state, completely eliminating unhandled autoplay rejections and extension error flags.
+  - Wrapped `speakCortexVoicePhrase` and chime generators in protective `try/catch` boundaries.
 
 ---
 

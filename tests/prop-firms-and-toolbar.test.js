@@ -44,7 +44,7 @@ const DEFAULT_PERP_FIRMS = [
     barMarginBottom: 8,
     headerHeightPx: 48,
     rememberOrderAmount: true,
-    restoreSelectedAccount: true,
+    restoreSelectedAccount: false,
     defaultLeverage: "5x"
   },
   {
@@ -61,7 +61,7 @@ const DEFAULT_PERP_FIRMS = [
     barMarginBottom: 8,
     headerHeightPx: 48,
     rememberOrderAmount: true,
-    restoreSelectedAccount: true,
+    restoreSelectedAccount: false,
     defaultLeverage: "10x"
   },
   {
@@ -78,7 +78,7 @@ const DEFAULT_PERP_FIRMS = [
     barMarginBottom: 8,
     headerHeightPx: 48,
     rememberOrderAmount: true,
-    restoreSelectedAccount: true,
+    restoreSelectedAccount: false,
     defaultLeverage: "24x"
   }
 ];
@@ -106,7 +106,7 @@ function normalizePerpFirmsConfig(rawList) {
       enableTimeframeFavorites: typeof existing.enableTimeframeFavorites === 'boolean'
         ? existing.enableTimeframeFavorites
         : (typeof def.enableTimeframeFavorites === 'boolean' ? def.enableTimeframeFavorites : true),
-      restoreSelectedAccount: existing.restoreSelectedAccount !== false
+      restoreSelectedAccount: typeof existing.restoreSelectedAccount === 'boolean' ? existing.restoreSelectedAccount : Boolean(def.restoreSelectedAccount)
     });
     seenIds.add(def.id);
   }
@@ -120,7 +120,7 @@ function normalizePerpFirmsConfig(rawList) {
       enabled: item.enabled !== false,
       isBuiltin: false,
       enableTimeframeFavorites: typeof item.enableTimeframeFavorites === 'boolean' ? item.enableTimeframeFavorites : true,
-      restoreSelectedAccount: item.restoreSelectedAccount !== false
+      restoreSelectedAccount: typeof item.restoreSelectedAccount === 'boolean' ? item.restoreSelectedAccount : false
     });
     seenIds.add(item.id);
   }
@@ -138,7 +138,7 @@ assert.strictEqual(initial[1].enableTimeframeFavorites, true, 'Vest Markets time
 assert.strictEqual(initial[2].id, 'kalshipro');
 assert.strictEqual(initial[2].name, 'Kalshi Pro');
 assert.strictEqual(initial[2].enableTimeframeFavorites, false, 'Kalshi Pro timeframe favoriting should be disabled by default');
-assert.strictEqual(initial[1].restoreSelectedAccount, true);
+assert.strictEqual(initial[1].restoreSelectedAccount, false, 'Vest Markets restoreSelectedAccount must default to false to protect live session');
 console.log('✓ Initial default firms normalized with Kalshi Pro and timeframe favoriting disabled on MFP and Kalshi Pro');
 
 // Test B: Vest Exchange cleanup & migration
@@ -164,7 +164,8 @@ assert.strictEqual(isolatedContent.includes('function attemptRestoreSelectedAcco
 assert.strictEqual(isolatedContent.includes('function initVestAccountTracker()'), true);
 assert.strictEqual(isolatedContent.includes('account-selector-trigger'), true);
 assert.strictEqual(isolatedContent.includes('Restore Selected Account on Refresh'), true);
-console.log('✓ Vest account tracking and auto-restoration verified');
+assert.strictEqual(isolatedContent.includes('DANGEROUS_ACTIONS'), true, 'Account restorer must enforce dangerous actions blacklist against disconnect/logout');
+console.log('✓ Vest account tracking, auto-restoration & disconnect protection verified');
 
 // 5. Verify Positions panel management per-firm setting and scoped state
 assert.strictEqual(isolatedContent.includes('managePositionsPanel: true'), true);

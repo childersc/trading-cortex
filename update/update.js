@@ -1290,13 +1290,10 @@
         }
       }).catch(() => {});
 
-      // Wait briefly for OS disk buffers to flush, then reload all active trading tabs in-place
+      // Wait briefly for OS disk buffers to flush.
+      // Do NOT forcefully reload active trading tabs to avoid severing Web3 wallet sessions & delegated keys.
+      // Trading tabs are preserved intact; the user can refresh their chart tab at their own convenience.
       await new Promise(r => setTimeout(r, 450));
-      for (const tab of vestTabs) {
-        if (tab.id) {
-          await chrome.tabs.reload(tab.id).catch(() => {});
-        }
-      }
 
       updateStepState(step4Row, step4Badge, 'done', 4);
       statusEyebrow.textContent = 'UPDATED';
@@ -1309,11 +1306,11 @@
 
       showSuccess(
         isDevDeploy
-          ? `✓ Trading Cortex has been updated to bleeding-edge dev branch commit (${devSha})! Your trading browser windows (${tradingTabsCount} tab${tradingTabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
-          : `✓ Trading Cortex has been successfully updated to v${targetVer}! Your trading browser windows (${tradingTabsCount} tab${tradingTabsCount === 1 ? '' : 's'}) have been automatically reloaded.`
+          ? `✓ Trading Cortex has been updated to bleeding-edge dev branch commit (${devSha})! Active trading tabs preserved without disruptive reload. Refresh your chart tab when ready to load the update.`
+          : `✓ Trading Cortex has been successfully updated to v${targetVer}! Active trading tabs preserved without disruptive reload. Refresh your chart tab when ready to load the update.`
       );
       logTerm(
-        `Update to ${targetVer} complete (${total} files synced). Reloaded ${tradingTabsCount} trading tab(s) cleanly without closing Update Center.`,
+        `Update to ${targetVer} complete (${total} files synced). Preserved ${tradingTabsCount} trading tab(s) without disruptive reload.`,
         'ok'
       );
     } catch (err) {
