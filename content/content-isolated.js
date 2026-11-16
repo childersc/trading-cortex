@@ -2809,11 +2809,68 @@
       : `${message.side === 'long' ? 'Buy' : 'Sell'} signal forming`, ci.signalAlertVoiceURI);
   }
 
-  function playOrderBlockChime(side) {
+  let sharedCortexAudioContext = null;
+  let userHasInteractedWithPage = false;
+
+  function markUserInteractionForAudio() {
+    userHasInteractedWithPage = true;
+    if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'suspended') {
+      sharedCortexAudioContext.resume().catch(() => {});
+    }
+  }
+
+  // Register passive interaction listeners on window to unlock Web Audio on first gesture
+  if (typeof window !== 'undefined') {
+    ['pointerdown', 'mousedown', 'keydown', 'touchstart'].forEach(type => {
+      window.addEventListener(type, markUserInteractionForAudio, { capture: true, passive: true });
+    });
+  }
+
+  function canPlayWebAudio() {
+    if (userHasInteractedWithPage) return true;
+    if (typeof navigator !== 'undefined' && navigator.userActivation) {
+      return Boolean(navigator.userActivation.hasBeenActive);
+    }
+    return false;
+  }
+
+  function getCortexAudioContext() {
+    if (!canPlayWebAudio()) {
+      return null;
+    }
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      if (!AudioCtx) return null;
+      if (!sharedCortexAudioContext || sharedCortexAudioContext.state === 'closed') {
+        sharedCortexAudioContext = new AudioCtx();
+      }
+      if (sharedCortexAudioContext.state === 'suspended') {
+        sharedCortexAudioContext.resume().catch(() => {});
+      }
+      return sharedCortexAudioContext;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function playWithAudioContext(playFn) {
+    try {
+      const ctx = getCortexAudioContext();
+      if (!ctx) return;
+      if (ctx.state === 'running') {
+        playFn(ctx);
+      } else if (ctx.state === 'suspended') {
+        ctx.resume().then(() => {
+          if (ctx.state === 'running') {
+            playFn(ctx);
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }
+
+  function playOrderBlockChime(side) {
+    playWithAudioContext((ctx) => {
       const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -2832,7 +2889,7 @@
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
       osc.start(now);
       osc.stop(now + 0.38);
-    } catch (e) {}
+    });
   }
 
   function handleOrderBlockMitigatedAlert(payload) {
@@ -11089,10 +11146,7 @@ if (activeTab === 'diagnostics') {
   }
 
   function playRangeChime() {
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+    playWithAudioContext((ctx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -11106,7 +11160,7 @@ if (activeTab === 'diagnostics') {
       gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.42);
-    } catch (e) {}
+    });
   }
 
   function formatTimeframeForSpeech(tf) {

@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.85`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.86`) are documented in this file.
+
+---
+
+## [v1.1.86] — 2026-11-15
+
+### 🔇 Web Audio Autoplay Policy & AudioContext Extension Error Fix
+- **Chrome Autoplay Policy Compliance**:
+  - Resolved Chrome's extension error: *"The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page."*
+  - Guarded all Web Audio instantiation (`playOrderBlockChime` and `playRangeChime`) behind `canPlayWebAudio()` checks (`userHasInteractedWithPage` and `navigator.userActivation.hasBeenActive`).
+  - Prohibits premature `new AudioContext()` instantiation on immediate page hydration before the user has touched the keyboard or mouse, preventing Chromium from generating console warnings and extension error badges.
+- **Shared Singleton AudioContext**:
+  - Replaced ad-hoc `new AudioContext()` instantiation with a lazy-initialized, shared singleton (`getCortexAudioContext()`).
+  - Added global passive listeners (`pointerdown`, `mousedown`, `keydown`, `touchstart`) to automatically unlock and resume the shared audio context upon the very first user interaction with the exchange.
+  - Eliminated AudioContext resource leaks and browser context limit exhaustion.
 
 ---
 

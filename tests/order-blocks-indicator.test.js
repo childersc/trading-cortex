@@ -63,12 +63,33 @@ for (const ctrl of expectedControls) {
 
 console.log('✓ All 17 Order Blocks settings drawer inputs, sliders, and buttons verified');
 
-// 4. Verify Audible Voice & Web Audio Chime Alerts
+// 4. Verify Audible Voice & Web Audio Chime Alerts with Autoplay Policy Protection
 assert(isolatedJs.includes('function playOrderBlockChime('), 'Must define playOrderBlockChime for synthesized audio feedback');
 assert(isolatedJs.includes('function handleOrderBlockMitigatedAlert('), 'Must define handleOrderBlockMitigatedAlert handler');
+assert(isolatedJs.includes('function canPlayWebAudio('), 'Must define canPlayWebAudio to respect Chrome autoplay policy');
+assert(isolatedJs.includes('function getCortexAudioContext('), 'Must define getCortexAudioContext singleton helper');
 assert(isolatedJs.includes("Bullish Order Block Mitigated. Enter Long."), 'Voice alert phrase for long entry must be defined');
 assert(isolatedJs.includes("Bearish Order Block Mitigated. Enter Short."), 'Voice alert phrase for short entry must be defined');
 assert(isolatedJs.includes("type === 'VEST_TV_OB_MITIGATED'"), 'Window message listener must handle VEST_TV_OB_MITIGATED');
+
+// Autoplay policy unit test in isolated VM
+{
+  const sandbox = {
+    window: { addEventListener: () => {} },
+    navigator: { userActivation: { hasBeenActive: false } }
+  };
+  vm.createContext(sandbox);
+  const audioExtract = isolatedJs.match(/let sharedCortexAudioContext[\s\S]*?function playWithAudioContext\([\s\S]*?\n  \}/);
+  assert(audioExtract, 'Must extract audio policy functions');
+  vm.runInContext(audioExtract[0], sandbox);
+
+  assert.strictEqual(sandbox.canPlayWebAudio(), false, 'canPlayWebAudio must return false before user activation');
+  assert.strictEqual(sandbox.getCortexAudioContext(), null, 'getCortexAudioContext must return null when inactive to prevent Chrome autoplay error');
+
+  sandbox.markUserInteractionForAudio();
+  assert.strictEqual(sandbox.canPlayWebAudio(), true, 'canPlayWebAudio must return true after user interaction');
+  console.log('✓ Chrome autoplay policy protection verified: avoids premature AudioContext instantiation');
+}
 
 console.log('✓ Audible alerts (Speech voice synthesis + Web Audio chimes) verified');
 
