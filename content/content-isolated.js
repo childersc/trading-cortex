@@ -718,7 +718,7 @@
       swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
       minFvgTicks: Math.max(0, Math.min(20, Math.round(Number(cfg.minFvgTicks) || 1))),
       maxBlocks: Math.max(3, Math.min(30, Math.round(Number(cfg.maxBlocks) || 10))),
-      extendMode: cfg.extendMode === 'right' ? 'right' : 'mitigation',
+      extendMode: (cfg.extendMode === 'right' || cfg.extendMode === 'candle') ? cfg.extendMode : 'mitigation',
       bullishColor: typeof cfg.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bullishColor) ? cfg.bullishColor : '#10b981',
       bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
       bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
@@ -6530,7 +6530,8 @@
             ${range('vest-ob-min-fvg-ticks', 'Minimum FVG Imbalance Size', 0, 20, 1, ob.minFvgTicks, ' ticks')}
             <label for="vest-ob-extend-mode" style="display:block;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">Zone Extension Mode</label>
             <select id="vest-ob-extend-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
-              <option value="mitigation" ${ob.extendMode !== 'right' ? 'selected' : ''}>Stop at initial mitigation / retest (Single-Use)</option>
+              <option value="candle" ${ob.extendMode === 'candle' ? 'selected' : ''}>On Candle Only (No extension to left or right)</option>
+              <option value="mitigation" ${ob.extendMode === 'mitigation' || (!ob.extendMode || (ob.extendMode !== 'candle' && ob.extendMode !== 'right')) ? 'selected' : ''}>Extend forward until initial mitigation / retest</option>
               <option value="right" ${ob.extendMode === 'right' ? 'selected' : ''}>Extend indefinitely to right edge</option>
             </select>
           </div>
@@ -7630,6 +7631,49 @@
         const bc = overlay.querySelector('#vest-dbg-border-color');
         if (bc && draftSettings.diagnosticsBox) draftSettings.diagnosticsBox.borderColor = bc.value;
       }
+      // Sync Order Blocks
+      const masterOb = overlay.querySelector('#vest-ob-master-enabled');
+      if (masterOb || overlay.querySelector('#vest-ob-extend-mode')) {
+        const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+        if (masterOb) ob.enabled = Boolean(masterOb.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-ob-swing-lookback')) ob.swingLookback = Number(q('#vest-ob-swing-lookback').value) || 5;
+        if (q('#vest-ob-max-blocks')) ob.maxBlocks = Number(q('#vest-ob-max-blocks').value) || 10;
+        if (q('#vest-ob-min-fvg-ticks')) ob.minFvgTicks = Number(q('#vest-ob-min-fvg-ticks').value) || 1;
+        if (q('#vest-ob-extend-mode')) ob.extendMode = q('#vest-ob-extend-mode').value || 'mitigation';
+        if (q('#vest-ob-bull-color')) ob.bullishColor = q('#vest-ob-bull-color').value || '#10b981';
+        if (q('#vest-ob-bull-opacity')) ob.bullishOpacity = Number(q('#vest-ob-bull-opacity').value) || 20;
+        if (q('#vest-ob-bear-color')) ob.bearishColor = q('#vest-ob-bear-color').value || '#ef4444';
+        if (q('#vest-ob-bear-opacity')) ob.bearishOpacity = Number(q('#vest-ob-bear-opacity').value) || 20;
+        if (q('#vest-ob-show-entry-icon')) ob.showOrderEntryIcon = Boolean(q('#vest-ob-show-entry-icon').checked);
+        if (q('#vest-ob-icon-size')) ob.orderIconSize = Number(q('#vest-ob-icon-size').value) || 13;
+        if (q('#vest-ob-voice-alert')) ob.voiceAlertEnabled = Boolean(q('#vest-ob-voice-alert').checked);
+        if (q('#vest-ob-chime-alert')) ob.chimeAlertEnabled = Boolean(q('#vest-ob-chime-alert').checked);
+        if (q('#vest-ob-voice-uri')) ob.voiceURI = q('#vest-ob-voice-uri').value || '';
+        if (q('#vest-ob-show-target-lines')) ob.showTargetLines = Boolean(q('#vest-ob-show-target-lines').checked);
+        if (q('#vest-ob-rr-ratio')) ob.riskRewardRatio = Number(q('#vest-ob-rr-ratio').value) || 2.0;
+        draftSettings.orderBlocks = normalizeOrderBlocksConfig(ob);
+      }
+
+      // Sync Market Structure
+      const masterMs = overlay.querySelector('#vest-ms-master-enabled');
+      if (masterMs || overlay.querySelector('#vest-ms-swing-lookback')) {
+        const ms = normalizeMarketStructureConfig(draftSettings.marketStructure);
+        if (masterMs) ms.enabled = Boolean(masterMs.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-ms-swing-lookback')) ms.swingLookback = Number(q('#vest-ms-swing-lookback').value) || 5;
+        if (q('#vest-ms-max-lines')) ms.maxStructureLines = Number(q('#vest-ms-max-lines').value) || 15;
+        if (q('#vest-ms-break-mode')) ms.breakMode = q('#vest-ms-break-mode').value === 'wick' ? 'wick' : 'close';
+        if (q('#vest-ms-show-bos')) ms.showBos = Boolean(q('#vest-ms-show-bos').checked);
+        if (q('#vest-ms-show-choch')) ms.showChoch = Boolean(q('#vest-ms-show-choch').checked);
+        if (q('#vest-ms-extend-lines')) ms.extendLines = Boolean(q('#vest-ms-extend-lines').checked);
+        if (q('#vest-ms-label-mode')) ms.labelMode = q('#vest-ms-label-mode').value || 'both';
+        if (q('#vest-ms-line-style')) ms.lineStyle = q('#vest-ms-line-style').value === 'solid' ? 'solid' : 'dashed';
+        if (q('#vest-ms-bull-color')) ms.bullishColor = q('#vest-ms-bull-color').value || '#10b981';
+        if (q('#vest-ms-bear-color')) ms.bearishColor = q('#vest-ms-bear-color').value || '#ef4444';
+        draftSettings.marketStructure = normalizeMarketStructureConfig(ms);
+      }
+
       if (false && 'vest_dummy_ci_close') {
         draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(ci);
       }

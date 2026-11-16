@@ -8439,7 +8439,7 @@
       swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
       minFvgTicks: Math.max(0, Math.min(20, Math.round(Number(cfg.minFvgTicks) || 1))),
       maxBlocks: Math.max(3, Math.min(30, Math.round(Number(cfg.maxBlocks) || 10))),
-      extendMode: cfg.extendMode === 'right' ? 'right' : 'mitigation',
+      extendMode: (cfg.extendMode === 'right' || cfg.extendMode === 'candle') ? cfg.extendMode : 'mitigation',
       bullishColor: typeof cfg.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bullishColor) ? cfg.bullishColor : '#10b981',
       bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
       bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
@@ -8499,13 +8499,16 @@
               id,
               side: "short",
               type: "bearish",
-              barIndex: obIdx,
+              arrayIndex: obIdx,
+              barIndex: (typeof bars[obIdx].barIndex === 'number') ? bars[obIdx].barIndex : obIdx,
               timeSec: bars[obIdx].timeSec || 0,
               top: obTop,
               bottom: obBottom,
-              breakBarIndex,
-              breakTimeSec: bars[breakBarIndex].timeSec || 0,
+              breakArrayIndex: breakBarIndex,
+              breakBarIndex: (bars[breakBarIndex] && typeof bars[breakBarIndex].barIndex === 'number') ? bars[breakBarIndex].barIndex : breakBarIndex,
+              breakTimeSec: bars[breakBarIndex] ? bars[breakBarIndex].timeSec : 0,
               isMitigated: false,
+              mitigatedArrayIndex: -1,
               mitigatedBarIndex: -1,
               mitigatedTimeSec: 0,
               mitigatedPrice: 0,
@@ -8545,13 +8548,16 @@
               id,
               side: "long",
               type: "bullish",
-              barIndex: obIdx,
+              arrayIndex: obIdx,
+              barIndex: (typeof bars[obIdx].barIndex === 'number') ? bars[obIdx].barIndex : obIdx,
               timeSec: bars[obIdx].timeSec || 0,
               top: obTop,
               bottom: obBottom,
-              breakBarIndex,
-              breakTimeSec: bars[breakBarIndex].timeSec || 0,
+              breakArrayIndex: breakBarIndex,
+              breakBarIndex: (bars[breakBarIndex] && typeof bars[breakBarIndex].barIndex === 'number') ? bars[breakBarIndex].barIndex : breakBarIndex,
+              breakTimeSec: bars[breakBarIndex] ? bars[breakBarIndex].timeSec : 0,
               isMitigated: false,
+              mitigatedArrayIndex: -1,
               mitigatedBarIndex: -1,
               mitigatedTimeSec: 0,
               mitigatedPrice: 0,
@@ -8565,12 +8571,14 @@
     // 3. Track Mitigation & Invalidation forward in time (Smart Risk: 1-time touch zone)
     for (let o = 0; o < orderBlocks.length; o++) {
       const ob = orderBlocks[o];
-      for (let m = ob.breakBarIndex + 1; m < bars.length; m++) {
+      const startScan = (typeof ob.breakArrayIndex === 'number' && ob.breakArrayIndex >= 0) ? (ob.breakArrayIndex + 1) : (ob.breakBarIndex + 1);
+      for (let m = startScan; m < bars.length; m++) {
         const bar = bars[m];
         if (ob.side === "long") {
           if (!ob.isMitigated && bar.low <= ob.top && bar.high >= ob.bottom) {
             ob.isMitigated = true;
-            ob.mitigatedBarIndex = m;
+            ob.mitigatedArrayIndex = m;
+            ob.mitigatedBarIndex = (typeof bar.barIndex === 'number') ? bar.barIndex : m;
             ob.mitigatedTimeSec = bar.timeSec || 0;
             ob.mitigatedPrice = Math.min(ob.top, bar.high);
             break;
@@ -8581,7 +8589,8 @@
         } else {
           if (!ob.isMitigated && bar.high >= ob.bottom && bar.low <= ob.top) {
             ob.isMitigated = true;
-            ob.mitigatedBarIndex = m;
+            ob.mitigatedArrayIndex = m;
+            ob.mitigatedBarIndex = (typeof bar.barIndex === 'number') ? bar.barIndex : m;
             ob.mitigatedTimeSec = bar.timeSec || 0;
             ob.mitigatedPrice = Math.max(ob.bottom, bar.low);
             break;
@@ -8608,31 +8617,46 @@
       if (ob.isInvalidated) continue;
 
       const rawStartX = barToX(ob.barIndex, ob.timeSec);
-      if (rawStartX === null) continue;
+      if (rawStartX === null || !isFinite(rawStartX)) continue;
 
       const topY = priceToY(ob.top);
       const bottomY = priceToY(ob.bottom);
-      if (topY === null || bottomY === null) continue;
+      if (topY === null || bottomY === null || !isFinite(topY) || !isFinite(bottomY)) continue;
 
+      // Box starts strictly on the left edge of the Order Block candle — NEVER extends to the left!
       const boxLeft = rawStartX - halfBarW;
-      let boxRight;
+      let boxRight = rawStartX + halfBarW;
 
-      if (ob.isMitigated) {
+      if (cfg.extendMode === 'candle') {
+        // Single candle only: Box is strictly on the actual origin bar!
+        boxRight = rawStartX + halfBarW;
+      } else if (ob.isMitigated) {
+        // Extend forward to the mitigation touch candle, then stop
         const mitX = barToX(ob.mitigatedBarIndex, ob.mitigatedTimeSec);
-        boxRight = mitX !== null ? mitX + halfBarW : cssWidth;
+        if (mitX !== null && isFinite(mitX) && mitX >= rawStartX) {
+          boxRight = mitX + halfBarW;
+        } else {
+          boxRight = rawStartX + halfBarW;
+        }
       } else if (cfg.extendMode === 'right') {
+        // Extend to the far right edge of the chart canvas
         boxRight = cssWidth;
       } else {
+        // Default "mitigation" mode while unmitigated: extend to the current forming bar
         const lastBar = bars && bars.length > 0 ? bars[bars.length - 1] : null;
-        const lastX = lastBar ? barToX(bars.length - 1, lastBar.timeSec) : cssWidth;
-        boxRight = lastX !== null ? lastX + halfBarW * 4 : cssWidth;
+        const lastX = lastBar ? barToX(lastBar.barIndex, lastBar.timeSec) : null;
+        if (lastX !== null && isFinite(lastX) && lastX >= rawStartX) {
+          boxRight = lastX + halfBarW;
+        } else {
+          boxRight = rawStartX + halfBarW * 2;
+        }
       }
 
       if (boxRight < 0 || boxLeft > cssWidth) continue;
 
       const boxTop = Math.min(topY, bottomY);
       const boxHeight = Math.max(2, Math.abs(bottomY - topY));
-      const boxWidth = Math.max(4, boxRight - boxLeft);
+      const boxWidth = Math.max(halfBarW * 2, boxRight - boxLeft);
 
       const isBull = ob.side === 'long';
       const baseColor = isBull ? cfg.bullishColor : cfg.bearishColor;
@@ -8663,7 +8687,9 @@
 
       // 4. Order Entry Icon on the mitigation bar
       if (ob.isMitigated && cfg.showOrderEntryIcon && ob.mitigatedBarIndex >= 0) {
-        const mitBar = bars && bars[ob.mitigatedBarIndex];
+        const mitBar = (bars && typeof ob.mitigatedArrayIndex === 'number' && ob.mitigatedArrayIndex >= 0 && ob.mitigatedArrayIndex < bars.length)
+          ? bars[ob.mitigatedArrayIndex]
+          : (bars ? (bars[ob.mitigatedBarIndex] || bars.find(b => b.barIndex === ob.mitigatedBarIndex)) : null);
         const mitX = barToX(ob.mitigatedBarIndex, ob.mitigatedTimeSec);
         if (mitBar && mitX !== null) {
           const iconSize = cfg.orderIconSize;
@@ -10400,6 +10426,12 @@
     const hasTimeToCoord = Boolean(tsApi && typeof tsApi.timeToCoordinate === 'function');
 
     const barToX = (barIndex, timeSec) => {
+      if (hasTimeToCoord && typeof timeSec === 'number' && timeSec > 1e8) {
+        try {
+          const x = tsApi.timeToCoordinate(timeSec);
+          if (typeof x === 'number' && isFinite(x)) return x;
+        } catch (err) {}
+      }
       if (hasIndexToCoord && typeof barIndex === 'number') {
         try {
           const x = timeScale.indexToCoordinate(barIndex);
@@ -10916,6 +10948,12 @@
     // Note: During an active mouse drag, activeChart.getVisibleRange() in TradingView only updates on mouseup,
     // WHEREAS timeScale.indexToCoordinate(), timeScale.rightOffset(), and timeScale.barSpacing() update on every single pixel of drag!
     const barToX = (barIndex, timeSec) => {
+      if (hasTimeToCoord && typeof timeSec === 'number' && timeSec > 1e8) {
+        try {
+          const x = tsApi.timeToCoordinate(timeSec);
+          if (typeof x === 'number' && isFinite(x)) return x;
+        } catch (err) {}
+      }
       if (hasIndexToCoord && typeof barIndex === 'number') {
         try {
           const x = timeScale.indexToCoordinate(barIndex);
