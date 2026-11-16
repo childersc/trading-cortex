@@ -8481,7 +8481,16 @@
     chimeAlertEnabled: true,
     voiceURI: '',
     showTargetLines: true,
-    riskRewardRatio: 2.0
+    riskRewardRatio: 3.0,
+    showStatsBox: true,
+    statsRrRatio: 3.0,
+    statsBoxWidth: 290,
+    statsBoxPinned: false,
+    statsBoxPinnedLeft: null,
+    statsBoxPinnedTop: null,
+    statsBoxCollapsed: false,
+    statsBoxRelX: 0.04,
+    statsBoxRelY: 0.54
   };
 
   function normalizeOrderBlocksConfig(rawCfg) {
@@ -8502,7 +8511,16 @@
       chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
       voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
       showTargetLines: cfg.showTargetLines !== false,
-      riskRewardRatio: Math.max(1.0, Math.min(5.0, Number(cfg.riskRewardRatio) || 2.0))
+      riskRewardRatio: Math.max(1.0, Math.min(10.0, Number(cfg.riskRewardRatio) || 3.0)),
+      showStatsBox: cfg.showStatsBox !== false,
+      statsRrRatio: Math.max(1.0, Math.min(10.0, Number(cfg.statsRrRatio) || 3.0)),
+      statsBoxWidth: Math.max(240, Math.min(450, Math.round(Number(cfg.statsBoxWidth) || 290))),
+      statsBoxPinned: Boolean(cfg.statsBoxPinned),
+      statsBoxPinnedLeft: typeof cfg.statsBoxPinnedLeft === 'number' && Number.isFinite(cfg.statsBoxPinnedLeft) ? cfg.statsBoxPinnedLeft : null,
+      statsBoxPinnedTop: typeof cfg.statsBoxPinnedTop === 'number' && Number.isFinite(cfg.statsBoxPinnedTop) ? cfg.statsBoxPinnedTop : null,
+      statsBoxCollapsed: Boolean(cfg.statsBoxCollapsed),
+      statsBoxRelX: typeof cfg.statsBoxRelX === 'number' && Number.isFinite(cfg.statsBoxRelX) ? Math.max(0, Math.min(1, cfg.statsBoxRelX)) : 0.04,
+      statsBoxRelY: typeof cfg.statsBoxRelY === 'number' && Number.isFinite(cfg.statsBoxRelY) ? Math.max(0, Math.min(1, cfg.statsBoxRelY)) : 0.54
     };
   }
 
@@ -8696,7 +8714,156 @@
     orderBlocks.sort((a, b) => b.timeSec - a.timeSec);
     return orderBlocks.slice(0, maxBlocks);
   }
-    function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
+
+  function computeOrderBlockPerformanceStats(orderBlocks, bars, rrRatio = 3.0) {
+    if (!Array.isArray(orderBlocks) || orderBlocks.length === 0 || !Array.isArray(bars) || bars.length === 0) {
+      return {
+        totalBlocks: 0,
+        mitigatedCount: 0,
+        wins: 0,
+        losses: 0,
+        pending: 0,
+        closedTrades: 0,
+        winRate: 0,
+        netR: 0,
+        profitFactor: 0,
+        expectancy: '+0.00R',
+        rrRatio: Number(rrRatio) || 3.0,
+        long: { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 },
+        short: { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 }
+      };
+    }
+
+    const targetRr = Math.max(1.0, Number(rrRatio) || 3.0);
+    let wins = 0;
+    let losses = 0;
+    let pending = 0;
+    let mitigatedCount = 0;
+
+    const longStats = { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 };
+    const shortStats = { total: 0, wins: 0, losses: 0, pending: 0, winRate: 0 };
+
+    for (let i = 0; i < orderBlocks.length; i++) {
+      const ob = orderBlocks[i];
+      if (!ob || !ob.isMitigated) continue;
+      mitigatedCount++;
+
+      const risk = ob.top - ob.bottom;
+      if (!isFinite(risk) || risk <= 0) continue;
+
+      const mIdx = (typeof ob.mitigatedArrayIndex === 'number' && ob.mitigatedArrayIndex >= 0)
+        ? ob.mitigatedArrayIndex
+        : bars.findIndex(b => (b.timeSec && b.timeSec >= ob.mitigatedTimeSec));
+      if (mIdx < 0 || mIdx >= bars.length) continue;
+
+      let outcome = 'pending'; // 'win' | 'loss' | 'pending'
+
+      if (ob.side === 'long') {
+        longStats.total++;
+        const entryPrice = ob.top;
+        const slPrice = ob.bottom;
+        const tpPrice = entryPrice + targetRr * risk;
+
+        const entryBar = bars[mIdx];
+        if (entryBar.low <= slPrice) {
+          outcome = 'loss';
+        } else if (entryBar.high >= tpPrice) {
+          outcome = 'win';
+        } else {
+          for (let b = mIdx + 1; b < bars.length; b++) {
+            const bar = bars[b];
+            if (bar.low <= slPrice) {
+              outcome = 'loss';
+              break;
+            } else if (bar.high >= tpPrice) {
+              outcome = 'win';
+              break;
+            }
+          }
+        }
+
+        if (outcome === 'win') {
+          wins++;
+          longStats.wins++;
+        } else if (outcome === 'loss') {
+          losses++;
+          longStats.losses++;
+        } else {
+          pending++;
+          longStats.pending++;
+        }
+      } else {
+        // Bearish Order Block (Short)
+        shortStats.total++;
+        const entryPrice = ob.bottom;
+        const slPrice = ob.top;
+        const tpPrice = entryPrice - targetRr * risk;
+
+        const entryBar = bars[mIdx];
+        if (entryBar.high >= slPrice) {
+          outcome = 'loss';
+        } else if (entryBar.low <= tpPrice) {
+          outcome = 'win';
+        } else {
+          for (let b = mIdx + 1; b < bars.length; b++) {
+            const bar = bars[b];
+            if (bar.high >= slPrice) {
+              outcome = 'loss';
+              break;
+            } else if (bar.low <= tpPrice) {
+              outcome = 'win';
+              break;
+            }
+          }
+        }
+
+        if (outcome === 'win') {
+          wins++;
+          shortStats.wins++;
+        } else if (outcome === 'loss') {
+          losses++;
+          shortStats.losses++;
+        } else {
+          pending++;
+          shortStats.pending++;
+        }
+      }
+    }
+
+    const closedTrades = wins + losses;
+    const winRate = closedTrades > 0 ? Math.round((wins / closedTrades) * 1000) / 10 : 0;
+    const netR = Math.round(((wins * targetRr) - (losses * 1.0)) * 10) / 10;
+    const profitFactor = losses > 0
+      ? (Math.round(((wins * targetRr) / losses) * 100) / 100)
+      : (wins > 0 ? 99.9 : 0);
+    const expectancy = closedTrades > 0
+      ? (Math.round((netR / closedTrades) * 100) / 100)
+      : 0;
+
+    const longClosed = longStats.wins + longStats.losses;
+    longStats.winRate = longClosed > 0 ? Math.round((longStats.wins / longClosed) * 1000) / 10 : 0;
+
+    const shortClosed = shortStats.wins + shortStats.losses;
+    shortStats.winRate = shortClosed > 0 ? Math.round((shortStats.wins / shortClosed) * 1000) / 10 : 0;
+
+    return {
+      totalBlocks: orderBlocks.length,
+      mitigatedCount,
+      wins,
+      losses,
+      pending,
+      closedTrades,
+      winRate,
+      netR,
+      profitFactor,
+      expectancy: (expectancy >= 0 ? '+' : '') + expectancy.toFixed(2) + 'R',
+      rrRatio: targetRr,
+      long: longStats,
+      short: shortStats
+    };
+  }
+
+  function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
     if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
     const cfg = normalizeOrderBlocksConfig(config);
 
@@ -11220,9 +11387,32 @@
             }
           }
         }
+        if (orderBlocksConfig.showStatsBox !== false) {
+          const stats = computeOrderBlockPerformanceStats(cachedComputedOrderBlocks, bars, orderBlocksConfig.statsRrRatio || 3.0);
+          postToIsolated({
+            type: 'VEST_TV_ORDER_BLOCKS_UPDATE',
+            payload: {
+              symbol: symbolKey,
+              resolution: tfLabel,
+              totalBlocks: cachedComputedOrderBlocks.length,
+              stats,
+              timestamp: Date.now()
+            }
+          });
+        }
       }
     } else {
       cachedComputedOrderBlocks = [];
+      postToIsolated({
+        type: 'VEST_TV_ORDER_BLOCKS_UPDATE',
+        payload: {
+          symbol: symbolKey,
+          resolution: formatCurrentResolutionLabel(),
+          totalBlocks: 0,
+          stats: null,
+          timestamp: Date.now()
+        }
+      });
     }
 
     const rangeDetectorConfig = normalizeRangeDetectorConfig(currentSettings.rangeDetector);

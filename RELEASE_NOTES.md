@@ -1,3 +1,14 @@
+Trading Cortex v1.1.88 — Institutional Order Block On-Chart Performance Stats Screen (1:3 RR)
+
+- **On-Chart Performance Stats Screen (`v1.1.88`)**: Added an interactive floating stats screen (`#vest-chart-ob-stats-box`) inside the TradingView chart viewport for the Institutional Order Blocks indicator.
+- **1:3 Risk:Reward Win/Loss Tracking (`v1.1.88`)**: Automatically tracks every mitigated Order Block trade forward in time from entry:
+  - Bullish OBs enter at `ob.top` with SL at `ob.bottom` and TP at `ob.top + 3 * risk`.
+  - Bearish OBs enter at `ob.bottom` with SL at `ob.top` and TP at `ob.bottom - 3 * risk`.
+  - Counts Winners, Losers, and Pending trades with Net R-multiple, Profit Factor, and Expectancy.
+- **Directional Win/Loss Breakdown (`v1.1.88`)**: Displays separate win/loss records and win rates for Long Order Blocks vs Short Order Blocks.
+- **Interactive Window Features (`v1.1.88`)**: Draggable with chart boundary clamping, sticky pin button (`#vest-cosb-pin-btn`), minimize-to-pill (`#vest-cosb-restore-btn`), and direct Settings navigation button (`#vest-cosb-btn-settings`).
+- **Settings Drawer Controls (`v1.1.88`)**: Added toggle to show/hide the stats box, slider for target R:R ratio (1.0 to 10.0 RR), and a button to reset box position.
+
 Trading Cortex v1.1.87 — Range Detector Directional Trending, Timeframe Switcher, 1m Support & Sticky Pin
 
 - **Directional Trending (`v1.1.87`)**: Identifies whether the non-ranging market is **`▲ TRENDING LONG`** or **`▼ TRENDING SHORT`** across all monitored timeframes based on lookback moving averages, net displacement, and channel position.
