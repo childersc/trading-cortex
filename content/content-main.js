@@ -8460,23 +8460,41 @@
     const lookback = cfg.swingLookback;
     const maxBlocks = cfg.maxBlocks;
 
+    // Calculate median/average candle range over bars to detect anomalous outlier candles
+    let totalRange = 0;
+    const sampleCount = Math.min(50, bars.length);
+    for (let s = bars.length - sampleCount; s < bars.length; s++) {
+      totalRange += Math.abs(bars[s].high - bars[s].low);
+    }
+    const avgRange = Math.max(0.0001, totalRange / sampleCount);
+
     const orderBlocks = [];
 
     // Scan every bar g for Fair Value Gaps (FVG) creating inefficiency
-    // Rule: An Order Block is strictly valid on the bar before the displacement bar that creates the gap (obIdx = g - 1)
     for (let g = 1; g < bars.length - 1; g++) {
-      const obIdx = g - 1; // Strictly the bar before the displacement bar that creates the gap!
-
       // 1. Bearish Order Block candidate:
       // Bar g is downward displacement candle (close < open) creating gap between bars[g - 1].low and bars[g + 1].high
       if (bars[g].close < bars[g].open && bars[g + 1].high < bars[g - 1].low) {
-        // Find immediate structure low to break (the low of the swing leg leading into obIdx)
-        let targetLow = bars[obIdx].low;
-        for (let k = Math.max(0, obIdx - lookback); k < obIdx; k++) {
+        // Highest candle was bearish/down; search backward for the last bullish/up candle
+        let originIdx = -1;
+        if (bars[g - 1].close >= bars[g - 1].open) {
+          originIdx = g - 1;
+        } else {
+          for (let k = g - 1; k >= Math.max(0, g - 1 - lookback); k--) {
+            if (bars[k].close >= bars[k].open) {
+              originIdx = k;
+              break;
+            }
+          }
+        }
+        if (originIdx < 0) continue;
+        const originBar = bars[originIdx];
+
+        let targetLow = originBar.low;
+        for (let k = Math.max(0, originIdx - lookback); k < originIdx; k++) {
           if (bars[k].low < targetLow) targetLow = bars[k].low;
         }
 
-        // Check for break of structure by the displacement move within 5 bars
         let broke = false;
         let breakBarIndex = -1;
         for (let b = g; b < Math.min(bars.length, g + 6); b++) {
@@ -8488,20 +8506,23 @@
         }
 
         if (broke) {
-          // Highest candle was bearish/down; search backward for the last bullish/up candle
-          // Prevent stacking duplicate OBs within 2 bars on the same impulsive move
-          if (!orderBlocks.some(x => x.side === "short" && Math.abs(x.barIndex - obIdx) <= 2)) {
-            const obTop = bars[obIdx].high;
-            const obBottom = Math.min(bars[obIdx].low, bars[obIdx].open);
-            const id = "bear_ob_" + (bars[obIdx].timeSec || obIdx) + "_" + obTop.toFixed(4);
+          if (!orderBlocks.some(x => x.side === 'short' && Math.abs(x.arrayIndex - originIdx) <= 2)) {
+            let obTop = originBar.high;
+            let obBottom = Math.min(originBar.low, originBar.open);
+            // Cap anomalous mega-candles (e.g. news crash / gap > 3x average range) to the upper absorption zone
+            const candleRange = originBar.high - originBar.low;
+            if (candleRange > 3 * avgRange) {
+              obBottom = Math.max(originBar.high - avgRange * 2, Math.min(originBar.open, originBar.close));
+            }
+            const id = 'bear_ob_' + (originBar.timeSec || originIdx) + '_' + obTop.toFixed(4);
 
             orderBlocks.push({
               id,
-              side: "short",
-              type: "bearish",
-              arrayIndex: obIdx,
-              barIndex: (typeof bars[obIdx].barIndex === 'number') ? bars[obIdx].barIndex : obIdx,
-              timeSec: bars[obIdx].timeSec || 0,
+              side: 'short',
+              type: 'bearish',
+              arrayIndex: originIdx,
+              barIndex: (typeof originBar.barIndex === 'number') ? originBar.barIndex : originIdx,
+              timeSec: originBar.timeSec || 0,
               top: obTop,
               bottom: obBottom,
               breakArrayIndex: breakBarIndex,
@@ -8521,8 +8542,23 @@
       // 2. Bullish Order Block candidate:
       // Bar g is upward displacement candle (close > open) creating gap between bars[g - 1].high and bars[g + 1].low
       if (bars[g].close > bars[g].open && bars[g + 1].low > bars[g - 1].high) {
-        let targetHigh = bars[obIdx].high;
-        for (let k = Math.max(0, obIdx - lookback); k < obIdx; k++) {
+        // Lowest candle was bullish/up; search backward for the last bearish/down candle
+        let originIdx = -1;
+        if (bars[g - 1].close <= bars[g - 1].open) {
+          originIdx = g - 1;
+        } else {
+          for (let k = g - 1; k >= Math.max(0, g - 1 - lookback); k--) {
+            if (bars[k].close <= bars[k].open) {
+              originIdx = k;
+              break;
+            }
+          }
+        }
+        if (originIdx < 0) continue;
+        const originBar = bars[originIdx];
+
+        let targetHigh = originBar.high;
+        for (let k = Math.max(0, originIdx - lookback); k < originIdx; k++) {
           if (bars[k].high > targetHigh) targetHigh = bars[k].high;
         }
 
@@ -8537,20 +8573,23 @@
         }
 
         if (broke) {
-          // Lowest candle was bullish/up; search backward for the last bearish/down candle
-          // Prevent stacking duplicate OBs within 2 bars on the same impulsive move
-          if (!orderBlocks.some(x => x.side === "long" && Math.abs(x.barIndex - obIdx) <= 2)) {
-            const obTop = Math.max(bars[obIdx].high, bars[obIdx].open);
-            const obBottom = bars[obIdx].low;
-            const id = "bull_ob_" + (bars[obIdx].timeSec || obIdx) + "_" + obTop.toFixed(4);
+          if (!orderBlocks.some(x => x.side === 'long' && Math.abs(x.arrayIndex - originIdx) <= 2)) {
+            let obTop = Math.max(originBar.high, originBar.open);
+            let obBottom = originBar.low;
+            // Cap anomalous mega-candles (e.g. news crash / gap > 3x average range) to the lower absorption zone
+            const candleRange = originBar.high - originBar.low;
+            if (candleRange > 3 * avgRange) {
+              obTop = Math.min(originBar.low + avgRange * 2, Math.max(originBar.open, originBar.close));
+            }
+            const id = 'bull_ob_' + (originBar.timeSec || originIdx) + '_' + obTop.toFixed(4);
 
             orderBlocks.push({
               id,
-              side: "long",
-              type: "bullish",
-              arrayIndex: obIdx,
-              barIndex: (typeof bars[obIdx].barIndex === 'number') ? bars[obIdx].barIndex : obIdx,
-              timeSec: bars[obIdx].timeSec || 0,
+              side: 'long',
+              type: 'bullish',
+              arrayIndex: originIdx,
+              barIndex: (typeof originBar.barIndex === 'number') ? originBar.barIndex : originIdx,
+              timeSec: originBar.timeSec || 0,
               top: obTop,
               bottom: obBottom,
               breakArrayIndex: breakBarIndex,
@@ -8574,7 +8613,7 @@
       const startScan = (typeof ob.breakArrayIndex === 'number' && ob.breakArrayIndex >= 0) ? (ob.breakArrayIndex + 1) : (ob.breakBarIndex + 1);
       for (let m = startScan; m < bars.length; m++) {
         const bar = bars[m];
-        if (ob.side === "long") {
+        if (ob.side === 'long') {
           if (!ob.isMitigated && bar.low <= ob.top && bar.high >= ob.bottom) {
             ob.isMitigated = true;
             ob.mitigatedArrayIndex = m;
@@ -8602,11 +8641,10 @@
       }
     }
 
-    // Keep active / mitigated order blocks sorted by recent timeSec
     orderBlocks.sort((a, b) => b.timeSec - a.timeSec);
     return orderBlocks.slice(0, maxBlocks);
   }
-  function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
+    function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
     if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
     const cfg = normalizeOrderBlocksConfig(config);
 
