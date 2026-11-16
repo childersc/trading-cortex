@@ -1,3 +1,10 @@
+Trading Cortex v1.1.84 — Range Detector (Multi-Timeframe) with Glowing Blue Box & Audible Alerts
+
+- **Multi-Timeframe Range Detector Engine (`v1.1.84`)**: Evaluates market consolidation vs. trending expansion across multiple timeframes (`5m`, `15m`, `1h`, `4h`, `1D`) using Choppiness Index (CHOP), ADX, and channel containment.
+- **On-Chart Floating Range Detector Box (`v1.1.84`)**: Draggable widget featuring a **blue title bar with white text**, **slight blue glow halo**, and color-coded status pills (**green** for Ranging, **red** for Trending).
+- **Audible Alerts on New Range Transitions (`v1.1.84`)**: Synthesized voice alert (*"Range detected on [Symbol] [Timeframe]"*) and chime tone when a new consolidation range begins.
+- **Charting Indicators Hub Integration (`v1.1.84`)**: Dedicated indicator tile with master slider switch, expandable settings drawer, and quick Studio dropdown menu button.
+
 Trading Cortex v1.1.83 — Institutional Order Block Color Validation & Range Capping
 
 - **Strict Opposite-Color Candle Rule (`v1.1.83`)**: Enforces that Bullish Order Blocks must be down/bearish candles (`close <= open`) and Bearish Order Blocks must be up/bullish candles (`close >= open`), eliminating false order blocks on continuation candles during prolonged rallies/selloffs.

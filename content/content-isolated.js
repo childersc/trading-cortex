@@ -657,6 +657,58 @@
     };
   }
 
+  // -------------------------------------------------------------
+  // Range Detector (Multi-Timeframe) Configuration & Defaults
+  // -------------------------------------------------------------
+  const DEFAULT_RANGE_DETECTOR = {
+    enabled: false,
+    lookbackBars: 20,
+    chopThreshold: 55, // Choppiness Index >= 55 indicates ranging/consolidation
+    adxThreshold: 22, // ADX <= 22 indicates weak trend / ranging
+    detectionMode: 'hybrid', // 'hybrid' | 'chop' | 'adx' | 'channel'
+    timeframes: ['5m', '15m', '1h', '4h', '1D'],
+    voiceAlertEnabled: true,
+    chimeAlertEnabled: true,
+    voiceURI: '',
+    glowEffect: true,
+    boxWidth: 290,
+    bgOpacity: 90,
+    relX: 0.04,
+    relY: 0.18,
+    pinned: false,
+    pinnedLeft: null,
+    pinnedTop: null,
+    collapsed: false
+  };
+
+  function normalizeRangeDetectorConfig(rawCfg) {
+    const cfg = { ...DEFAULT_RANGE_DETECTOR, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    const validTfs = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1D', '1W'];
+    const timeframes = Array.isArray(cfg.timeframes) && cfg.timeframes.length > 0
+      ? cfg.timeframes.filter(tf => validTfs.includes(tf))
+      : ['5m', '15m', '1h', '4h', '1D'];
+    return {
+      enabled: Boolean(cfg.enabled),
+      lookbackBars: Math.max(10, Math.min(50, Math.round(Number(cfg.lookbackBars) || 20))),
+      chopThreshold: Math.max(35, Math.min(80, Math.round(Number(cfg.chopThreshold) || 55))),
+      adxThreshold: Math.max(10, Math.min(40, Math.round(Number(cfg.adxThreshold) || 22))),
+      detectionMode: ['hybrid', 'chop', 'adx', 'channel'].includes(cfg.detectionMode) ? cfg.detectionMode : 'hybrid',
+      timeframes: timeframes.length > 0 ? timeframes : ['5m', '15m', '1h', '4h', '1D'],
+      voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
+      chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
+      voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
+      glowEffect: cfg.glowEffect !== false,
+      boxWidth: Math.max(240, Math.min(450, Math.round(Number(cfg.boxWidth) || 290))),
+      bgOpacity: Math.max(30, Math.min(100, Math.round(Number(cfg.bgOpacity) || 90))),
+      relX: typeof cfg.relX === 'number' && Number.isFinite(cfg.relX) ? Math.max(0, Math.min(1, cfg.relX)) : 0.04,
+      relY: typeof cfg.relY === 'number' && Number.isFinite(cfg.relY) ? Math.max(0, Math.min(1, cfg.relY)) : 0.18,
+      pinned: Boolean(cfg.pinned),
+      pinnedLeft: typeof cfg.pinnedLeft === 'number' && Number.isFinite(cfg.pinnedLeft) ? cfg.pinnedLeft : null,
+      pinnedTop: typeof cfg.pinnedTop === 'number' && Number.isFinite(cfg.pinnedTop) ? cfg.pinnedTop : null,
+      collapsed: Boolean(cfg.collapsed)
+    };
+  }
+
   const DEFAULT_MARKET_STRUCTURE = {
     enabled: false,
     swingLookback: 5,
@@ -1640,6 +1692,7 @@
     cortexIndicator: JSON.parse(JSON.stringify(DEFAULT_CORTEX_INDICATOR)),
     orderBlocks: JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS)),
     marketStructure: JSON.parse(JSON.stringify(DEFAULT_MARKET_STRUCTURE)),
+    rangeDetector: JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR)),
     debugMode: false,
     dialogGlassEffect: false,
     dialogGlassOpacity: 78,
@@ -2810,7 +2863,14 @@
     if (!event.data || typeof event.data !== 'object') return;
     const { type, templateId, template, updates } = event.data;
 
-    if (type === 'VEST_TV_OB_MITIGATED') {
+    if (type === 'VEST_TV_RANGE_UPDATE') {
+      latestRangeDetectorTelemetry = event.data.payload || {};
+      if (settings.rangeDetector && settings.rangeDetector.enabled) {
+        renderChartRangeBox();
+      }
+    } else if (type === 'VEST_TV_RANGE_ALERT') {
+      handleRangeDetectedAlert(event.data.payload || {});
+    } else     if (type === 'VEST_TV_OB_MITIGATED') {
       handleOrderBlockMitigatedAlert(event.data.payload || {});
     } else if (type === 'VEST_TV_CI_SIGNAL_FORMING') {
       speakCortexSignalAlert(event.data.payload || {}, false);
@@ -4178,6 +4238,18 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.sessionIndicators && settings.sessionIndicators.enabled ? 'on' : ''}">${settings.sessionIndicators && settings.sessionIndicators.enabled ? 'ON' : 'OFF'}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-rangedetector-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#3b82f6;">
+              <rect x="3" y="6" width="18" height="12" rx="2"></rect>
+              <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="2 2"></line>
+              <polyline points="7 10 9 8 11 10"></polyline>
+              <polyline points="13 14 15 16 17 14"></polyline>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Range Detector...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.rangeDetector && settings.rangeDetector.enabled ? 'on' : ''}">${settings.rangeDetector && settings.rangeDetector.enabled ? 'ON' : 'OFF'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-autofvg-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#a855f7;">
@@ -4718,6 +4790,7 @@
         cortexIndicator: settings.cortexIndicator,
         orderBlocks: settings.orderBlocks,
         marketStructure: settings.marketStructure,
+        rangeDetector: settings.rangeDetector,
         diagnosticsBox: settings.diagnosticsBox,
         debugMode: settings.debugMode,
         dialogGlassEffect: settings.dialogGlassEffect,
@@ -6426,6 +6499,61 @@
 
 
       
+
+      function renderRangeDetectorSettingsHtml(rd) {
+        return `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;padding:14px;border-radius:8px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.22);">
+            <div>
+              <label for="vest-rd-lookback" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Lookback Period (Bars)</label>
+              <input type="number" id="vest-rd-lookback" min="10" max="50" value="${rd.lookbackBars}" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+            </div>
+            <div>
+              <label for="vest-rd-mode" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Detection Engine</label>
+              <select id="vest-rd-mode" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+                <option value="hybrid" ${rd.detectionMode === 'hybrid' ? 'selected' : ''}>Hybrid (Choppiness + ADX)</option>
+                <option value="chop" ${rd.detectionMode === 'chop' ? 'selected' : ''}>Choppiness Index Only</option>
+                <option value="adx" ${rd.detectionMode === 'adx' ? 'selected' : ''}>ADX Threshold Only</option>
+                <option value="channel" ${rd.detectionMode === 'channel' ? 'selected' : ''}>High/Low Range Channel</option>
+              </select>
+            </div>
+            <div>
+              <label for="vest-rd-chop-thresh" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Choppiness Threshold (≥ Ranging)</label>
+              <input type="number" id="vest-rd-chop-thresh" min="35" max="80" value="${rd.chopThreshold}" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+            </div>
+            <div>
+              <label for="vest-rd-adx-thresh" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">ADX Threshold (≤ Ranging)</label>
+              <input type="number" id="vest-rd-adx-thresh" min="10" max="40" value="${rd.adxThreshold}" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+            </div>
+            <div>
+              <label for="vest-rd-opacity" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Box Opacity (%)</label>
+              <input type="range" id="vest-rd-opacity" min="30" max="100" value="${rd.bgOpacity}" style="width:100%;">
+            </div>
+            <div>
+              <label for="vest-rd-width" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Box Width (px)</label>
+              <input type="number" id="vest-rd-width" min="240" max="450" value="${rd.boxWidth}" style="width:100%;padding:8px;border-radius:6px;background:#0b0e14;color:#e4e4e7;border:1px solid #343a46;">
+            </div>
+            <div style="grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:16px;margin-top:6px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#e4e4e7;cursor:pointer;">
+                <input type="checkbox" id="vest-rd-voice-alert" ${rd.voiceAlertEnabled ? 'checked' : ''}>
+                <span>Voice Speech Alert ("Range detected on...")</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#e4e4e7;cursor:pointer;">
+                <input type="checkbox" id="vest-rd-chime-alert" ${rd.chimeAlertEnabled ? 'checked' : ''}>
+                <span>Chime Sound Alert</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#e4e4e7;cursor:pointer;">
+                <input type="checkbox" id="vest-rd-glow-effect" ${rd.glowEffect ? 'checked' : ''}>
+                <span>Blue Glowing Halo Effect</span>
+              </label>
+            </div>
+            <div style="grid-column:1 / -1;display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+              <button type="button" class="vest-tvs-action-btn" id="vest-rd-reset-pos-btn" style="padding:6px 12px;font-size:11px;">Reset Box Position</button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-rd-reset-defaults-btn" style="padding:6px 12px;font-size:11px;">Reset Defaults</button>
+            </div>
+          </div>
+        `;
+      }
+
       function renderMarketStructureSettingsHtml(ms) {
         const range = (id, label, min, max, step, value, unit = '') => `
           <label for="${id}" style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e4e4e7;margin:12px 0 6px;">${label}<span id="${id}-value" style="color:#06b6d4;">${value}${unit}</span></label>
@@ -6638,6 +6766,8 @@
         const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
         draftSettings.orderBlocks = ob;
 
+        const rd = normalizeRangeDetectorConfig(draftSettings.rangeDetector);
+        draftSettings.rangeDetector = rd;
         const ms = normalizeMarketStructureConfig(draftSettings.marketStructure);
         draftSettings.marketStructure = ms;
 
@@ -6740,6 +6870,17 @@
             masterToggleId: 'vest-ob-master-enabled',
             isEnabled: Boolean(ob.enabled),
             renderSettings: () => renderOrderBlocksSettingsHtml(ob)
+          },
+          {
+            id: 'rangedetector',
+            title: 'Range Detector (Multi-Timeframe)',
+            desc: 'Multi-timeframe market consolidation & range detection widget with glowing on-chart box and audible alerts',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="2 2"/><polyline points="7 10 9 8 11 10"/><polyline points="13 14 15 16 17 14"/></svg>`,
+            accentColor: '#3b82f6',
+            bgTint: 'rgba(59, 130, 246, 0.12)',
+            masterToggleId: 'vest-rd-master-enabled',
+            isEnabled: Boolean(rd.enabled),
+            renderSettings: () => renderRangeDetectorSettingsHtml(rd)
           },
           {
             id: 'marketstructure',
@@ -6916,6 +7057,7 @@
       window.removeEventListener('mouseup', onModalMouseUp, true);
       overlay.remove();
       // Restore committed settings to main world in case user cancelled after previewing
+      if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       notifyMainWorldConfig();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
@@ -7655,7 +7797,25 @@
         draftSettings.orderBlocks = normalizeOrderBlocksConfig(ob);
       }
 
-      // Sync Market Structure
+      // Sync Range Detector
+      const masterRd = overlay.querySelector('#vest-rd-master-enabled');
+      if (masterRd || overlay.querySelector('#vest-rd-lookback')) {
+        const rd = normalizeRangeDetectorConfig(draftSettings.rangeDetector);
+        if (masterRd) rd.enabled = Boolean(masterRd.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-rd-lookback')) rd.lookbackBars = Number(q('#vest-rd-lookback').value) || 20;
+        if (q('#vest-rd-mode')) rd.detectionMode = q('#vest-rd-mode').value || 'hybrid';
+        if (q('#vest-rd-chop-thresh')) rd.chopThreshold = Number(q('#vest-rd-chop-thresh').value) || 55;
+        if (q('#vest-rd-adx-thresh')) rd.adxThreshold = Number(q('#vest-rd-adx-thresh').value) || 22;
+        if (q('#vest-rd-opacity')) rd.bgOpacity = Number(q('#vest-rd-opacity').value) || 90;
+        if (q('#vest-rd-width')) rd.boxWidth = Number(q('#vest-rd-width').value) || 290;
+        if (q('#vest-rd-voice-alert')) rd.voiceAlertEnabled = Boolean(q('#vest-rd-voice-alert').checked);
+        if (q('#vest-rd-chime-alert')) rd.chimeAlertEnabled = Boolean(q('#vest-rd-chime-alert').checked);
+        if (q('#vest-rd-glow-effect')) rd.glowEffect = Boolean(q('#vest-rd-glow-effect').checked);
+        draftSettings.rangeDetector = normalizeRangeDetectorConfig(rd);
+      }
+
+            // Sync Market Structure
       const masterMs = overlay.querySelector('#vest-ms-master-enabled');
       if (masterMs || overlay.querySelector('#vest-ms-swing-lookback')) {
         const ms = normalizeMarketStructureConfig(draftSettings.marketStructure);
@@ -7706,6 +7866,7 @@
       renderStudioHeaderPill();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
+      if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       showToast('Settings saved');
       if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
@@ -7869,6 +8030,7 @@
             else if (indId === 'cortexindicator' && draftSettings.cortexIndicator) draftSettings.cortexIndicator.enabled = isChecked;
             else if (indId === 'orderblocks' && draftSettings.orderBlocks) draftSettings.orderBlocks.enabled = isChecked;
             else if (indId === 'marketstructure' && draftSettings.marketStructure) draftSettings.marketStructure.enabled = isChecked;
+            else if (indId === 'rangedetector' && draftSettings.rangeDetector) draftSettings.rangeDetector.enabled = isChecked;
 
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -8529,6 +8691,46 @@
           broadcastLiveSessionDraft();
         });
         ['#vest-ci-stop-points', '#vest-ci-target-spacing', '#vest-ci-level-font-size', '#vest-ci-level-box-scale', '#vest-ci-reversal-ignore-bars'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+      }
+
+      if (activeTab === 'rangedetector' || activeTab === 'chartingindicators') {
+        overlay.querySelector('#vest-rd-reset-defaults-btn')?.addEventListener('click', () => {
+          draftSettings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+          draftSettings.rangeDetector.enabled = true;
+          targetIndicatorToScroll = 'rangedetector';
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Range Detector settings to defaults');
+        });
+
+        overlay.querySelector('#vest-rd-reset-pos-btn')?.addEventListener('click', () => {
+          if (!draftSettings.rangeDetector) draftSettings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+          draftSettings.rangeDetector.relX = 0.04;
+          draftSettings.rangeDetector.relY = 0.18;
+          draftSettings.rangeDetector.pinned = false;
+          draftSettings.rangeDetector.pinnedLeft = null;
+          draftSettings.rangeDetector.pinnedTop = null;
+          if (chartRangeBoxEl) {
+            chartRangeBoxEl.style.left = '40px';
+            chartRangeBoxEl.style.top = '120px';
+          }
+          broadcastLiveSessionDraft();
+          showToast('Reset Range Detector box position');
+        });
+
+        ['#vest-rd-master-enabled', '#vest-rd-mode', '#vest-rd-voice-alert', '#vest-rd-chime-alert', '#vest-rd-glow-effect'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+
+        ['#vest-rd-lookback', '#vest-rd-chop-thresh', '#vest-rd-adx-thresh', '#vest-rd-opacity', '#vest-rd-width'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -10842,6 +11044,318 @@ if (activeTab === 'diagnostics') {
 
     chartDiagnosticsBoxEl.style.left = `${clampedLeft}px`;
     chartDiagnosticsBoxEl.style.top = `${clampedTop}px`;
+  }
+
+
+  // -------------------------------------------------------------
+  // Floating On-Chart Range Detector Box Component
+  // -------------------------------------------------------------
+  let chartRangeBoxEl = null;
+  let activeRangeBoxDrag = null;
+  let latestRangeDetectorTelemetry = null;
+
+  function clampAndPositionChartRangeBox() {
+    if (!chartRangeBoxEl || chartRangeBoxEl.style.display === 'none' || activeRangeBoxDrag) return;
+    const rd = normalizeRangeDetectorConfig(settings.rangeDetector);
+    const vp = getScreenBoundsRect();
+
+    if (rd.collapsed) {
+      const minPos = getMinimizedCortexBarCoords('range_detector', chartRangeBoxEl);
+      chartRangeBoxEl.style.left = `${minPos.left}px`;
+      chartRangeBoxEl.style.top = `${minPos.top}px`;
+      return;
+    }
+
+    const boxW = chartRangeBoxEl.offsetWidth || rd.boxWidth || 290;
+    const boxH = chartRangeBoxEl.offsetHeight || 220;
+
+    let targetLeft;
+    let targetTop;
+    if (rd.pinned && rd.pinnedLeft !== null && rd.pinnedTop !== null) {
+      targetLeft = rd.pinnedLeft;
+      targetTop = rd.pinnedTop;
+    } else {
+      const maxOffsetX = Math.max(0, vp.width - boxW);
+      const maxOffsetY = Math.max(0, vp.height - boxH);
+      targetLeft = Math.round(vp.left + rd.relX * maxOffsetX);
+      targetTop = Math.round(vp.top + rd.relY * maxOffsetY);
+    }
+
+    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
+    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
+
+    chartRangeBoxEl.style.left = `${clampedLeft}px`;
+    chartRangeBoxEl.style.top = `${clampedTop}px`;
+  }
+
+  function playRangeChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      const now = ctx.currentTime;
+      osc.frequency.setValueAtTime(523.25, now); // C5
+      osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.14); // G5
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.42);
+    } catch (e) {}
+  }
+
+  function handleRangeDetectedAlert(payload) {
+    if (!isTopWindow || !payload) return;
+    const rdConfig = normalizeRangeDetectorConfig(settings.rangeDetector);
+    if (!rdConfig.enabled) return;
+    const alertKey = `${payload.symbol || ''}:${payload.resolution || ''}:${Math.floor(Date.now() / 60000)}`;
+    const dedupeKey = `__trading_cortex_rd_alert__:${payload.symbol || ''}:${payload.resolution || ''}`;
+    try {
+      const recentKeys = JSON.parse(window.localStorage.getItem(dedupeKey) || '[]');
+      if (Array.isArray(recentKeys) && recentKeys.includes(alertKey)) return;
+      const nextKeys = (Array.isArray(recentKeys) ? recentKeys : []).concat(alertKey).slice(-24);
+      window.localStorage.setItem(dedupeKey, JSON.stringify(nextKeys));
+    } catch (e) {}
+
+    if (rdConfig.chimeAlertEnabled !== false) {
+      playRangeChime();
+    }
+    if (rdConfig.voiceAlertEnabled !== false) {
+      const phrase = `Range detected on ${payload.symbol || 'market'} ${payload.resolution || ''}`;
+      speakCortexVoicePhrase(phrase, rdConfig.voiceURI);
+    }
+    showToast(`Range detected on ${payload.symbol || 'market'} (${payload.resolution || ''})`);
+  }
+
+  function renderChartRangeBox(animateFromRect = null) {
+    if (!isTopWindow) return;
+
+    const rd = normalizeRangeDetectorConfig(settings.rangeDetector);
+    settings.rangeDetector = rd;
+
+    if (!rd.enabled) {
+      if (chartRangeBoxEl) {
+        chartRangeBoxEl.style.display = 'none';
+      }
+      return;
+    }
+
+    if (!chartRangeBoxEl || !chartRangeBoxEl.isConnected) {
+      chartRangeBoxEl = document.getElementById('vest-chart-range-box');
+      if (!chartRangeBoxEl) {
+        chartRangeBoxEl = document.createElement('div');
+        chartRangeBoxEl.id = 'vest-chart-range-box';
+        document.body.appendChild(chartRangeBoxEl);
+      }
+    }
+
+    chartRangeBoxEl.style.display = 'block';
+    chartRangeBoxEl.style.position = 'fixed';
+    chartRangeBoxEl.style.zIndex = '10002';
+    chartRangeBoxEl.style.width = rd.collapsed ? 'auto' : `${rd.boxWidth}px`;
+    chartRangeBoxEl.style.background = `rgba(11, 15, 25, ${(rd.bgOpacity || 90) / 100})`;
+    chartRangeBoxEl.style.backdropFilter = 'blur(12px)';
+    chartRangeBoxEl.style.borderRadius = '8px';
+    chartRangeBoxEl.style.border = '1px solid rgba(59, 130, 246, 0.55)';
+    chartRangeBoxEl.style.boxShadow = rd.glowEffect !== false
+      ? '0 0 16px rgba(59, 130, 246, 0.42), 0 0 32px rgba(37, 99, 235, 0.22)'
+      : '0 8px 24px rgba(0, 0, 0, 0.6)';
+    chartRangeBoxEl.style.overflow = 'hidden';
+    chartRangeBoxEl.style.userSelect = 'none';
+    chartRangeBoxEl.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+    const telem = latestRangeDetectorTelemetry || {};
+    const timeframesData = Array.isArray(telem.timeframes) && telem.timeframes.length > 0
+      ? telem.timeframes
+      : rd.timeframes.map(tf => ({ timeframe: tf, isRanging: false, chop: 50, adx: 20 }));
+
+    const overallRangingCount = timeframesData.filter(t => t.isRanging).length;
+    const isOverallRanging = overallRangingCount >= Math.ceil(timeframesData.length / 2);
+
+    if (rd.collapsed) {
+      chartRangeBoxEl.innerHTML = `
+        <div class="vest-crb-min-pill" id="vest-crb-restore-btn" style="
+          display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+          background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #ffffff;
+          cursor: pointer; border-radius: 8px; font-size: 11.5px; font-weight: 700;
+        " title="Click to expand Range Detector">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: ${isOverallRanging ? '#10b981' : '#ef4444'}; box-shadow: 0 0 8px ${isOverallRanging ? '#10b981' : '#ef4444'};"></span>
+          <span>RANGE DETECTOR (${overallRangingCount}/${timeframesData.length})</span>
+          <span style="opacity: 0.8;">↗</span>
+        </div>
+      `;
+    } else {
+      let tfRowsHtml = '';
+      for (const t of timeframesData) {
+        const isR = Boolean(t.isRanging);
+        const chopVal = typeof t.chop === 'number' ? Math.round(t.chop) : '--';
+        const badgeBg = isR ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.16)';
+        const badgeBorder = isR ? 'rgba(16, 185, 129, 0.42)' : 'rgba(239, 68, 68, 0.42)';
+        const badgeColor = isR ? '#34d399' : '#f87171';
+        const indicatorDot = isR ? '#10b981' : '#ef4444';
+        const labelText = isR ? 'RANGING' : 'TRENDING';
+
+        tfRowsHtml += `
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px;">
+            <div style="display: flex; align-items: center; gap: 9px;">
+              <span style="font-size: 12px; font-weight: 700; color: #f8fafc; font-family: monospace; width: 32px;">${escapeHtml(t.timeframe)}</span>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: ${badgeBg}; border: 1px solid ${badgeBorder}; border-radius: 4px;">
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: ${indicatorDot}; box-shadow: 0 0 7px ${indicatorDot};"></span>
+                <span style="font-size: 10.5px; font-weight: 700; color: ${badgeColor}; letter-spacing: 0.3px;">${labelText}</span>
+              </div>
+            </div>
+            <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">CHOP ${chopVal}%</span>
+          </div>
+        `;
+      }
+
+      chartRangeBoxEl.innerHTML = `
+        <!-- Blue Title Bar with White Text -->
+        <div id="vest-crb-title-bar" style="
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 8px 12px; background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          color: #ffffff; cursor: move; border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        ">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="width: 15px; height: 15px; color: #ffffff;">
+              <rect x="3" y="6" width="18" height="12" rx="2"></rect>
+              <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="2 2"></line>
+              <polyline points="7 10 9 8 11 10"></polyline>
+              <polyline points="13 14 15 16 17 14"></polyline>
+            </svg>
+            <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.4px; text-transform: uppercase;">Range Detector</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <button type="button" id="vest-crb-btn-collapse" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; line-height: 1;" title="Minimize Window">_</button>
+            <button type="button" id="vest-crb-btn-settings" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;" title="Range Detector Settings">⚙</button>
+            <button type="button" id="vest-crb-btn-close" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;" title="Close Range Detector">✕</button>
+          </div>
+        </div>
+
+        <!-- Box Body: Multi-Timeframe Status -->
+        <div style="padding: 10px 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.07);">
+            <span style="font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: 0.5px;">MULTI-TIMEFRAME</span>
+            <span style="font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: ${isOverallRanging ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)'}; color: ${isOverallRanging ? '#34d399' : '#f87171'}; border: 1px solid ${isOverallRanging ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'};">
+              ${isOverallRanging ? 'MARKET RANGING' : 'MARKET TRENDING'}
+            </span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 5px;">
+            ${tfRowsHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    wireChartRangeBoxEvents();
+    clampAndPositionChartRangeBox();
+  }
+
+  function wireChartRangeBoxEvents() {
+    if (!chartRangeBoxEl) return;
+
+    const restoreBtn = chartRangeBoxEl.querySelector('#vest-crb-restore-btn');
+    if (restoreBtn) {
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.rangeDetector) settings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+        settings.rangeDetector.collapsed = false;
+        queueSettingsSave({ rangeDetector: settings.rangeDetector });
+        renderChartRangeBox();
+      });
+      return;
+    }
+
+    const collapseBtn = chartRangeBoxEl.querySelector('#vest-crb-btn-collapse');
+    if (collapseBtn) {
+      collapseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.rangeDetector) settings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+        settings.rangeDetector.collapsed = true;
+        queueSettingsSave({ rangeDetector: settings.rangeDetector });
+        renderChartRangeBox();
+      });
+    }
+
+    const settingsBtn = chartRangeBoxEl.querySelector('#vest-crb-btn-settings');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openStudioSettingsModal('indicators', 'rangedetector');
+      });
+    }
+
+    const closeBtn = chartRangeBoxEl.querySelector('#vest-crb-btn-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.rangeDetector) settings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+        settings.rangeDetector.enabled = false;
+        queueSettingsSave({ rangeDetector: settings.rangeDetector });
+        renderChartRangeBox();
+        notifyMainWorldConfig();
+        showToast('Range Detector disabled');
+      });
+    }
+
+    const dragHandle = chartRangeBoxEl.querySelector('#vest-crb-title-bar');
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button, input, label')) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = chartRangeBoxEl.getBoundingClientRect();
+        activeRangeBoxDrag = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+          if (!activeRangeBoxDrag || !chartRangeBoxEl) return;
+          const vp = getScreenBoundsRect();
+          const boxW = chartRangeBoxEl.offsetWidth || 290;
+          const boxH = chartRangeBoxEl.offsetHeight || 220;
+
+          const rawLeft = ev.clientX - activeRangeBoxDrag.offsetX;
+          const rawTop = ev.clientY - activeRangeBoxDrag.offsetY;
+
+          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
+          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
+
+          chartRangeBoxEl.style.left = `${Math.round(clampedLeft)}px`;
+          chartRangeBoxEl.style.top = `${Math.round(clampedTop)}px`;
+
+          const maxOffsetX = Math.max(1, vp.width - boxW);
+          const maxOffsetY = Math.max(1, vp.height - boxH);
+          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
+          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
+
+          if (!settings.rangeDetector) settings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+          settings.rangeDetector.relX = Math.round(relX * 10000) / 10000;
+          settings.rangeDetector.relY = Math.round(relY * 10000) / 10000;
+        };
+
+        const onUp = () => {
+          activeRangeBoxDrag = null;
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          queueSettingsSave({ rangeDetector: settings.rangeDetector });
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    }
   }
 
   function renderChartDiagnosticsBox(animateFromRect = null) {

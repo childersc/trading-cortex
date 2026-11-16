@@ -170,6 +170,10 @@
   };
   const sentOrderBlockAlerts = new Set();
   let cachedOrderBlocksSignature = '';
+  let cachedComputedRangeStatus = [];
+  let cachedRangeDetectorSignature = '';
+  let lastActiveRangeState = false;
+  const sentRangeAlerts = new Set();
   let cachedComputedOrderBlocks = [];
   let cachedMarketStructureSignature = '';
   let cachedComputedMarketStructure = [];
@@ -8818,6 +8822,42 @@
   // -------------------------------------------------------------
   // Market Structure (BOS / MSS / CHoCH) Engine
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Range Detector (Multi-Timeframe) Configuration & Defaults
+  // -------------------------------------------------------------
+  const DEFAULT_RANGE_DETECTOR = {
+    enabled: false,
+    lookbackBars: 20,
+    chopThreshold: 55,
+    adxThreshold: 22,
+    detectionMode: 'hybrid',
+    timeframes: ['5m', '15m', '1h', '4h', '1D'],
+    voiceAlertEnabled: true,
+    chimeAlertEnabled: true,
+    voiceURI: '',
+    glowEffect: true
+  };
+
+  function normalizeRangeDetectorConfig(rawCfg) {
+    const cfg = { ...DEFAULT_RANGE_DETECTOR, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    const validTfs = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1D', '1W'];
+    const timeframes = Array.isArray(cfg.timeframes) && cfg.timeframes.length > 0
+      ? cfg.timeframes.filter(tf => validTfs.includes(tf))
+      : ['5m', '15m', '1h', '4h', '1D'];
+    return {
+      enabled: Boolean(cfg.enabled),
+      lookbackBars: Math.max(10, Math.min(50, Math.round(Number(cfg.lookbackBars) || 20))),
+      chopThreshold: Math.max(35, Math.min(80, Math.round(Number(cfg.chopThreshold) || 55))),
+      adxThreshold: Math.max(10, Math.min(40, Math.round(Number(cfg.adxThreshold) || 22))),
+      detectionMode: ['hybrid', 'chop', 'adx', 'channel'].includes(cfg.detectionMode) ? cfg.detectionMode : 'hybrid',
+      timeframes: timeframes.length > 0 ? timeframes : ['5m', '15m', '1h', '4h', '1D'],
+      voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
+      chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
+      voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
+      glowEffect: cfg.glowEffect !== false
+    };
+  }
+
   const DEFAULT_MARKET_STRUCTURE = {
     enabled: false,
     swingLookback: 5,
@@ -9034,6 +9074,219 @@
       ctx.fillText(badgeText, midX, y);
     }
     ctx.restore();
+  }
+
+  // -------------------------------------------------------------
+  // Range Detector (Multi-Timeframe) Algorithms
+  // -------------------------------------------------------------
+  function computeChoppinessIndex(bars, period = 14) {
+    if (!bars || bars.length < period + 1) return 50;
+    const n = Math.min(period, bars.length - 1);
+    let sumTrueRange = 0;
+    let highestHigh = -Infinity;
+    let lowestLow = Infinity;
+    const endIdx = bars.length - 1;
+    for (let i = endIdx - n + 1; i <= endIdx; i++) {
+      const cur = bars[i];
+      const prev = bars[i - 1];
+      const tr = Math.max(
+        cur.high - cur.low,
+        Math.abs(cur.high - prev.close),
+        Math.abs(cur.low - prev.close)
+      );
+      sumTrueRange += tr;
+      if (cur.high > highestHigh) highestHigh = cur.high;
+      if (cur.low < lowestLow) lowestLow = cur.low;
+    }
+    const range = highestHigh - lowestLow;
+    if (range <= 0) return 100;
+    const chop = 100 * (Math.log10(sumTrueRange / range) / Math.log10(n));
+    return Math.max(0, Math.min(100, Math.round(chop * 10) / 10));
+  }
+
+  function computeAdx(bars, period = 14) {
+    if (!bars || bars.length < period * 2) return 20;
+    const n = Math.min(period, Math.floor(bars.length / 2));
+    let trSum = 0;
+    let plusDmSum = 0;
+    let minusDmSum = 0;
+
+    for (let i = 1; i <= n; i++) {
+      const cur = bars[i];
+      const prev = bars[i - 1];
+      const tr = Math.max(cur.high - cur.low, Math.abs(cur.high - prev.close), Math.abs(cur.low - prev.close));
+      const upMove = cur.high - prev.high;
+      const downMove = prev.low - cur.low;
+      const plusDm = (upMove > downMove && upMove > 0) ? upMove : 0;
+      const minusDm = (downMove > upMove && downMove > 0) ? downMove : 0;
+      trSum += tr;
+      plusDmSum += plusDm;
+      minusDmSum += minusDm;
+    }
+
+    let smoothedTr = trSum;
+    let smoothedPlusDm = plusDmSum;
+    let smoothedMinusDm = minusDmSum;
+    let dxValues = [];
+
+    for (let i = n + 1; i < bars.length; i++) {
+      const cur = bars[i];
+      const prev = bars[i - 1];
+      const tr = Math.max(cur.high - cur.low, Math.abs(cur.high - prev.close), Math.abs(cur.low - prev.close));
+      const upMove = cur.high - prev.high;
+      const downMove = prev.low - cur.low;
+      const plusDm = (upMove > downMove && upMove > 0) ? upMove : 0;
+      const minusDm = (downMove > upMove && downMove > 0) ? downMove : 0;
+
+      smoothedTr = smoothedTr - (smoothedTr / n) + tr;
+      smoothedPlusDm = smoothedPlusDm - (smoothedPlusDm / n) + plusDm;
+      smoothedMinusDm = smoothedMinusDm - (smoothedMinusDm / n) + minusDm;
+
+      const plusDi = smoothedTr > 0 ? (smoothedPlusDm / smoothedTr) * 100 : 0;
+      const minusDi = smoothedTr > 0 ? (smoothedMinusDm / smoothedTr) * 100 : 0;
+      const diDiff = Math.abs(plusDi - minusDi);
+      const diSum = plusDi + minusDi;
+      const dx = diSum > 0 ? (diDiff / diSum) * 100 : 0;
+      dxValues.push(dx);
+    }
+
+    if (dxValues.length === 0) return 20;
+    const recentDx = dxValues.slice(-n);
+    const adx = recentDx.reduce((a, b) => a + b, 0) / recentDx.length;
+    return Math.max(0, Math.min(100, Math.round(adx * 10) / 10));
+  }
+
+  function parseTimeframeToSeconds(tfStr) {
+    const s = String(tfStr || '').trim().toLowerCase();
+    if (s.endsWith('m')) return Math.max(60, Number(s.slice(0, -1)) * 60);
+    if (s.endsWith('h')) return Math.max(3600, Number(s.slice(0, -1)) * 3600);
+    if (s.endsWith('d')) return Math.max(86400, Number(s.slice(0, -1)) * 86400);
+    if (s.endsWith('w')) return Math.max(604800, Number(s.slice(0, -1)) * 604800);
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? n * 60 : 300;
+  }
+
+  function aggregateBarsToInterval(bars, targetIntervalSec) {
+    if (!bars || bars.length === 0 || !targetIntervalSec || targetIntervalSec <= 0) return bars;
+    const aggregated = [];
+    let currentBucketTime = null;
+    let group = [];
+
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i];
+      const bTime = Number(b.timeSec);
+      if (!isFinite(bTime) || bTime <= 0) continue;
+      const bucket = Math.floor(bTime / targetIntervalSec) * targetIntervalSec;
+      if (currentBucketTime === null || bucket === currentBucketTime) {
+        currentBucketTime = bucket;
+        group.push(b);
+      } else {
+        if (group.length > 0) {
+          let high = -Infinity;
+          let low = Infinity;
+          for (let g = 0; g < group.length; g++) {
+            if (group[g].high > high) high = group[g].high;
+            if (group[g].low < low) low = group[g].low;
+          }
+          aggregated.push({
+            timeSec: currentBucketTime,
+            open: group[0].open,
+            high,
+            low,
+            close: group[group.length - 1].close,
+            barIndex: aggregated.length
+          });
+        }
+        currentBucketTime = bucket;
+        group = [b];
+      }
+    }
+    if (group.length > 0 && currentBucketTime !== null) {
+      let high = -Infinity;
+      let low = Infinity;
+      for (let g = 0; g < group.length; g++) {
+        if (group[g].high > high) high = group[g].high;
+        if (group[g].low < low) low = group[g].low;
+      }
+      aggregated.push({
+        timeSec: currentBucketTime,
+        open: group[0].open,
+        high,
+        low,
+        close: group[group.length - 1].close,
+        barIndex: aggregated.length
+      });
+    }
+    return aggregated;
+  }
+
+  function computeMultiTimeframeRangeStatus(bars, config, currentResolutionLabel) {
+    if (!bars || bars.length < 5 || !config || !config.enabled) return [];
+    const cfg = normalizeRangeDetectorConfig(config);
+    const lookback = cfg.lookbackBars;
+    const chopThresh = cfg.chopThreshold;
+    const adxThresh = cfg.adxThreshold;
+    const mode = cfg.detectionMode;
+
+    const baseIntervalSec = Math.max(
+      60,
+      bars.length >= 2 ? Math.round((bars[bars.length - 1].timeSec - bars[0].timeSec) / (bars.length - 1)) : 300
+    );
+
+    const results = [];
+
+    for (let t = 0; t < cfg.timeframes.length; t++) {
+      const tfName = cfg.timeframes[t];
+      const targetSec = parseTimeframeToSeconds(tfName);
+
+      let tfBars = bars;
+      if (targetSec > baseIntervalSec * 1.4) {
+        tfBars = aggregateBarsToInterval(bars, targetSec);
+      }
+
+      if (tfBars.length < 5) continue;
+
+      const evalSlice = tfBars.slice(-Math.max(lookback * 3, 50));
+      const chop = computeChoppinessIndex(evalSlice, lookback);
+      const adx = computeAdx(evalSlice, Math.min(14, lookback));
+
+      const recentBars = evalSlice.slice(-lookback);
+      let rangeHigh = -Infinity;
+      let rangeLow = Infinity;
+      for (let b = 0; b < recentBars.length; b++) {
+        if (recentBars[b].high > rangeHigh) rangeHigh = recentBars[b].high;
+        if (recentBars[b].low < rangeLow) rangeLow = recentBars[b].low;
+      }
+      const lastClose = evalSlice[evalSlice.length - 1].close;
+      const rangeSpan = rangeHigh - rangeLow;
+      const posPct = rangeSpan > 0 ? ((lastClose - rangeLow) / rangeSpan) * 100 : 50;
+
+      let isRanging = false;
+      if (mode === 'chop') {
+        isRanging = chop >= chopThresh;
+      } else if (mode === 'adx') {
+        isRanging = adx <= adxThresh && chop >= 45;
+      } else if (mode === 'channel') {
+        isRanging = posPct >= 20 && posPct <= 80 && chop >= 48;
+      } else {
+        // Hybrid mode (default): Market is ranging if Choppiness is elevated (CHOP >= chopThresh)
+        // OR (ADX is low AND Choppiness is not in a runaway trend, i.e. CHOP >= 48)
+        isRanging = (chop >= chopThresh) || (adx <= adxThresh && chop >= 48);
+      }
+
+      results.push({
+        timeframe: tfName,
+        isRanging,
+        chop,
+        adx,
+        rangeHigh,
+        rangeLow,
+        posPct: Math.round(posPct),
+        barsEvaluated: evalSlice.length
+      });
+    }
+
+    return results;
   }
 
   function normalizeEpochSec(rawTime) {
@@ -10910,7 +11163,64 @@
       cachedComputedOrderBlocks = [];
     }
 
-    if (marketStructureEnabled) {
+    const rangeDetectorConfig = normalizeRangeDetectorConfig(currentSettings.rangeDetector);
+    const rangeDetectorEnabled = Boolean(rangeDetectorConfig.enabled);
+
+    if (rangeDetectorEnabled) {
+      const tfLabel = formatCurrentResolutionLabel();
+      const rdSig = `${barsSig}_${tfLabel}_${JSON.stringify(rangeDetectorConfig)}`;
+      if (
+        ictSessionsNeedsFullRecompute ||
+        rdSig !== cachedRangeDetectorSignature
+      ) {
+        cachedComputedRangeStatus = computeMultiTimeframeRangeStatus(bars, rangeDetectorConfig, tfLabel);
+        cachedRangeDetectorSignature = rdSig;
+
+        const activeTfResult = cachedComputedRangeStatus.find(r => r.timeframe.toLowerCase() === tfLabel.toLowerCase()) || cachedComputedRangeStatus[0];
+        const isNowRanging = activeTfResult ? activeTfResult.isRanging : false;
+
+        // Post live telemetry update to isolated world
+        postToIsolated({
+          type: 'VEST_TV_RANGE_UPDATE',
+          payload: {
+            symbol: symbolKey,
+            resolution: tfLabel,
+            timeframes: cachedComputedRangeStatus,
+            activeIsRanging: isNowRanging,
+            activeChop: activeTfResult ? activeTfResult.chop : 50,
+            activeAdx: activeTfResult ? activeTfResult.adx : 20,
+            activeRangeHigh: activeTfResult ? activeTfResult.rangeHigh : null,
+            activeRangeLow: activeTfResult ? activeTfResult.rangeLow : null,
+            timestamp: Date.now()
+          }
+        });
+
+        // Audible alert transition: Trigger when market enters a new range!
+        if (isNowRanging && !lastActiveRangeState) {
+          const alertKey = `${symbolKey}:${tfLabel}:${Math.floor(Date.now() / 60000)}`;
+          if (!sentRangeAlerts.has(alertKey)) {
+            sentRangeAlerts.add(alertKey);
+            postToIsolated({
+              type: 'VEST_TV_RANGE_ALERT',
+              payload: {
+                symbol: symbolKey,
+                resolution: tfLabel,
+                rangeHigh: activeTfResult ? activeTfResult.rangeHigh : null,
+                rangeLow: activeTfResult ? activeTfResult.rangeLow : null,
+                chop: activeTfResult ? activeTfResult.chop : 50,
+                timestamp: Date.now()
+              }
+            });
+          }
+        }
+        lastActiveRangeState = isNowRanging;
+      }
+    } else {
+      cachedComputedRangeStatus = [];
+      lastActiveRangeState = false;
+    }
+
+        if (marketStructureEnabled) {
       const tfLabel = formatCurrentResolutionLabel();
       const msSig = `${barsSig}_${tfLabel}_${JSON.stringify(marketStructureConfig)}`;
       if (
