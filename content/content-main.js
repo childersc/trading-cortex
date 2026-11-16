@@ -235,18 +235,59 @@
       });
   }
 
+  function convertTimeframeToTvResolution(tf) {
+    const raw = String(tf || '').trim();
+    const s = raw.toLowerCase();
+    if (!s) return '15';
+    if (s === '1m' || s === '1') return '1';
+    if (s === '3m' || s === '3') return '3';
+    if (s === '5m' || s === '5') return '5';
+    if (s === '15m' || s === '15') return '15';
+    if (s === '30m' || s === '30') return '30';
+    if (s === '45m' || s === '45') return '45';
+    if (s === '1h' || s === '60') return '60';
+    if (s === '2h' || s === '120') return '120';
+    if (s === '3h' || s === '180') return '180';
+    if (s === '4h' || s === '240') return '240';
+    if (s === '1d' || s === 'd') return '1D';
+    if (s === '1w' || s === 'w') return '1W';
+    if (s === '1mo' || (s === '1m' && raw === '1M')) return '1M';
+    if (s.endsWith('m')) return s.slice(0, -1);
+    if (s.endsWith('h')) return String(Number(s.slice(0, -1)) * 60);
+    if (s.endsWith('d')) return s.toUpperCase();
+    return raw;
+  }
+
   function selectFavoriteTimeframe(resolution) {
-    cortexDebugLog('Timeframe selected via favorites bar', { resolution });
+    const cleanRes = convertTimeframeToTvResolution(resolution);
+    cortexDebugLog('Timeframe selected via favorites bar / widget', { resolution, cleanRes });
+    let handled = false;
     try {
       const chart = activeChart || (activeChartApi && typeof activeChartApi.activeChart === 'function' ? activeChartApi.activeChart() : null);
       if (chart && typeof chart.setResolution === 'function') {
-        chart.setResolution(String(resolution), () => {
+        chart.setResolution(String(cleanRes), () => {
           if (typeof handleChartIntervalChanged === 'function') {
-            handleChartIntervalChanged(resolution);
+            handleChartIntervalChanged(cleanRes);
           } else {
             scheduleSaveCurrentChartSettings(200);
           }
         });
+        handled = true;
+      }
+    } catch (e) {}
+
+    // Fallback: click native toolbar button matching resolution or label
+    try {
+      const option = TIMEFRAME_BY_RESOLUTION.get(cleanRes.toLowerCase()) || TIMEFRAME_BY_RESOLUTION.get(String(resolution).toLowerCase());
+      const shortStr = option ? option.short : resolution;
+      const candidates = Array.from(document.querySelectorAll('[data-name="time-interval-button"], [data-value], button, div[role="button"]'));
+      for (const el of candidates) {
+        const txt = (el.textContent || '').trim().toLowerCase();
+        const val = (el.getAttribute('data-value') || '').toLowerCase();
+        if (val === cleanRes.toLowerCase() || txt === shortStr.toLowerCase() || txt === cleanRes.toLowerCase()) {
+          el.click();
+          break;
+        }
       }
     } catch (e) {}
   }
@@ -3651,6 +3692,13 @@
     const { type, payload } = event.data;
 
     switch (type) {
+      case 'VEST_TV_CHANGE_RESOLUTION': {
+        const targetRes = String(payload && (payload.resolution || payload) || '').trim();
+        if (targetRes) {
+          selectFavoriteTimeframe(targetRes);
+        }
+        break;
+      }
       case 'VEST_TV_RESET_CHART_VIEW': {
         handleResetChartViewTrigger('isolated_message');
         break;
@@ -8831,7 +8879,7 @@
     chopThreshold: 55,
     adxThreshold: 22,
     detectionMode: 'hybrid',
-    timeframes: ['5m', '15m', '1h', '4h', '1D'],
+    timeframes: ['1m', '5m', '15m', '1h', '4h', '1D'],
     voiceAlertEnabled: true,
     chimeAlertEnabled: true,
     voiceURI: '',
@@ -8841,16 +8889,19 @@
   function normalizeRangeDetectorConfig(rawCfg) {
     const cfg = { ...DEFAULT_RANGE_DETECTOR, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
     const validTfs = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1D', '1W'];
-    const timeframes = Array.isArray(cfg.timeframes) && cfg.timeframes.length > 0
+    let timeframes = Array.isArray(cfg.timeframes) && cfg.timeframes.length > 0
       ? cfg.timeframes.filter(tf => validTfs.includes(tf))
-      : ['5m', '15m', '1h', '4h', '1D'];
+      : ['1m', '5m', '15m', '1h', '4h', '1D'];
+    if (!timeframes.includes('1m') && (timeframes.includes('5m') || timeframes.includes('15m'))) {
+      timeframes = ['1m', ...timeframes];
+    }
     return {
       enabled: Boolean(cfg.enabled),
       lookbackBars: Math.max(10, Math.min(50, Math.round(Number(cfg.lookbackBars) || 20))),
       chopThreshold: Math.max(35, Math.min(80, Math.round(Number(cfg.chopThreshold) || 55))),
       adxThreshold: Math.max(10, Math.min(40, Math.round(Number(cfg.adxThreshold) || 22))),
       detectionMode: ['hybrid', 'chop', 'adx', 'channel'].includes(cfg.detectionMode) ? cfg.detectionMode : 'hybrid',
-      timeframes: timeframes.length > 0 ? timeframes : ['5m', '15m', '1h', '4h', '1D'],
+      timeframes: timeframes.length > 0 ? timeframes : ['1m', '5m', '15m', '1h', '4h', '1D'],
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
       chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
       voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
@@ -9274,9 +9325,20 @@
         isRanging = (chop >= chopThresh) || (adx <= adxThresh && chop >= 48);
       }
 
+      // Determine trending direction (Long vs Short)
+      const sma = recentBars.reduce((sum, b) => sum + b.close, 0) / recentBars.length;
+      const firstOpen = recentBars[0].open;
+      const isTrendingLong = (lastClose > firstOpen) || (lastClose >= sma && posPct >= 50);
+      const trendDirection = isTrendingLong ? 'long' : 'short';
+      const statusText = isRanging
+        ? 'RANGING'
+        : (isTrendingLong ? 'TRENDING LONG' : 'TRENDING SHORT');
+
       results.push({
         timeframe: tfName,
         isRanging,
+        trendDirection,
+        statusText,
         chop,
         adx,
         rangeHigh,

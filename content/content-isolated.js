@@ -666,7 +666,7 @@
     chopThreshold: 55, // Choppiness Index >= 55 indicates ranging/consolidation
     adxThreshold: 22, // ADX <= 22 indicates weak trend / ranging
     detectionMode: 'hybrid', // 'hybrid' | 'chop' | 'adx' | 'channel'
-    timeframes: ['5m', '15m', '1h', '4h', '1D'],
+    timeframes: ['1m', '5m', '15m', '1h', '4h', '1D'],
     voiceAlertEnabled: true,
     chimeAlertEnabled: true,
     voiceURI: '',
@@ -684,16 +684,19 @@
   function normalizeRangeDetectorConfig(rawCfg) {
     const cfg = { ...DEFAULT_RANGE_DETECTOR, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
     const validTfs = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1D', '1W'];
-    const timeframes = Array.isArray(cfg.timeframes) && cfg.timeframes.length > 0
+    let timeframes = Array.isArray(cfg.timeframes) && cfg.timeframes.length > 0
       ? cfg.timeframes.filter(tf => validTfs.includes(tf))
-      : ['5m', '15m', '1h', '4h', '1D'];
+      : ['1m', '5m', '15m', '1h', '4h', '1D'];
+    if (!timeframes.includes('1m') && (timeframes.includes('5m') || timeframes.includes('15m'))) {
+      timeframes = ['1m', ...timeframes];
+    }
     return {
       enabled: Boolean(cfg.enabled),
       lookbackBars: Math.max(10, Math.min(50, Math.round(Number(cfg.lookbackBars) || 20))),
       chopThreshold: Math.max(35, Math.min(80, Math.round(Number(cfg.chopThreshold) || 55))),
       adxThreshold: Math.max(10, Math.min(40, Math.round(Number(cfg.adxThreshold) || 22))),
       detectionMode: ['hybrid', 'chop', 'adx', 'channel'].includes(cfg.detectionMode) ? cfg.detectionMode : 'hybrid',
-      timeframes: timeframes.length > 0 ? timeframes : ['5m', '15m', '1h', '4h', '1D'],
+      timeframes: timeframes.length > 0 ? timeframes : ['1m', '5m', '15m', '1h', '4h', '1D'],
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
       chimeAlertEnabled: cfg.chimeAlertEnabled !== false,
       voiceURI: typeof cfg.voiceURI === 'string' ? cfg.voiceURI : '',
@@ -4709,7 +4712,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure'];
+    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure', 'rangedetector'];
     let targetIndicatorToScroll = targetIndicatorId;
     if (INDICATOR_MAP.includes(initialTab)) {
       targetIndicatorToScroll = initialTab;
@@ -11269,9 +11272,10 @@ if (activeTab === 'diagnostics') {
     chartRangeBoxEl.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
     const telem = latestRangeDetectorTelemetry || {};
-    const timeframesData = Array.isArray(telem.timeframes) && telem.timeframes.length > 0
-      ? telem.timeframes
-      : rd.timeframes.map(tf => ({ timeframe: tf, isRanging: false, chop: 50, adx: 20 }));
+    const timeframesData = rd.timeframes.map(tf => {
+      const match = (telem.timeframes || []).find(t => t.timeframe === tf);
+      return match || { timeframe: tf, isRanging: false, trendDirection: 'short', statusText: 'TRENDING SHORT', chop: 50, adx: 20 };
+    });
 
     const overallRangingCount = timeframesData.filter(t => t.isRanging).length;
     const isOverallRanging = overallRangingCount >= Math.ceil(timeframesData.length / 2);
@@ -11293,22 +11297,52 @@ if (activeTab === 'diagnostics') {
       for (const t of timeframesData) {
         const isR = Boolean(t.isRanging);
         const chopVal = typeof t.chop === 'number' ? Math.round(t.chop) : '--';
-        const badgeBg = isR ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.16)';
-        const badgeBorder = isR ? 'rgba(16, 185, 129, 0.42)' : 'rgba(239, 68, 68, 0.42)';
-        const badgeColor = isR ? '#34d399' : '#f87171';
-        const indicatorDot = isR ? '#10b981' : '#ef4444';
-        const labelText = isR ? 'RANGING' : 'TRENDING';
+        const isLong = t.trendDirection === 'long' || t.statusText === 'TRENDING LONG';
+
+        let badgeBg, badgeBorder, badgeColor, indicatorDot, labelText, arrowIcon;
+        if (isR) {
+          badgeBg = 'rgba(16, 185, 129, 0.16)';
+          badgeBorder = 'rgba(16, 185, 129, 0.42)';
+          badgeColor = '#34d399';
+          indicatorDot = '#10b981';
+          arrowIcon = '●';
+          labelText = 'RANGING';
+        } else if (isLong) {
+          badgeBg = 'rgba(16, 185, 129, 0.14)';
+          badgeBorder = 'rgba(16, 185, 129, 0.35)';
+          badgeColor = '#34d399';
+          indicatorDot = '#10b981';
+          arrowIcon = '▲';
+          labelText = 'TRENDING LONG';
+        } else {
+          badgeBg = 'rgba(239, 68, 68, 0.16)';
+          badgeBorder = 'rgba(239, 68, 68, 0.42)';
+          badgeColor = '#f87171';
+          indicatorDot = '#ef4444';
+          arrowIcon = '▼';
+          labelText = 'TRENDING SHORT';
+        }
 
         tfRowsHtml += `
-          <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px;">
-            <div style="display: flex; align-items: center; gap: 9px;">
-              <span style="font-size: 12px; font-weight: 700; color: #f8fafc; font-family: monospace; width: 32px;">${escapeHtml(t.timeframe)}</span>
-              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: ${badgeBg}; border: 1px solid ${badgeBorder}; border-radius: 4px;">
-                <span style="width: 7px; height: 7px; border-radius: 50%; background: ${indicatorDot}; box-shadow: 0 0 7px ${indicatorDot};"></span>
-                <span style="font-size: 10.5px; font-weight: 700; color: ${badgeColor}; letter-spacing: 0.3px;">${labelText}</span>
+          <div class="vest-crb-tf-row" data-timeframe="${escapeHtml(t.timeframe)}" style="
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 5px 9px; background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px;
+            cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+          " title="Click to switch chart to ${escapeHtml(t.timeframe)} timeframe">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="vest-crb-tf-chip" style="
+                display: inline-flex; align-items: center; justify-content: center;
+                min-width: 32px; padding: 2px 6px; border-radius: 4px;
+                background: rgba(59, 130, 246, 0.20); border: 1px solid rgba(59, 130, 246, 0.38);
+                color: #bfdbfe; font-size: 11px; font-weight: 700; font-family: monospace;
+              ">${escapeHtml(t.timeframe)}</span>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; background: ${badgeBg}; border: 1px solid ${badgeBorder}; border-radius: 4px;">
+                <span style="font-size: 8px; line-height: 1; color: ${indicatorDot};">${arrowIcon}</span>
+                <span style="font-size: 9.5px; font-weight: 700; color: ${badgeColor}; letter-spacing: 0.3px;">${labelText}</span>
               </div>
             </div>
-            <span style="font-size: 10px; color: #94a3b8; font-family: monospace;">CHOP ${chopVal}%</span>
+            <span style="font-size: 9.5px; color: #94a3b8; font-family: monospace;">CHOP ${chopVal}%</span>
           </div>
         `;
       }
@@ -11330,6 +11364,12 @@ if (activeTab === 'diagnostics') {
             <span style="font-weight: 700; font-size: 12px; letter-spacing: 0.4px; text-transform: uppercase;">Range Detector</span>
           </div>
           <div style="display: flex; align-items: center; gap: 5px;">
+            <button type="button" class="vest-crb-icon-btn ${rd.pinned ? 'is-pinned' : ''}" id="vest-crb-pin-btn" style="background: ${rd.pinned ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.15)'}; border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1;" title="${rd.pinned ? 'Sticky / Pinned to screen (click to unpin)' : 'Make Sticky / Pin window to exact screen position'}">
+              <svg viewBox="0 0 24 24" fill="${rd.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 12px; height: 12px;">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+              </svg>
+            </button>
             <button type="button" id="vest-crb-btn-collapse" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; line-height: 1;" title="Minimize Window">_</button>
             <button type="button" id="vest-crb-btn-settings" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;" title="Range Detector Settings">⚙</button>
             <button type="button" id="vest-crb-btn-close" style="background: rgba(255,255,255,0.15); border: none; color: #ffffff; width: 20px; height: 20px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;" title="Close Range Detector">✕</button>
@@ -11371,6 +11411,24 @@ if (activeTab === 'diagnostics') {
       return;
     }
 
+    const pinBtn = chartRangeBoxEl.querySelector('#vest-crb-pin-btn');
+    if (pinBtn) {
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!settings.rangeDetector) settings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
+        const nextPinned = !settings.rangeDetector.pinned;
+        settings.rangeDetector.pinned = nextPinned;
+        if (nextPinned && chartRangeBoxEl) {
+          const rect = chartRangeBoxEl.getBoundingClientRect();
+          settings.rangeDetector.pinnedLeft = Math.round(rect.left);
+          settings.rangeDetector.pinnedTop = Math.round(rect.top);
+        }
+        queueSettingsSave({ rangeDetector: settings.rangeDetector });
+        renderChartRangeBox();
+        showToast(nextPinned ? 'Range Detector pinned (sticky)' : 'Range Detector unpinned');
+      });
+    }
+
     const collapseBtn = chartRangeBoxEl.querySelector('#vest-crb-btn-collapse');
     if (collapseBtn) {
       collapseBtn.addEventListener('click', (e) => {
@@ -11386,7 +11444,7 @@ if (activeTab === 'diagnostics') {
     if (settingsBtn) {
       settingsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        openStudioSettingsModal('indicators', 'rangedetector');
+        openStudioSettingsModal('chartingindicators', 'rangedetector');
       });
     }
 
@@ -11402,6 +11460,29 @@ if (activeTab === 'diagnostics') {
         showToast('Range Detector disabled');
       });
     }
+
+    chartRangeBoxEl.querySelectorAll('.vest-crb-tf-row').forEach(row => {
+      row.addEventListener('mouseenter', () => {
+        row.style.background = 'rgba(255, 255, 255, 0.08)';
+        row.style.borderColor = 'rgba(59, 130, 246, 0.45)';
+        row.style.transform = 'translateX(2px)';
+      });
+      row.addEventListener('mouseleave', () => {
+        row.style.background = 'rgba(255, 255, 255, 0.03)';
+        row.style.borderColor = 'rgba(255, 255, 255, 0.06)';
+        row.style.transform = 'none';
+      });
+      row.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tf = row.getAttribute('data-timeframe');
+        if (!tf) return;
+        postToMainWorlds({
+          type: 'VEST_TV_CHANGE_RESOLUTION',
+          payload: { resolution: tf }
+        });
+        showToast(`Switching chart timeframe to ${tf}...`);
+      });
+    });
 
     const dragHandle = chartRangeBoxEl.querySelector('#vest-crb-title-bar');
     if (dragHandle) {
@@ -11441,6 +11522,10 @@ if (activeTab === 'diagnostics') {
           if (!settings.rangeDetector) settings.rangeDetector = JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR));
           settings.rangeDetector.relX = Math.round(relX * 10000) / 10000;
           settings.rangeDetector.relY = Math.round(relY * 10000) / 10000;
+          if (settings.rangeDetector.pinned) {
+            settings.rangeDetector.pinnedLeft = Math.round(clampedLeft);
+            settings.rangeDetector.pinnedTop = Math.round(clampedTop);
+          }
         };
 
         const onUp = () => {

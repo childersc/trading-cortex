@@ -1,3 +1,11 @@
+Trading Cortex v1.1.87 — Range Detector Directional Trending, Timeframe Switcher, 1m Support & Sticky Pin
+
+- **Directional Trending (`v1.1.87`)**: Identifies whether the non-ranging market is **`▲ TRENDING LONG`** or **`▼ TRENDING SHORT`** across all monitored timeframes based on lookback moving averages, net displacement, and channel position.
+- **Interactive Timeframe Switcher (`v1.1.87`)**: Clicking any timeframe row or chip in the Range Detector box switches the TradingView chart directly to that resolution.
+- **1m Timeframe Support (`v1.1.87`)**: Added `'1m'` to default monitored timeframes (`['1m', '5m', '15m', '1h', '4h', '1D']`).
+- **Sticky Pin Button (`v1.1.87`)**: Added sticky/pin button (`#vest-crb-pin-btn`) to the blue title bar to lock the widget in place across page refreshes.
+- **Immediate Settings Routing (`v1.1.87`)**: Clicking the gear button (`⚙`) in the title bar opens the Settings Dialog directly on the Charting Indicators tab with the Range Detector drawer expanded and focused.
+
 Trading Cortex v1.1.86 — Web Audio Autoplay Policy & AudioContext Extension Error Fix
 
 - **Chrome Autoplay Policy Compliance (`v1.1.86`)**: Eliminated the Chrome extension error *"The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page"*. Web Audio context creation is guarded by `canPlayWebAudio()` and user activation status.

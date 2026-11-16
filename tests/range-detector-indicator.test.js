@@ -17,14 +17,17 @@ console.log('Running Range Detector (Multi-Timeframe) Indicator Tests...');
 // 1. Verify Configuration Schemas & Defaults
 assert(isolatedJs.includes('DEFAULT_RANGE_DETECTOR ='), 'content-isolated.js must define DEFAULT_RANGE_DETECTOR');
 assert(mainJs.includes('DEFAULT_RANGE_DETECTOR ='), 'content-main.js must define DEFAULT_RANGE_DETECTOR');
+assert(isolatedJs.includes("'1m'") && isolatedJs.includes("'5m'"), 'DEFAULT_RANGE_DETECTOR must include 1m timeframe');
+assert(mainJs.includes("'1m'") && mainJs.includes("'5m'"), 'content-main.js DEFAULT_RANGE_DETECTOR must include 1m timeframe');
 assert(isolatedJs.includes('function normalizeRangeDetectorConfig('), 'content-isolated.js must define normalizeRangeDetectorConfig');
 assert(mainJs.includes('function normalizeRangeDetectorConfig('), 'content-main.js must define normalizeRangeDetectorConfig');
 
-console.log('✓ DEFAULT_RANGE_DETECTOR and normalization helpers verified in both isolated & main scripts');
+console.log('✓ DEFAULT_RANGE_DETECTOR (including 1m) and normalization helpers verified in both isolated & main scripts');
 
 // 2. Verify Indicator Hub and Studio Dropdown Registration
 assert(isolatedJs.includes("'vest-rd-master-enabled'"), 'Range Detector master switch must exist in Charting Indicators hub');
 assert(isolatedJs.includes("id: 'rangedetector'"), 'Tile must be registered with id rangedetector');
+assert(isolatedJs.includes("'rangedetector'"), 'INDICATOR_MAP must include rangedetector for direct settings drawer routing');
 assert(isolatedJs.includes('Range Detector (Multi-Timeframe)'), 'Tile title must describe Range Detector (Multi-Timeframe)');
 assert(isolatedJs.includes('id="vest-sdm-open-rangedetector-btn"'), 'Studio dropdown menu must contain Range Detector direct button');
 
@@ -51,14 +54,22 @@ for (const ctrl of expectedControls) {
 
 console.log('✓ All 11 Range Detector settings drawer inputs, sliders, and buttons verified');
 
-// 4. Verify Floating Box Component, Blue Title Bar, Blue Glow & MTF Indicators
+// 4. Verify Floating Box Component, Blue Title Bar, Sticky Pin Button, Timeframe Switcher & MTF Directional Indicators
 assert(isolatedJs.includes('vest-chart-range-box'), 'content-isolated.js must define #vest-chart-range-box');
 assert(isolatedJs.includes('Range Detector') && isolatedJs.includes('#2563eb'), 'Title bar must feature blue gradient background with white text');
+assert(isolatedJs.includes('vest-crb-pin-btn'), 'Title bar must include sticky pin button #vest-crb-pin-btn');
+assert(isolatedJs.includes('vest-crb-btn-settings'), 'Title bar must include settings gear button #vest-crb-btn-settings');
+assert(isolatedJs.includes("openStudioSettingsModal('chartingindicators', 'rangedetector')"), 'Settings button must immediately open Range Detector drawer in Charting Indicators');
+assert(isolatedJs.includes('VEST_TV_CHANGE_RESOLUTION'), 'Clicking timeframe rows must post VEST_TV_CHANGE_RESOLUTION message');
+assert(mainJs.includes('case \'VEST_TV_CHANGE_RESOLUTION\':'), 'content-main.js must handle VEST_TV_CHANGE_RESOLUTION message');
+assert(mainJs.includes('function selectFavoriteTimeframe('), 'content-main.js must define selectFavoriteTimeframe');
+assert(mainJs.includes('function convertTimeframeToTvResolution('), 'content-main.js must define convertTimeframeToTvResolution');
 assert(isolatedJs.includes('rgba(59, 130, 246'), 'Box must feature blue glow halo styling');
-assert(isolatedJs.includes('RANGING') && isolatedJs.includes('TRENDING'), 'Box must render RANGING (green) and TRENDING (red) indicators');
-assert(isolatedJs.includes('#10b981') && isolatedJs.includes('#ef4444'), 'Box must use green for ranging and red for non-ranging');
+assert(isolatedJs.includes('RANGING'), 'Box must render RANGING status');
+assert(isolatedJs.includes('TRENDING LONG') && isolatedJs.includes('TRENDING SHORT'), 'Box must render TRENDING LONG and TRENDING SHORT directional status');
+assert(mainJs.includes('TRENDING LONG') && mainJs.includes('TRENDING SHORT'), 'Engine must compute TRENDING LONG and TRENDING SHORT');
 
-console.log('✓ On-chart floating box with blue title bar, slight blue glow, and green/red MTF indicators verified');
+console.log('✓ On-chart floating box with sticky pin, direct settings routing, timeframe switcher & trending long/short indicators verified');
 
 // 5. Verify Audible Alert Handling & Natural Speech Formatting (Instrument, Venue, Timeframe)
 assert(isolatedJs.includes('function handleRangeDetectedAlert('), 'content-isolated.js must define handleRangeDetectedAlert');
@@ -242,7 +253,41 @@ const trendResults = sandbox.computeMultiTimeframeRangeStatus(trendingBars, {
 
 const trend5m = trendResults.find(r => r.timeframe === '5m');
 assert(trend5m, 'Must evaluate 5m timeframe for trending market');
-assert.strictEqual(trend5m.isRanging, false, '5m timeframe must detect market is NOT ranging / TRENDING (red indicator)');
+assert.strictEqual(trend5m.isRanging, false, '5m timeframe must detect market is NOT ranging / TRENDING');
+assert.strictEqual(trend5m.trendDirection, 'long', 'Upward runaway bars must be marked long');
+assert.strictEqual(trend5m.statusText, 'TRENDING LONG', 'Status text must be TRENDING LONG');
 
-console.log('✓ VM algorithm test passed: cleanly differentiates RANGING (🟢) vs TRENDING (🔴) across timeframes');
+// Scenario C: Strongly Trending Short Market (Consecutive downward selloff bars)
+const shortBars = [];
+for (let i = 0; i < 60; i++) {
+  const o = 200 - i * 2.0;
+  const c = 200 - i * 2.0 - 1.8;
+  const h = o + 0.3;
+  const l = c - 0.5;
+  shortBars.push({
+    timeSec: baseTime + i * interval,
+    open: o,
+    high: h,
+    low: l,
+    close: c,
+    barIndex: i
+  });
+}
+
+const shortResults = sandbox.computeMultiTimeframeRangeStatus(shortBars, {
+  enabled: true,
+  lookbackBars: 14,
+  chopThreshold: 55,
+  adxThreshold: 22,
+  detectionMode: 'hybrid',
+  timeframes: ['1m', '5m', '15m']
+}, '5m');
+
+const short5m = shortResults.find(r => r.timeframe === '5m');
+assert(short5m, 'Must evaluate 5m timeframe for short market');
+assert.strictEqual(short5m.isRanging, false, 'Must detect market is NOT ranging');
+assert.strictEqual(short5m.trendDirection, 'short', 'Downward bars must be marked short');
+assert.strictEqual(short5m.statusText, 'TRENDING SHORT', 'Status text must be TRENDING SHORT');
+
+console.log('✓ VM algorithm test passed: cleanly differentiates RANGING (🟢), TRENDING LONG (▲), and TRENDING SHORT (▼)');
 console.log('All Range Detector Indicator Tests Passed Successfully!');
