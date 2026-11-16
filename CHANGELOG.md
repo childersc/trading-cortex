@@ -1,6 +1,29 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.86`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.87`) are documented in this file.
+
+---
+
+## [v1.1.87] — 2026-11-15
+
+### 📊 Range Detector Directional Trending, Timeframe Switcher, 1m Support & Sticky Pin
+- **Directional Trending (`TRENDING LONG` vs `TRENDING SHORT`)**:
+  - Upgraded Range Detector from generic `TRENDING` to specific directional evaluations.
+  - When non-ranging, evaluates price displacement, lookback simple moving average, and relative range channel position to display:
+    - **`▲ TRENDING LONG`** (Green/Emerald pill with up arrow) on bullish directional momentum.
+    - **`▼ TRENDING SHORT`** (Rose/Red pill with down arrow) on bearish directional momentum.
+    - **`● RANGING`** (Green glowing pill) during market consolidation.
+- **Interactive Timeframe Switcher**:
+  - Clicking any timeframe row or chip in the Range Detector box immediately sends a `VEST_TV_CHANGE_RESOLUTION` event to switch the chart directly to that resolution.
+  - Added resolution converter helper (`convertTimeframeToTvResolution`) with fallback to native TradingView interval toolbar buttons.
+- **1m Timeframe Integration**:
+  - Added `'1m'` to default timeframes list: `['1m', '5m', '15m', '1h', '4h', '1D']`.
+  - Normalization automatically prepends `'1m'` for existing configs.
+- **Sticky Pin Button (`#vest-crb-pin-btn`)**:
+  - Added a pin / sticky icon button to the blue title bar.
+  - Toggling pin mode locks the Range Detector box to exact screen coordinates (`pinnedLeft`, `pinnedTop`) and persists across page reloads.
+- **Direct Settings Routing**:
+  - Clicking the gear button (`⚙`) in the Range Detector title bar now opens the Settings Dialog on the **Charting Indicators** tab, expands `#vest-ind-drawer-rangedetector`, smoothly scrolls the tile into view, and highlights it with a cyan halo glow.
 
 ---
 
