@@ -60,12 +60,63 @@ assert(isolatedJs.includes('#10b981') && isolatedJs.includes('#ef4444'), 'Box mu
 
 console.log('✓ On-chart floating box with blue title bar, slight blue glow, and green/red MTF indicators verified');
 
-// 5. Verify Audible Alert Handling
+// 5. Verify Audible Alert Handling & Natural Speech Formatting (Instrument, Venue, Timeframe)
 assert(isolatedJs.includes('function handleRangeDetectedAlert('), 'content-isolated.js must define handleRangeDetectedAlert');
 assert(isolatedJs.includes('playRangeChime'), 'Audible chime sound player must be defined');
 assert(isolatedJs.includes('Range detected on'), 'Voice alert speech phrase must be defined');
+assert(isolatedJs.includes('function formatTimeframeForSpeech('), 'content-isolated.js must define formatTimeframeForSpeech');
+assert(isolatedJs.includes('function formatSymbolForSpeech('), 'content-isolated.js must define formatSymbolForSpeech');
+assert(isolatedJs.includes('function getActiveVenueName('), 'content-isolated.js must define getActiveVenueName');
+assert(isolatedJs.includes("timeframe."), 'Voice alert phrase must conclude with natural timeframe');
 assert(isolatedJs.includes("type === 'VEST_TV_RANGE_ALERT'"), 'Window message listener must handle VEST_TV_RANGE_ALERT');
 assert(isolatedJs.includes("type === 'VEST_TV_RANGE_UPDATE'"), 'Window message listener must handle VEST_TV_RANGE_UPDATE');
+
+// Test voice phrase generation directly in a mini-context
+{
+  const tfMatch = isolatedJs.match(/function formatTimeframeForSpeech\([\s\S]*?\n  \}/);
+  const symMatch = isolatedJs.match(/function formatSymbolForSpeech\([\s\S]*?\n  \}/);
+  const venueMatch = isolatedJs.match(/function getActiveVenueName\([\s\S]*?\n  \}/);
+  assert(tfMatch && symMatch && venueMatch, 'Must extract speech formatting helpers');
+
+  const speechBox = {
+    window: { location: { hostname: 'trade.vestmarkets.com' } },
+    getActivePerpFirm: () => ({ name: 'Vest Markets' })
+  };
+  vm.createContext(speechBox);
+  vm.runInContext(`
+    ${tfMatch[0]}
+    ${symMatch[0]}
+    ${venueMatch[0]}
+    function generateSpeechPhrase(symbol, venue, tf) {
+      const spokenInstrument = formatSymbolForSpeech(symbol);
+      const venueName = getActiveVenueName(venue);
+      const spokenTf = formatTimeframeForSpeech(tf);
+      return \`Range detected on \${spokenInstrument} on \${venueName}, \${spokenTf} timeframe.\`;
+    }
+  `, speechBox);
+
+  // Timeframe conversions
+  assert.strictEqual(speechBox.formatTimeframeForSpeech('15m'), '15 minute');
+  assert.strictEqual(speechBox.formatTimeframeForSpeech('1h'), '1 hour');
+  assert.strictEqual(speechBox.formatTimeframeForSpeech('60'), '1 hour');
+  assert.strictEqual(speechBox.formatTimeframeForSpeech('240'), '4 hour');
+  assert.strictEqual(speechBox.formatTimeframeForSpeech('1D'), 'daily');
+  assert.strictEqual(speechBox.formatTimeframeForSpeech('5'), '5 minute');
+
+  // Symbol conversions
+  assert.strictEqual(speechBox.formatSymbolForSpeech('HYPE-PERP'), 'HYPE Perpetual');
+  assert.strictEqual(speechBox.formatSymbolForSpeech('BTC-PERP'), 'BTC Perpetual');
+  assert.strictEqual(speechBox.formatSymbolForSpeech('NQ'), 'NQ');
+
+  // Full spoken phrase
+  const phrase = speechBox.generateSpeechPhrase('HYPE', 'Vest Markets', '15m');
+  assert.strictEqual(phrase, 'Range detected on HYPE on Vest Markets, 15 minute timeframe.');
+
+  const phrase2 = speechBox.generateSpeechPhrase('NQ', '', '60');
+  assert.strictEqual(phrase2, 'Range detected on NQ on Vest Markets, 1 hour timeframe.');
+
+  console.log('✓ Natural speech alert formatting verified: announces instrument, venue, and timeframe');
+}
 
 console.log('✓ Audible alerts (Speech voice synthesis + Web Audio chimes) verified');
 

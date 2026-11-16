@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.84`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.85`) are documented in this file.
+
+---
+
+## [v1.1.85] — 2026-11-15
+
+### 🗣️ Range Detector Audible Alerts Enhanced with Instrument, Venue & Natural Timeframe
+- **Full Context Voice Speech Announcement**:
+  - The voice synthesis alert triggered upon entering a new consolidation range now explicitly speaks:
+    1. **Instrument**: Spoken naturally without technical ticker artifacts (e.g. `HYPE Perpetual` for `HYPE-PERP`, `NQ`, `BTC Perpetual`, `ES`).
+    2. **Venue**: Identifies the exact active trading firm / exchange venue (e.g. `Vest Markets`, `MyFundedPerpetuals`, `Kalshi Pro`) resolved from `getActivePerpFirm()` and page context.
+    3. **Timeframe**: Spoken in human natural speech (e.g. `"15 minute"`, `"1 hour"`, `"4 hour"`, `"daily"`) instead of raw shorthand codes (e.g. `15m`, `60`, `1D`).
+  - Example spoken announcement: *"Range detected on HYPE on Vest Markets, 15 minute timeframe."*
+- **Notification Toast Synchronization**:
+  - The pop-up toast notification has been updated in tandem to include instrument, venue, and spoken timeframe format.
 
 ---
 

@@ -11109,6 +11109,47 @@ if (activeTab === 'diagnostics') {
     } catch (e) {}
   }
 
+  function formatTimeframeForSpeech(tf) {
+    const raw = String(tf || '').trim();
+    const s = raw.toLowerCase();
+    if (!s) return 'current';
+    if (s === '1d' || s === 'd') return 'daily';
+    if (s === '1w' || s === 'w') return 'weekly';
+    if (s === '1mo' || (s === '1m' && raw === '1M')) return 'monthly';
+    if (/^\d+$/.test(s)) {
+      const num = parseInt(s, 10);
+      if (num >= 60 && num % 60 === 0) {
+        const h = num / 60;
+        return `${h} hour`;
+      }
+      return `${num} minute`;
+    }
+    if (s.endsWith('m')) return `${s.slice(0, -1)} minute`;
+    if (s.endsWith('h')) return `${s.slice(0, -1)} hour`;
+    if (s.endsWith('d')) return `${s.slice(0, -1)} day`;
+    if (s.endsWith('w')) return `${s.slice(0, -1)} week`;
+    return raw;
+  }
+
+  function formatSymbolForSpeech(sym) {
+    const s = String(sym || '').trim();
+    if (!s) return 'the market';
+    return s.replace(/-PERP$/i, ' Perpetual').replace(/PERP$/i, ' Perpetual').trim();
+  }
+
+  function getActiveVenueName(payloadVenue) {
+    if (payloadVenue && typeof payloadVenue === 'string' && payloadVenue.trim()) {
+      return payloadVenue.trim();
+    }
+    const firm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    if (firm && firm.name) return firm.name;
+    const host = (typeof window !== 'undefined' && window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
+    if (host.includes('vest')) return 'Vest Markets';
+    if (host.includes('kalshi')) return 'Kalshi Pro';
+    if (host.includes('myfundedperpetuals') || host.includes('myfundedperps') || host.includes('mfp')) return 'MyFundedPerpetuals';
+    return 'the exchange';
+  }
+
   function handleRangeDetectedAlert(payload) {
     if (!isTopWindow || !payload) return;
     const rdConfig = normalizeRangeDetectorConfig(settings.rangeDetector);
@@ -11122,14 +11163,18 @@ if (activeTab === 'diagnostics') {
       window.localStorage.setItem(dedupeKey, JSON.stringify(nextKeys));
     } catch (e) {}
 
+    const spokenInstrument = formatSymbolForSpeech(payload.symbol || currentInstrument);
+    const venueName = getActiveVenueName(payload.venue);
+    const spokenTf = formatTimeframeForSpeech(payload.resolution || currentResolution);
+
     if (rdConfig.chimeAlertEnabled !== false) {
       playRangeChime();
     }
     if (rdConfig.voiceAlertEnabled !== false) {
-      const phrase = `Range detected on ${payload.symbol || 'market'} ${payload.resolution || ''}`;
+      const phrase = `Range detected on ${spokenInstrument} on ${venueName}, ${spokenTf} timeframe.`;
       speakCortexVoicePhrase(phrase, rdConfig.voiceURI);
     }
-    showToast(`Range detected on ${payload.symbol || 'market'} (${payload.resolution || ''})`);
+    showToast(`Range detected on ${spokenInstrument} on ${venueName} (${spokenTf})`);
   }
 
   function renderChartRangeBox(animateFromRect = null) {
