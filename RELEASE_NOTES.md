@@ -1,3 +1,10 @@
+Trading Cortex v1.1.82 — Order Block Strict Coordinate Anchoring & Zero Left/Right Drift
+
+- **Zero Leftward Drift (`v1.1.82`)**: Fixed coordinate mapping in `barToX` to prioritize `timeToCoordinate(timeSec)` and harmonized internal array indices with TradingView `TimePointIndex`, completely eliminating the bug where order blocks stretched thousands of pixels to the left.
+- **Strict Left Edge Locking (`v1.1.82`)**: Hard-anchored `boxLeft` directly to `rawStartX - halfBarW`, guaranteeing boxes never extend to the left of their origin bar.
+- **New "On Candle Only" Extension Mode (`v1.1.82`)**: Added a 3rd option to **Zone Extension Mode** in the settings drawer allowing traders to display the Order Block exclusively over the origin candle itself without any left or right extension.
+- **Full Settings Draft Syncing (`v1.1.82`)**: Wired Order Blocks and Market Structure controls directly into `syncCurrentPaneToDraft()` for persistent configuration across all drawer inputs.
+
 Trading Cortex v1.1.81 — Exact Order Block Placement on Impulsive Moves
 
 - **Accurate Impulsive Origin Placement (`v1.1.81`)**: Order blocks now consistently anchor to the true origin candle right before every impulsive displacement move (`obIdx = g - 1`) across all chart timeframes.

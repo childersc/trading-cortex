@@ -1,6 +1,23 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.81`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.82`) are documented in this file.
+
+---
+
+## [v1.1.82] — 2026-11-15
+
+### 🎯 Order Block Strict Coordinate Anchoring & Zero Left/Right Drift
+- **Eliminated Leftward Box Drift**:
+  1. *TimePointIndex vs. Array Index Harmonization*: Resolved the issue where `ob.barIndex` was assigned the internal array index (e.g. `120`) instead of TradingView's `TimePointIndex` (e.g. `3540`). When passed to `timeScale.indexToCoordinate()`, it previously resolved to candles weeks in the past, drawing boxes thousands of pixels offscreen to the left.
+  2. *Timestamp Coordinate Priority*: Updated `barToX` in `content-main.js` to prioritize `tsApi.timeToCoordinate(timeSec)` when `timeSec > 1e8`. Because UNIX timestamps are globally monotonic and unambiguous, the origin candle is mapped to its exact on-chart X coordinate with zero drift.
+  3. *Strict Left Edge Clamping*: Hard-locked the left coordinate of the Order Block box to `boxLeft = rawStartX - halfBarW`, guaranteeing that no Order Block can ever stretch to the left of its origin candle.
+- **Single Candle Mode ("On Candle Only")**:
+  - Added a new mode to **Zone Extension Mode** in the Order Blocks settings drawer:
+    - `candle`: **On Candle Only (No extension to left or right)** — the box strictly spans the width of the origin candle (`boxLeft = rawStartX - halfBarW`, `boxRight = rawStartX + halfBarW`).
+    - `mitigation`: **Extend forward until initial mitigation / retest** (Single-Use Smart Risk zone).
+    - `right`: **Extend indefinitely to right edge**.
+- **Settings Drawer Draft Syncing**:
+  - Added complete field synchronization in `syncCurrentPaneToDraft()` in `content/content-isolated.js` for Order Blocks (`extendMode`, `swingLookback`, `maxBlocks`, `minFvgTicks`, colors, alert toggles, and R:R ratios) and Market Structure settings, ensuring that selections made in the drawer persist directly to live drafts.
 
 ---
 
