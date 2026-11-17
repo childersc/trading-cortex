@@ -1,3 +1,19 @@
+Trading Cortex v1.1.91 — Web Audio Autoplay Hardening & Order Block Precision Tuning
+
+- **Elimination of Chrome Extension AudioContext Errors (`v1.1.91`)**: Resolved the `The AudioContext was not allowed to start` error in `chrome://extensions` by strictly preventing `.resume()` or AudioContext creation outside user gestures. The AudioContext is safely initialized upon user interactions (`click`, `pointerdown`, `keydown`), and background alert chimes only execute when the context is in the `'running'` state.
+- **Institutional Order Block Validation & False-Positive Elimination (`v1.1.91`)**: Fixed an issue on 1-hour NQ charts where minor continuation pauses during strong upward rallies were falsely identified as Bullish Order Blocks. Order blocks are now strictly sourced from confirmed swing low/high origins, and Break of Structure (BOS) requires breaking a preceding swing point formed prior to the swing origin.
+- **Continuous Forward Invalidation Tracking (`v1.1.91`)**: Order blocks now continuously monitor price action past mitigation: if price breaks through the invalidation boundary (`close < ob.bottom` for Bullish OB, `close > ob.top` for Bearish OB), the block is marked invalidated and cleanly removed from the chart canvas.
+
+Trading Cortex v1.1.90 — Real-Time Cross-Browser & Cross-Tab Settings Synchronization
+
+- **Zero-Latency Cross-Tab Sync (`v1.1.90`)**: Multi-window setups now synchronize all configuration changes in real-time across all open browsers and monitors without needing a page refresh. Disabling or enabling any setting on Browser A applies to Browser B instantaneously.
+- **Triple-Layer Transport Architecture (`v1.1.90`)**:
+  - `BroadcastChannel('__trading_cortex_cross_tab_sync__')` delivers instant sub-millisecond updates across tabs and windows on the same origin.
+  - Window `storage` event listener captures real-time `localStorage` changes.
+  - `chrome.storage.onChanged` propagates settings across different domains (`vestmarkets.com`, `myfundedperpetuals.com`, `kalshi.com`) and popup menus.
+- **Instant Reactive Component Re-application (`v1.1.90`)**: Disabling any indicator (Range Detector, Order Blocks, Market Structure, Sessions, FVG, Trades, News, Diagnostics) immediately hides on-chart floating boxes, removes minimized taskbar pills, and clears drawings from the TradingView canvas on all connected screens in real-time.
+- **In-Dialog Live Synchronization (`v1.1.90`)**: If the Settings Dialog or Cortex menu is already open in another window, its master toggle switches, sliders, and badges update dynamically to reflect the change, preventing stale drafts from overwriting settings.
+
 Trading Cortex v1.1.89 — DEX Session Logout Elimination & Web Audio Autoplay Hardening
 
 - **Zero-Disruption Update Engine (`v1.1.89`)**: Removed forced `chrome.tabs.reload()` during self-updates. Active trading tabs on Vest Markets, My Funded Perpetuals, and Kalshi Pro remain open and active without reload interruptions, preventing severed Privy/Turnkey Web3 wallet session signers.
