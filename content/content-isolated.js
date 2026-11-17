@@ -1974,6 +1974,11 @@
       );
     } catch (e) {}
 
+    // Broadcast live across open tabs/windows immediately
+    if (typeof broadcastLiveSettingsCrossTab === 'function' && data && (data.settings || data.templates)) {
+      broadcastLiveSettingsCrossTab(data.settings || settings, data.templates || templates);
+    }
+
     if (!isExtensionValid()) return Promise.resolve();
     try {
       // Write immediately to chrome.storage.local (which also triggers service-worker to write user-data/cortex-db.json on disk)
@@ -2012,6 +2017,12 @@
         writeDomainVault(templates, merged);
       } catch (e) {}
     }
+
+    // Broadcast live across all open tabs/windows immediately without waiting for debounce
+    if (typeof broadcastLiveSettingsCrossTab === 'function') {
+      broadcastLiveSettingsCrossTab({ ...settings, ...pendingSettingsUpdate }, templates);
+    }
+
     if (saveSettingsTimeout) clearTimeout(saveSettingsTimeout);
     saveSettingsTimeout = setTimeout(() => {
       if (pendingSettingsUpdate) {
@@ -2130,15 +2141,159 @@
     postToMainWorlds({ type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE', payload: { drawings: globalDrawings } });
   }
 
-  // Listen for storage changes from popup
+  const CORTEX_CROSS_TAB_CHANNEL_NAME = '__trading_cortex_cross_tab_sync__';
+  let cortexCrossTabChannel = null;
+  const tabInstanceId = `cortex_tab_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+  function initCrossTabSyncChannel() {
+    if (typeof window === 'undefined' || typeof window.BroadcastChannel === 'undefined') return;
+    try {
+      if (!cortexCrossTabChannel) {
+        cortexCrossTabChannel = new BroadcastChannel(CORTEX_CROSS_TAB_CHANNEL_NAME);
+        cortexCrossTabChannel.onmessage = (event) => {
+          if (!event || !event.data || typeof event.data !== 'object') return;
+          const { type, senderId, payload } = event.data;
+          if (senderId === tabInstanceId) return; // Do not process self broadcast
+          if (type === 'CORTEX_LIVE_SETTINGS_BROADCAST' && payload) {
+            handleIncomingLiveSettings(payload.settings, payload.templates);
+          }
+        };
+      }
+    } catch (e) {}
+  }
+
+  function broadcastLiveSettingsCrossTab(targetSettings, targetTemplates = null) {
+    if (!cortexCrossTabChannel) {
+      initCrossTabSyncChannel();
+    }
+    if (cortexCrossTabChannel) {
+      try {
+        cortexCrossTabChannel.postMessage({
+          type: 'CORTEX_LIVE_SETTINGS_BROADCAST',
+          senderId: tabInstanceId,
+          payload: {
+            settings: targetSettings || settings,
+            templates: targetTemplates || templates,
+            timestamp: Date.now()
+          }
+        });
+      } catch (e) {}
+    }
+  }
+
+  function handleIncomingLiveSettings(incomingSettings, incomingTemplates) {
+    if (!isExtensionValid()) return;
+    let hasChanged = false;
+
+    if (incomingTemplates && Array.isArray(incomingTemplates)) {
+      templates = sanitizeUserTemplates(incomingTemplates);
+      hasChanged = true;
+    }
+
+    if (incomingSettings && typeof incomingSettings === 'object') {
+      settings = {
+        ...settings,
+        ...incomingSettings,
+        lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings)
+      };
+      hasChanged = true;
+    }
+
+    if (hasChanged) {
+      applyLiveSettingsToAllComponents();
+    }
+  }
+
+  function applyLiveSettingsToAllComponents() {
+    // 1. Notify Main World (canvas indicators: OB, FVG, MS, Sessions, VWAP, Candle OHLC, Fail lines)
+    notifyMainWorldConfig();
+
+    if (!isTopWindow) return;
+
+    // 2. Re-render / hide / show on-chart widgets in real-time
+    try {
+      if (typeof renderChartRangeBox === 'function') {
+        renderChartRangeBox();
+      }
+      if (typeof renderChartOrderBlockStatsBox === 'function') {
+        renderChartOrderBlockStatsBox();
+      }
+      if (typeof renderChartTradesBox === 'function') {
+        renderChartTradesBox();
+      }
+      if (typeof renderChartNewsBox === 'function') {
+        renderChartNewsBox();
+      }
+      if (typeof renderChartDiagnosticsBox === 'function') {
+        renderChartDiagnosticsBox();
+      }
+      if (typeof renderFloatingBar === 'function') {
+        renderFloatingBar();
+      }
+      if (typeof ensureCortexTopBar === 'function') {
+        ensureCortexTopBar();
+      }
+      if (typeof renderStudioHeaderPill === 'function') {
+        renderStudioHeaderPill();
+      }
+      if (typeof repositionAllMinimizedBoxes === 'function') {
+        repositionAllMinimizedBoxes();
+      }
+      if (typeof applyDialogGlassEffect === 'function') {
+        applyDialogGlassEffect(settings.dialogGlassEffect, settings.dialogGlassOpacity);
+      }
+      if (typeof syncActiveDrawingBarVisibility === 'function') {
+        syncActiveDrawingBarVisibility();
+      }
+    } catch (e) {}
+
+    // 3. Dispatch live event so any currently open Settings modal in this window reflects updated toggles in real time
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('cortex-live-settings-updated', {
+          detail: { settings, templates }
+        }));
+      } catch (e) {}
+    }
+  }
+
+  // Hook up window storage event for instant multi-window local storage sync
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (!e || !e.key) return;
+      if (e.key === '__trading_cortex_isolated_settings__' && e.newValue) {
+        try {
+          const incoming = JSON.parse(e.newValue);
+          if (incoming && typeof incoming === 'object') {
+            handleIncomingLiveSettings(incoming, null);
+          }
+        } catch (err) {}
+      } else if (e.key === '__trading_cortex_vault_db_v1__' && e.newValue) {
+        try {
+          const vault = JSON.parse(e.newValue);
+          if (vault && vault.settings) {
+            handleIncomingLiveSettings(vault.settings, Array.isArray(vault.templates) ? vault.templates : null);
+          }
+        } catch (err) {}
+      }
+    }, { passive: true });
+  }
+
+  initCrossTabSyncChannel();
+
+  // Listen for storage changes from popup & other browser windows
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (!isExtensionValid()) return;
         if (area !== 'local' && area !== 'sync') return;
 
+        let settingsChanged = false;
+        let templatesChanged = false;
+
         if (changes.templates && Array.isArray(changes.templates.newValue)) {
           templates = sanitizeUserTemplates(changes.templates.newValue);
+          templatesChanged = true;
         }
         if (changes.settings && changes.settings.newValue) {
           const incomingSettings = changes.settings.newValue;
@@ -2147,6 +2302,7 @@
             ...incomingSettings,
             lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings)
           };
+          settingsChanged = true;
         }
         if (changes.lastChartSettingsMeta && changes.lastChartSettingsMeta.newValue) {
           lastChartSettingsMeta = changes.lastChartSettingsMeta.newValue;
@@ -2159,7 +2315,7 @@
           installedVersionOverride = changes.installedVersionOverride.newValue;
           if (isTopWindow) {
             ensureCortexTopBar();
-      renderStudioHeaderPill();
+            renderStudioHeaderPill();
           }
         }
         if (changes.updateChannel && isTopWindow) {
@@ -2193,7 +2349,11 @@
           }
         }
 
-        notifyMainWorldConfig();
+        if (settingsChanged || templatesChanged) {
+          applyLiveSettingsToAllComponents();
+        } else {
+          notifyMainWorldConfig();
+        }
       });
     }
   } catch (e) {}
@@ -2840,11 +3000,10 @@
   function markUserInteractionForAudio() {
     userHasInteractedWithPage = true;
     try {
+      const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
+      if (!AudioCtx) return;
       if (!sharedCortexAudioContext || sharedCortexAudioContext.state === 'closed') {
-        const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
-        if (AudioCtx) {
-          sharedCortexAudioContext = new AudioCtx();
-        }
+        sharedCortexAudioContext = new AudioCtx();
       }
       if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'suspended') {
         sharedCortexAudioContext.resume().catch(() => {});
@@ -2862,43 +3021,25 @@
   function canPlayWebAudio() {
     if (userHasInteractedWithPage) return true;
     if (typeof navigator !== 'undefined' && navigator.userActivation) {
-      return Boolean(navigator.userActivation.isActive);
+      return Boolean(navigator.userActivation.isActive || navigator.userActivation.hasBeenActive);
     }
     return false;
   }
 
   function getCortexAudioContext() {
-    if (!canPlayWebAudio()) {
-      return null;
-    }
-    try {
-      const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
-      if (!AudioCtx) return null;
-      if (!sharedCortexAudioContext || sharedCortexAudioContext.state === 'closed') {
-        sharedCortexAudioContext = new AudioCtx();
-      }
-      if (sharedCortexAudioContext.state === 'suspended' && userHasInteractedWithPage) {
-        sharedCortexAudioContext.resume().catch(() => {});
-      }
-      return sharedCortexAudioContext;
-    } catch (e) {
-      return null;
-    }
+    if (!sharedCortexAudioContext) return null;
+    return sharedCortexAudioContext;
   }
 
   function playWithAudioContext(playFn) {
     try {
-      const ctx = getCortexAudioContext();
-      if (!ctx) return;
-      if (ctx.state === 'running') {
-        playFn(ctx);
-      } else if (ctx.state === 'suspended' && userHasInteractedWithPage) {
-        ctx.resume().then(() => {
-          if (ctx.state === 'running') {
-            playFn(ctx);
-          }
-        }).catch(() => {});
+      // Chrome's autoplay policy strictly forbids calling new AudioContext() or ctx.resume()
+      // in background callbacks outside an active user gesture, which logs an extension error in chrome://extensions.
+      // AudioContext is safely instantiated & resumed inside markUserInteractionForAudio() on genuine user gestures.
+      if (!sharedCortexAudioContext || sharedCortexAudioContext.state !== 'running') {
+        return;
       }
+      playFn(sharedCortexAudioContext);
     } catch (e) {}
   }
 
@@ -2957,14 +3098,10 @@
 
     if (type === 'VEST_TV_RANGE_UPDATE') {
       latestRangeDetectorTelemetry = event.data.payload || {};
-      if (settings.rangeDetector && settings.rangeDetector.enabled) {
-        renderChartRangeBox();
-      }
+      renderChartRangeBox();
     } else if (type === 'VEST_TV_ORDER_BLOCKS_UPDATE') {
       latestOrderBlocksTelemetry = event.data.payload || {};
-      if (settings.orderBlocks && settings.orderBlocks.enabled && settings.orderBlocks.showStatsBox !== false) {
-        renderChartOrderBlockStatsBox();
-      }
+      renderChartOrderBlockStatsBox();
     } else if (type === 'VEST_TV_RANGE_ALERT') {
       handleRangeDetectedAlert(event.data.payload || {});
     } else     if (type === 'VEST_TV_OB_MITIGATED') {
@@ -4798,6 +4935,19 @@
     const overlay = document.createElement('div');
     overlay.id = 'vest-studio-settings-dialog';
     overlay.className = 'vest-tvs-overlay';
+
+    function onLiveSettingsUpdated(e) {
+      if (!overlay || !overlay.isConnected) {
+        window.removeEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
+        return;
+      }
+      if (!e || !e.detail || !e.detail.settings) return;
+      Object.assign(draftSettings, JSON.parse(JSON.stringify(e.detail.settings)));
+      if (typeof renderDialog === 'function') {
+        renderDialog();
+      }
+    }
+    window.addEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
 
     const NAV_ITEMS = [
       {
@@ -7168,6 +7318,7 @@
       }
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
+      window.removeEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
       overlay.remove();
       // Restore committed settings to main world in case user cancelled after previewing
       if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
@@ -7987,6 +8138,7 @@
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
       showToast('Settings saved');
       if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
+      window.removeEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
       overlay.remove();
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
@@ -8904,7 +9056,12 @@
         });
 
         overlay.querySelector('#vest-ob-test-voice-btn')?.addEventListener('click', () => {
-          playOrderBlockChime('long');
+          markUserInteractionForAudio();
+          if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'suspended') {
+            sharedCortexAudioContext.resume().then(() => playOrderBlockChime('long')).catch(() => {});
+          } else {
+            playOrderBlockChime('long');
+          }
           const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
           const voiceUri = overlay.querySelector('#vest-ob-voice-uri')?.value || ob.voiceURI;
           speakCortexVoicePhrase('Bullish Order Block Mitigated. Enter Long.', voiceUri);
@@ -15025,6 +15182,7 @@ if (activeTab === 'diagnostics') {
       if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
       window.removeEventListener('mousemove', onModalMouseMove, true);
       window.removeEventListener('mouseup', onModalMouseUp, true);
+      window.removeEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
       overlay.remove();
       if (editorModalEl === overlay) editorModalEl = null;
       currentEditingTemplateId = null;

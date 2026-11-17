@@ -8560,10 +8560,12 @@
         if (originIdx < 0) continue;
         const originBar = bars[originIdx];
 
-        let targetLow = originBar.low;
-        for (let k = Math.max(0, originIdx - lookback); k < originIdx; k++) {
+        // Valid Bearish OB requires breaking a prior Swing Low formed BEFORE the origin peak
+        let targetLow = Infinity;
+        for (let k = Math.max(0, originIdx - lookback * 2); k < originIdx; k++) {
           if (bars[k].low < targetLow) targetLow = bars[k].low;
         }
+        if (!isFinite(targetLow) || targetLow >= originBar.low) continue;
 
         let broke = false;
         let breakBarIndex = -1;
@@ -8627,10 +8629,12 @@
         if (originIdx < 0) continue;
         const originBar = bars[originIdx];
 
-        let targetHigh = originBar.high;
-        for (let k = Math.max(0, originIdx - lookback); k < originIdx; k++) {
+        // Valid Bullish OB requires breaking a prior Swing High formed BEFORE the origin dip
+        let targetHigh = -Infinity;
+        for (let k = Math.max(0, originIdx - lookback * 2); k < originIdx; k++) {
           if (bars[k].high > targetHigh) targetHigh = bars[k].high;
         }
+        if (!isFinite(targetHigh) || targetHigh <= originBar.high) continue;
 
         let broke = false;
         let breakBarIndex = -1;
@@ -8690,9 +8694,12 @@
             ob.mitigatedBarIndex = (typeof bar.barIndex === 'number') ? bar.barIndex : m;
             ob.mitigatedTimeSec = bar.timeSec || 0;
             ob.mitigatedPrice = Math.min(ob.top, bar.high);
-            break;
-          } else if (bar.close < ob.bottom) {
+          }
+          if (bar.close < ob.bottom) {
             ob.isInvalidated = true;
+            ob.invalidatedArrayIndex = m;
+            ob.invalidatedBarIndex = (typeof bar.barIndex === 'number') ? bar.barIndex : m;
+            ob.invalidatedTimeSec = bar.timeSec || 0;
             break;
           }
         } else {
@@ -8702,9 +8709,12 @@
             ob.mitigatedBarIndex = (typeof bar.barIndex === 'number') ? bar.barIndex : m;
             ob.mitigatedTimeSec = bar.timeSec || 0;
             ob.mitigatedPrice = Math.max(ob.bottom, bar.low);
-            break;
-          } else if (bar.close > ob.top) {
+          }
+          if (bar.close > ob.top) {
             ob.isInvalidated = true;
+            ob.invalidatedArrayIndex = m;
+            ob.invalidatedBarIndex = (typeof bar.barIndex === 'number') ? bar.barIndex : m;
+            ob.invalidatedTimeSec = bar.timeSec || 0;
             break;
           }
         }
@@ -11476,6 +11486,15 @@
     } else {
       cachedComputedRangeStatus = [];
       lastActiveRangeState = false;
+      postToIsolated({
+        type: 'VEST_TV_RANGE_UPDATE',
+        payload: {
+          symbol: symbolKey,
+          resolution: formatCurrentResolutionLabel(),
+          statuses: [],
+          timestamp: Date.now()
+        }
+      });
     }
 
         if (marketStructureEnabled) {

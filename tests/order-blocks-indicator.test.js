@@ -247,4 +247,50 @@ assert.strictEqual(stats2.short.winRate, 0);
 
 console.log('✓ computeOrderBlockPerformanceStats accurately evaluates 1:3 RR win/loss/netR/expectancy for Long and Short OBs');
 
+// 8. Verify rejection of invalid continuation candles during rallies (1h NQ false positive fix)
+console.log('Testing rejection of invalid continuation pauses mid-rally...');
+const pureRallyBars = [];
+for (let i = 0; i < 15; i++) {
+  // Pure uptrend making higher highs and higher lows with minor down pauses
+  const isPause = (i === 5 || i === 9);
+  pureRallyBars.push({
+    barIndex: i,
+    timeSec: baseTime + i * interval,
+    open: isPause ? 100 + i * 2 + 1 : 100 + i * 2,
+    high: 100 + i * 2 + 2,
+    low: 100 + i * 2 - 0.5,
+    close: isPause ? 100 + i * 2 : 100 + i * 2 + 1.5
+  });
+}
+const rallyObs = sandbox.computeOrderBlocksFromBars(pureRallyBars, {
+  enabled: true,
+  swingLookback: 3,
+  maxBlocks: 5
+});
+assert.strictEqual(rallyObs.length, 0, 'Pure continuation rally without prior swing high break must produce 0 false-positive Order Blocks');
+console.log('✓ Rejection of invalid rally continuation pauses verified (0 false positives on NQ rally)');
+
+// 9. Verify continuous invalidation tracking
+console.log('Testing continuous invalidation tracking past mitigation...');
+const invalidationBars = syntheticBars.map(b => ({ ...b }));
+// At bar 15, price crashes below OB bottom (97.5) to 95.0
+invalidationBars[15] = {
+  barIndex: 15,
+  timeSec: baseTime + 15 * interval,
+  open: 98.0,
+  high: 98.0,
+  low: 94.0,
+  close: 95.0
+};
+const invalidatedComputed = sandbox.computeOrderBlocksFromBars(invalidationBars, {
+  enabled: true,
+  swingLookback: 2,
+  maxBlocks: 5
+});
+const violatedOb = invalidatedComputed.find(x => x.side === 'long');
+assert(violatedOb, 'Must detect long OB');
+assert.strictEqual(violatedOb.isMitigated, true, 'OB was mitigated at bar 10');
+assert.strictEqual(violatedOb.isInvalidated, true, 'OB must be marked as invalidated when price closes below bottom');
+console.log('✓ Continuous invalidation tracking verified (violated OBs cleanly marked invalidated)');
+
 console.log('All Institutional Order Blocks Indicator Tests Passed Successfully!');

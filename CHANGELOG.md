@@ -1,6 +1,50 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.89`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.91`) are documented in this file.
+
+---
+
+## [v1.1.91] — 2026-11-16
+
+### 🛡️ Web Audio Autoplay Policy Hardening & Order Block Precision Tuning
+- **Elimination of Chrome Extension AudioContext Errors (`chrome://extensions`)**:
+  - Resolved `The AudioContext was not allowed to start. It must be resumed (or created) after a user gesture on the page` completely.
+  - Refactored `playWithAudioContext()` to strictly guard against calling `AudioContext.resume()` or creating contexts in background message / price alert loops outside an active user gesture.
+  - AudioContext is strictly instantiated and resumed within explicit user interactions (`pointerdown`, `mousedown`, `keydown`, `touchstart`, or test alert button clicks), transitioning into `'running'` state cleanly without triggering Chrome's autoplay violation warnings.
+  - Test alert buttons (`#vest-ob-test-voice-btn`) proactively call `markUserInteractionForAudio()` to ensure instant playback upon clicking.
+- **Institutional Order Block Validation & False-Positive Elimination (1h NQ Fix)**:
+  - Fixed an issue where minor continuation pauses during strong upward rallies on 1-hour NQ charts were falsely identified as Bullish Order Blocks.
+  - Sourced order blocks strictly from confirmed swing low / swing high origins rather than arbitrary continuation candles.
+  - Enforced Break of Structure (BOS / MSS) against preceding swing points formed prior to the swing origin (`targetHigh > originBar.high` for Bullish OB; `targetLow < originBar.low` for Bearish OB). Pure continuation candles without a prior swing point break are strictly rejected.
+- **Continuous Forward Invalidation Tracking**:
+  - Order blocks are now continuously tracked past mitigation: if price later breaks through the invalidation boundary (`close < ob.bottom` for Bullish OB, `close > ob.top` for Bearish OB), the block is cleanly marked `isInvalidated = true` and removed from the chart canvas.
+
+---
+
+## [v1.1.90] — 2026-11-16
+
+### ⚡ Real-Time Cross-Browser & Cross-Tab Settings Synchronization
+- **Zero-Latency Cross-Tab Synchronization (`BroadcastChannel`)**:
+  - Implemented `BroadcastChannel('__trading_cortex_cross_tab_sync__')` enabling instant, zero-latency communication across all open browser windows, tabs, and monitors without requiring any page refreshes.
+  - Changes made in Browser A (or Tab A) are broadcasted immediately to Browser B via `broadcastLiveSettingsCrossTab()`.
+- **Triple-Layer Multi-Browser Transport Architecture**:
+  - **Layer 1 (BroadcastChannel)**: Instant sub-millisecond tab-to-tab communication across windows on the same origin.
+  - **Layer 2 (Window Storage Events)**: Real-time native browser `storage` event listener reacting to `__trading_cortex_isolated_settings__` updates.
+  - **Layer 3 (chrome.storage.onChanged)**: Extension-level real-time listener propagating changes across all profiles, popups, and different exchange domains (`next.vestmarkets.com`, `myfundedperpetuals.com`, `kalshi.com`).
+- **Instant Reactive Component Re-application (`applyLiveSettingsToAllComponents`)**:
+  - Disabling any feature on Browser A immediately executes hiding logic on Browser B in real time:
+    - **Range Detector**: Immediately hides the blue glowing on-chart box (`#vest-chart-range-box`) and removes minimized taskbar pills.
+    - **Order Blocks**: Immediately hides the on-chart 1:3 RR performance stats screen (`#vest-chart-ob-stats-box`), clears order block canvas drawings, and removes taskbar pills.
+    - **Market Structure**: Immediately clears BOS / MSS / CHoCH lines and labels from the TradingView canvas.
+    - **Session Indicators / Killzones / VWAP**: Immediately clears session highlights and price scale badges.
+    - **Auto FVG**: Cleans up canvas Fair Value Gaps and removes native TradingView drawings.
+    - **Instrument Trades, Economic News & Diagnostics**: Immediately toggles visibility and taskbar slots across all windows.
+    - **Floating Template Bar & Top Bar Pills**: Updates active template selection, button states, and dropdown menu badges (`ON`/`OFF`) in real time.
+    - **Dialog Glass Mode**: Updates frosted glass styling and opacity across all open floating panels.
+- **In-Dialog Live Sync (`openStudioSettingsModal`)**:
+  - If the Settings Dialog is currently open on Browser B when Browser A changes a setting, Browser B dynamically receives `cortex-live-settings-updated`, updates its draft state, and re-renders active switches, sliders, and badges in real time so stale drafts are never committed.
+- **Main World Instant Canvas Clearing**:
+  - Updated `content-main.js` so disabling Range Detector posts `VEST_TV_RANGE_UPDATE` with empty statuses to reset telemetry and trigger an immediate clean re-render of the chart canvas.
 
 ---
 
