@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.97`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.98`) are documented in this file.
+
+---
+
+## [v1.1.98] — 2026-11-19
+
+### 🧹 Filter Internal UUID/Hex Sub-Objects & Top-Window Canvas Layer
+- **Eliminated Random UUID/Hex Accounts**:
+  - Updated `normalizeCanonicalAccountName()` in both `content-main.js` and `content-isolated.js` to reject internal UUID records (`xxxxxxxx-xxxx-...`) and raw hex wallet/ledger hashes (`0x...`), automatically purging them from cache so only real human-named firm accounts (`Account 71`, `Account 73`, `Account 74`, `Account 75`, `Account 76`, `Account 77`, etc.) are displayed.
+- **Top-Window Front-Most Canvas Mounting**:
+  - Mounted `#vest-accounts-risk-overlay-canvas` on `window.top.document.body` (converting iframe coordinates cleanly) at `z-index: 2147483640` with `pointer-events: none` so even top-window host overlays like Vest's `↕ P&L` pill cannot cover over the drawing.
 
 ---
 

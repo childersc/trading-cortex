@@ -11294,23 +11294,48 @@
     const rect = targetChartCanvas.getBoundingClientRect();
     const cssW = Math.max(1, Math.round(rect.width || targetChartCanvas.clientWidth || 1));
     const cssH = Math.max(1, Math.round(rect.height || targetChartCanvas.clientHeight || 1));
-    const dpr = (ownerDoc.defaultView && ownerDoc.defaultView.devicePixelRatio) || window.devicePixelRatio || 1;
+
+    // Mount in window.top.document.body when same-origin so nothing in the host page (e.g. top-window ↕ P&L overlays) can cover it
+    let hostDoc = ownerDoc;
+    let absLeft = rect.left;
+    let absTop = rect.top;
+    try {
+      let curWin = ownerDoc.defaultView || window;
+      while (curWin && curWin !== curWin.parent && curWin.frameElement) {
+        const frameRect = curWin.frameElement.getBoundingClientRect();
+        absLeft += frameRect.left;
+        absTop += frameRect.top;
+        curWin = curWin.parent;
+      }
+      if (curWin && curWin.document && curWin.document.body) {
+        hostDoc = curWin.document;
+      }
+    } catch (e) {
+      hostDoc = ownerDoc;
+      absLeft = rect.left;
+      absTop = rect.top;
+    }
+
+    const dpr = (hostDoc.defaultView && hostDoc.defaultView.devicePixelRatio) || window.devicePixelRatio || 1;
     const bmpW = Math.max(1, Math.round(cssW * dpr));
     const bmpH = Math.max(1, Math.round(cssH * dpr));
 
-    if (!accountsRiskTopCanvas || !accountsRiskTopCanvas.isConnected || accountsRiskTopCanvas.ownerDocument !== ownerDoc) {
-      const existing = ownerDoc.getElementById('vest-accounts-risk-overlay-canvas');
+    if (!accountsRiskTopCanvas || !accountsRiskTopCanvas.isConnected || accountsRiskTopCanvas.ownerDocument !== hostDoc) {
+      if (accountsRiskTopCanvas && accountsRiskTopCanvas.isConnected) {
+        try { accountsRiskTopCanvas.remove(); } catch (e) {}
+      }
+      const existing = hostDoc.getElementById('vest-accounts-risk-overlay-canvas');
       if (existing) {
         accountsRiskTopCanvas = existing;
       } else {
-        accountsRiskTopCanvas = ownerDoc.createElement('canvas');
+        accountsRiskTopCanvas = hostDoc.createElement('canvas');
         accountsRiskTopCanvas.id = 'vest-accounts-risk-overlay-canvas';
-        (ownerDoc.body || ownerDoc.documentElement).appendChild(accountsRiskTopCanvas);
+        (hostDoc.body || hostDoc.documentElement).appendChild(accountsRiskTopCanvas);
       }
     }
 
     accountsRiskTopCanvas.style.cssText =
-      `position:fixed;left:${Math.round(rect.left)}px;top:${Math.round(rect.top)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;z-index:2147483640;user-select:none;display:block;`;
+      `position:fixed;left:${Math.round(absLeft)}px;top:${Math.round(absTop)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;z-index:2147483640;user-select:none;display:block;`;
     if (accountsRiskTopCanvas.width !== bmpW) accountsRiskTopCanvas.width = bmpW;
     if (accountsRiskTopCanvas.height !== bmpH) accountsRiskTopCanvas.height = bmpH;
     return { canvas: accountsRiskTopCanvas, cssW, cssH, dpr };
@@ -13741,6 +13766,11 @@
     // Pure numeric account number like "71", "73", "76" -> "Account 71"
     if (/^\d{1,6}$/.test(s)) {
       return `Account ${s}`;
+    }
+
+    // Reject UUIDs (full or truncated like "6e6f946a-5a6e-4246-a...") and raw hex hashes / wallet addresses
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(s) || /^(?:0x)?[0-9a-f]{12,}$/i.test(s)) {
+      return null;
     }
 
     // Reject UI buttons, tabs, currencies, market tickers, and 1-2 char abbreviations like "PA"
