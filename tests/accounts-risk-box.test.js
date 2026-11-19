@@ -128,7 +128,10 @@ assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('73'), 'Account 73'
 assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('Active Positions'), null);
 assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('Add Funded Account'), null);
 assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('PA'), null);
-console.log('✓ Canonical account name normalization & UI noise filtering verified');
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('6e6f946a-5a6e-4246-a123-456789abcdef'), null);
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('06674ff0-6d04-502b-b'), null);
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('0x7a250d5630b4cf539739df2c5dacb4c659f2488d'), null);
+console.log('✓ Canonical account name normalization, UUID/hex rejection & UI noise filtering verified');
 
 const mockFirmApiPayload = {
   data: {

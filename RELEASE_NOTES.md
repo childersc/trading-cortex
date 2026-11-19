@@ -1,3 +1,8 @@
+Trading Cortex v1.1.98 — Filter Internal UUID/Hex Records & Top-Window Front-Most Canvas
+
+- **Filtered Out Random UUID/Hex Rows (`v1.1.98`)**: Rejected internal UUID sub-objects (`6e6f946a-5a6e-4246-...`) and raw hex hashes from account discovery and automatically purged them from cache, leaving only your real named firm accounts (`Account 71`, `Account 73`, etc.).
+- **Top-Window Front-Most Canvas (`v1.1.98`)**: Mounted the click-through overlay canvas on `window.top.document.body` so even host-page overlays like `↕ P&L` render behind the Accounts & Risk drawing.
+
 Trading Cortex v1.1.97 — Front-Most Accounts & Risk Canvas Layer & Lower Top Offset
 
 - **Front-Most Chart Layer (`v1.1.97`)**: Moved the Accounts & Risk drawing onto a dedicated click-through (`pointer-events: none`) top-most overlay canvas (`z-index: 2147483640`) so nothing on the chart (`↕ P&L`, position/order badges, legend buttons, or indicators) can cover over it.

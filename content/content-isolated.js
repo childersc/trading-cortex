@@ -12556,6 +12556,11 @@ if (activeTab === 'diagnostics') {
       return `Account ${s}`;
     }
 
+    // Reject UUIDs (full or truncated like "6e6f946a-5a6e-4246-a...") and raw hex hashes / wallet addresses
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(s) || /^(?:0x)?[0-9a-f]{12,}$/i.test(s)) {
+      return null;
+    }
+
     // Reject UI buttons, tabs, currencies, market tickers, and 1-2 char abbreviations like "PA"
     const INVALID_ACCOUNT_RE = /^(active\s+positions|open\s+orders|trade\s+history|order\s+history|positions?\s+history|funding\s+history|add\s+funded.*|add\s+account.*|create\s+account.*|new\s+account.*|get\s+funded.*|manage\s+accounts?.*|switch\s+account.*|connect.*|disconnect.*|logout|log\s+out|sign\s+out|deposit|withdraw|settings|portfolio|markets|trade|usdc|usdt|usd|btc|eth|sol|hype|nq|es|cl|gc|eur|gbp|jpy|pa|na|n\/a|null|undefined|none|total|all|summary|default|active|open|closed|pending|long|short|buy|sell|market|limit)$/i;
     if (INVALID_ACCOUNT_RE.test(s) || /-PERP$|-USD$|-USDT$|-USDC$/i.test(s)) {
