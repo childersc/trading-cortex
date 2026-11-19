@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.100`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.101`) are documented in this file.
+
+---
+
+## [v1.1.101] — 2026-11-19
+
+### 🛡️ Fixed Double Chart Overlays on Timeframe Switch & Ghost Chart on Portfolio Page
+- **Prevented Overlay Self-Targeting (`findMainChartPaneCanvas`)**:
+  - Excluded `#vest-accounts-risk-overlay-canvas` and `.vest-cortex-overlay-canvas` from `findMainChartPaneCanvas()`, and required top-document canvases to belong to a real TradingView chart container (never `document.body` or a Portfolio equity curve `<canvas>`). This eliminates the double-overlay artifact when switching chart timeframes.
+- **Instant SPA Route Cleanup (`Portfolio`, `Markets`, `Docs`, etc.)**:
+  - Added a non-chart SPA route guard (`/portfolio`, `/markets`, `/affiliate`, `/docs`, `/capital`, etc.) plus `clearAllChartOverlays()` whenever no TradingView chart canvas is mounted, immediately hiding and clearing `ictSessionsCanvas`, `#vest-accounts-risk-overlay-canvas`, `#vest-accounts-risk-toggle-btn`, and price scale badges when navigating away from the Trade page.
 
 ---
 

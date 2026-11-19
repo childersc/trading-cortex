@@ -1,3 +1,8 @@
+Trading Cortex v1.1.101 — Fix Double Chart Overlay on Timeframe Switch & Portfolio Ghost Chart
+
+- **Fixed Double Chart Overlays (`v1.1.101`)**: Excluded `#vest-accounts-risk-overlay-canvas` from `findMainChartPaneCanvas()` and validated TradingView container ancestry so timeframe switches can never self-target our overlay canvas or double-render candles/indicators.
+- **Instant Cleanup on Portfolio & Non-Chart Screens (`v1.1.101`)**: Added SPA route detection and `clearAllChartOverlays()` so navigating to **Portfolio**, **Markets**, or other non-chart tabs immediately clears all chart candles, indicator overlays, and the Accounts & Risk drawing.
+
 Trading Cortex v1.1.100 — Clearer Per-Trade Dollar Amount Badge & Open PnL Labels
 
 - **Unmistakable Trade Amount Badge (`v1.1.100`)**: Flat/closed account rows now explicitly display **`USE / TRADE (X%)`** with the exact dollar amount highlighted inside a bold amber pill (`$4.90`), while open positions clearly prefix live values with **`PnL`** (`PnL +$2.59`).
