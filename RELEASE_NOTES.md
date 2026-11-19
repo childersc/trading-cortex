@@ -1,3 +1,9 @@
+Trading Cortex v1.1.96 — Clean Account Names, Deduplication & UI Noise Filtering
+
+- **Clean Canonical Account Names (`v1.1.96`)**: Normalized concatenated Vest account strings (`76Account 76Instant`, `71Account 71Evaluati`) and bare numbers (`71`, `73`, `76`) into clean, deduplicated names (`Account 71`, `Account 73`, `Account 76`), with live `Account Value` prioritized over secondary balance fields.
+- **Filtered Non-Account UI Rows (`v1.1.96`)**: Automatically strips and purges non-account labels (`Active Positions`, `Add Funded Account`, `PA`) from the chart overlay and cache.
+- **Formatting & Clearance (`v1.1.96`)**: Fixed negative dollar formatting (`-$0.20`) and nudged default top offset (`76px`) below TradingView's `^` legend button.
+
 Trading Cortex v1.1.95 — Non-Destructive In-Place Settings Sync (Fixes Scrollbar Push-Back)
 
 - **Fixed Settings Scrollbar Pushing Back Up (`v1.1.95`)**: Replaced full modal DOM re-rendering on live settings events with non-destructive in-place DOM patching (`syncOpenModalControlsInPlace()`). Scrolling or dragging the Settings scrollbar is never interrupted or reset while switches/badges still sync live across browsers.

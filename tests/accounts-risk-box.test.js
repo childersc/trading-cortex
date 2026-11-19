@@ -79,7 +79,8 @@ const defCfg = sandbox.normalizeAccountsRiskBoxConfig(null);
 assert.strictEqual(defCfg.enabled, true, 'Accounts & Risk drawing must be enabled by default');
 assert.strictEqual(defCfg.riskPercent, 1.0, 'Default risk percentage must be 1.0%');
 assert.strictEqual(defCfg.offsetX, 12, 'Default offsetX must anchor top-left inside chart pane');
-assert.strictEqual(defCfg.offsetY, 52, 'Default offsetY must sit directly below OHLC legend');
+assert.strictEqual(defCfg.offsetY, 76, 'Default offsetY must sit cleanly below OHLC legend and ^ collapse button');
+assert.strictEqual(sandbox.formatPlainDollar(-0.20), '-$0.20', 'Negative dollar values must format as -$0.20');
 
 // Test Open vs Closed per-instrument logic
 const account76 = {
@@ -104,16 +105,27 @@ console.log('✓ VM computation verified: live Open PnL when open, configurable 
 
 // 5. VM Unit Test for extractAccountsFromApiPayload (All Firm Accounts Discovery)
 const normCanvasInstCode = extractFn('normalizeCanvasInstrumentKey', mainJs);
+const normCanonAccCode = extractFn('normalizeCanonicalAccountName', mainJs);
 const parseNumCode = extractFn('parseFiniteAccountNum', mainJs);
 const extractPosCode = extractFn('extractPositionsMapFromAccountObj', mainJs);
 const extractAccCode = extractFn('extractAccountsFromApiPayload', mainJs);
 
-const mainSandbox = { Math, Number, String, Array, Object, Boolean, JSON, WeakSet, Set, isFinite };
+const mainSandbox = { Math, Number, String, Array, Object, Boolean, JSON, WeakSet, Set, Map, isFinite };
 vm.createContext(mainSandbox);
 vm.runInContext(
-  `${normCanvasInstCode}\n${parseNumCode}\n${extractPosCode}\n${extractAccCode}`,
+  `${normCanvasInstCode}\n${normCanonAccCode}\n${parseNumCode}\n${extractPosCode}\n${extractAccCode}`,
   mainSandbox
 );
+
+// Verify canonical name cleaning & noise filtering (matches Vest screenshot cases)
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('76Account 76Instant'), 'Account 76');
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('71Account 71Evaluati'), 'Account 71');
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('75Account 75Evaluati'), 'Account 75');
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('73'), 'Account 73');
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('Active Positions'), null);
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('Add Funded Account'), null);
+assert.strictEqual(mainSandbox.normalizeCanonicalAccountName('PA'), null);
+console.log('✓ Canonical account name normalization & UI noise filtering verified');
 
 const mockFirmApiPayload = {
   data: {
