@@ -11338,7 +11338,64 @@
       `position:fixed;left:${Math.round(absLeft)}px;top:${Math.round(absTop)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;z-index:2147483640;user-select:none;display:block;`;
     if (accountsRiskTopCanvas.width !== bmpW) accountsRiskTopCanvas.width = bmpW;
     if (accountsRiskTopCanvas.height !== bmpH) accountsRiskTopCanvas.height = bmpH;
-    return { canvas: accountsRiskTopCanvas, cssW, cssH, dpr };
+    return { canvas: accountsRiskTopCanvas, hostDoc, absLeft: Math.round(absLeft), absTop: Math.round(absTop), cssW, cssH, dpr };
+  }
+
+  let accountsRiskToggleBtn = null;
+
+  function syncAccountsRiskToggleButton(topOverlay, hitRect, isCollapsed) {
+    if (!topOverlay || !topOverlay.hostDoc || !hitRect) {
+      if (accountsRiskToggleBtn) accountsRiskToggleBtn.style.display = 'none';
+      return;
+    }
+    const hostDoc = topOverlay.hostDoc;
+    if (!accountsRiskToggleBtn || !accountsRiskToggleBtn.isConnected || accountsRiskToggleBtn.ownerDocument !== hostDoc) {
+      if (accountsRiskToggleBtn && accountsRiskToggleBtn.isConnected) {
+        try { accountsRiskToggleBtn.remove(); } catch (e) {}
+      }
+      const existing = hostDoc.getElementById('vest-accounts-risk-toggle-btn');
+      if (existing) {
+        accountsRiskToggleBtn = existing;
+      } else {
+        accountsRiskToggleBtn = hostDoc.createElement('button');
+        accountsRiskToggleBtn.type = 'button';
+        accountsRiskToggleBtn.id = 'vest-accounts-risk-toggle-btn';
+        accountsRiskToggleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const curCfg = (currentSettings && currentSettings.accountsRiskBox) || {};
+          const nextCollapsed = !Boolean(curCfg.collapsed);
+          if (!currentSettings.accountsRiskBox) currentSettings.accountsRiskBox = {};
+          currentSettings.accountsRiskBox.collapsed = nextCollapsed;
+          if (latestAccountsRiskOverlayData && latestAccountsRiskOverlayData.config) {
+            latestAccountsRiskOverlayData.config.collapsed = nextCollapsed;
+          }
+          postToIsolated({
+            type: 'VEST_TV_ACCOUNTS_RISK_TOGGLE_COLLAPSE',
+            collapsed: nextCollapsed
+          });
+          scheduleIctSessionsRender(false);
+        });
+        (hostDoc.body || hostDoc.documentElement).appendChild(accountsRiskToggleBtn);
+      }
+    }
+
+    const leftPx = Math.round(topOverlay.absLeft + hitRect.x);
+    const topPx = Math.round(topOverlay.absTop + hitRect.y);
+    const wPx = Math.max(16, Math.round(hitRect.w));
+    const hPx = Math.max(16, Math.round(hitRect.h));
+
+    if (isCollapsed) {
+      accountsRiskToggleBtn.textContent = '';
+      accountsRiskToggleBtn.title = 'Click to expand Accounts & Risk';
+      accountsRiskToggleBtn.style.cssText =
+        `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:transparent;border:none;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:block;`;
+    } else {
+      accountsRiskToggleBtn.textContent = '—';
+      accountsRiskToggleBtn.title = 'Minimize Accounts & Risk';
+      accountsRiskToggleBtn.style.cssText =
+        `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);border-radius:4px;color:#cbd5e1;font-size:10px;font-weight:800;line-height:1;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:flex;align-items:center;justify-content:center;`;
+    }
   }
 
   function clearAccountsRiskTopOverlayCanvas() {
@@ -11347,6 +11404,11 @@
         const c = accountsRiskTopCanvas.getContext('2d');
         if (c) c.clearRect(0, 0, accountsRiskTopCanvas.width, accountsRiskTopCanvas.height);
         accountsRiskTopCanvas.style.display = 'none';
+      } catch (e) {}
+    }
+    if (accountsRiskToggleBtn) {
+      try {
+        accountsRiskToggleBtn.style.display = 'none';
       } catch (e) {}
     }
   }
@@ -11389,11 +11451,14 @@
   }
 
   function renderAccountsRiskOnCanvas(ctx, overlayData, rawCfg, symbolKey, cssWidth, cssHeight) {
-    if (!ctx || !rawCfg || rawCfg.enabled === false) return;
+    if (!ctx || !rawCfg || rawCfg.enabled === false) return null;
     const accounts = (overlayData && Array.isArray(overlayData.accounts)) ? overlayData.accounts : [];
     const riskPct = Math.max(0.05, Math.min(50, Number(rawCfg.riskPercent) || 1.0));
     const showOtherPnl = rawCfg.showOtherPnl !== false;
-    const boxW = Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || 248)));
+    const isCollapsed = Boolean(rawCfg.collapsed);
+    const baseFont = Math.max(8, Math.min(18, Number(rawCfg.fontSize) || 10.5));
+    const scale = baseFont / 10.5;
+    const boxW = Math.max(200, Math.min(480, Math.round(Number(rawCfg.boxWidth) || 248)));
     const x = Math.max(4, Math.round(Number(rawCfg.offsetX ?? 12)));
     const y = Math.max(4, Math.round(Number(rawCfg.offsetY ?? 108)));
     const bgOpacity = Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 82)));
@@ -11402,12 +11467,47 @@
 
     const activeSym = normalizeCanvasInstrumentKey((overlayData && overlayData.currentInstrument) || symbolKey || '');
     const activeAccName = (overlayData && overlayData.activeAccountName) ? String(overlayData.activeAccountName).trim() : '';
+    const firmLabel = (overlayData && overlayData.firmName) ? String(overlayData.firmName).toUpperCase() : 'ACCOUNTS';
 
-    // Precompute row metrics so we know exact box height before drawing
-    const padX = 10;
-    const headerH = 24;
-    const rowGap = 5;
-    const padBottom = 8;
+    const hdrFont = Math.max(8, Math.round((baseFont - 0.5) * 10) / 10);
+    const nameFont = Math.round(baseFont * 10) / 10;
+    const balFont = Math.round((baseFont + 0.5) * 10) / 10;
+    const tagFont = Math.max(7.5, Math.round((baseFont - 1) * 10) / 10);
+    const pnlFont = Math.round(baseFont * 10) / 10;
+    const subFont = Math.max(7.5, Math.round((baseFont - 1.5) * 10) / 10);
+
+    const padX = Math.round(10 * scale);
+    const headerH = Math.max(22, Math.round(24 * scale));
+
+    // Minimized state: draw a sleek single-line compact pill right at (x, y)
+    if (isCollapsed) {
+      ctx.save();
+      ctx.font = `700 ${hdrFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const pillText = `▸ ${firmLabel} (${accounts.length})${activeSym ? ` · ${activeSym}` : ''}`;
+      const textW = ctx.measureText(pillText).width;
+      const pillW = Math.min(boxW, Math.max(120, Math.round(textW + padX * 2 + 6)));
+      const pillH = headerH;
+
+      drawRoundedRectPath(ctx, x, y, pillW, pillH, 6);
+      ctx.fillStyle = hexToRgbaString(bgHex, Math.min(100, bgOpacity + 6));
+      ctx.fill();
+      ctx.strokeStyle = hexToRgbaString(borderHex, 65);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e0f2fe';
+      ctx.fillText(pillText, x + padX, y + pillH / 2 + 0.5);
+      ctx.restore();
+      return { x, y, w: pillW, h: pillH, isCollapsed: true };
+    }
+
+    // Precompute row metrics scaled to fontSize
+    const rowGap = Math.max(4, Math.round(5 * scale));
+    const padBottom = Math.max(6, Math.round(8 * scale));
+    const singleRowH = Math.round(34 * scale);
+    const doubleRowH = Math.round(46 * scale);
 
     const preparedRows = accounts.map(acc => {
       const bal = (typeof acc.balance === 'number' && Number.isFinite(acc.balance)) ? acc.balance : null;
@@ -11428,7 +11528,7 @@
       const hasSubLine = isOpenOnInst
         ? (totalPnl !== null && instPos && typeof instPos.pnl === 'number' && Math.abs(totalPnl - instPos.pnl) >= 0.01)
         : (showOtherPnl && totalPnl !== null && Math.abs(totalPnl) >= 0.005);
-      const rowH = hasSubLine ? 46 : 34;
+      const rowH = hasSubLine ? doubleRowH : singleRowH;
       const isCurrent = Boolean(activeAccName && acc.name === activeAccName);
       return { acc, bal, riskAmt, totalPnl, instPos, isOpenOnInst, hasSubLine, rowH, isCurrent };
     });
@@ -11437,7 +11537,7 @@
     let contentH = 0;
     const visibleRows = [];
     if (preparedRows.length === 0) {
-      contentH = 24;
+      contentH = Math.round(24 * scale);
     } else {
       for (const r of preparedRows) {
         const nextH = contentH + (visibleRows.length > 0 ? rowGap : 0) + r.rowH;
@@ -11448,7 +11548,16 @@
     }
 
     const totalH = headerH + 6 + contentH + padBottom;
-    if (x + boxW > cssWidth - 4 && cssWidth > boxW + 16) return;
+    if (x + boxW > cssWidth - 4 && cssWidth > boxW + 16) return null;
+
+    const minBtnSize = Math.max(16, Math.min(22, Math.round(16 * scale)));
+    const minBtnRect = {
+      x: x + boxW - minBtnSize - 5,
+      y: y + Math.round((headerH - minBtnSize) / 2),
+      w: minBtnSize,
+      h: minBtnSize,
+      isCollapsed: false
+    };
 
     ctx.save();
     // 1. Background panel (native chart drawing — non-draggable, pointer-events: none)
@@ -11459,18 +11568,17 @@
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // 2. Compact header strip
-    ctx.font = '700 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    // 2. Compact header strip (leaves room on the right for the minimize button)
+    ctx.font = `700 ${hdrFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#e2e8f0';
-    const firmLabel = (overlayData && overlayData.firmName) ? String(overlayData.firmName).toUpperCase() : 'ACCOUNTS';
     ctx.fillText(`${firmLabel} (${accounts.length})`, x + padX, y + headerH / 2 + 1);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#7dd3fc';
-    const rightHdr = activeSym ? `${activeSym} · ${riskPct}% RISK` : `${riskPct}% RISK`;
-    ctx.fillText(rightHdr, x + boxW - padX, y + headerH / 2 + 1);
+    const rightHdr = activeSym ? `${activeSym} · ${riskPct}%` : `${riskPct}% RISK`;
+    ctx.fillText(rightHdr, minBtnRect.x - 6, y + headerH / 2 + 1);
 
     // Header divider
     ctx.beginPath();
@@ -11483,10 +11591,10 @@
     // 3. Account rows
     let curY = y + headerH + 6;
     if (visibleRows.length === 0) {
-      ctx.font = '500 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.font = `500 ${nameFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
       ctx.textAlign = 'left';
       ctx.fillStyle = '#94a3b8';
-      ctx.fillText('Scanning firm accounts...', x + padX, curY + 11);
+      ctx.fillText('Scanning firm accounts...', x + padX, curY + Math.round(11 * scale));
     } else {
       for (let i = 0; i < visibleRows.length; i++) {
         const r = visibleRows[i];
@@ -11502,74 +11610,74 @@
         ctx.stroke();
 
         // Line 1: dot + Account Name (left) | Balance (right)
-        const line1Y = curY + 11;
+        const line1Y = curY + Math.round(11 * scale);
         const dotColor = r.isCurrent ? '#10b981' : '#38bdf8';
         ctx.beginPath();
-        ctx.arc(rx + 8, line1Y, 2.6, 0, Math.PI * 2);
+        ctx.arc(rx + Math.round(8 * scale), line1Y, Math.max(2.2, 2.6 * scale), 0, Math.PI * 2);
         ctx.fillStyle = dotColor;
         ctx.fill();
 
-        ctx.font = '700 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.font = `700 ${nameFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'left';
         ctx.fillStyle = '#f8fafc';
         const accNameStr = String(r.acc.name || r.acc.id || 'Account').slice(0, 20);
-        ctx.fillText(accNameStr, rx + 15, line1Y);
+        ctx.fillText(accNameStr, rx + Math.round(15 * scale), line1Y);
 
-        ctx.font = '700 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        ctx.font = `700 ${balFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
         ctx.textAlign = 'right';
         ctx.fillStyle = '#f8fafc';
         ctx.fillText(formatCanvasDollarPlain(r.bal), rx + rw - 7, line1Y);
 
         // Line 2: Open PnL on current instrument OR Risk/Trade if closed/flat
-        const line2Y = curY + 25;
+        const line2Y = curY + Math.round(25 * scale);
         if (r.isOpenOnInst && r.instPos) {
           const isLong = r.instPos.side === 'long';
           const tagColor = isLong ? '#34d399' : '#f87171';
           const pnlVal = typeof r.instPos.pnl === 'number' ? r.instPos.pnl : null;
           const pnlColor = pnlVal === null ? '#cbd5e1' : (pnlVal > 0.0001 ? '#34d399' : (pnlVal < -0.0001 ? '#f87171' : '#cbd5e1'));
 
-          ctx.font = '700 9.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.font = `700 ${tagFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'left';
           ctx.fillStyle = tagColor;
           ctx.fillText(`${isLong ? 'LONG' : 'SHORT'} ${activeSym}`, rx + 7, line2Y);
 
-          ctx.font = '700 10.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.font = `700 ${pnlFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
           ctx.textAlign = 'right';
           ctx.fillStyle = pnlColor;
           const pnlStr = pnlVal !== null ? formatCanvasDollarSigned(pnlVal) : '--';
           ctx.fillText(r.instPos.pnlPct ? `${pnlStr} (${r.instPos.pnlPct})` : pnlStr, rx + rw - 7, line2Y);
 
           if (r.hasSubLine) {
-            const line3Y = curY + 38;
-            ctx.font = '600 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            const line3Y = curY + Math.round(38 * scale);
+            ctx.font = `600 ${subFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
             ctx.textAlign = 'left';
             ctx.fillStyle = '#94a3b8';
             ctx.fillText('Total Open PnL', rx + 7, line3Y);
 
-            ctx.font = '600 9.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+            ctx.font = `600 ${tagFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
             ctx.textAlign = 'right';
             ctx.fillStyle = r.totalPnl >= 0 ? '#34d399' : '#f87171';
             ctx.fillText(formatCanvasDollarSigned(r.totalPnl), rx + rw - 7, line3Y);
           }
         } else {
-          ctx.font = '700 9.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.font = `700 ${tagFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'left';
           ctx.fillStyle = '#7dd3fc';
           ctx.fillText(`FLAT ${activeSym || 'CHART'} · RISK`, rx + 7, line2Y);
 
-          ctx.font = '700 10.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.font = `700 ${pnlFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
           ctx.textAlign = 'right';
           ctx.fillStyle = '#fbbf24';
           ctx.fillText(formatCanvasDollarPlain(r.riskAmt), rx + rw - 7, line2Y);
 
           if (r.hasSubLine) {
-            const line3Y = curY + 38;
-            ctx.font = '600 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            const line3Y = curY + Math.round(38 * scale);
+            ctx.font = `600 ${subFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
             ctx.textAlign = 'left';
             ctx.fillStyle = '#94a3b8';
             ctx.fillText('Other Open PnL', rx + 7, line3Y);
 
-            ctx.font = '600 9.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+            ctx.font = `600 ${tagFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
             ctx.textAlign = 'right';
             ctx.fillStyle = r.totalPnl >= 0 ? '#34d399' : '#f87171';
             ctx.fillText(formatCanvasDollarSigned(r.totalPnl), rx + rw - 7, line3Y);
@@ -11581,6 +11689,7 @@
     }
 
     ctx.restore();
+    return minBtnRect;
   }
 
   function renderIctSessionIndicators() {
@@ -12657,7 +12766,8 @@
           topCtx.setTransform(1, 0, 0, 1, 0, 0);
           topCtx.clearRect(0, 0, topOverlay.canvas.width, topOverlay.canvas.height);
           topCtx.setTransform(topOverlay.dpr, 0, 0, topOverlay.dpr, 0, 0);
-          renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, topOverlay.cssW, topOverlay.cssH);
+          const hitRect = renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, topOverlay.cssW, topOverlay.cssH);
+          syncAccountsRiskToggleButton(topOverlay, hitRect, Boolean(hitRect && hitRect.isCollapsed));
         }
       }
     } else {

@@ -1,3 +1,8 @@
+Trading Cortex v1.1.99 — Accounts & Risk Font Size Control & 1-Click Minimize/Expand
+
+- **Configurable Font Size (`v1.1.99`)**: Added a live **Font Size** slider (`8px – 18px`) in **Cortex → Accounts & Risk Box...** that scales all text, dollar values, and row spacing proportionally on the chart canvas.
+- **1-Click Minimize / Expand (`v1.1.99`)**: Added a compact `—` button on the top-right of the drawing header to collapse the box into a tiny single-line pill (`▸ VEST MARKETS (6) · HYPE`) when you don't need it, and click anywhere on the pill to expand it back open.
+
 Trading Cortex v1.1.98 — Filter Internal UUID/Hex Records & Top-Window Front-Most Canvas
 
 - **Filtered Out Random UUID/Hex Rows (`v1.1.98`)**: Rejected internal UUID sub-objects (`6e6f946a-5a6e-4246-...`) and raw hex hashes from account discovery and automatically purged them from cache, leaving only your real named firm accounts (`Account 71`, `Account 73`, etc.).

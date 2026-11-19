@@ -15,6 +15,7 @@ const mainJs = fs.readFileSync(mainJsPath, 'utf8');
 // 1. Verify non-draggable canvas drawing in content-main.js
 assert(mainJs.includes('function renderAccountsRiskOnCanvas('), 'content-main.js must define renderAccountsRiskOnCanvas');
 assert(mainJs.includes('function ensureAccountsRiskTopOverlayCanvas(') && mainJs.includes('z-index:2147483640'), 'Accounts & Risk canvas must render on a dedicated front-most overlay canvas above all chart elements');
+assert(mainJs.includes('function syncAccountsRiskToggleButton(') && mainJs.includes('vest-accounts-risk-toggle-btn'), 'Accounts & Risk drawing must support 1-click minimize/expand toggle button');
 assert(mainJs.includes("case 'VEST_TV_ACCOUNTS_RISK_DATA':"), 'content-main.js must handle VEST_TV_ACCOUNTS_RISK_DATA');
 assert(mainJs.includes("case 'VEST_SCAN_ACCOUNTS_NOW':"), 'content-main.js must handle VEST_SCAN_ACCOUNTS_NOW');
 assert(mainJs.includes('renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig'), 'renderIctSessionIndicators must draw accounts & risk on the front-most canvas');
@@ -39,6 +40,8 @@ assert(isolatedJs.includes('id="vest-sdm-open-accountsrisk-btn"'), 'Cortex dropd
 assert(isolatedJs.includes("id: 'accountsrisk'"), 'Charting Indicators hub must register accountsrisk tile');
 assert(isolatedJs.includes('vest-arb-master-enabled'), 'Master toggle must be present');
 assert(isolatedJs.includes('vest-arb-risk-pct'), 'Configurable risk percentage input must be present');
+assert(isolatedJs.includes('vest-arb-font-size'), 'Configurable font size slider must be present');
+assert(isolatedJs.includes("type === 'VEST_TV_ACCOUNTS_RISK_TOGGLE_COLLAPSE'"), 'Isolated world must persist minimize/expand toggle state');
 assert(isolatedJs.includes('vest-arb-offset-x') && isolatedJs.includes('vest-arb-offset-y'), 'Canvas top-left offset controls must be present');
 assert(isolatedJs.includes('vest-arb-scan-accounts-btn'), 'Scan Firm Accounts button must be present');
 assert(isolatedJs.includes('CORTEX_ACCOUNT_SNAPSHOT_UPDATE'), 'Cross-tab BroadcastChannel must sync live account snapshots');
@@ -81,6 +84,12 @@ assert.strictEqual(defCfg.enabled, true, 'Accounts & Risk drawing must be enable
 assert.strictEqual(defCfg.riskPercent, 1.0, 'Default risk percentage must be 1.0%');
 assert.strictEqual(defCfg.offsetX, 12, 'Default offsetX must anchor top-left inside chart pane');
 assert.strictEqual(defCfg.offsetY, 108, 'Default offsetY must sit cleanly below OHLC legend and indicator config controls');
+assert.strictEqual(defCfg.fontSize, 10.5, 'Default fontSize must be 10.5px');
+assert.strictEqual(defCfg.collapsed, false, 'Default collapsed must be false');
+assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ fontSize: 14.5, collapsed: true }).fontSize, 14.5);
+assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ fontSize: 14.5, collapsed: true }).collapsed, true);
+assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ fontSize: 99 }).fontSize, 18, 'fontSize must clamp to 18px max');
+assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ fontSize: 3 }).fontSize, 8, 'fontSize must clamp to 8px min');
 assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ offsetY: 52 }).offsetY, 108, 'Old default offsetY 52 must migrate to 108');
 assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ offsetY: 76 }).offsetY, 108, 'Old default offsetY 76 must migrate to 108');
 assert.strictEqual(sandbox.formatPlainDollar(-0.20), '-$0.20', 'Negative dollar values must format as -$0.20');
