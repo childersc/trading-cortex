@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.101`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.102`) are documented in this file.
+
+---
+
+## [v1.1.102] — 2026-11-19
+
+### ⚡ Eliminated Chart Flickering on Instrument & Account Switches
+- **Removed Transient Empty-Bar Clearing**:
+  - Stopped calling `clearAllChartOverlays()` during brief empty-bar loading frames when switching instruments or accounts on the Trade page, preventing overlays from flashing `display: none` while new symbol bars load.
+- **Dirty-Checked Style & Render Signature Caching**:
+  - Cached `lastAccountsRiskCanvasStyle`, `lastAccountsRiskBtnStyle`, and `lastAccountsRiskRenderSig` so `#vest-accounts-risk-overlay-canvas` and `#vest-accounts-risk-toggle-btn` only update CSS styles or repaint when coordinates, dimensions, config, symbol, or account data actually change — eliminating 60fps DOM/canvas thrashing.
+- **Preserved Cached Chart Canvas Across Symbol Changes**:
+  - Only clears `cachedTargetChartCanvas` when navigating away to non-chart routes (`/portfolio`, `/markets`, etc.), keeping `/trade/A` → `/trade/B` transitions flicker-free.
 
 ---
 

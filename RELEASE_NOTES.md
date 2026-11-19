@@ -1,3 +1,8 @@
+Trading Cortex v1.1.102 — Eliminated Chart Flickering on Instrument & Account Switches
+
+- **Zero Flicker on Instrument / Account Switches (`v1.1.102`)**: Stopped clearing overlays during transient empty-bar loading frames and preserved the cached chart canvas across `/trade` symbol changes.
+- **Dirty-Checked Overlay Repainting (`v1.1.102`)**: Cached canvas/button styles and render signatures so the Accounts & Risk overlay only repaints when its data, symbol, config, or geometry actually changes instead of thrashing every frame.
+
 Trading Cortex v1.1.101 — Fix Double Chart Overlay on Timeframe Switch & Portfolio Ghost Chart
 
 - **Fixed Double Chart Overlays (`v1.1.101`)**: Excluded `#vest-accounts-risk-overlay-canvas` from `findMainChartPaneCanvas()` and validated TradingView container ancestry so timeframe switches can never self-target our overlay canvas or double-render candles/indicators.
