@@ -1,3 +1,9 @@
+Trading Cortex v1.1.92 — On-Chart Accounts & Per-Trade Risk Box (Top-Left Chart Overlay)
+
+- **Top-Left Chart Accounts & Risk Box (`v1.1.92`)**: Added a compact floating widget anchored inside the top-left of the TradingView chart (to the right of the drawing toolbar and below the OHLC legend). Draggable, pinnable, minimizable to the Cortex top bar, and synced across all open browsers.
+- **Multi-Account Balances & Live Open PnL (`v1.1.92`)**: Displays all tracked accounts with their current balances and real-time Open PnL, automatically aggregating live account state across open tabs/windows and the account switcher dropdown.
+- **Instrument-Aware Per-Trade Risk Calculator (`v1.1.92`)**: When an account has an open position on the current chart instrument, it shows live side and Open PnL; when flat/closed on that instrument, it displays the exact dollar amount to risk per trade based on a configurable percentage (adjustable inline right inside the box or via Settings presets).
+
 Trading Cortex v1.1.91 — Web Audio Autoplay Hardening & Order Block Precision Tuning
 
 - **Elimination of Chrome Extension AudioContext Errors (`v1.1.91`)**: Resolved the `The AudioContext was not allowed to start` error in `chrome://extensions` by strictly preventing `.resume()` or AudioContext creation outside user gestures. The AudioContext is safely initialized upon user interactions (`click`, `pointerdown`, `keydown`), and background alert chimes only execute when the context is in the `'running'` state.

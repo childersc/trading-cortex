@@ -1,6 +1,21 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.91`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.92`) are documented in this file.
+
+---
+
+## [v1.1.92] — 2026-11-19
+
+### 💼 On-Chart Accounts & Per-Trade Risk Box (Top-Left Chart Overlay)
+- **Top-Left Chart Anchoring (`#vest-chart-accounts-risk-box`)**:
+  - Added a sleek floating overlay box anchored inside the top-left of the TradingView chart viewport (right of the drawing toolbar and below the OHLC legend).
+  - Supports dragging, sticky screen pin, minimize-to-top-bar taskbar pill (`accounts_risk`), direct settings routing, and "Reset to Top-Left" placement.
+- **Multi-Account Live Balance & Open PnL Aggregation**:
+  - Automatically tracks your active account balance (`Account Value`), total `Unrealized PnL`, and open per-instrument positions (`Active Positions`), and passively captures accounts seen in the account switcher dropdown.
+  - Synchronizes live account snapshots in real time across all open browser tabs and windows via `BroadcastChannel`, `localStorage`, and `chrome.storage.local` so every open account appears together in the box.
+- **Instrument-Specific Open PnL vs. Configurable Per-Trade Risk**:
+  - When an account has an **open position** on the active chart instrument, it displays the live side (`LONG`/`SHORT`) and real-time Open PnL (plus total account PnL if other instruments are also open).
+  - When the position on the active chart instrument is **closed / flat**, it automatically calculates and displays the exact dollar amount to **risk per trade** (`Balance × Risk %`), with both an inline Risk % input in the box footer and quick presets (`0.5%`, `1%`, `2%`, `3%`, `5%`) in Settings.
 
 ---
 
