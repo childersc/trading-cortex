@@ -587,6 +587,23 @@
 
   const DEFAULT_DIAGNOSTICS_BOX = { enabled: false, collapsed: false, pinned: false, pinnedLeft: null, pinnedTop: null, relX: 0.72, relY: 0.12, boxWidth: 360, bgColor: '#0f172a', bgOpacity: 94, borderColor: '#38bdf8' };
 
+  const DEFAULT_ACCOUNTS_RISK_BOX = {
+    enabled: true,
+    collapsed: false,
+    pinned: false,
+    pinnedLeft: null,
+    pinnedTop: null,
+    relX: null,
+    relY: null,
+    boxWidth: 256,
+    riskPercent: 1.0,
+    showOtherPnl: true,
+    bgColor: '#0b101b',
+    bgOpacity: 92,
+    borderColor: '#38bdf8',
+    manualAccounts: []
+  };
+
   const DEFAULT_POSITION_HUD = {
     enabled: true,           // Master toggle: enable active position overlay HUD
     showPriceLineHud: true,  // Rectangle box on current yellow price line displaying live PnL
@@ -1139,6 +1156,93 @@
       bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 94))),
       borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor)
     };
+    };
+  }
+
+  function normalizeAccountsRiskBoxConfig(rawCfg) {
+    const base = JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS_RISK_BOX));
+    if (!rawCfg || typeof rawCfg !== 'object') return base;
+    const relX = rawCfg.relX !== null && rawCfg.relX !== undefined && isFinite(Number(rawCfg.relX))
+      ? Math.max(0, Math.min(1, Number(rawCfg.relX)))
+      : null;
+    const relY = rawCfg.relY !== null && rawCfg.relY !== undefined && isFinite(Number(rawCfg.relY))
+      ? Math.max(0, Math.min(1, Number(rawCfg.relY)))
+      : null;
+    const pinnedLeft = rawCfg.pinnedLeft !== null && rawCfg.pinnedLeft !== undefined && isFinite(Number(rawCfg.pinnedLeft))
+      ? Math.round(Number(rawCfg.pinnedLeft))
+      : null;
+    const pinnedTop = rawCfg.pinnedTop !== null && rawCfg.pinnedTop !== undefined && isFinite(Number(rawCfg.pinnedTop))
+      ? Math.round(Number(rawCfg.pinnedTop))
+      : null;
+    const riskPctRaw = Number(rawCfg.riskPercent);
+    const riskPercent = Number.isFinite(riskPctRaw)
+      ? Math.max(0.05, Math.min(50, Math.round(riskPctRaw * 100) / 100))
+      : base.riskPercent;
+    const manualAccounts = Array.isArray(rawCfg.manualAccounts)
+      ? rawCfg.manualAccounts
+          .filter(a => a && typeof a === 'object' && String(a.name || '').trim())
+          .map(a => ({
+            id: String(a.id || a.name).trim(),
+            name: String(a.name).trim(),
+            balance: Number.isFinite(Number(a.balance)) ? Number(a.balance) : 0
+          }))
+      : [];
+    return {
+      ...base,
+      ...rawCfg,
+      enabled: rawCfg.enabled !== false,
+      collapsed: Boolean(rawCfg.collapsed),
+      pinned: Boolean(rawCfg.pinned),
+      pinnedLeft,
+      pinnedTop,
+      relX,
+      relY,
+      boxWidth: Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || base.boxWidth))),
+      riskPercent,
+      showOtherPnl: rawCfg.showOtherPnl !== false,
+      bgColor: normalizeHexColor(rawCfg.bgColor || base.bgColor, base.bgColor),
+      bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? base.bgOpacity))),
+      borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor),
+      manualAccounts
+    };
+  }
+
+  function computeAccountInstrumentStatus(account, currentSymbol, riskPercent) {
+    const sym = typeof normalizeInstrumentKey === 'function'
+      ? normalizeInstrumentKey(currentSymbol)
+      : String(currentSymbol || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const balance = (account && typeof account.balance === 'number' && Number.isFinite(account.balance))
+      ? account.balance
+      : null;
+    const pct = Math.max(0.05, Math.min(50, Number(riskPercent) || 1.0));
+    const riskAmount = balance !== null ? Math.max(0, balance * (pct / 100)) : null;
+
+    const positionsMap = (account && account.positionsBySymbol && typeof account.positionsBySymbol === 'object')
+      ? account.positionsBySymbol
+      : {};
+    let instPos = sym ? (positionsMap[sym] || null) : null;
+    if (!instPos && sym) {
+      for (const k of Object.keys(positionsMap)) {
+        const nk = typeof normalizeInstrumentKey === 'function' ? normalizeInstrumentKey(k) : String(k || '').toUpperCase();
+        if (nk === sym || nk.startsWith(sym) || sym.startsWith(nk)) {
+          instPos = positionsMap[k];
+          break;
+        }
+      }
+    }
+    const hasOpenOnInstrument = Boolean(instPos);
+    const totalOpenPnl = (account && typeof account.totalOpenPnl === 'number' && Number.isFinite(account.totalOpenPnl))
+      ? account.totalOpenPnl
+      : null;
+
+    return {
+      symbol: sym || '',
+      balance,
+      riskPercent: pct,
+      riskAmount,
+      hasOpenOnInstrument,
+      instrumentPosition: instPos,
+      totalOpenPnl
     };
   }
 
@@ -1719,6 +1823,7 @@
     dialogGlassOpacity: 78,
     minimizedWindowOrder: [],
     diagnosticsBox: JSON.parse(JSON.stringify(DEFAULT_DIAGNOSTICS_BOX)),
+    accountsRiskBox: JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS_RISK_BOX)),
     bottomPanelStates: {},
     bottomPanelState: {
       isMinimized: false,
@@ -2156,6 +2261,8 @@
           if (senderId === tabInstanceId) return; // Do not process self broadcast
           if (type === 'CORTEX_LIVE_SETTINGS_BROADCAST' && payload) {
             handleIncomingLiveSettings(payload.settings, payload.templates);
+          } else if (type === 'CORTEX_ACCOUNT_SNAPSHOT_UPDATE' && payload && typeof handleIncomingAccountSnapshots === 'function') {
+            handleIncomingAccountSnapshots(payload.snapshots);
           }
         };
       }
@@ -2227,6 +2334,9 @@
       if (typeof renderChartDiagnosticsBox === 'function') {
         renderChartDiagnosticsBox();
       }
+      if (typeof renderChartAccountsRiskBox === 'function') {
+        renderChartAccountsRiskBox();
+      }
       if (typeof renderFloatingBar === 'function') {
         renderFloatingBar();
       }
@@ -2275,6 +2385,13 @@
             handleIncomingLiveSettings(vault.settings, Array.isArray(vault.templates) ? vault.templates : null);
           }
         } catch (err) {}
+      } else if (e.key === '__trading_cortex_account_snapshots__' && e.newValue) {
+        try {
+          const snaps = JSON.parse(e.newValue);
+          if (snaps && typeof snaps === 'object' && typeof handleIncomingAccountSnapshots === 'function') {
+            handleIncomingAccountSnapshots(snaps);
+          }
+        } catch (err) {}
       }
     }, { passive: true });
   }
@@ -2310,6 +2427,9 @@
         if (changes.globalDrawings && Array.isArray(changes.globalDrawings.newValue)) {
           globalDrawings = normalizeGlobalDrawings(changes.globalDrawings.newValue);
           postToMainWorlds({ type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE', payload: { drawings: globalDrawings } });
+        }
+        if (changes.cortexAccountSnapshots && changes.cortexAccountSnapshots.newValue && typeof handleIncomingAccountSnapshots === 'function') {
+          handleIncomingAccountSnapshots(changes.cortexAccountSnapshots.newValue);
         }
         if (changes.installedVersionOverride && changes.installedVersionOverride.newValue) {
           installedVersionOverride = changes.installedVersionOverride.newValue;
@@ -3320,6 +3440,9 @@
       if (isTopWindow && prevInst !== currentInstrument && settings.tradesBox && settings.tradesBox.enabled && typeof renderChartTradesBox === 'function') {
         renderChartTradesBox();
       }
+      if (isTopWindow && prevInst !== currentInstrument && settings.accountsRiskBox && settings.accountsRiskBox.enabled && typeof renderChartAccountsRiskBox === 'function') {
+        renderChartAccountsRiskBox();
+      }
       if (isTopWindow && prevInst !== currentInstrument) refreshCortexPaperStatsOnChart(currentInstrument);
     } else if (type === 'VEST_TRADES_CAPTURED') {
       if (isTopWindow && Array.isArray(event.data.trades) && event.data.trades.length > 0 && typeof mergeCapturedTrades === 'function') {
@@ -3993,6 +4116,13 @@
             clampAndPositionChartDiagnosticsBox();
           }
         }
+        if (settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
+          if (!chartAccountsRiskBoxEl || !chartAccountsRiskBoxEl.isConnected) {
+            renderChartAccountsRiskBox();
+          } else {
+            clampAndPositionChartAccountsRiskBox();
+          }
+        }
         /* [HEARTBEAT_CLEANUP_BLOCK]
         if (!studioPillEl || !studioPillEl.isConnected) {
           renderStudioHeaderPill();
@@ -4515,6 +4645,16 @@
           </div>
           <span class="vest-sdm-badge-pill ${settings.tradesBox && settings.tradesBox.enabled ? 'on' : ''}">${settings.tradesBox && settings.tradesBox.enabled ? 'ON' : 'OFF'}</span>
         </div>
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-accountsrisk-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
+              <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+              <line x1="2" y1="10" x2="22" y2="10"></line>
+            </svg>
+            <span style="font-weight:600; color:#f8fafc;">Accounts &amp; Risk Box...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.accountsRiskBox && settings.accountsRiskBox.enabled ? 'on' : ''}">${settings.accountsRiskBox && settings.accountsRiskBox.enabled ? 'ON' : 'OFF'}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-marketstructure-btn" style="padding: 8px 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#06b6d4;">
@@ -4705,6 +4845,11 @@
       openStudioSettingsModal('diagnostics');
     });
 
+    menuEl.querySelector('#vest-sdm-open-accountsrisk-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('chartingindicators', 'accountsrisk');
+    });
+
     // Left Drawing Toolbar Toggle Button -> sends toggle command to TradingView chart
     menuEl.querySelector('#vest-sdm-toggle-drawing-toolbar-btn')?.addEventListener('click', () => {
       const nextVisible = !latestDrawingToolbarVisible;
@@ -4886,7 +5031,7 @@
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
-    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure', 'rangedetector'];
+    const INDICATOR_MAP = ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure', 'rangedetector', 'accountsrisk'];
     let targetIndicatorToScroll = targetIndicatorId;
     if (INDICATOR_MAP.includes(initialTab)) {
       targetIndicatorToScroll = initialTab;
@@ -4916,6 +5061,7 @@
     draftSettings.failLines = normalizeFailLinesConfig(draftSettings.failLines);
     draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
     draftSettings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
+    draftSettings.accountsRiskBox = normalizeAccountsRiskBoxConfig(draftSettings.accountsRiskBox);
     draftSettings.perpFirms = normalizePerpFirmsConfig(draftSettings.perpFirms);
     const activeFirmInitial = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
     let selectedFirmId = activeFirmInitial ? activeFirmInitial.id : (draftSettings.perpFirms[0]?.id || 'myfundedperpetuals');
@@ -5016,6 +5162,9 @@
       if (draftSettings.diagnosticsBox) {
         settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(draftSettings.diagnosticsBox);
       }
+      if (draftSettings.accountsRiskBox) {
+        settings.accountsRiskBox = normalizeAccountsRiskBoxConfig(draftSettings.accountsRiskBox);
+      }
       if (typeof draftSettings.debugMode === 'boolean') {
         settings.debugMode = draftSettings.debugMode;
       }
@@ -5039,6 +5188,7 @@
         marketStructure: settings.marketStructure,
         rangeDetector: settings.rangeDetector,
         diagnosticsBox: settings.diagnosticsBox,
+        accountsRiskBox: settings.accountsRiskBox,
         debugMode: settings.debugMode,
         dialogGlassEffect: settings.dialogGlassEffect,
         perpFirms: settings.perpFirms
@@ -5052,6 +5202,9 @@
       }
       if (typeof renderChartDiagnosticsBox === 'function') {
         renderChartDiagnosticsBox();
+      }
+      if (typeof renderChartAccountsRiskBox === 'function') {
+        renderChartAccountsRiskBox();
       }
       postToMainWorlds({
         type: 'VEST_TV_CONFIG_UPDATE',
@@ -6747,6 +6900,65 @@
 
       
 
+      function renderAccountsRiskSettingsHtml(arb) {
+        const currentSnaps = typeof getMergedAccountSnapshotsList === 'function' ? getMergedAccountSnapshotsList() : [];
+        const savedRowsHtml = currentSnaps.length > 0
+          ? currentSnaps.map(acc => `
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);font-size:11px;">
+                <span style="color:#f8fafc;font-weight:600;">${escapeHtml(acc.name || acc.id)}</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="color:#38bdf8;font-family:monospace;">${acc.balance !== null && Number.isFinite(acc.balance) ? `$${acc.balance.toFixed(2)}` : '--'}</span>
+                  <button type="button" class="vest-arb-remove-acc-btn" data-acc-key="${escapeHtml(acc.key || '')}" style="background:rgba(239,68,68,0.16);border:1px solid rgba(239,68,68,0.35);color:#fca5a5;border-radius:4px;padding:1px 6px;font-size:10px;cursor:pointer;" title="Remove from list">✕</button>
+                </div>
+              </div>
+            `).join('')
+          : `<div style="font-size:11px;color:#64748b;padding:4px 0;">Accounts are automatically discovered as you view or open them across browser tabs.</div>`;
+
+        return `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;padding:14px;border-radius:8px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.22);">
+            <div>
+              <label for="vest-arb-risk-pct" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Risk Per Trade (% of Balance)</label>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <input type="number" id="vest-arb-risk-pct" min="0.05" max="50" step="0.1" value="${arb.riskPercent}" style="width:100%;padding:7px 8px;border-radius:6px;background:#0b0e14;color:#f8fafc;border:1px solid #343a46;font-family:monospace;font-weight:700;">
+                <span style="color:#94a3b8;font-size:12px;font-weight:700;">%</span>
+              </div>
+              <div style="display:flex;gap:4px;margin-top:6px;">
+                ${[0.5, 1, 2, 3, 5].map(p => `<button type="button" class="vest-arb-preset-pct" data-pct="${p}" style="flex:1;padding:3px 0;font-size:10px;font-weight:700;border-radius:4px;cursor:pointer;background:${Number(arb.riskPercent) === p ? 'rgba(56,189,248,0.28)' : 'rgba(255,255,255,0.06)'};border:1px solid ${Number(arb.riskPercent) === p ? 'rgba(56,189,248,0.7)' : 'rgba(255,255,255,0.12)'};color:#f8fafc;">${p}%</button>`).join('')}
+              </div>
+            </div>
+            <div>
+              <label for="vest-arb-width" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Box Width (<span id="vest-arb-width-val">${arb.boxWidth}px</span>)</label>
+              <input type="range" id="vest-arb-width" min="200" max="440" step="4" value="${arb.boxWidth}" style="width:100%;margin-top:6px;">
+              <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11.5px;color:#cbd5e1;cursor:pointer;">
+                <input type="checkbox" id="vest-arb-show-other-pnl" ${arb.showOtherPnl !== false ? 'checked' : ''} />
+                Show other-instrument Open PnL when flat
+              </label>
+            </div>
+            <div>
+              <label for="vest-arb-bg-opacity" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Background Opacity (<span id="vest-arb-opacity-val">${arb.bgOpacity}%</span>)</label>
+              <input type="range" id="vest-arb-bg-opacity" min="20" max="100" step="2" value="${arb.bgOpacity}" style="width:100%;">
+            </div>
+            <div style="display:flex;align-items:flex-end;gap:8px;">
+              <div style="flex:1;">
+                <label for="vest-arb-border-color" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Accent Border</label>
+                <input type="color" id="vest-arb-border-color" value="${arb.borderColor || '#38bdf8'}" style="width:100%;height:32px;border:none;border-radius:6px;background:transparent;cursor:pointer;">
+              </div>
+              <button type="button" class="vest-tvs-action-btn" id="vest-arb-reset-pos-btn" style="height:32px;padding:0 10px;font-size:11px;white-space:nowrap;">Reset to Top-Left</button>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;padding:12px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <span style="font-size:12px;font-weight:700;color:#f8fafc;">Tracked Accounts (${currentSnaps.length})</span>
+              <button type="button" id="vest-arb-clear-accounts-btn" style="background:rgba(239,68,68,0.14);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;border-radius:5px;padding:3px 8px;font-size:10.5px;cursor:pointer;">Clear Cached</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;max-height:140px;overflow-y:auto;">
+              ${savedRowsHtml}
+            </div>
+          </div>
+        `;
+      }
+
       function renderRangeDetectorSettingsHtml(rd) {
         return `
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;padding:14px;border-radius:8px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.22);">
@@ -7033,6 +7245,8 @@
         draftSettings.rangeDetector = rd;
         const ms = normalizeMarketStructureConfig(draftSettings.marketStructure);
         draftSettings.marketStructure = ms;
+        const arb = normalizeAccountsRiskBoxConfig(draftSettings.accountsRiskBox);
+        draftSettings.accountsRiskBox = arb;
 
         const INDICATORS = [
           {
@@ -7155,6 +7369,17 @@
             masterToggleId: 'vest-ms-master-enabled',
             isEnabled: Boolean(ms.enabled),
             renderSettings: () => renderMarketStructureSettingsHtml(ms)
+          },
+          {
+            id: 'accountsrisk',
+            title: 'Accounts &amp; Risk Box',
+            desc: 'Top-left on-chart widget showing all accounts, current balances, live Open PnL, and per-trade dollar risk when flat on the active instrument',
+            icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>`,
+            accentColor: '#38bdf8',
+            bgTint: 'rgba(56, 189, 248, 0.12)',
+            masterToggleId: 'vest-arb-master-enabled',
+            isEnabled: Boolean(arb.enabled),
+            renderSettings: () => renderAccountsRiskSettingsHtml(arb)
           }
         ];
 
@@ -8082,6 +8307,20 @@
         draftSettings.rangeDetector = normalizeRangeDetectorConfig(rd);
       }
 
+      // Sync Accounts & Risk Box
+      const masterArb = overlay.querySelector('#vest-arb-master-enabled');
+      if (masterArb || overlay.querySelector('#vest-arb-risk-pct')) {
+        const arb = normalizeAccountsRiskBoxConfig(draftSettings.accountsRiskBox);
+        if (masterArb) arb.enabled = Boolean(masterArb.checked);
+        const q = (sel) => overlay.querySelector(sel);
+        if (q('#vest-arb-risk-pct')) arb.riskPercent = Number(q('#vest-arb-risk-pct').value) || 1.0;
+        if (q('#vest-arb-width')) arb.boxWidth = Number(q('#vest-arb-width').value) || 256;
+        if (q('#vest-arb-bg-opacity')) arb.bgOpacity = Number(q('#vest-arb-bg-opacity').value) || 92;
+        if (q('#vest-arb-border-color')) arb.borderColor = q('#vest-arb-border-color').value || '#38bdf8';
+        if (q('#vest-arb-show-other-pnl')) arb.showOtherPnl = Boolean(q('#vest-arb-show-other-pnl').checked);
+        draftSettings.accountsRiskBox = normalizeAccountsRiskBoxConfig(arb);
+      }
+
             // Sync Market Structure
       const masterMs = overlay.querySelector('#vest-ms-master-enabled');
       if (masterMs || overlay.querySelector('#vest-ms-swing-lookback')) {
@@ -9007,6 +9246,71 @@
         });
       }
 
+      if (activeTab === 'accountsrisk' || activeTab === 'chartingindicators') {
+        overlay.querySelector('#vest-arb-reset-pos-btn')?.addEventListener('click', () => {
+          const arb = normalizeAccountsRiskBoxConfig(draftSettings.accountsRiskBox);
+          arb.relX = null;
+          arb.relY = null;
+          arb.pinned = false;
+          arb.pinnedLeft = null;
+          arb.pinnedTop = null;
+          arb.collapsed = false;
+          draftSettings.accountsRiskBox = arb;
+          broadcastLiveSessionDraft();
+          showToast('Accounts & Risk Box reset to top-left of chart');
+        });
+
+        overlay.querySelectorAll('.vest-arb-preset-pct').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const pct = Number(btn.getAttribute('data-pct')) || 1.0;
+            const input = overlay.querySelector('#vest-arb-risk-pct');
+            if (input) input.value = String(pct);
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+
+        overlay.querySelector('#vest-arb-clear-accounts-btn')?.addEventListener('click', () => {
+          if (typeof clearCachedAccountSnapshots === 'function') {
+            clearCachedAccountSnapshots();
+          }
+          targetIndicatorToScroll = 'accountsrisk';
+          renderDialog();
+          showToast('Cleared cached accounts — active tab account will re-sync');
+        });
+
+        overlay.querySelectorAll('.vest-arb-remove-acc-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const accKey = btn.getAttribute('data-acc-key');
+            if (accKey && typeof removeAccountSnapshotByKey === 'function') {
+              removeAccountSnapshotByKey(accKey);
+            }
+            targetIndicatorToScroll = 'accountsrisk';
+            renderDialog();
+          });
+        });
+
+        ['#vest-arb-master-enabled', '#vest-arb-show-other-pnl', '#vest-arb-border-color'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+
+        ['#vest-arb-risk-pct', '#vest-arb-width', '#vest-arb-bg-opacity'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('input', () => {
+            const wEl = overlay.querySelector('#vest-arb-width');
+            const wVal = overlay.querySelector('#vest-arb-width-val');
+            if (wEl && wVal) wVal.textContent = `${wEl.value}px`;
+            const opEl = overlay.querySelector('#vest-arb-bg-opacity');
+            const opVal = overlay.querySelector('#vest-arb-opacity-val');
+            if (opEl && opVal) opVal.textContent = `${opEl.value}%`;
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+          });
+        });
+      }
+
       if (activeTab === 'marketstructure' || activeTab === 'chartingindicators') {
         overlay.querySelector('#vest-ms-reset-defaults-btn')?.addEventListener('click', () => {
           draftSettings.marketStructure = JSON.parse(JSON.stringify(DEFAULT_MARKET_STRUCTURE));
@@ -9450,6 +9754,9 @@ if (activeTab === 'diagnostics') {
     if (settings.orderBlocks && settings.orderBlocks.enabled && settings.orderBlocks.showStatsBox !== false && settings.orderBlocks.statsBoxCollapsed) {
       activeCollapsed.push('order_blocks_stats');
     }
+    if (settings.accountsRiskBox && settings.accountsRiskBox.enabled && settings.accountsRiskBox.collapsed) {
+      activeCollapsed.push('accounts_risk');
+    }
 
     const order = current.filter(id => activeCollapsed.includes(id));
     activeCollapsed.forEach(id => {
@@ -9511,6 +9818,9 @@ if (activeTab === 'diagnostics') {
       } else if (type === 'order_blocks_stats') {
         el = chartOrderBlockStatsBoxEl;
         defaultW = 230;
+      } else if (type === 'accounts_risk') {
+        el = chartAccountsRiskBoxEl;
+        defaultW = 215;
       }
 
       const boxW = (el && el.offsetWidth) || (type === boxType && boxEl && boxEl.offsetWidth) || defaultW;
@@ -9566,6 +9876,9 @@ if (activeTab === 'diagnostics') {
       } else if (boxType === 'order_blocks_stats') {
         el = chartOrderBlockStatsBoxEl;
         defaultW = 230;
+      } else if (boxType === 'accounts_risk') {
+        el = chartAccountsRiskBoxEl;
+        defaultW = 215;
       } else if (boxType === 'positions') {
         el = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
         defaultW = 195;
@@ -11287,6 +11600,7 @@ if (activeTab === 'diagnostics') {
         currentPrice: currentPrice || '--',
         debugMode: Boolean(settings.debugMode),
         diagnosticsBox: settings.diagnosticsBox,
+        accountsRiskBox: settings.accountsRiskBox,
         newsBoxEnabled: Boolean(settings.newsBox && settings.newsBox.enabled),
         tradesBoxEnabled: Boolean(settings.tradesBox && settings.tradesBox.enabled),
         positionHudEnabled: Boolean(settings.positionHud && settings.positionHud.enabled),
@@ -12141,6 +12455,793 @@ if (activeTab === 'diagnostics') {
           window.removeEventListener('mousemove', onMove);
           window.removeEventListener('mouseup', onUp);
           queueSettingsSave({ orderBlocks: settings.orderBlocks });
+        };
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    }
+  }
+
+  // -------------------------------------------------------------
+  // On-Chart Accounts & Per-Trade Risk Box (Top-Left Chart Overlay)
+  // -------------------------------------------------------------
+  let chartAccountsRiskBoxEl = null;
+  let activeAccountsRiskBoxDrag = null;
+  let accountsRiskPollTimer = null;
+  let accountSnapshotsRegistry = {};
+  let lastAccountSnapshotDigest = '';
+  const ACCOUNT_SNAPSHOTS_LS_KEY = '__trading_cortex_account_snapshots__';
+
+  function parseDollarAmount(rawText) {
+    if (rawText === null || rawText === undefined) return null;
+    const str = String(rawText).trim();
+    if (!str) return null;
+    const isParenNeg = /^\(\s*\$/.test(str) && /\)$/.test(str);
+    const match = str.match(/([-+])?\s*\$\s*([\d,]+(?:\.\d+)?)/);
+    if (!match) return null;
+    const sign = (match[1] === '-' || isParenNeg) ? -1 : 1;
+    const num = Number(match[2].replace(/,/g, ''));
+    return Number.isFinite(num) ? sign * num : null;
+  }
+
+  function formatSignedDollar(val) {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return '--';
+    const absStr = Math.abs(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (val > 0.0001) return `+$${absStr}`;
+    if (val < -0.0001) return `-$${absStr}`;
+    return `$0.00`;
+  }
+
+  function formatPlainDollar(val) {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return '--';
+    return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function loadAccountSnapshotsFromLocalStorage() {
+    try {
+      const raw = window.localStorage.getItem(ACCOUNT_SNAPSHOTS_LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          accountSnapshotsRegistry = { ...parsed, ...accountSnapshotsRegistry };
+        }
+      }
+    } catch (e) {}
+  }
+
+  function persistAndBroadcastAccountSnapshots() {
+    try {
+      window.localStorage.setItem(ACCOUNT_SNAPSHOTS_LS_KEY, JSON.stringify(accountSnapshotsRegistry));
+    } catch (e) {}
+    try {
+      if (isExtensionValid() && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ cortexAccountSnapshots: accountSnapshotsRegistry });
+      }
+    } catch (e) {}
+    try {
+      if (!cortexCrossTabChannel) initCrossTabSyncChannel();
+      if (cortexCrossTabChannel) {
+        cortexCrossTabChannel.postMessage({
+          type: 'CORTEX_ACCOUNT_SNAPSHOT_UPDATE',
+          senderId: tabInstanceId,
+          payload: { snapshots: accountSnapshotsRegistry, timestamp: Date.now() }
+        });
+      }
+    } catch (e) {}
+  }
+
+  function handleIncomingAccountSnapshots(incoming) {
+    if (!incoming || typeof incoming !== 'object') return;
+    let changed = false;
+    for (const key of Object.keys(incoming)) {
+      const inc = incoming[key];
+      if (!inc || typeof inc !== 'object' || !inc.name) continue;
+      const cur = accountSnapshotsRegistry[key];
+      if (!cur || (Number(inc.updatedAt) || 0) >= (Number(cur.updatedAt) || 0)) {
+        accountSnapshotsRegistry[key] = inc;
+        changed = true;
+      }
+    }
+    if (changed && chartAccountsRiskBoxEl && chartAccountsRiskBoxEl.style.display !== 'none') {
+      renderChartAccountsRiskBox();
+    }
+  }
+
+  function clearCachedAccountSnapshots() {
+    accountSnapshotsRegistry = {};
+    lastAccountSnapshotDigest = '';
+    persistAndBroadcastAccountSnapshots();
+    scrapeAndSyncCurrentAccountSnapshot(true);
+    renderChartAccountsRiskBox();
+  }
+
+  function removeAccountSnapshotByKey(accKey) {
+    if (!accKey || !accountSnapshotsRegistry[accKey]) return;
+    delete accountSnapshotsRegistry[accKey];
+    lastAccountSnapshotDigest = '';
+    persistAndBroadcastAccountSnapshots();
+    renderChartAccountsRiskBox();
+  }
+
+  function getMergedAccountSnapshotsList() {
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const activeFirmId = activeFirm ? activeFirm.id : 'vest';
+    const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
+    const cleanCurrentName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : null;
+
+    const list = Object.values(accountSnapshotsRegistry)
+      .filter(a => a && typeof a === 'object' && a.name && (!a.firmId || a.firmId === activeFirmId));
+
+    // Sort: currently active account first, then alphabetically/numerically by name
+    list.sort((a, b) => {
+      const aActive = cleanCurrentName && a.name === cleanCurrentName ? 1 : 0;
+      const bActive = cleanCurrentName && b.name === cleanCurrentName ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+    });
+    return list;
+  }
+
+  function scrapeAccountHealthMetricsFromDom() {
+    let balance = null;
+    let totalOpenPnl = null;
+    let inPositionsUsd = null;
+
+    try {
+      // 1. Scan Account Health panel (Vest bottom-right panel)
+      const candidates = Array.from(document.querySelectorAll('div, section, aside')).filter(el => {
+        if (el.children.length > 20) return false;
+        const txt = (el.innerText || '').trim();
+        return txt.length > 15 && txt.length < 450 && /account\s+value/i.test(txt);
+      });
+      // Prefer the tightest container containing both "Account Health" and "Account Value"
+      candidates.sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
+      const healthEl = candidates.find(el => /account\s+health/i.test(el.innerText || '')) || candidates[0] || null;
+      if (healthEl) {
+        const text = healthEl.innerText || '';
+        const valMatch = text.match(/account\s+value[\s:]*([-+]?\s*\$[\d,]+(?:\.\d+)?)/i);
+        if (valMatch) balance = parseDollarAmount(valMatch[1]);
+        const pnlMatch = text.match(/unrealized\s+p(?:&|n)?l[\s:]*([-+]?\s*\$[\d,]+(?:\.\d+)?)/i);
+        if (pnlMatch) totalOpenPnl = parseDollarAmount(pnlMatch[1]);
+      }
+
+      // 2. Fallback / supplement from top summary bar ("Unr. PnL: -$0.20", "In Positions: $177.59")
+      const bodyTextSlice = Array.from(document.querySelectorAll('header, nav, div')).filter(el => {
+        if (el.children.length > 14) return false;
+        const txt = (el.innerText || '').trim();
+        return txt.length > 10 && txt.length < 300 && (/unr\.?\s*pnl/i.test(txt) || /in\s+positions/i.test(txt));
+      });
+      bodyTextSlice.sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
+      for (const el of bodyTextSlice) {
+        const txt = el.innerText || '';
+        if (totalOpenPnl === null) {
+          const m = txt.match(/unr\.?\s*pnl[\s:]*([-+]?\s*\$[\d,]+(?:\.\d+)?)/i);
+          if (m) totalOpenPnl = parseDollarAmount(m[1]);
+        }
+        if (inPositionsUsd === null) {
+          const mPos = txt.match(/in\s+positions[\s:]*([-+]?\s*\$[\d,]+(?:\.\d+)?)/i);
+          if (mPos) inPositionsUsd = parseDollarAmount(mPos[1]);
+        }
+        if (totalOpenPnl !== null && inPositionsUsd !== null) break;
+      }
+    } catch (e) {}
+
+    return { balance, totalOpenPnl, inPositionsUsd };
+  }
+
+  function scrapeActivePositionsMapFromDom(inPositionsUsd = null) {
+    const positionsBySymbol = {};
+    let reliable = false;
+
+    try {
+      // Fast reliable flat signal from header strip ("In Positions: $0.00")
+      if (typeof inPositionsUsd === 'number' && Math.abs(inPositionsUsd) < 0.005) {
+        return { reliable: true, positionsBySymbol: {} };
+      }
+
+      const bottomInfo = typeof findBottomPositionsPanel === 'function' ? findBottomPositionsPanel() : null;
+      const panel = bottomInfo?.panel || document.querySelector('[data-vest-bottom-panel="true"]');
+      if (!panel) return { reliable: false, positionsBySymbol };
+
+      // Check Active Positions tab badge count e.g. "Active Positions (0)" or "Active Positions (2)"
+      const tabs = Array.from(panel.querySelectorAll('[role="tab"], button'));
+      const activePosTab = tabs.find(t => /^active\s+positions(?:\s*\(\s*\d+\s*\))?$/i.test((t.innerText || '').replace(/\s+/g, ' ').trim()));
+      if (activePosTab) {
+        const tabText = (activePosTab.innerText || '').replace(/\s+/g, ' ').trim();
+        const countMatch = tabText.match(/\(\s*(\d+)\s*\)/);
+        if (countMatch && Number(countMatch[1]) === 0) {
+          return { reliable: true, positionsBySymbol: {} };
+        }
+      }
+
+      // Check if Active Positions view is currently visible
+      const panelText = (panel.innerText || '').toLowerCase();
+      if (/no\s+active\s+positions/i.test(panelText)) {
+        return { reliable: true, positionsBySymbol: {} };
+      }
+
+      const tables = Array.from(panel.querySelectorAll('table, [role="table"]'));
+      for (const table of tables) {
+        const rect = table.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        let headers = Array.from(table.querySelectorAll('thead th, thead [role="columnheader"]'))
+          .map(c => (c.innerText || c.textContent || '').trim().toLowerCase());
+        if (!headers.length) {
+          headers = Array.from(table.querySelectorAll('tr:first-child th, tr:first-child td, [role="row"]:first-child [role="columnheader"]'))
+            .map(c => (c.innerText || c.textContent || '').trim().toLowerCase());
+        }
+        const headerLine = headers.join(' | ');
+        // Ensure this is strictly the Active Positions table (not History or Open Orders)
+        const isActivePosTable = (headerLine.includes('open price') || headerLine.includes('mid price') || headerLine.includes('fail price')) &&
+          headerLine.includes('pnl') &&
+          !headerLine.includes('closed') &&
+          !headerLine.includes('exit price') &&
+          !headerLine.includes('trigger price');
+        if (!isActivePosTable) continue;
+
+        reliable = true;
+        const pnlColIdx = headers.findIndex(h => /^pnl\b|\bpnl\b/.test(h) && !h.includes('realized'));
+        const valColIdx = headers.findIndex(h => h.includes('value') || h.includes('size'));
+        const rows = Array.from(table.querySelectorAll('tbody tr, [role="row"]'));
+
+        for (const row of rows) {
+          if (row.querySelector('th, [role="columnheader"]')) continue;
+          const rowText = (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim();
+          if (!rowText || !/\b(long|short)\b/i.test(rowText)) continue;
+
+          const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
+          const marketCellText = (cells[0]?.innerText || cells[0]?.textContent || rowText).trim();
+          const symToken = marketCellText.split(/\s+/)[0] || '';
+          const normSym = typeof normalizeInstrumentKey === 'function'
+            ? normalizeInstrumentKey(symToken)
+            : symToken.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          if (!normSym) continue;
+
+          const side = /\bshort\b/i.test(rowText) ? 'short' : 'long';
+          let pnlVal = null;
+          let pnlPct = '';
+          if (pnlColIdx >= 0 && cells[pnlColIdx]) {
+            const pnlCellText = (cells[pnlColIdx].innerText || cells[pnlColIdx].textContent || '').trim();
+            pnlVal = parseDollarAmount(pnlCellText);
+            const pctM = pnlCellText.match(/([-+]?\d+(?:\.\d+)?%)/);
+            if (pctM) pnlPct = pctM[1];
+          }
+          let valUsd = null;
+          if (valColIdx >= 0 && cells[valColIdx]) {
+            valUsd = parseDollarAmount(cells[valColIdx].innerText || '');
+          }
+
+          positionsBySymbol[normSym] = {
+            symbol: normSym,
+            side,
+            pnl: pnlVal,
+            pnlPct,
+            value: valUsd
+          };
+        }
+        break;
+      }
+    } catch (e) {}
+
+    return { reliable, positionsBySymbol };
+  }
+
+  function scrapeOpenAccountDropdownIntoRegistry() {
+    try {
+      const items = document.querySelectorAll(
+        '[data-testid^="account-item-"], [role="menuitem"], [class*="account-item"], [class*="DropdownMenuItem"]'
+      );
+      if (!items.length) return false;
+      const DANGEROUS_ACTIONS = /disconnect|logout|log out|sign out|exit|leave|unlink|switch wallet|revoke|remove|deposit|withdraw|settings|create|new account|get funded/i;
+      const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+      const firmId = activeFirm ? activeFirm.id : 'vest';
+      let discoveredAny = false;
+
+      for (const item of items) {
+        const rect = item.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const rawText = (item.innerText || '').trim();
+        if (!rawText || DANGEROUS_ACTIONS.test(rawText)) continue;
+        const firstLine = rawText.split(/\r?\n/)[0].replace(/[↕▼⌄▾]/g, '').trim();
+        if (!firstLine || firstLine.length > 48) continue;
+        // Must look like an account name (e.g. "Account 76", "Account 59", "Evaluation...", "Funded...", or have data-testid account-item-)
+        const isAccountTestId = Boolean(item.getAttribute('data-testid')?.startsWith('account-item-'));
+        if (!isAccountTestId && !/account\s*\d+|evaluation|funded|subaccount/i.test(firstLine)) continue;
+
+        const key = `${firmId}::${firstLine}`;
+        const maybeBal = parseDollarAmount(rawText);
+        if (!accountSnapshotsRegistry[key]) {
+          accountSnapshotsRegistry[key] = {
+            key,
+            id: firstLine,
+            name: firstLine,
+            firmId,
+            balance: maybeBal,
+            totalOpenPnl: null,
+            inPositionsUsd: null,
+            positionsBySymbol: {},
+            updatedAt: Date.now(),
+            sourceTabId: tabInstanceId
+          };
+          discoveredAny = true;
+        } else if (maybeBal !== null && accountSnapshotsRegistry[key].balance === null) {
+          accountSnapshotsRegistry[key].balance = maybeBal;
+          discoveredAny = true;
+        }
+      }
+      if (discoveredAny) {
+        persistAndBroadcastAccountSnapshots();
+      }
+      return discoveredAny;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function scrapeAndSyncCurrentAccountSnapshot(forceRender = false) {
+    if (!isTopWindow || !isExtensionValid()) return;
+    scrapeOpenAccountDropdownIntoRegistry();
+
+    const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
+    const rawAccName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : null;
+    if (!rawAccName) return;
+
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const firmId = activeFirm ? activeFirm.id : 'vest';
+    const key = `${firmId}::${rawAccName}`;
+
+    const health = scrapeAccountHealthMetricsFromDom();
+    const posRes = scrapeActivePositionsMapFromDom(health.inPositionsUsd);
+
+    const existing = accountSnapshotsRegistry[key] || {
+      key,
+      id: rawAccName,
+      name: rawAccName,
+      firmId,
+      balance: null,
+      totalOpenPnl: null,
+      inPositionsUsd: null,
+      positionsBySymbol: {},
+      updatedAt: 0
+    };
+
+    const nextSnap = {
+      ...existing,
+      key,
+      id: rawAccName,
+      name: rawAccName,
+      firmId,
+      balance: health.balance !== null ? health.balance : existing.balance,
+      totalOpenPnl: health.totalOpenPnl !== null ? health.totalOpenPnl : existing.totalOpenPnl,
+      inPositionsUsd: health.inPositionsUsd !== null ? health.inPositionsUsd : existing.inPositionsUsd,
+      positionsBySymbol: posRes.reliable ? posRes.positionsBySymbol : (existing.positionsBySymbol || {}),
+      updatedAt: Date.now(),
+      sourceTabId: tabInstanceId
+    };
+
+    accountSnapshotsRegistry[key] = nextSnap;
+
+    const digest = JSON.stringify({
+      k: key,
+      b: nextSnap.balance,
+      p: nextSnap.totalOpenPnl,
+      ip: nextSnap.inPositionsUsd,
+      pos: nextSnap.positionsBySymbol,
+      inst: currentInstrument || ''
+    });
+
+    if (digest !== lastAccountSnapshotDigest || forceRender) {
+      lastAccountSnapshotDigest = digest;
+      persistAndBroadcastAccountSnapshots();
+      if (settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
+        renderChartAccountsRiskBox();
+      }
+    }
+  }
+
+  function getChartTopLeftAnchorRect() {
+    const vp = getScreenBoundsRect();
+    let chartRect = null;
+    let bestArea = 0;
+    try {
+      const iframes = Array.from(document.querySelectorAll('iframe'));
+      for (const frame of iframes) {
+        const r = frame.getBoundingClientRect();
+        if (r.width >= 300 && r.height >= 200) {
+          const area = r.width * r.height;
+          if (area > bestArea) {
+            bestArea = area;
+            chartRect = r;
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (chartRect) {
+      // Position inside top-left of TradingView chart (clears ~52px drawing toolbar and ~92px top toolbar + OHLC legend)
+      return {
+        left: Math.round(chartRect.left + 58),
+        top: Math.round(chartRect.top + 92),
+        chartRect
+      };
+    }
+    return {
+      left: Math.round(vp.left + 64),
+      top: Math.round(vp.top + 140),
+      chartRect: null
+    };
+  }
+
+  function clampAndPositionChartAccountsRiskBox() {
+    if (!chartAccountsRiskBoxEl || chartAccountsRiskBoxEl.style.display === 'none' || activeAccountsRiskBoxDrag) return;
+    const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+    const vp = getScreenBoundsRect();
+
+    if (arb.collapsed) {
+      const minPos = getMinimizedCortexBarCoords('accounts_risk', chartAccountsRiskBoxEl);
+      chartAccountsRiskBoxEl.style.left = `${minPos.left}px`;
+      chartAccountsRiskBoxEl.style.top = `${minPos.top}px`;
+      return;
+    }
+
+    const boxW = chartAccountsRiskBoxEl.offsetWidth || arb.boxWidth || 256;
+    const boxH = chartAccountsRiskBoxEl.offsetHeight || 160;
+
+    let targetLeft;
+    let targetTop;
+    if (arb.pinned && arb.pinnedLeft !== null && arb.pinnedTop !== null) {
+      targetLeft = arb.pinnedLeft;
+      targetTop = arb.pinnedTop;
+    } else if (typeof arb.relX === 'number' && typeof arb.relY === 'number') {
+      const maxOffsetX = Math.max(0, vp.width - boxW);
+      const maxOffsetY = Math.max(0, vp.height - boxH);
+      targetLeft = Math.round(vp.left + arb.relX * maxOffsetX);
+      targetTop = Math.round(vp.top + arb.relY * maxOffsetY);
+    } else {
+      // Default: anchor cleanly inside top-left of the TradingView chart (red box region)
+      const anchor = getChartTopLeftAnchorRect();
+      targetLeft = anchor.left;
+      targetTop = anchor.top;
+    }
+
+    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
+    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
+
+    chartAccountsRiskBoxEl.style.left = `${clampedLeft}px`;
+    chartAccountsRiskBoxEl.style.top = `${clampedTop}px`;
+  }
+
+  function renderChartAccountsRiskBox() {
+    if (!isTopWindow) return;
+
+    const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+    settings.accountsRiskBox = arb;
+
+    if (!arb.enabled) {
+      if (chartAccountsRiskBoxEl) {
+        chartAccountsRiskBoxEl.style.display = 'none';
+      }
+      if (accountsRiskPollTimer) {
+        clearInterval(accountsRiskPollTimer);
+        accountsRiskPollTimer = null;
+      }
+      return;
+    }
+
+    if (!chartAccountsRiskBoxEl || !chartAccountsRiskBoxEl.isConnected) {
+      chartAccountsRiskBoxEl = document.getElementById('vest-chart-accounts-risk-box');
+      if (!chartAccountsRiskBoxEl) {
+        chartAccountsRiskBoxEl = document.createElement('div');
+        chartAccountsRiskBoxEl.id = 'vest-chart-accounts-risk-box';
+        document.body.appendChild(chartAccountsRiskBoxEl);
+      }
+    }
+
+    if (!accountsRiskPollTimer) {
+      loadAccountSnapshotsFromLocalStorage();
+      scrapeAndSyncCurrentAccountSnapshot(false);
+      accountsRiskPollTimer = setInterval(() => {
+        if (!isExtensionValid()) {
+          clearInterval(accountsRiskPollTimer);
+          accountsRiskPollTimer = null;
+          return;
+        }
+        if (settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
+          scrapeAndSyncCurrentAccountSnapshot(false);
+        }
+      }, 1500);
+    }
+
+    // Do not clobber inline risk input while user is actively typing inside it
+    const activeEl = document.activeElement;
+    if (activeEl && chartAccountsRiskBoxEl.contains(activeEl) && activeEl.id === 'vest-arb-inline-risk-pct') {
+      return;
+    }
+
+    chartAccountsRiskBoxEl.style.display = 'block';
+    chartAccountsRiskBoxEl.style.position = 'fixed';
+    chartAccountsRiskBoxEl.style.zIndex = '10003';
+    chartAccountsRiskBoxEl.style.width = arb.collapsed ? 'auto' : `${arb.boxWidth || 256}px`;
+    chartAccountsRiskBoxEl.style.background = hexToRgba(arb.bgColor || '#0b101b', (Number(arb.bgOpacity ?? 92)) / 100);
+    chartAccountsRiskBoxEl.style.backdropFilter = 'blur(10px)';
+    chartAccountsRiskBoxEl.style.borderRadius = '8px';
+    chartAccountsRiskBoxEl.style.border = `1px solid ${hexToRgba(arb.borderColor || '#38bdf8', arb.pinned ? 0.78 : 0.48)}`;
+    chartAccountsRiskBoxEl.style.boxShadow = `0 0 14px ${hexToRgba(arb.borderColor || '#38bdf8', 0.22)}, 0 6px 18px rgba(0,0,0,0.45)`;
+    chartAccountsRiskBoxEl.style.overflow = 'hidden';
+    chartAccountsRiskBoxEl.style.userSelect = 'none';
+    chartAccountsRiskBoxEl.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+    const accounts = getMergedAccountSnapshotsList();
+    const activeSym = typeof normalizeInstrumentKey === 'function'
+      ? normalizeInstrumentKey(currentInstrument || '')
+      : String(currentInstrument || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
+    const activeAccName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : null;
+
+    const totalBal = accounts.reduce((sum, a) => sum + (typeof a.balance === 'number' && Number.isFinite(a.balance) ? a.balance : 0), 0);
+
+    if (arb.collapsed) {
+      chartAccountsRiskBoxEl.innerHTML = `
+        <div id="vest-arb-restore-btn" style="
+          display: flex; align-items: center; gap: 7px; padding: 5px 11px;
+          background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff;
+          cursor: pointer; border-radius: 7px; font-size: 11px; font-weight: 700;
+        " title="Click to expand Accounts & Risk Box">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span>
+          <span>ACCOUNTS (${accounts.length}) · ${formatPlainDollar(totalBal)}</span>
+          <span style="opacity: 0.85;">↗</span>
+        </div>
+      `;
+    } else {
+      const rowsHtml = accounts.length > 0
+        ? accounts.map(acc => {
+            const st = computeAccountInstrumentStatus(acc, activeSym, arb.riskPercent);
+            const isCurrentTabAcc = Boolean(activeAccName && acc.name === activeAccName);
+            const isFresh = (Date.now() - (Number(acc.updatedAt) || 0)) < 15000;
+            const dotColor = isCurrentTabAcc ? '#10b981' : (isFresh ? '#38bdf8' : '#64748b');
+
+            let statusRowHtml = '';
+            if (st.hasOpenOnInstrument && st.instrumentPosition) {
+              const pos = st.instrumentPosition;
+              const isLong = pos.side === 'long';
+              const sideColor = isLong ? '#34d399' : '#f87171';
+              const sideBg = isLong ? 'rgba(16,185,129,0.14)' : 'rgba(239,68,68,0.14)';
+              const pnlNum = pos.pnl;
+              const pnlColor = pnlNum === null ? '#e2e8f0' : (pnlNum > 0.0001 ? '#34d399' : (pnlNum < -0.0001 ? '#f87171' : '#cbd5e1'));
+              const showAcctTotal = st.totalOpenPnl !== null && pnlNum !== null && Math.abs(st.totalOpenPnl - pnlNum) >= 0.01;
+              statusRowHtml = `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
+                  <span style="font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:3px;background:${sideBg};color:${sideColor};letter-spacing:0.3px;">
+                    ${isLong ? 'LONG' : 'SHORT'} ${escapeHtml(st.symbol || '')}
+                  </span>
+                  <span style="font-size:11px;font-weight:700;font-family:monospace;color:${pnlColor};">
+                    ${pnlNum !== null ? formatSignedDollar(pnlNum) : '--'}${pos.pnlPct ? ` <span style="font-size:9.5px;opacity:0.8;">(${escapeHtml(pos.pnlPct)})</span>` : ''}
+                  </span>
+                </div>
+                ${showAcctTotal ? `
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;font-size:9.5px;color:#94a3b8;">
+                    <span>Total Open PnL</span>
+                    <span style="font-family:monospace;font-weight:600;color:${st.totalOpenPnl >= 0 ? '#34d399' : '#f87171'};">${formatSignedDollar(st.totalOpenPnl)}</span>
+                  </div>
+                ` : ''}
+              `;
+            } else {
+              // Position is CLOSED on this specific instrument -> show per-trade Risk amount!
+              const hasOtherPnl = arb.showOtherPnl !== false && st.totalOpenPnl !== null && Math.abs(st.totalOpenPnl) >= 0.005;
+              statusRowHtml = `
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
+                  <span style="font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(56,189,248,0.12);color:#7dd3fc;letter-spacing:0.25px;">
+                    FLAT ${escapeHtml(st.symbol || 'CHART')} · RISK ${st.riskPercent}%
+                  </span>
+                  <span style="font-size:11.5px;font-weight:800;font-family:monospace;color:#fbbf24;">
+                    ${st.riskAmount !== null ? formatPlainDollar(st.riskAmount) : '--'}
+                  </span>
+                </div>
+                ${hasOtherPnl ? `
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;font-size:9.5px;color:#94a3b8;">
+                    <span>Other Open PnL</span>
+                    <span style="font-family:monospace;font-weight:600;color:${st.totalOpenPnl >= 0 ? '#34d399' : '#f87171'};">${formatSignedDollar(st.totalOpenPnl)}</span>
+                  </div>
+                ` : ''}
+              `;
+            }
+
+            return `
+              <div style="padding:6px 8px;border-radius:6px;background:${isCurrentTabAcc ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isCurrentTabAcc ? 'rgba(56,189,248,0.32)' : 'rgba(255,255,255,0.07)'};">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+                  <div style="display:flex;align-items:center;gap:5px;min-width:0;">
+                    <span style="width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${dotColor};box-shadow:0 0 6px ${dotColor};" title="${isCurrentTabAcc ? 'Active account in this tab' : (isFresh ? 'Live from another open tab' : 'Last known snapshot')}"></span>
+                    <span style="font-size:11px;font-weight:700;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(acc.name)}</span>
+                  </div>
+                  <span style="font-size:11.5px;font-weight:800;font-family:monospace;color:#f8fafc;flex-shrink:0;">
+                    ${st.balance !== null ? formatPlainDollar(st.balance) : '--'}
+                  </span>
+                </div>
+                ${statusRowHtml}
+              </div>
+            `;
+          }).join('')
+        : `<div style="padding:10px 6px;text-align:center;font-size:11px;color:#94a3b8;">Detecting account balance...</div>`;
+
+      chartAccountsRiskBoxEl.innerHTML = `
+        <div id="vest-arb-title-bar" style="
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 6px 9px; background: linear-gradient(135deg, #0369a1, #0c4a6e);
+          color: #ffffff; cursor: move; border-bottom: 1px solid rgba(255,255,255,0.14);
+        ">
+          <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
+            <span style="font-weight: 800; font-size: 10.5px; letter-spacing: 0.45px; text-transform: uppercase; white-space: nowrap;">Accounts &amp; Risk</span>
+            ${activeSym ? `<span style="font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,0.18); color: #e0f2fe;">${escapeHtml(activeSym)}</span>` : ''}
+          </div>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button type="button" id="vest-arb-pin-btn" style="background:${arb.pinned ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.15)'};border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="${arb.pinned ? 'Pinned (sticky)' : 'Pin to exact screen position'}">
+              <svg viewBox="0 0 24 24" fill="${arb.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+              </svg>
+            </button>
+            <button type="button" id="vest-arb-btn-collapse" style="background:rgba(255,255,255,0.15);border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;" title="Minimize">_</button>
+            <button type="button" id="vest-arb-btn-settings" style="background:rgba(255,255,255,0.15);border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10.5px;line-height:1;" title="Accounts & Risk Settings">⚙</button>
+            <button type="button" id="vest-arb-btn-close" style="background:rgba(255,255,255,0.15);border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10.5px;line-height:1;" title="Hide Box">✕</button>
+          </div>
+        </div>
+        <div style="padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto;">
+          ${rowsHtml}
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.22);font-size:10px;color:#94a3b8;">
+          <span style="font-weight:600;">Risk / Trade:</span>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <input type="number" id="vest-arb-inline-risk-pct" min="0.05" max="50" step="0.1" value="${arb.riskPercent}" style="width:48px;padding:2px 4px;border-radius:4px;background:rgba(15,23,42,0.9);color:#fbbf24;border:1px solid rgba(56,189,248,0.35);font-family:monospace;font-size:10.5px;font-weight:700;text-align:right;" title="Configurable risk % per trade" />
+            <span style="font-weight:700;color:#e2e8f0;">%</span>
+          </div>
+        </div>
+      `;
+    }
+
+    wireChartAccountsRiskBoxEvents();
+    clampAndPositionChartAccountsRiskBox();
+  }
+
+  function wireChartAccountsRiskBoxEvents() {
+    if (!chartAccountsRiskBoxEl) return;
+
+    const restoreBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-restore-btn');
+    if (restoreBtn) {
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+        arb.collapsed = false;
+        settings.accountsRiskBox = arb;
+        markWindowAsRestored('accounts_risk');
+        queueSettingsSave({ accountsRiskBox: arb });
+        renderChartAccountsRiskBox();
+      });
+      return;
+    }
+
+    const pinBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-pin-btn');
+    if (pinBtn) {
+      pinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+        arb.pinned = !arb.pinned;
+        if (arb.pinned && chartAccountsRiskBoxEl) {
+          const rect = chartAccountsRiskBoxEl.getBoundingClientRect();
+          arb.pinnedLeft = Math.round(rect.left);
+          arb.pinnedTop = Math.round(rect.top);
+        }
+        settings.accountsRiskBox = arb;
+        queueSettingsSave({ accountsRiskBox: arb });
+        renderChartAccountsRiskBox();
+        showToast(arb.pinned ? 'Accounts & Risk Box pinned' : 'Accounts & Risk Box unpinned');
+      });
+    }
+
+    const collapseBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-btn-collapse');
+    if (collapseBtn) {
+      collapseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+        arb.collapsed = true;
+        settings.accountsRiskBox = arb;
+        markWindowAsMinimized('accounts_risk');
+        queueSettingsSave({ accountsRiskBox: arb });
+        renderChartAccountsRiskBox();
+      });
+    }
+
+    const settingsBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-btn-settings');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openStudioSettingsModal('chartingindicators', 'accountsrisk');
+      });
+    }
+
+    const closeBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-btn-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+        arb.enabled = false;
+        settings.accountsRiskBox = arb;
+        queueSettingsSave({ accountsRiskBox: arb });
+        renderChartAccountsRiskBox();
+        renderStudioHeaderPill();
+        showToast('Accounts & Risk Box hidden (re-enable in Cortex menu)');
+      });
+    }
+
+    const inlineRiskInput = chartAccountsRiskBoxEl.querySelector('#vest-arb-inline-risk-pct');
+    if (inlineRiskInput) {
+      const commitInlineRisk = () => {
+        const val = Number(inlineRiskInput.value);
+        if (!Number.isFinite(val) || val <= 0) return;
+        const arb = normalizeAccountsRiskBoxConfig({ ...settings.accountsRiskBox, riskPercent: val });
+        settings.accountsRiskBox = arb;
+        queueSettingsSave({ accountsRiskBox: arb });
+        renderChartAccountsRiskBox();
+      };
+      inlineRiskInput.addEventListener('change', commitInlineRisk);
+      inlineRiskInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          inlineRiskInput.blur();
+          commitInlineRisk();
+        }
+      });
+    }
+
+    const dragHandle = chartAccountsRiskBoxEl.querySelector('#vest-arb-title-bar');
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button, input, label')) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = chartAccountsRiskBoxEl.getBoundingClientRect();
+        activeAccountsRiskBoxDrag = {
+          offsetX: e.clientX - rect.left,
+          offsetY: e.clientY - rect.top
+        };
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+          if (!activeAccountsRiskBoxDrag || !chartAccountsRiskBoxEl) return;
+          const vp = getScreenBoundsRect();
+          const boxW = chartAccountsRiskBoxEl.offsetWidth || 256;
+          const boxH = chartAccountsRiskBoxEl.offsetHeight || 160;
+
+          const rawLeft = ev.clientX - activeAccountsRiskBoxDrag.offsetX;
+          const rawTop = ev.clientY - activeAccountsRiskBoxDrag.offsetY;
+          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
+          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
+
+          chartAccountsRiskBoxEl.style.left = `${Math.round(clampedLeft)}px`;
+          chartAccountsRiskBoxEl.style.top = `${Math.round(clampedTop)}px`;
+
+          const maxOffsetX = Math.max(1, vp.width - boxW);
+          const maxOffsetY = Math.max(1, vp.height - boxH);
+          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
+          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
+
+          const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+          arb.relX = Math.round(relX * 10000) / 10000;
+          arb.relY = Math.round(relY * 10000) / 10000;
+          if (arb.pinned) {
+            arb.pinnedLeft = Math.round(clampedLeft);
+            arb.pinnedTop = Math.round(clampedTop);
+          }
+          settings.accountsRiskBox = arb;
+        };
+
+        const onUp = () => {
+          activeAccountsRiskBoxDrag = null;
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          queueSettingsSave({ accountsRiskBox: settings.accountsRiskBox });
         };
 
         window.addEventListener('mousemove', onMove);
@@ -16051,8 +17152,12 @@ if (activeTab === 'diagnostics') {
   // -------------------------------------------------------------
   async function init() {
     try {
-      const data = await safeStorageGet(['templates', 'settings', 'globalDrawings', 'updaterState', 'installedVersionOverride', 'updateChannel']);
+      const data = await safeStorageGet(['templates', 'settings', 'globalDrawings', 'updaterState', 'installedVersionOverride', 'updateChannel', 'cortexAccountSnapshots']);
       globalDrawings = normalizeGlobalDrawings(data.globalDrawings);
+      loadAccountSnapshotsFromLocalStorage();
+      if (data.cortexAccountSnapshots && typeof data.cortexAccountSnapshots === 'object') {
+        handleIncomingAccountSnapshots(data.cortexAccountSnapshots);
+      }
       if (data.installedVersionOverride) {
         installedVersionOverride = data.installedVersionOverride;
       }
@@ -16085,6 +17190,7 @@ if (activeTab === 'diagnostics') {
           orderBlocks: normalizeOrderBlocksConfig(data.settings.orderBlocks),
           marketStructure: normalizeMarketStructureConfig(data.settings.marketStructure),
           diagnosticsBox: normalizeDiagnosticsBoxConfig(data.settings.diagnosticsBox),
+          accountsRiskBox: normalizeAccountsRiskBoxConfig(data.settings.accountsRiskBox),
           debugMode: Boolean(data.settings.debugMode),
           dialogGlassEffect: Boolean(data.settings.dialogGlassEffect),
           favoriteTimeframes: normalizeFavoriteTimeframes(data.settings.favoriteTimeframes)
@@ -16108,6 +17214,7 @@ if (activeTab === 'diagnostics') {
         settings.failLines = normalizeFailLinesConfig(settings.failLines);
         settings.cortexIndicator = normalizeCortexIndicatorConfig(settings.cortexIndicator);
         settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(settings.diagnosticsBox);
+        settings.accountsRiskBox = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
         settings.debugMode = Boolean(settings.debugMode);
         settings.dialogGlassEffect = Boolean(settings.dialogGlassEffect);
         settings.favoriteTimeframes = normalizeFavoriteTimeframes(settings.favoriteTimeframes);
@@ -16146,6 +17253,13 @@ if (activeTab === 'diagnostics') {
         renderChartRangeBox();
         renderChartOrderBlockStatsBox();
         renderChartDiagnosticsBox();
+        renderChartAccountsRiskBox();
+        setTimeout(() => {
+          if (settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
+            scrapeAndSyncCurrentAccountSnapshot(true);
+            clampAndPositionChartAccountsRiskBox();
+          }
+        }, 1200);
         setupIsolatedActionTracking();
         initVestAccountTracker();
         // Run background update check on page refresh / load
