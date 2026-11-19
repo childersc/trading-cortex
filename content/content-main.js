@@ -11204,16 +11204,23 @@
   function clearIctPriceScaleBadges() {
     try {
       if (ictPriceScaleBadgeContainer) {
-        ictPriceScaleBadgeContainer.innerHTML = '';
-        ictPriceScaleBadgeContainer.style.display = 'none';
+        if (ictPriceScaleBadgeContainer.style.display !== 'none') {
+          ictPriceScaleBadgeContainer.style.display = 'none';
+        }
+        // Hide pooled badge nodes without tearing down the DOM container
+        const kids = ictPriceScaleBadgeContainer.children;
+        for (let i = 0; i < kids.length; i++) {
+          if (kids[i].style.display !== 'none') kids[i].style.display = 'none';
+        }
       }
+      const ownerTag = (window.top === window) ? 'top' : 'frame';
       const docs = [document];
       document.querySelectorAll('iframe').forEach(ifr => {
         try { if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) docs.push(ifr.contentDocument); } catch (e) {}
       });
       docs.forEach(d => {
         try {
-          d.querySelectorAll('.vest-ict-price-axis-badges').forEach(el => {
+          d.querySelectorAll(`.vest-ict-price-axis-badges[data-vest-owner="${ownerTag}"]`).forEach(el => {
             if (el !== ictPriceScaleBadgeContainer) el.remove();
           });
         } catch (e) {}
@@ -11233,6 +11240,7 @@
     }
 
     const ownerDoc = targetChartCanvas.ownerDocument || document;
+    const ownerTag = (window.top === window) ? 'top' : 'frame';
 
     // Locate and cache the right-hand price axis container
     let axisHost = (cachedPriceAxisTargetCanvas === targetChartCanvas && cachedPriceAxisHost && cachedPriceAxisHost.isConnected)
@@ -11247,7 +11255,7 @@
           axisHost = parentTd.nextElementSibling.querySelector('div') || parentTd.nextElementSibling;
         }
         if (!axisHost) {
-          const allCanvases = ownerDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+          const allCanvases = ownerDoc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas):not(.vest-cortex-overlay-canvas):not(#vest-accounts-risk-overlay-canvas)');
           for (const c of allCanvases) {
             if (c === targetChartCanvas) continue;
             const r = c.getBoundingClientRect();
@@ -11282,13 +11290,14 @@
       }
       ictPriceScaleBadgeContainer = ownerDoc.createElement('div');
       ictPriceScaleBadgeContainer.className = 'vest-ict-price-axis-badges';
+      ictPriceScaleBadgeContainer.setAttribute('data-vest-owner', ownerTag);
       const cs = ownerDoc.defaultView ? ownerDoc.defaultView.getComputedStyle(mountParent) : null;
       if (cs && cs.position === 'static') {
         mountParent.style.position = 'relative';
       }
       ictPriceScaleBadgeContainer.style.cssText = isInsideAxis
-        ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;'
-        : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;';
+        ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;will-change:contents;'
+        : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;will-change:contents;';
       mountParent.appendChild(ictPriceScaleBadgeContainer);
       lastPriceAxisBadgesHtml = '';
     }
@@ -11297,17 +11306,53 @@
       ictPriceScaleBadgeContainer.style.display = 'block';
     }
 
-    let html = '';
+    // Reuse pooled badge DOM nodes with GPU-composited translate3d — never wipe innerHTML on ticks (eliminates flicker!)
+    const visibleBadges = [];
     for (let i = 0; i < badgeItems.length; i++) {
       const b = badgeItems[i];
       if (b.y < 8 || b.y > cssHeight - 8) continue;
+      visibleBadges.push(b);
+    }
+
+    const pool = ictPriceScaleBadgeContainer.children;
+    for (let i = 0; i < visibleBadges.length; i++) {
+      const b = visibleBadges[i];
       const priceText = formatChartPriceValue(b.price, lastTrackedPrice);
       const fg = getContrastTextColorForHex(b.color);
-      html += `<div style="position:absolute;left:${isInsideAxis ? '1px' : 'auto'};right:${isInsideAxis ? '2px' : '0px'};top:${Math.round(b.y)}px;transform:translateY(-50%);background:${b.color};color:${fg};font-family:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,sans-serif;font-size:10.5px;font-weight:700;line-height:15px;height:16px;padding:0 5px;border-radius:2px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:flex-start;letter-spacing:0.1px;">${priceText}</div>`;
+      const yPx = Math.round(b.y);
+
+      let el = pool[i];
+      if (!el) {
+        el = ownerDoc.createElement('div');
+        el.style.cssText =
+          `position:absolute;top:0;left:${isInsideAxis ? '1px' : 'auto'};right:${isInsideAxis ? '2px' : '0px'};font-family:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,sans-serif;font-size:10.5px;font-weight:700;line-height:15px;height:16px;padding:0 5px;border-radius:2px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:flex-start;letter-spacing:0.1px;will-change:transform;backface-visibility:hidden;`;
+        ictPriceScaleBadgeContainer.appendChild(el);
+      }
+
+      if (el.style.display !== 'flex') el.style.display = 'flex';
+      const nextTransform = `translate3d(0,${yPx}px,0) translateY(-50%)`;
+      if (el.dataset.vestTx !== nextTransform) {
+        el.style.transform = nextTransform;
+        el.dataset.vestTx = nextTransform;
+      }
+      if (el.dataset.vestBg !== b.color) {
+        el.style.backgroundColor = b.color;
+        el.dataset.vestBg = b.color;
+      }
+      if (el.dataset.vestFg !== fg) {
+        el.style.color = fg;
+        el.dataset.vestFg = fg;
+      }
+      if (el.textContent !== priceText) {
+        el.textContent = priceText;
+      }
     }
-    if (html !== lastPriceAxisBadgesHtml) {
-      ictPriceScaleBadgeContainer.innerHTML = html;
-      lastPriceAxisBadgesHtml = html;
+
+    // Hide any extra pooled nodes not needed this frame
+    for (let i = visibleBadges.length; i < pool.length; i++) {
+      if (pool[i].style.display !== 'none') {
+        pool[i].style.display = 'none';
+      }
     }
   }
 

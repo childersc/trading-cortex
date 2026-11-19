@@ -1,3 +1,7 @@
+Trading Cortex v1.1.103 — Eliminated Session Line Price-Axis Label Flickering
+
+- **Zero-Flicker Price-Axis Session Badges (`v1.1.103`)**: Replaced full `innerHTML` teardown on every price tick with persistent pooled badge nodes using GPU-composited `translate3d` positioning and owner-scoped cross-frame protection (`data-vest-owner`), eliminating flickering on session High/Low price scale labels.
+
 Trading Cortex v1.1.102 — Eliminated Chart Flickering on Instrument & Account Switches
 
 - **Zero Flicker on Instrument / Account Switches (`v1.1.102`)**: Stopped clearing overlays during transient empty-bar loading frames and preserved the cached chart canvas across `/trade` symbol changes.
