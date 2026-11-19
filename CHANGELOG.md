@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.103`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.104`) are documented in this file.
+
+---
+
+## [v1.1.104] — 2026-11-19
+
+### 🛠️ Fixed Child-Iframe Overlay Clearing Loop & Removed `will-change` Canvas Tearing
+- **Early Child-Iframe Yield (`isYieldingChartToTopWindow`)**:
+  - Added an explicit `isYieldingChartToTopWindow()` exit at the very top of `renderIctSessionIndicators()`. Previously, when a child iframe yielded `findMainChartPaneCanvas() -> null` to `window.top`, it fell into `clearAllChartOverlays()` on every tick/mouse event, fighting with `window.top` and causing severe overlay/badge flickering.
+- **Removed `will-change` Compositor Layer Tearing on Price Axis**:
+  - Removed `will-change: contents`, `will-change: transform`, and `backface-visibility: hidden` from `.vest-ict-price-axis-badges` and its pooled badge nodes, keeping clean pooled `top` positioning without GPU buffer tearing over TradingView's actively repainting price-axis `<canvas>`.
 
 ---
 

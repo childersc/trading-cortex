@@ -6987,23 +6987,27 @@
 
   let cachedTargetChartCanvas = null;
 
-  function findMainChartPaneCanvas() {
-    // If we are inside a child iframe and window.top also initialized content-main.js,
-    // only yield to window.top if window.top can actually read our document (same-origin/blob) AND we do not exclusively own the chart model.
+  function isYieldingChartToTopWindow() {
     try {
       if (window.top && window.top !== window && window.top.__VEST_CHART_TEMPLATES_MAIN_INITIALIZED__) {
-        // Check if window.top can access our document without throwing a cross-origin SecurityError
         const topDoc = window.top.document;
         if (topDoc) {
-          // If window.top already mounted a .vest-ict-sessions-canvas inside our document, let window.top drive it
           const existingTopCanvas = document.querySelector('.vest-ict-sessions-canvas[data-vest-owner="top"]');
           if (existingTopCanvas) {
-            return null;
+            return true;
           }
         }
       }
     } catch (e) {
-      // Cross-origin iframe: window.top CANNOT access our DOM, so this child frame MUST render the overlay canvas!
+      // Cross-origin iframe: cannot yield to window.top
+    }
+    return false;
+  }
+
+  function findMainChartPaneCanvas() {
+    // If we are inside a child iframe and window.top already mounted the overlay canvas in our document, yield cleanly.
+    if (isYieldingChartToTopWindow()) {
+      return null;
     }
 
     // Never render TradingView chart overlays on non-chart SPA routes (e.g., Portfolio, Markets, Docs, Affiliate)
@@ -11296,8 +11300,8 @@
         mountParent.style.position = 'relative';
       }
       ictPriceScaleBadgeContainer.style.cssText = isInsideAxis
-        ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;will-change:contents;'
-        : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;will-change:contents;';
+        ? 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6;overflow:hidden;user-select:none;'
+        : 'position:absolute;top:0;right:0;width:68px;bottom:0;pointer-events:none;z-index:6;overflow:visible;user-select:none;';
       mountParent.appendChild(ictPriceScaleBadgeContainer);
       lastPriceAxisBadgesHtml = '';
     }
@@ -11306,7 +11310,7 @@
       ictPriceScaleBadgeContainer.style.display = 'block';
     }
 
-    // Reuse pooled badge DOM nodes with GPU-composited translate3d — never wipe innerHTML on ticks (eliminates flicker!)
+    // Reuse pooled badge DOM nodes with clean top positioning (no innerHTML teardown, no GPU will-change tearing over TV canvas)
     const visibleBadges = [];
     for (let i = 0; i < badgeItems.length; i++) {
       const b = badgeItems[i];
@@ -11325,15 +11329,15 @@
       if (!el) {
         el = ownerDoc.createElement('div');
         el.style.cssText =
-          `position:absolute;top:0;left:${isInsideAxis ? '1px' : 'auto'};right:${isInsideAxis ? '2px' : '0px'};font-family:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,sans-serif;font-size:10.5px;font-weight:700;line-height:15px;height:16px;padding:0 5px;border-radius:2px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:flex-start;letter-spacing:0.1px;will-change:transform;backface-visibility:hidden;`;
+          `position:absolute;left:${isInsideAxis ? '1px' : 'auto'};right:${isInsideAxis ? '2px' : '0px'};transform:translateY(-50%);font-family:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,sans-serif;font-size:10.5px;font-weight:700;line-height:15px;height:16px;padding:0 5px;border-radius:2px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:flex-start;letter-spacing:0.1px;`;
         ictPriceScaleBadgeContainer.appendChild(el);
       }
 
       if (el.style.display !== 'flex') el.style.display = 'flex';
-      const nextTransform = `translate3d(0,${yPx}px,0) translateY(-50%)`;
-      if (el.dataset.vestTx !== nextTransform) {
-        el.style.transform = nextTransform;
-        el.dataset.vestTx = nextTransform;
+      const nextTop = `${yPx}px`;
+      if (el.dataset.vestTop !== nextTop) {
+        el.style.top = nextTop;
+        el.dataset.vestTop = nextTop;
       }
       if (el.dataset.vestBg !== b.color) {
         el.style.backgroundColor = b.color;
@@ -11813,6 +11817,11 @@
   function renderIctSessionIndicators() {
     const renderStartTime = performance.now();
     ictSessionsRafId = null;
+
+    // If this child iframe is yielding chart rendering to window.top, exit immediately without touching ANY overlays or badges!
+    if (isYieldingChartToTopWindow()) {
+      return;
+    }
 
     const config = currentSettings && currentSettings.sessionIndicators;
     const cortexConfig = currentSettings && currentSettings.cortexIndicator;
