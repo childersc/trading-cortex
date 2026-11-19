@@ -16,6 +16,8 @@ const mainJs = fs.readFileSync(mainJsPath, 'utf8');
 assert(mainJs.includes('function renderAccountsRiskOnCanvas('), 'content-main.js must define renderAccountsRiskOnCanvas');
 assert(mainJs.includes('function ensureAccountsRiskTopOverlayCanvas(') && mainJs.includes('z-index:2147483640'), 'Accounts & Risk canvas must render on a dedicated front-most overlay canvas above all chart elements');
 assert(mainJs.includes('function syncAccountsRiskToggleButton(') && mainJs.includes('vest-accounts-risk-toggle-btn'), 'Accounts & Risk drawing must support 1-click minimize/expand toggle button');
+assert(mainJs.includes('not(.vest-cortex-overlay-canvas):not(#vest-accounts-risk-overlay-canvas)'), 'findMainChartPaneCanvas must exclude our own Accounts & Risk overlay canvas to prevent double chart overlays');
+assert(mainJs.includes('const clearAllChartOverlays = () =>') && mainJs.includes('/^\\/(portfolio|markets|affiliate|docs|'), 'Non-chart SPA routes (Portfolio, Markets, etc.) must immediately clear all chart overlays');
 assert(mainJs.includes("case 'VEST_TV_ACCOUNTS_RISK_DATA':"), 'content-main.js must handle VEST_TV_ACCOUNTS_RISK_DATA');
 assert(mainJs.includes("case 'VEST_SCAN_ACCOUNTS_NOW':"), 'content-main.js must handle VEST_SCAN_ACCOUNTS_NOW');
 assert(mainJs.includes('renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig'), 'renderIctSessionIndicators must draw accounts & risk on the front-most canvas');

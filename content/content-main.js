@@ -7006,18 +7006,44 @@
       // Cross-origin iframe: window.top CANNOT access our DOM, so this child frame MUST render the overlay canvas!
     }
 
-    // Fast path: reuse cached target canvas if it is still connected and sized!
-    if (cachedTargetChartCanvas && cachedTargetChartCanvas.isConnected) {
-      const cw = cachedTargetChartCanvas.clientWidth;
-      const ch = cachedTargetChartCanvas.clientHeight;
-      if (cw >= 240 && ch >= 140) {
-        return cachedTargetChartCanvas;
+    // Never render TradingView chart overlays on non-chart SPA routes (e.g., Portfolio, Markets, Docs, Affiliate)
+    try {
+      const topPath = (window.top && window.top.location && window.top.location.pathname) ? String(window.top.location.pathname) : String(window.location.pathname || '');
+      if (/^\/(portfolio|markets|affiliate|docs|capital|leaderboard|referral|rewards|vault|staking|earn)\b/i.test(topPath)) {
+        cachedTargetChartCanvas = null;
+        return null;
       }
+    } catch (e) {}
+
+    const isValidTradingViewCanvas = (c, doc) => {
+      if (!c || !c.isConnected) return false;
+      if (c.id === 'vest-accounts-risk-overlay-canvas' || c.classList.contains('vest-ict-sessions-canvas') || c.classList.contains('vest-cortex-overlay-canvas')) {
+        return false;
+      }
+      if (!c.parentElement || c.parentElement === doc.body || c.parentElement === doc.documentElement) {
+        return false;
+      }
+      const rect = c.getBoundingClientRect();
+      if (rect.width < 240 || rect.height < 140) return false;
+      // If canvas is in the top document (not inside a TradingView iframe), verify it belongs to a TradingView chart container (not a Portfolio equity chart)
+      if (doc === document && window.top === window) {
+        const isTvContainer = Boolean(c.closest('.chart-gui-wrapper, .chart-markup-table, .layout__area--center, [class*="tv-chart"], [id*="tradingview"], [id*="tv_chart"]'));
+        if (!isTvContainer) return false;
+      }
+      return true;
+    };
+
+    // Fast path: reuse cached target canvas if it is still connected, visible, and valid!
+    if (cachedTargetChartCanvas && isValidTradingViewCanvas(cachedTargetChartCanvas, cachedTargetChartCanvas.ownerDocument || document)) {
+      return cachedTargetChartCanvas;
     }
+    cachedTargetChartCanvas = null;
 
     const docs = [document];
     document.querySelectorAll('iframe').forEach(ifr => {
       try {
+        const ifrRect = ifr.getBoundingClientRect();
+        if (ifrRect.width < 240 || ifrRect.height < 140) return;
         if (ifr.contentDocument && !docs.includes(ifr.contentDocument)) {
           docs.push(ifr.contentDocument);
         }
@@ -7029,10 +7055,10 @@
 
     for (const doc of docs) {
       try {
-        const canvases = doc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+        const canvases = doc.querySelectorAll('canvas:not(.vest-ict-sessions-canvas):not(.vest-cortex-overlay-canvas):not(#vest-accounts-risk-overlay-canvas)');
         for (const c of canvases) {
+          if (!isValidTradingViewCanvas(c, doc)) continue;
           const rect = c.getBoundingClientRect();
-          if (rect.width < 240 || rect.height < 140) continue;
           const area = rect.width * rect.height;
           if (area > bestArea + 1000) {
             bestArea = area;
@@ -7045,7 +7071,7 @@
     // If bestCanvas is inside a pane that has multiple stacked canvases (base chart canvas + top crosshair canvas),
     // always pick the first non-vest canvas in that parent container for deterministic stability.
     if (bestCanvas && bestCanvas.parentElement) {
-      const siblingCanvases = bestCanvas.parentElement.querySelectorAll('canvas:not(.vest-ict-sessions-canvas)');
+      const siblingCanvases = bestCanvas.parentElement.querySelectorAll('canvas:not(.vest-ict-sessions-canvas):not(.vest-cortex-overlay-canvas):not(#vest-accounts-risk-overlay-canvas)');
       if (siblingCanvases.length > 0) {
         bestCanvas = siblingCanvases[0];
       }
@@ -11327,9 +11353,11 @@
       const existing = hostDoc.getElementById('vest-accounts-risk-overlay-canvas');
       if (existing) {
         accountsRiskTopCanvas = existing;
+        accountsRiskTopCanvas.className = 'vest-cortex-overlay-canvas';
       } else {
         accountsRiskTopCanvas = hostDoc.createElement('canvas');
         accountsRiskTopCanvas.id = 'vest-accounts-risk-overlay-canvas';
+        accountsRiskTopCanvas.className = 'vest-cortex-overlay-canvas';
         (hostDoc.body || hostDoc.documentElement).appendChild(accountsRiskTopCanvas);
       }
     }
@@ -11735,23 +11763,33 @@
       cleanupNativeAutoFvgShapes(null);
     }
 
-    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled && !accountsRiskEnabled) {
+    const clearAllChartOverlays = () => {
       lastRenderedCandleOhlcHitBoxes = [];
       if (ictSessionsCanvas) {
-        const ctx = ictSessionsCanvas.getContext('2d');
-        if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
+        const c = ictSessionsCanvas.getContext('2d');
+        if (c) c.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
         ictSessionsCanvas.style.display = 'none';
       }
       clearAccountsRiskTopOverlayCanvas();
       clearIctPriceScaleBadges();
+      removeFailPriceLineButtons();
+      syncCortexManualBuyButton(false, '', null);
+    };
+
+    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled && !accountsRiskEnabled) {
+      clearAllChartOverlays();
       return;
     }
 
     const targetCanvas = findMainChartPaneCanvas();
-    if (!targetCanvas) return;
+    if (!targetCanvas) {
+      clearAllChartOverlays();
+      return;
+    }
 
     const extracted = extractSeriesBarsFromModel();
     if (!extracted || !extracted.bars || extracted.bars.length === 0) {
+      clearAllChartOverlays();
       return;
     }
 
@@ -14177,6 +14215,29 @@
     setTimeout(scanPlatformAccountsInMainWorld, 1500);
     setTimeout(scanPlatformAccountsInMainWorld, 4500);
     setInterval(scanPlatformAccountsInMainWorld, 10000);
+
+    // Watch SPA navigation so leaving the Trade page (e.g. to Portfolio) immediately hides all chart overlays
+    let lastCheckedPathname = String(window.location.pathname || '');
+    setInterval(() => {
+      const curPath = String(window.location.pathname || '');
+      if (curPath !== lastCheckedPathname) {
+        lastCheckedPathname = curPath;
+        cachedTargetChartCanvas = null;
+        if (/^\/(portfolio|markets|affiliate|docs|capital|leaderboard|referral|rewards|vault|staking|earn)\b/i.test(curPath)) {
+          clearAccountsRiskTopOverlayCanvas();
+          if (ictSessionsCanvas) {
+            try {
+              const c = ictSessionsCanvas.getContext('2d');
+              if (c) c.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
+              ictSessionsCanvas.style.display = 'none';
+            } catch (e) {}
+          }
+          clearIctPriceScaleBadges();
+        } else {
+          scheduleIctSessionsRender(true);
+        }
+      }
+    }, 300);
   }
 
   // Initialize context menu listener immediately
