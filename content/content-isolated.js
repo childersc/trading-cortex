@@ -591,7 +591,7 @@
     enabled: true,
     boxWidth: 248,
     offsetX: 12,
-    offsetY: 76,
+    offsetY: 108,
     riskPercent: 1.0,
     showOtherPnl: true,
     bgColor: '#0b101b',
@@ -1162,7 +1162,10 @@
       ? Math.max(0.05, Math.min(50, Math.round(riskPctRaw * 100) / 100))
       : base.riskPercent;
     const offsetXRaw = Number(rawCfg.offsetX);
-    const offsetYRaw = Number(rawCfg.offsetY);
+    let offsetYRaw = Number(rawCfg.offsetY);
+    if (offsetYRaw === 52 || offsetYRaw === 76) {
+      offsetYRaw = base.offsetY;
+    }
     return {
       ...base,
       ...rawCfg,

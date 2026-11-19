@@ -11286,6 +11286,45 @@
   }
 
   let latestAccountsRiskOverlayData = null;
+  let accountsRiskTopCanvas = null;
+
+  function ensureAccountsRiskTopOverlayCanvas(targetChartCanvas) {
+    if (!targetChartCanvas) return null;
+    const ownerDoc = targetChartCanvas.ownerDocument || document;
+    const rect = targetChartCanvas.getBoundingClientRect();
+    const cssW = Math.max(1, Math.round(rect.width || targetChartCanvas.clientWidth || 1));
+    const cssH = Math.max(1, Math.round(rect.height || targetChartCanvas.clientHeight || 1));
+    const dpr = (ownerDoc.defaultView && ownerDoc.defaultView.devicePixelRatio) || window.devicePixelRatio || 1;
+    const bmpW = Math.max(1, Math.round(cssW * dpr));
+    const bmpH = Math.max(1, Math.round(cssH * dpr));
+
+    if (!accountsRiskTopCanvas || !accountsRiskTopCanvas.isConnected || accountsRiskTopCanvas.ownerDocument !== ownerDoc) {
+      const existing = ownerDoc.getElementById('vest-accounts-risk-overlay-canvas');
+      if (existing) {
+        accountsRiskTopCanvas = existing;
+      } else {
+        accountsRiskTopCanvas = ownerDoc.createElement('canvas');
+        accountsRiskTopCanvas.id = 'vest-accounts-risk-overlay-canvas';
+        (ownerDoc.body || ownerDoc.documentElement).appendChild(accountsRiskTopCanvas);
+      }
+    }
+
+    accountsRiskTopCanvas.style.cssText =
+      `position:fixed;left:${Math.round(rect.left)}px;top:${Math.round(rect.top)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;z-index:2147483640;user-select:none;display:block;`;
+    if (accountsRiskTopCanvas.width !== bmpW) accountsRiskTopCanvas.width = bmpW;
+    if (accountsRiskTopCanvas.height !== bmpH) accountsRiskTopCanvas.height = bmpH;
+    return { canvas: accountsRiskTopCanvas, cssW, cssH, dpr };
+  }
+
+  function clearAccountsRiskTopOverlayCanvas() {
+    if (accountsRiskTopCanvas) {
+      try {
+        const c = accountsRiskTopCanvas.getContext('2d');
+        if (c) c.clearRect(0, 0, accountsRiskTopCanvas.width, accountsRiskTopCanvas.height);
+        accountsRiskTopCanvas.style.display = 'none';
+      } catch (e) {}
+    }
+  }
 
   function drawRoundedRectPath(ctx, x, y, w, h, r) {
     const rad = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -11331,7 +11370,7 @@
     const showOtherPnl = rawCfg.showOtherPnl !== false;
     const boxW = Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || 248)));
     const x = Math.max(4, Math.round(Number(rawCfg.offsetX ?? 12)));
-    const y = Math.max(4, Math.round(Number(rawCfg.offsetY ?? 76)));
+    const y = Math.max(4, Math.round(Number(rawCfg.offsetY ?? 108)));
     const bgOpacity = Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 82)));
     const bgHex = typeof rawCfg.bgColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawCfg.bgColor) ? rawCfg.bgColor : '#0b101b';
     const borderHex = typeof rawCfg.borderColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawCfg.borderColor) ? rawCfg.borderColor : '#38bdf8';
@@ -11554,6 +11593,7 @@
         if (ctx) ctx.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
         ictSessionsCanvas.style.display = 'none';
       }
+      clearAccountsRiskTopOverlayCanvas();
       clearIctPriceScaleBadges();
       return;
     }
@@ -12583,9 +12623,20 @@
       lastRenderedCandleOhlcHitBoxes = [];
     }
 
-    // 7B. Render Non-Draggable Accounts & Per-Trade Risk Overlay directly on the top-left of the chart canvas
+    // 7B. Render Non-Draggable Accounts & Per-Trade Risk Overlay on a dedicated front-most click-through canvas (above P&L / order lines / legend)
     if (accountsRiskEnabled) {
-      renderAccountsRiskOnCanvas(ctx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, cssWidth, cssHeight);
+      const topOverlay = ensureAccountsRiskTopOverlayCanvas(targetCanvas);
+      if (topOverlay && topOverlay.canvas) {
+        const topCtx = topOverlay.canvas.getContext('2d');
+        if (topCtx) {
+          topCtx.setTransform(1, 0, 0, 1, 0, 0);
+          topCtx.clearRect(0, 0, topOverlay.canvas.width, topOverlay.canvas.height);
+          topCtx.setTransform(topOverlay.dpr, 0, 0, topOverlay.dpr, 0, 0);
+          renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, topOverlay.cssW, topOverlay.cssH);
+        }
+      }
+    } else {
+      clearAccountsRiskTopOverlayCanvas();
     }
 
     if (failLinesEnabled) {

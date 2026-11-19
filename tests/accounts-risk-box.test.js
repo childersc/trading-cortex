@@ -14,9 +14,10 @@ const mainJs = fs.readFileSync(mainJsPath, 'utf8');
 
 // 1. Verify non-draggable canvas drawing in content-main.js
 assert(mainJs.includes('function renderAccountsRiskOnCanvas('), 'content-main.js must define renderAccountsRiskOnCanvas');
+assert(mainJs.includes('function ensureAccountsRiskTopOverlayCanvas(') && mainJs.includes('z-index:2147483640'), 'Accounts & Risk canvas must render on a dedicated front-most overlay canvas above all chart elements');
 assert(mainJs.includes("case 'VEST_TV_ACCOUNTS_RISK_DATA':"), 'content-main.js must handle VEST_TV_ACCOUNTS_RISK_DATA');
 assert(mainJs.includes("case 'VEST_SCAN_ACCOUNTS_NOW':"), 'content-main.js must handle VEST_SCAN_ACCOUNTS_NOW');
-assert(mainJs.includes('renderAccountsRiskOnCanvas(ctx, latestAccountsRiskOverlayData, accountsRiskConfig'), 'renderIctSessionIndicators must draw accounts & risk directly on chart canvas');
+assert(mainJs.includes('renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig'), 'renderIctSessionIndicators must draw accounts & risk on the front-most canvas');
 assert(!isolatedJs.includes('wireChartAccountsRiskBoxEvents'), 'Must NOT render a draggable floating DOM window for Accounts & Risk');
 console.log('✓ Non-draggable native chart canvas drawing verified');
 
@@ -79,7 +80,9 @@ const defCfg = sandbox.normalizeAccountsRiskBoxConfig(null);
 assert.strictEqual(defCfg.enabled, true, 'Accounts & Risk drawing must be enabled by default');
 assert.strictEqual(defCfg.riskPercent, 1.0, 'Default risk percentage must be 1.0%');
 assert.strictEqual(defCfg.offsetX, 12, 'Default offsetX must anchor top-left inside chart pane');
-assert.strictEqual(defCfg.offsetY, 76, 'Default offsetY must sit cleanly below OHLC legend and ^ collapse button');
+assert.strictEqual(defCfg.offsetY, 108, 'Default offsetY must sit cleanly below OHLC legend and indicator config controls');
+assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ offsetY: 52 }).offsetY, 108, 'Old default offsetY 52 must migrate to 108');
+assert.strictEqual(sandbox.normalizeAccountsRiskBoxConfig({ offsetY: 76 }).offsetY, 108, 'Old default offsetY 76 must migrate to 108');
 assert.strictEqual(sandbox.formatPlainDollar(-0.20), '-$0.20', 'Negative dollar values must format as -$0.20');
 
 // Test Open vs Closed per-instrument logic
