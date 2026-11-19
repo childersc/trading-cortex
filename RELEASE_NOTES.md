@@ -1,3 +1,8 @@
+Trading Cortex v1.1.94 — Settings Scroll-Jump & Accounts Toggle Fix
+
+- **Fixed Settings Modal Jumping Back to Top (`v1.1.94`)**: Eliminated unwanted modal re-renders triggered by background viewport/account storage writes and self-save echoes. Genuine cross-browser live updates now preserve exact scroll position and open indicator drawers.
+- **Fixed Accounts & Risk Master Toggle Reverting (`v1.1.94`)**: Wired `accountsrisk` directly into the Indicator Hub master toggle handler and `commitDraftAndClose()` so toggling ON/OFF persists reliably.
+
 Trading Cortex v1.1.93 — Native Chart Canvas Accounts & Risk Drawing + All-Firm Account Discovery
 
 - **Non-Draggable Chart Canvas Drawing (`v1.1.93`)**: Replaced the floating draggable window with a native, click-through canvas drawing rendered directly onto the TradingView chart pane at top-left (right below the OHLC legend, inside the chart). Never blocks mouse interaction or drawing tools.
