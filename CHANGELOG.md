@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.98`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.99`) are documented in this file.
+
+---
+
+## [v1.1.99] — 2026-11-19
+
+### 🔠 Accounts & Risk Font Size Slider & 1-Click Minimize/Expand
+- **Configurable Font Size (`8px – 18px`)**:
+  - Added a live **Font Size** slider (`#vest-arb-font-size`, default `10.5px`) in the Accounts & Risk settings drawer that proportionally scales all typography, row heights, padding, and spacing on the chart canvas in real time.
+- **1-Click Minimize / Expand Toggle (`#vest-accounts-risk-toggle-btn`)**:
+  - Added a compact `—` minimize button in the top-right corner of the Accounts & Risk drawing header while keeping the rest of the chart overlay 100% click-through and non-draggable.
+  - Minimizing collapses the drawing in place into a tiny single-line pill (`▸ VEST MARKETS (6) · HYPE`); clicking anywhere on the minimized pill expands it right back open and syncs state across tabs.
 
 ---
 

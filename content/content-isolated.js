@@ -589,7 +589,9 @@
 
   const DEFAULT_ACCOUNTS_RISK_BOX = {
     enabled: true,
+    collapsed: false,
     boxWidth: 248,
+    fontSize: 10.5,
     offsetX: 12,
     offsetY: 108,
     riskPercent: 1.0,
@@ -1166,11 +1168,17 @@
     if (offsetYRaw === 52 || offsetYRaw === 76) {
       offsetYRaw = base.offsetY;
     }
+    const fontSizeRaw = Number(rawCfg.fontSize);
+    const fontSize = Number.isFinite(fontSizeRaw)
+      ? Math.max(8, Math.min(18, Math.round(fontSizeRaw * 2) / 2))
+      : base.fontSize;
     return {
       ...base,
       ...rawCfg,
       enabled: rawCfg.enabled !== false,
-      boxWidth: Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || base.boxWidth))),
+      collapsed: Boolean(rawCfg.collapsed),
+      boxWidth: Math.max(200, Math.min(480, Math.round(Number(rawCfg.boxWidth) || base.boxWidth))),
+      fontSize,
       offsetX: Number.isFinite(offsetXRaw) ? Math.max(4, Math.min(400, Math.round(offsetXRaw))) : base.offsetX,
       offsetY: Number.isFinite(offsetYRaw) ? Math.max(4, Math.min(400, Math.round(offsetYRaw))) : base.offsetY,
       riskPercent,
@@ -3425,6 +3433,14 @@
     } else if (type === 'VEST_ACCOUNTS_CAPTURED') {
       if (isTopWindow && Array.isArray(event.data.accounts) && event.data.accounts.length > 0 && typeof mergeCapturedFirmAccounts === 'function') {
         mergeCapturedFirmAccounts(event.data.accounts);
+      }
+    } else if (type === 'VEST_TV_ACCOUNTS_RISK_TOGGLE_COLLAPSE') {
+      if (isTopWindow) {
+        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
+        arb.collapsed = typeof event.data.collapsed === 'boolean' ? event.data.collapsed : !arb.collapsed;
+        settings.accountsRiskBox = arb;
+        queueSettingsSave({ accountsRiskBox: arb });
+        pushAccountsRiskDataToChartCanvas();
       }
     } else if (type === 'VEST_OUTSIDE_INTERACTION') {
       if (studioMenuOpen && typeof closeStudioDropdown === 'function') {
@@ -6949,8 +6965,10 @@
             </div>
             <div>
               <label for="vest-arb-width" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Box Width (<span id="vest-arb-width-val">${arb.boxWidth}px</span>)</label>
-              <input type="range" id="vest-arb-width" min="200" max="440" step="4" value="${arb.boxWidth}" style="width:100%;margin-top:6px;">
-              <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11.5px;color:#cbd5e1;cursor:pointer;">
+              <input type="range" id="vest-arb-width" min="200" max="480" step="4" value="${arb.boxWidth}" style="width:100%;margin-top:2px;">
+              <label for="vest-arb-font-size" style="display:block;font-size:12px;color:#e4e4e7;margin:8px 0 4px;">Font Size (<span id="vest-arb-fontsize-val">${arb.fontSize}px</span>)</label>
+              <input type="range" id="vest-arb-font-size" min="8" max="18" step="0.5" value="${arb.fontSize}" style="width:100%;">
+              <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11.5px;color:#cbd5e1;cursor:pointer;">
                 <input type="checkbox" id="vest-arb-show-other-pnl" ${arb.showOtherPnl !== false ? 'checked' : ''} />
                 Show other-instrument Open PnL when flat
               </label>
@@ -8350,6 +8368,7 @@
         const q = (sel) => overlay.querySelector(sel);
         if (q('#vest-arb-risk-pct')) arb.riskPercent = Number(q('#vest-arb-risk-pct').value) || 1.0;
         if (q('#vest-arb-width')) arb.boxWidth = Number(q('#vest-arb-width').value) || 248;
+        if (q('#vest-arb-font-size')) arb.fontSize = Number(q('#vest-arb-font-size').value) || 10.5;
         if (q('#vest-arb-offset-x')) arb.offsetX = Number(q('#vest-arb-offset-x').value) || 12;
         if (q('#vest-arb-offset-y')) arb.offsetY = Number(q('#vest-arb-offset-y').value) || 52;
         if (q('#vest-arb-bg-opacity')) arb.bgOpacity = Number(q('#vest-arb-bg-opacity').value) || 82;
@@ -9348,11 +9367,14 @@
           });
         });
 
-        ['#vest-arb-risk-pct', '#vest-arb-width', '#vest-arb-bg-opacity', '#vest-arb-offset-x', '#vest-arb-offset-y'].forEach(sel => {
+        ['#vest-arb-risk-pct', '#vest-arb-width', '#vest-arb-font-size', '#vest-arb-bg-opacity', '#vest-arb-offset-x', '#vest-arb-offset-y'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             const wEl = overlay.querySelector('#vest-arb-width');
             const wVal = overlay.querySelector('#vest-arb-width-val');
             if (wEl && wVal) wVal.textContent = `${wEl.value}px`;
+            const fsEl = overlay.querySelector('#vest-arb-font-size');
+            const fsVal = overlay.querySelector('#vest-arb-fontsize-val');
+            if (fsEl && fsVal) fsVal.textContent = `${fsEl.value}px`;
             const opEl = overlay.querySelector('#vest-arb-bg-opacity');
             const opVal = overlay.querySelector('#vest-arb-opacity-val');
             if (opEl && opVal) opVal.textContent = `${opEl.value}%`;
