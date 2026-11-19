@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.99`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.100`) are documented in this file.
+
+---
+
+## [v1.1.100] — 2026-11-19
+
+### 💰 Clearer Per-Trade Dollar Amount Highlight & Open PnL Labeling
+- **Unmistakable Per-Trade Amount Display**:
+  - Updated flat/closed rows in `renderAccountsRiskOnCanvas()` to clearly label **`USE / TRADE (X%)`** on the left and highlight the exact dollar amount inside a crisp amber/gold badge (`$4.90`) on the right.
+  - Prefixed open-position PnL values with **`PnL`** (`PnL +$2.59 (+2.75%)`) so there is zero ambiguity between live open PnL and the dollar amount to use for your next trade.
 
 ---
 

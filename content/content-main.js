@@ -11577,7 +11577,7 @@
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#7dd3fc';
-    const rightHdr = activeSym ? `${activeSym} · ${riskPct}%` : `${riskPct}% RISK`;
+    const rightHdr = activeSym ? `${activeSym} · ${riskPct}% / TRADE` : `${riskPct}% / TRADE`;
     ctx.fillText(rightHdr, minBtnRect.x - 6, y + headerH / 2 + 1);
 
     // Header divider
@@ -11645,7 +11645,7 @@
           ctx.textAlign = 'right';
           ctx.fillStyle = pnlColor;
           const pnlStr = pnlVal !== null ? formatCanvasDollarSigned(pnlVal) : '--';
-          ctx.fillText(r.instPos.pnlPct ? `${pnlStr} (${r.instPos.pnlPct})` : pnlStr, rx + rw - 7, line2Y);
+          ctx.fillText(r.instPos.pnlPct ? `PnL ${pnlStr} (${r.instPos.pnlPct})` : `PnL ${pnlStr}`, rx + rw - 7, line2Y);
 
           if (r.hasSubLine) {
             const line3Y = curY + Math.round(38 * scale);
@@ -11662,13 +11662,28 @@
         } else {
           ctx.font = `700 ${tagFont}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'left';
-          ctx.fillStyle = '#7dd3fc';
-          ctx.fillText(`FLAT ${activeSym || 'CHART'} · RISK`, rx + 7, line2Y);
+          ctx.fillStyle = '#93c5fd';
+          ctx.fillText(`USE / TRADE (${riskPct}%)`, rx + 7, line2Y);
 
-          ctx.font = `700 ${pnlFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+          const riskText = formatCanvasDollarPlain(r.riskAmt);
+          ctx.font = `800 ${pnlFont}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+          const riskTextW = ctx.measureText(riskText).width;
+          const badgePadX = Math.max(5, Math.round(6 * scale));
+          const badgeH = Math.max(13, Math.round(14 * scale));
+          const badgeW = Math.round(riskTextW + badgePadX * 2);
+          const badgeX = rx + rw - 5 - badgeW;
+          const badgeY = Math.round(line2Y - badgeH / 2);
+
+          drawRoundedRectPath(ctx, badgeX, badgeY, badgeW, badgeH, 4);
+          ctx.fillStyle = 'rgba(251, 191, 36, 0.16)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
           ctx.textAlign = 'right';
-          ctx.fillStyle = '#fbbf24';
-          ctx.fillText(formatCanvasDollarPlain(r.riskAmt), rx + rw - 7, line2Y);
+          ctx.fillStyle = '#fde68a';
+          ctx.fillText(riskText, rx + rw - 5 - badgePadX, line2Y + 0.5);
 
           if (r.hasSubLine) {
             const line3Y = curY + Math.round(38 * scale);

@@ -1,3 +1,7 @@
+Trading Cortex v1.1.100 — Clearer Per-Trade Dollar Amount Badge & Open PnL Labels
+
+- **Unmistakable Trade Amount Badge (`v1.1.100`)**: Flat/closed account rows now explicitly display **`USE / TRADE (X%)`** with the exact dollar amount highlighted inside a bold amber pill (`$4.90`), while open positions clearly prefix live values with **`PnL`** (`PnL +$2.59`).
+
 Trading Cortex v1.1.99 — Accounts & Risk Font Size Control & 1-Click Minimize/Expand
 
 - **Configurable Font Size (`v1.1.99`)**: Added a live **Font Size** slider (`8px – 18px`) in **Cortex → Accounts & Risk Box...** that scales all text, dollar values, and row spacing proportionally on the chart canvas.
