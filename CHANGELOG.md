@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.102`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.103`) are documented in this file.
+
+---
+
+## [v1.1.103] — 2026-11-19
+
+### ⚡ Eliminated Session Day Line Price-Axis Label Flickering
+- **GPU-Composited Pooled Price Scale Badges (`renderIctPriceScaleBadges`)**:
+  - Replaced `ictPriceScaleBadgeContainer.innerHTML = html` full DOM teardown on every price tick with persistent pooled badge `<div>` nodes positioned via `translate3d(0, y, 0)` (dirty-checking text, color, and transform so nodes are never recreated when price ticks or auto-scales).
+- **Owner-Scoped Cross-Frame Badge Protection (`data-vest-owner`)**:
+  - Tagged `.vest-ict-price-axis-badges` with `data-vest-owner` (`top` vs `frame`) and scoped `clearIctPriceScaleBadges()` strictly to the owning frame so the child iframe and top window can never ping-pong delete and recreate each other's price axis badges.
 
 ---
 
