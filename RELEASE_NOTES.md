@@ -1,3 +1,7 @@
+Trading Cortex v1.1.95 — Non-Destructive In-Place Settings Sync (Fixes Scrollbar Push-Back)
+
+- **Fixed Settings Scrollbar Pushing Back Up (`v1.1.95`)**: Replaced full modal DOM re-rendering on live settings events with non-destructive in-place DOM patching (`syncOpenModalControlsInPlace()`). Scrolling or dragging the Settings scrollbar is never interrupted or reset while switches/badges still sync live across browsers.
+
 Trading Cortex v1.1.94 — Settings Scroll-Jump & Accounts Toggle Fix
 
 - **Fixed Settings Modal Jumping Back to Top (`v1.1.94`)**: Eliminated unwanted modal re-renders triggered by background viewport/account storage writes and self-save echoes. Genuine cross-browser live updates now preserve exact scroll position and open indicator drawers.

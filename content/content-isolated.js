@@ -5050,20 +5050,53 @@
     overlay.id = 'vest-studio-settings-dialog';
     overlay.className = 'vest-tvs-overlay';
 
-    function getEditableSettingsSignature(s) {
-      if (!s || typeof s !== 'object') return '';
-      const clone = { ...s };
-      delete clone.lastChartSettings;
-      delete clone.vestLastActiveAccount;
-      delete clone.bottomPanelStates;
-      delete clone.bottomPanelState;
-      delete clone.sidebarState;
-      delete clone.minimizedWindowOrder;
-      delete clone.panelLayout;
-      try {
-        return JSON.stringify(clone);
-      } catch (err) {
-        return '';
+    function syncOpenModalControlsInPlace(incoming) {
+      if (!overlay || !overlay.isConnected || !incoming || typeof incoming !== 'object') return;
+      const toggleMap = [
+        { id: 'sessions', enabled: Boolean(incoming.sessionIndicators && incoming.sessionIndicators.enabled) },
+        { id: 'autofvg', enabled: Boolean(incoming.autoFvg && incoming.autoFvg.enabled) },
+        { id: 'news', enabled: Boolean(incoming.newsBox && incoming.newsBox.enabled) },
+        { id: 'trades', enabled: Boolean(incoming.tradesBox && incoming.tradesBox.enabled) },
+        { id: 'candleohlc', enabled: Boolean(incoming.candleOhlc && incoming.candleOhlc.enabled) },
+        { id: 'positionhud', enabled: Boolean(incoming.positionHud && incoming.positionHud.enabled !== false) },
+        { id: 'faillines', enabled: Boolean(incoming.failLines && incoming.failLines.enabled) },
+        { id: 'cortexindicator', enabled: Boolean(incoming.cortexIndicator && incoming.cortexIndicator.enabled) },
+        { id: 'orderblocks', enabled: Boolean(incoming.orderBlocks && incoming.orderBlocks.enabled) },
+        { id: 'marketstructure', enabled: Boolean(incoming.marketStructure && incoming.marketStructure.enabled) },
+        { id: 'rangedetector', enabled: Boolean(incoming.rangeDetector && incoming.rangeDetector.enabled) },
+        { id: 'accountsrisk', enabled: Boolean(incoming.accountsRiskBox && incoming.accountsRiskBox.enabled !== false) }
+      ];
+
+      for (const item of toggleMap) {
+        const tile = overlay.querySelector(`#vest-ind-tile-${item.id}`);
+        if (!tile) continue;
+        const toggle = tile.querySelector('.vest-ind-master-toggle');
+        if (toggle && toggle.checked !== item.enabled) {
+          toggle.checked = item.enabled;
+        }
+        tile.classList.toggle('is-enabled', item.enabled);
+        const badge = tile.querySelector('.vest-indicator-status-badge');
+        if (badge) {
+          badge.textContent = item.enabled ? 'ON' : 'OFF';
+          badge.className = `vest-indicator-status-badge ${item.enabled ? 'on' : 'off'}`;
+        }
+        const settingsBtn = overlay.querySelector(`#vest-ind-settings-btn-${item.id}`);
+        if (settingsBtn) {
+          settingsBtn.style.display = item.enabled ? 'inline-flex' : 'none';
+          if (!item.enabled) settingsBtn.classList.remove('is-active');
+        }
+        if (!item.enabled) {
+          const drawer = overlay.querySelector(`#vest-ind-drawer-${item.id}`);
+          if (drawer) drawer.style.display = 'none';
+        }
+      }
+
+      // Sync Accounts & Risk numeric inputs in place (skip whichever input currently has focus)
+      if (incoming.accountsRiskBox) {
+        const riskEl = overlay.querySelector('#vest-arb-risk-pct');
+        if (riskEl && document.activeElement !== riskEl && incoming.accountsRiskBox.riskPercent !== undefined) {
+          riskEl.value = String(incoming.accountsRiskBox.riskPercent);
+        }
       }
     }
 
@@ -5073,31 +5106,10 @@
         return;
       }
       if (!e || !e.detail || !e.detail.settings) return;
-      // Ignore noisy background viewport/account/sidebar writes and self-save echoes so scrolling & toggles never jump or revert
-      const incomingSig = getEditableSettingsSignature(e.detail.settings);
-      const currentDraftSig = getEditableSettingsSignature(draftSettings);
-      if (incomingSig && incomingSig === currentDraftSig) {
-        return;
-      }
-
-      const prevRightPane = overlay.querySelector('#vest-tvs-right-pane');
-      const prevScrollTop = prevRightPane ? prevRightPane.scrollTop : 0;
-      const openDrawerIds = Array.from(overlay.querySelectorAll('.vest-indicator-settings-drawer'))
-        .filter(d => d.style.display !== 'none')
-        .map(d => d.id);
-
+      // Never call renderDialog() here — wiping overlay.innerHTML resets scrollTop and cancels active scrollbar drags!
+      // Instead, merge draftSettings and patch toggle/badge DOM states in place.
       Object.assign(draftSettings, JSON.parse(JSON.stringify(e.detail.settings)));
-      if (typeof renderDialog === 'function') {
-        renderDialog();
-        const nextRightPane = overlay.querySelector('#vest-tvs-right-pane');
-        if (nextRightPane && prevScrollTop > 0) {
-          nextRightPane.scrollTop = prevScrollTop;
-        }
-        openDrawerIds.forEach(dId => {
-          const dEl = overlay.querySelector(`#${dId}`);
-          if (dEl) dEl.style.display = 'block';
-        });
-      }
+      syncOpenModalControlsInPlace(draftSettings);
     }
     window.addEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
 
