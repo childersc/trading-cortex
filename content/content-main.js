@@ -11313,6 +11313,10 @@
 
   let latestAccountsRiskOverlayData = null;
   let accountsRiskTopCanvas = null;
+  let lastAccountsRiskCanvasStyle = '';
+  let lastAccountsRiskRenderSig = '';
+  let lastAccountsRiskBtnStyle = '';
+  let lastAccountsRiskBtnCollapsed = null;
 
   function ensureAccountsRiskTopOverlayCanvas(targetChartCanvas) {
     if (!targetChartCanvas) return null;
@@ -11346,6 +11350,7 @@
     const bmpW = Math.max(1, Math.round(cssW * dpr));
     const bmpH = Math.max(1, Math.round(cssH * dpr));
 
+    let resized = false;
     if (!accountsRiskTopCanvas || !accountsRiskTopCanvas.isConnected || accountsRiskTopCanvas.ownerDocument !== hostDoc) {
       if (accountsRiskTopCanvas && accountsRiskTopCanvas.isConnected) {
         try { accountsRiskTopCanvas.remove(); } catch (e) {}
@@ -11360,20 +11365,36 @@
         accountsRiskTopCanvas.className = 'vest-cortex-overlay-canvas';
         (hostDoc.body || hostDoc.documentElement).appendChild(accountsRiskTopCanvas);
       }
+      lastAccountsRiskCanvasStyle = '';
+      lastAccountsRiskRenderSig = '';
+      resized = true;
     }
 
-    accountsRiskTopCanvas.style.cssText =
+    const nextStyle =
       `position:fixed;left:${Math.round(absLeft)}px;top:${Math.round(absTop)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;z-index:2147483640;user-select:none;display:block;`;
-    if (accountsRiskTopCanvas.width !== bmpW) accountsRiskTopCanvas.width = bmpW;
-    if (accountsRiskTopCanvas.height !== bmpH) accountsRiskTopCanvas.height = bmpH;
-    return { canvas: accountsRiskTopCanvas, hostDoc, absLeft: Math.round(absLeft), absTop: Math.round(absTop), cssW, cssH, dpr };
+    if (nextStyle !== lastAccountsRiskCanvasStyle) {
+      accountsRiskTopCanvas.style.cssText = nextStyle;
+      lastAccountsRiskCanvasStyle = nextStyle;
+    }
+    if (accountsRiskTopCanvas.width !== bmpW) {
+      accountsRiskTopCanvas.width = bmpW;
+      resized = true;
+    }
+    if (accountsRiskTopCanvas.height !== bmpH) {
+      accountsRiskTopCanvas.height = bmpH;
+      resized = true;
+    }
+    return { canvas: accountsRiskTopCanvas, hostDoc, absLeft: Math.round(absLeft), absTop: Math.round(absTop), cssW, cssH, dpr, resized };
   }
 
   let accountsRiskToggleBtn = null;
 
   function syncAccountsRiskToggleButton(topOverlay, hitRect, isCollapsed) {
     if (!topOverlay || !topOverlay.hostDoc || !hitRect) {
-      if (accountsRiskToggleBtn) accountsRiskToggleBtn.style.display = 'none';
+      if (accountsRiskToggleBtn && accountsRiskToggleBtn.style.display !== 'none') {
+        accountsRiskToggleBtn.style.display = 'none';
+        lastAccountsRiskBtnStyle = '';
+      }
       return;
     }
     const hostDoc = topOverlay.hostDoc;
@@ -11398,6 +11419,7 @@
           if (latestAccountsRiskOverlayData && latestAccountsRiskOverlayData.config) {
             latestAccountsRiskOverlayData.config.collapsed = nextCollapsed;
           }
+          lastAccountsRiskRenderSig = '';
           postToIsolated({
             type: 'VEST_TV_ACCOUNTS_RISK_TOGGLE_COLLAPSE',
             collapsed: nextCollapsed
@@ -11406,6 +11428,8 @@
         });
         (hostDoc.body || hostDoc.documentElement).appendChild(accountsRiskToggleBtn);
       }
+      lastAccountsRiskBtnStyle = '';
+      lastAccountsRiskBtnCollapsed = null;
     }
 
     const leftPx = Math.round(topOverlay.absLeft + hitRect.x);
@@ -11413,20 +11437,26 @@
     const wPx = Math.max(16, Math.round(hitRect.w));
     const hPx = Math.max(16, Math.round(hitRect.h));
 
-    if (isCollapsed) {
-      accountsRiskToggleBtn.textContent = '';
-      accountsRiskToggleBtn.title = 'Click to expand Accounts & Risk';
-      accountsRiskToggleBtn.style.cssText =
-        `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:transparent;border:none;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:block;`;
-    } else {
-      accountsRiskToggleBtn.textContent = '—';
-      accountsRiskToggleBtn.title = 'Minimize Accounts & Risk';
-      accountsRiskToggleBtn.style.cssText =
-        `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);border-radius:4px;color:#cbd5e1;font-size:10px;font-weight:800;line-height:1;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:flex;align-items:center;justify-content:center;`;
+    if (lastAccountsRiskBtnCollapsed !== isCollapsed) {
+      accountsRiskToggleBtn.textContent = isCollapsed ? '' : '—';
+      accountsRiskToggleBtn.title = isCollapsed ? 'Click to expand Accounts & Risk' : 'Minimize Accounts & Risk';
+      lastAccountsRiskBtnCollapsed = isCollapsed;
+    }
+
+    const nextBtnStyle = isCollapsed
+      ? `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:transparent;border:none;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:block;`
+      : `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);border-radius:4px;color:#cbd5e1;font-size:10px;font-weight:800;line-height:1;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:flex;align-items:center;justify-content:center;`;
+
+    if (nextBtnStyle !== lastAccountsRiskBtnStyle) {
+      accountsRiskToggleBtn.style.cssText = nextBtnStyle;
+      lastAccountsRiskBtnStyle = nextBtnStyle;
     }
   }
 
   function clearAccountsRiskTopOverlayCanvas() {
+    lastAccountsRiskRenderSig = '';
+    lastAccountsRiskCanvasStyle = '';
+    lastAccountsRiskBtnStyle = '';
     if (accountsRiskTopCanvas) {
       try {
         const c = accountsRiskTopCanvas.getContext('2d');
@@ -11789,7 +11819,7 @@
 
     const extracted = extractSeriesBarsFromModel();
     if (!extracted || !extracted.bars || extracted.bars.length === 0) {
-      clearAllChartOverlays();
+      // Do NOT flash/clear overlays during transient bar-loading frames when switching instruments or accounts
       return;
     }
 
@@ -12814,13 +12844,26 @@
     if (accountsRiskEnabled) {
       const topOverlay = ensureAccountsRiskTopOverlayCanvas(targetCanvas);
       if (topOverlay && topOverlay.canvas) {
-        const topCtx = topOverlay.canvas.getContext('2d');
-        if (topCtx) {
-          topCtx.setTransform(1, 0, 0, 1, 0, 0);
-          topCtx.clearRect(0, 0, topOverlay.canvas.width, topOverlay.canvas.height);
-          topCtx.setTransform(topOverlay.dpr, 0, 0, topOverlay.dpr, 0, 0);
-          const hitRect = renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, topOverlay.cssW, topOverlay.cssH);
-          syncAccountsRiskToggleButton(topOverlay, hitRect, Boolean(hitRect && hitRect.isCollapsed));
+        const arbRenderSig = JSON.stringify({
+          w: topOverlay.cssW,
+          h: topOverlay.cssH,
+          sym: symbolKey || '',
+          cfg: accountsRiskConfig || null,
+          ts: latestAccountsRiskOverlayData ? latestAccountsRiskOverlayData.timestamp : 0,
+          act: latestAccountsRiskOverlayData ? latestAccountsRiskOverlayData.activeAccountName : '',
+          inst: latestAccountsRiskOverlayData ? latestAccountsRiskOverlayData.currentInstrument : '',
+          cnt: (latestAccountsRiskOverlayData && Array.isArray(latestAccountsRiskOverlayData.accounts)) ? latestAccountsRiskOverlayData.accounts.length : 0
+        });
+        if (topOverlay.resized || arbRenderSig !== lastAccountsRiskRenderSig) {
+          lastAccountsRiskRenderSig = arbRenderSig;
+          const topCtx = topOverlay.canvas.getContext('2d');
+          if (topCtx) {
+            topCtx.setTransform(1, 0, 0, 1, 0, 0);
+            topCtx.clearRect(0, 0, topOverlay.canvas.width, topOverlay.canvas.height);
+            topCtx.setTransform(topOverlay.dpr, 0, 0, topOverlay.dpr, 0, 0);
+            const hitRect = renderAccountsRiskOnCanvas(topCtx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, topOverlay.cssW, topOverlay.cssH);
+            syncAccountsRiskToggleButton(topOverlay, hitRect, Boolean(hitRect && hitRect.isCollapsed));
+          }
         }
       }
     } else {
@@ -14222,8 +14265,8 @@
       const curPath = String(window.location.pathname || '');
       if (curPath !== lastCheckedPathname) {
         lastCheckedPathname = curPath;
-        cachedTargetChartCanvas = null;
         if (/^\/(portfolio|markets|affiliate|docs|capital|leaderboard|referral|rewards|vault|staking|earn)\b/i.test(curPath)) {
+          cachedTargetChartCanvas = null;
           clearAccountsRiskTopOverlayCanvas();
           if (ictSessionsCanvas) {
             try {
@@ -14234,7 +14277,7 @@
           }
           clearIctPriceScaleBadges();
         } else {
-          scheduleIctSessionsRender(true);
+          scheduleIctSessionsRender(false);
         }
       }
     }, 300);
