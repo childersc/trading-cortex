@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.93`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.94`) are documented in this file.
+
+---
+
+## [v1.1.94] — 2026-11-19
+
+### 🛠️ Settings Modal Scroll-Jump & Accounts Toggle Fix
+- **Fixed Settings Modal Jumping Back to Top on Scroll**:
+  - Updated `onLiveSettingsUpdated()` in `openStudioSettingsModal()` with `getEditableSettingsSignature()` so noisy background writes (`lastChartSettings` viewport saves, sidebar/account tracking, and self-save echoes) no longer trigger full modal re-renders.
+  - When a genuine cross-browser setting update arrives from another window, the modal now saves and restores `#vest-tvs-right-pane.scrollTop` and any currently expanded indicator drawers so scrolling never snaps back to the top.
+- **Fixed Accounts & Risk Toggle Reverting**:
+  - Added the missing `accountsrisk` branch to the `.vest-ind-master-toggle` change handler and wired `renderChartAccountsRiskBox()` inside `commitDraftAndClose()` so toggling **Accounts & Risk Box** ON/OFF persists cleanly.
 
 ---
 

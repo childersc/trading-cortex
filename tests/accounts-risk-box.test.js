@@ -42,7 +42,9 @@ assert(isolatedJs.includes('vest-arb-offset-x') && isolatedJs.includes('vest-arb
 assert(isolatedJs.includes('vest-arb-scan-accounts-btn'), 'Scan Firm Accounts button must be present');
 assert(isolatedJs.includes('CORTEX_ACCOUNT_SNAPSHOT_UPDATE'), 'Cross-tab BroadcastChannel must sync live account snapshots');
 assert(isolatedJs.includes('changes.cortexAccountSnapshots'), 'chrome.storage.onChanged must sync multi-browser account snapshots');
-console.log('✓ Dropdown, Settings Hub, and Cross-Browser live account sync verified');
+assert(isolatedJs.includes("indId === 'accountsrisk' && draftSettings.accountsRiskBox"), 'Master toggle change listener must update draftSettings.accountsRiskBox.enabled');
+assert(isolatedJs.includes('function getEditableSettingsSignature(') && isolatedJs.includes('nextRightPane.scrollTop = prevScrollTop'), 'Live settings sync in modal must ignore background/self echoes and preserve scroll position');
+console.log('✓ Dropdown, Settings Hub, Scroll Preservation, and Cross-Browser live account sync verified');
 
 // 4. VM Unit Tests for Dollar Parsing, Config Normalization & Risk Computation
 const extractFn = (name, src) => {

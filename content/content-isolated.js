@@ -5050,15 +5050,53 @@
     overlay.id = 'vest-studio-settings-dialog';
     overlay.className = 'vest-tvs-overlay';
 
+    function getEditableSettingsSignature(s) {
+      if (!s || typeof s !== 'object') return '';
+      const clone = { ...s };
+      delete clone.lastChartSettings;
+      delete clone.vestLastActiveAccount;
+      delete clone.bottomPanelStates;
+      delete clone.bottomPanelState;
+      delete clone.sidebarState;
+      delete clone.minimizedWindowOrder;
+      delete clone.panelLayout;
+      try {
+        return JSON.stringify(clone);
+      } catch (err) {
+        return '';
+      }
+    }
+
     function onLiveSettingsUpdated(e) {
       if (!overlay || !overlay.isConnected) {
         window.removeEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
         return;
       }
       if (!e || !e.detail || !e.detail.settings) return;
+      // Ignore noisy background viewport/account/sidebar writes and self-save echoes so scrolling & toggles never jump or revert
+      const incomingSig = getEditableSettingsSignature(e.detail.settings);
+      const currentDraftSig = getEditableSettingsSignature(draftSettings);
+      if (incomingSig && incomingSig === currentDraftSig) {
+        return;
+      }
+
+      const prevRightPane = overlay.querySelector('#vest-tvs-right-pane');
+      const prevScrollTop = prevRightPane ? prevRightPane.scrollTop : 0;
+      const openDrawerIds = Array.from(overlay.querySelectorAll('.vest-indicator-settings-drawer'))
+        .filter(d => d.style.display !== 'none')
+        .map(d => d.id);
+
       Object.assign(draftSettings, JSON.parse(JSON.stringify(e.detail.settings)));
       if (typeof renderDialog === 'function') {
         renderDialog();
+        const nextRightPane = overlay.querySelector('#vest-tvs-right-pane');
+        if (nextRightPane && prevScrollTop > 0) {
+          nextRightPane.scrollTop = prevScrollTop;
+        }
+        openDrawerIds.forEach(dId => {
+          const dEl = overlay.querySelector(`#${dId}`);
+          if (dEl) dEl.style.display = 'block';
+        });
       }
     }
     window.addEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
@@ -7407,7 +7445,7 @@
         `;
       }
 
-      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure'].includes(activeTab)) {
+      if (activeTab === 'chartingindicators' || ['sessions', 'autofvg', 'news', 'trades', 'candleohlc', 'positionhud', 'faillines', 'cortexindicator', 'orderblocks', 'marketstructure', 'rangedetector', 'accountsrisk'].includes(activeTab)) {
         return renderChartingIndicatorsHtml();
       }
       if (activeTab === 'perpfirms') {
@@ -7530,6 +7568,7 @@
       if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
       if (typeof renderChartOrderBlockStatsBox === 'function') renderChartOrderBlockStatsBox();
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
+      if (typeof renderChartAccountsRiskBox === 'function') renderChartAccountsRiskBox();
       notifyMainWorldConfig();
       if (typeof renderChartNewsBox === 'function') renderChartNewsBox();
       if (typeof renderChartTradesBox === 'function') renderChartTradesBox();
@@ -8358,6 +8397,7 @@
       if (typeof renderChartRangeBox === 'function') renderChartRangeBox();
       if (typeof renderChartOrderBlockStatsBox === 'function') renderChartOrderBlockStatsBox();
       if (typeof renderChartDiagnosticsBox === 'function') renderChartDiagnosticsBox();
+      if (typeof renderChartAccountsRiskBox === 'function') renderChartAccountsRiskBox();
       showToast('Settings saved');
       if (typeof closeTvColorPickerPopover === 'function') closeTvColorPickerPopover();
       window.removeEventListener('cortex-live-settings-updated', onLiveSettingsUpdated);
@@ -8522,6 +8562,7 @@
             else if (indId === 'orderblocks' && draftSettings.orderBlocks) draftSettings.orderBlocks.enabled = isChecked;
             else if (indId === 'marketstructure' && draftSettings.marketStructure) draftSettings.marketStructure.enabled = isChecked;
             else if (indId === 'rangedetector' && draftSettings.rangeDetector) draftSettings.rangeDetector.enabled = isChecked;
+            else if (indId === 'accountsrisk' && draftSettings.accountsRiskBox) draftSettings.accountsRiskBox.enabled = isChecked;
 
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
