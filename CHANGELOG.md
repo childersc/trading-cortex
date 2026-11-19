@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.95`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.96`) are documented in this file.
+
+---
+
+## [v1.1.96] — 2026-11-19
+
+### 🧹 Clean Account Name Normalization, Deduplication & UI Noise Filtering
+- **Canonical Account Names & Zero Duplicates**:
+  - Added `normalizeCanonicalAccountName()` in both `content-main.js` and `content-isolated.js` to normalize concatenated Vest DOM strings (`76Account 76Instant`, `71Account 71Evaluati`, `75Account 75Evaluati`) and bare numbers (`71`, `73`, `74`, `75`, `76`, `77`) into clean canonical names (`Account 71`, `Account 73`, `Account 74`, `Account 75`, `Account 76`, `Account 77`), automatically merging duplicate rows into one entry per account.
+  - Added balance priority weighting so live `Account Value` / `equity` is never overwritten by secondary collateral/dust fields.
+- **Filtered Non-Account UI Labels**:
+  - Automatically rejects and purges cached UI/menu strings such as `Active Positions`, `Add Funded Account`, and 2-letter abbreviations (`PA`) via `sanitizeAccountSnapshotsRegistry()`.
+- **Formatting & Top-Left Clearance**:
+  - Fixed negative dollar formatting (`-$0.20` instead of `$-0.20`) and adjusted default `offsetY` to `76px` so the overlay clears TradingView's top-left `^` legend collapse button cleanly.
 
 ---
 

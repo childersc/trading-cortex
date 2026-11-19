@@ -11304,7 +11304,8 @@
 
   function formatCanvasDollarPlain(val) {
     if (typeof val !== 'number' || !Number.isFinite(val)) return '--';
-    return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const absStr = Math.abs(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return val < -0.0001 ? `-$${absStr}` : `$${absStr}`;
   }
 
   function formatCanvasDollarSigned(val) {
@@ -11330,7 +11331,7 @@
     const showOtherPnl = rawCfg.showOtherPnl !== false;
     const boxW = Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || 248)));
     const x = Math.max(4, Math.round(Number(rawCfg.offsetX ?? 12)));
-    const y = Math.max(4, Math.round(Number(rawCfg.offsetY ?? 52)));
+    const y = Math.max(4, Math.round(Number(rawCfg.offsetY ?? 76)));
     const bgOpacity = Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 82)));
     const bgHex = typeof rawCfg.bgColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawCfg.bgColor) ? rawCfg.bgColor : '#0b101b';
     const borderHex = typeof rawCfg.borderColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawCfg.borderColor) ? rawCfg.borderColor : '#38bdf8';
@@ -13676,11 +13677,34 @@
     return map;
   }
 
+  function normalizeCanonicalAccountName(rawName) {
+    let s = String(rawName || '').split(/\r?\n/)[0].replace(/[↕▼⌄▾]/g, '').trim();
+    if (!s) return null;
+
+    // Clean Vest concatenated DOM badge+name+tier patterns like "76Account 76Instant", "71Account 71Evaluation"
+    const vestConcat = s.match(/^(?:\d+\s*)?account\s*#?\s*(\d+)(?:\s*(instant|evaluat\w*|funded|live|demo|standard|pro))?/i);
+    if (vestConcat) {
+      return `Account ${vestConcat[1]}`;
+    }
+
+    // Pure numeric account number like "71", "73", "76" -> "Account 71"
+    if (/^\d{1,6}$/.test(s)) {
+      return `Account ${s}`;
+    }
+
+    // Reject UI buttons, tabs, currencies, market tickers, and 1-2 char abbreviations like "PA"
+    const INVALID_ACCOUNT_RE = /^(active\s+positions|open\s+orders|trade\s+history|order\s+history|positions?\s+history|funding\s+history|add\s+funded.*|add\s+account.*|create\s+account.*|new\s+account.*|get\s+funded.*|manage\s+accounts?.*|switch\s+account.*|connect.*|disconnect.*|logout|log\s+out|sign\s+out|deposit|withdraw|settings|portfolio|markets|trade|usdc|usdt|usd|btc|eth|sol|hype|nq|es|cl|gc|eur|gbp|jpy|pa|na|n\/a|null|undefined|none|total|all|summary|default|active|open|closed|pending|long|short|buy|sell|market|limit)$/i;
+    if (INVALID_ACCOUNT_RE.test(s) || /-PERP$|-USD$|-USDT$|-USDC$/i.test(s)) {
+      return null;
+    }
+    if (s.length < 3 || s.length > 48) return null;
+    return s;
+  }
+
   function extractAccountsFromApiPayload(payload, sourceLabel = '') {
-    const found = [];
-    if (!payload || typeof payload !== 'object') return found;
+    const foundByName = new Map();
+    if (!payload || typeof payload !== 'object') return [];
     const seenObjs = new WeakSet();
-    const seenKeys = new Set();
 
     const walk = (node, depth) => {
       if (!node || typeof node !== 'object' || depth > 7) return;
@@ -13700,13 +13724,20 @@
       const isMarketTicker = node.markPrice !== undefined && node.indexPrice !== undefined && node.fundingRate !== undefined;
 
       if (!isCandle && !isOrderOrFill && !isMarketTicker) {
-        const balance = parseFiniteAccountNum(
+        // Distinguish primary equity/accountValue fields (priority 2) from secondary margin/collateral fields (priority 1)
+        const primaryBal = parseFiniteAccountNum(
           node.accountValue ?? node.account_value ?? node.totalEquity ?? node.total_equity ??
           node.equity ?? node.netLiquidation ?? node.net_liquidation ?? node.totalBalance ??
-          node.total_balance ?? node.balance ?? node.currentBalance ?? node.current_balance ??
-          node.walletBalance ?? node.wallet_balance ?? node.marginBalance ?? node.margin_balance ??
-          node.availableBalance ?? node.available_balance ?? node.nav ?? node.collateral
+          node.total_balance ?? node.currentBalance ?? node.current_balance ?? node.balance
         );
+        const secondaryBal = primaryBal === null
+          ? parseFiniteAccountNum(
+              node.walletBalance ?? node.wallet_balance ?? node.marginBalance ?? node.margin_balance ??
+              node.availableBalance ?? node.available_balance ?? node.nav ?? node.collateral
+            )
+          : null;
+        const balance = primaryBal !== null ? primaryBal : secondaryBal;
+        const balancePriority = primaryBal !== null ? 2 : (secondaryBal !== null ? 1 : 0);
 
         const totalOpenPnl = parseFiniteAccountNum(
           node.unrealizedPnl ?? node.unrealized_pnl ?? node.unrPnl ?? node.unr_pnl ??
@@ -13718,39 +13749,49 @@
         const rawNum = node.accountNumber ?? node.account_number ?? node.subaccountNumber ?? node.subaccount_number ?? null;
         const rawId = node.accountId ?? node.account_id ?? node.subaccountId ?? node.subaccount_id ?? node.id ?? node.uuid ?? null;
 
-        let displayName = '';
+        let candidateName = '';
         if (typeof rawName === 'string' && rawName.trim()) {
-          displayName = rawName.trim();
+          candidateName = rawName.trim();
         } else if (rawNum !== null && rawNum !== undefined && String(rawNum).trim()) {
-          displayName = `Account ${String(rawNum).trim()}`;
+          candidateName = `Account ${String(rawNum).trim()}`;
         } else if (rawId !== null && rawId !== undefined && typeof rawId !== 'object' && String(rawId).trim()) {
-          const idStr = String(rawId).trim();
-          if (/^\d{1,6}$/.test(idStr)) {
-            displayName = `Account ${idStr}`;
-          } else if (/account|eval|funded|sub|prop|challenge/i.test(idStr) && idStr.length <= 40) {
-            displayName = idStr;
-          }
+          candidateName = String(rawId).trim();
         }
 
-        const isCurrencyOrMarketName = /^(usdc|usdt|usd|btc|eth|sol|hype|nq|es|cl|gc|eur|gbp|jpy)$/i.test(displayName) ||
-          /-PERP$|-USD$|-USDT$|-USDC$/i.test(displayName) ||
-          /^(active|open|closed|pending|long|short|buy|sell|market|limit|default|null|undefined)$/i.test(displayName);
-
+        const canonicalName = normalizeCanonicalAccountName(candidateName);
         const hasPositionsArray = Array.isArray(node.positions) || Array.isArray(node.openPositions) || Array.isArray(node.activePositions);
 
-        if (displayName && displayName.length >= 2 && displayName.length <= 48 && !isCurrencyOrMarketName && (balance !== null || hasPositionsArray)) {
-          const idKey = String(rawId || displayName).trim();
-          const dedupeKey = `${displayName.toLowerCase()}::${idKey.toLowerCase()}`;
-          if (!seenKeys.has(dedupeKey)) {
-            seenKeys.add(dedupeKey);
-            found.push({
+        if (canonicalName && (balance !== null || hasPositionsArray)) {
+          const idKey = String(rawId || canonicalName).trim();
+          const posMap = extractPositionsMapFromAccountObj(node);
+          const existing = foundByName.get(canonicalName);
+          if (!existing) {
+            foundByName.set(canonicalName, {
               id: idKey,
-              name: displayName,
+              name: canonicalName,
               balance,
+              balancePriority,
               totalOpenPnl,
-              positionsBySymbol: extractPositionsMapFromAccountObj(node),
+              positionsBySymbol: posMap,
               source: sourceLabel
             });
+          } else {
+            // Merge: prefer higher-priority balance (accountValue/equity over dust collateral) & richer positions
+            const takeNewBal = balance !== null && (
+              existing.balance === null ||
+              balancePriority > existing.balancePriority ||
+              (balancePriority === existing.balancePriority && Math.abs(balance) > Math.abs(existing.balance))
+            );
+            if (takeNewBal) {
+              existing.balance = balance;
+              existing.balancePriority = balancePriority;
+            }
+            if (totalOpenPnl !== null && existing.totalOpenPnl === null) {
+              existing.totalOpenPnl = totalOpenPnl;
+            }
+            if (Object.keys(posMap).length > 0) {
+              existing.positionsBySymbol = { ...existing.positionsBySymbol, ...posMap };
+            }
           }
         }
       }
@@ -13767,7 +13808,7 @@
     };
 
     walk(payload, 0);
-    return found;
+    return Array.from(foundByName.values());
   }
 
   function scanReactFiberForAccounts() {

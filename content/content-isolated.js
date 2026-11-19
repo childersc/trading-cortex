@@ -591,7 +591,7 @@
     enabled: true,
     boxWidth: 248,
     offsetX: 12,
-    offsetY: 52,
+    offsetY: 76,
     riskPercent: 1.0,
     showOtherPnl: true,
     bgColor: '#0b101b',
@@ -12534,7 +12534,87 @@ if (activeTab === 'diagnostics') {
 
   function formatPlainDollar(val) {
     if (typeof val !== 'number' || !Number.isFinite(val)) return '--';
-    return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const absStr = Math.abs(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return val < -0.0001 ? `-$${absStr}` : `$${absStr}`;
+  }
+
+  function normalizeCanonicalAccountName(rawName) {
+    let s = String(rawName || '').split(/\r?\n/)[0].replace(/[↕▼⌄▾]/g, '').trim();
+    if (!s) return null;
+
+    // Clean Vest concatenated DOM badge+name+tier patterns like "76Account 76Instant", "71Account 71Evaluati"
+    const vestConcat = s.match(/^(?:\d+\s*)?account\s*#?\s*(\d+)(?:\s*(instant|evaluat\w*|funded|live|demo|standard|pro))?/i);
+    if (vestConcat) {
+      return `Account ${vestConcat[1]}`;
+    }
+
+    // Pure numeric account number like "71", "73", "76" -> "Account 71"
+    if (/^\d{1,6}$/.test(s)) {
+      return `Account ${s}`;
+    }
+
+    // Reject UI buttons, tabs, currencies, market tickers, and 1-2 char abbreviations like "PA"
+    const INVALID_ACCOUNT_RE = /^(active\s+positions|open\s+orders|trade\s+history|order\s+history|positions?\s+history|funding\s+history|add\s+funded.*|add\s+account.*|create\s+account.*|new\s+account.*|get\s+funded.*|manage\s+accounts?.*|switch\s+account.*|connect.*|disconnect.*|logout|log\s+out|sign\s+out|deposit|withdraw|settings|portfolio|markets|trade|usdc|usdt|usd|btc|eth|sol|hype|nq|es|cl|gc|eur|gbp|jpy|pa|na|n\/a|null|undefined|none|total|all|summary|default|active|open|closed|pending|long|short|buy|sell|market|limit)$/i;
+    if (INVALID_ACCOUNT_RE.test(s) || /-PERP$|-USD$|-USDT$|-USDC$/i.test(s)) {
+      return null;
+    }
+    if (s.length < 3 || s.length > 48) return null;
+    return s;
+  }
+
+  function sanitizeAccountSnapshotsRegistry() {
+    const cleaned = {};
+    let mutated = false;
+    for (const rawKey of Object.keys(accountSnapshotsRegistry || {})) {
+      const entry = accountSnapshotsRegistry[rawKey];
+      if (!entry || typeof entry !== 'object') {
+        mutated = true;
+        continue;
+      }
+      const canonicalName = normalizeCanonicalAccountName(entry.name || entry.id);
+      if (!canonicalName) {
+        mutated = true;
+        continue;
+      }
+      const firmId = entry.firmId || 'vest';
+      const canonicalKey = `${firmId}::${canonicalName}`;
+      if (canonicalKey !== rawKey || entry.name !== canonicalName) {
+        mutated = true;
+      }
+      const prev = cleaned[canonicalKey];
+      if (!prev) {
+        cleaned[canonicalKey] = {
+          ...entry,
+          key: canonicalKey,
+          id: canonicalName,
+          name: canonicalName,
+          firmId
+        };
+      } else {
+        mutated = true;
+        const prevPrio = Number(prev.balancePriority) || (prev.source === 'live_dom' ? 3 : 1);
+        const curPrio = Number(entry.balancePriority) || (entry.source === 'live_dom' ? 3 : 1);
+        const takeCurBal = typeof entry.balance === 'number' && Number.isFinite(entry.balance) && (
+          prev.balance === null || prev.balance === undefined ||
+          curPrio > prevPrio ||
+          (curPrio === prevPrio && (Number(entry.updatedAt) || 0) >= (Number(prev.updatedAt) || 0) && Math.abs(entry.balance) >= Math.abs(prev.balance || 0))
+        );
+        const prevPosCount = prev.positionsBySymbol ? Object.keys(prev.positionsBySymbol).length : 0;
+        const curPosCount = entry.positionsBySymbol ? Object.keys(entry.positionsBySymbol).length : 0;
+        cleaned[canonicalKey] = {
+          ...prev,
+          balance: takeCurBal ? entry.balance : prev.balance,
+          balancePriority: takeCurBal ? curPrio : prevPrio,
+          totalOpenPnl: (entry.totalOpenPnl !== null && entry.totalOpenPnl !== undefined && curPrio >= prevPrio) ? entry.totalOpenPnl : prev.totalOpenPnl,
+          positionsBySymbol: curPosCount > 0 ? { ...(prev.positionsBySymbol || {}), ...(entry.positionsBySymbol || {}) } : (prev.positionsBySymbol || {}),
+          updatedAt: Math.max(Number(prev.updatedAt) || 0, Number(entry.updatedAt) || 0)
+        };
+      }
+    }
+    if (mutated) {
+      accountSnapshotsRegistry = cleaned;
+    }
+    return mutated;
   }
 
   function loadAccountSnapshotsFromLocalStorage() {
@@ -12545,6 +12625,9 @@ if (activeTab === 'diagnostics') {
         if (parsed && typeof parsed === 'object') {
           accountSnapshotsRegistry = { ...parsed, ...accountSnapshotsRegistry };
         }
+      }
+      if (sanitizeAccountSnapshotsRegistry()) {
+        try { window.localStorage.setItem(ACCOUNT_SNAPSHOTS_LS_KEY, JSON.stringify(accountSnapshotsRegistry)); } catch (e) {}
       }
     } catch (e) {}
   }
@@ -12573,15 +12656,21 @@ if (activeTab === 'diagnostics') {
   function handleIncomingAccountSnapshots(incoming) {
     if (!incoming || typeof incoming !== 'object') return;
     let changed = false;
-    for (const key of Object.keys(incoming)) {
-      const inc = incoming[key];
-      if (!inc || typeof inc !== 'object' || !inc.name) continue;
+    for (const rawKey of Object.keys(incoming)) {
+      const inc = incoming[rawKey];
+      if (!inc || typeof inc !== 'object') continue;
+      const canonicalName = normalizeCanonicalAccountName(inc.name || inc.id);
+      if (!canonicalName) continue;
+      const firmId = inc.firmId || 'vest';
+      const key = `${firmId}::${canonicalName}`;
+      const normalizedInc = { ...inc, key, id: canonicalName, name: canonicalName, firmId };
       const cur = accountSnapshotsRegistry[key];
-      if (!cur || (Number(inc.updatedAt) || 0) >= (Number(cur.updatedAt) || 0)) {
-        accountSnapshotsRegistry[key] = inc;
+      if (!cur || (Number(normalizedInc.updatedAt) || 0) >= (Number(cur.updatedAt) || 0)) {
+        accountSnapshotsRegistry[key] = normalizedInc;
         changed = true;
       }
     }
+    if (sanitizeAccountSnapshotsRegistry()) changed = true;
     if (changed && settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
       pushAccountsRiskDataToChartCanvas();
     }
@@ -12604,10 +12693,11 @@ if (activeTab === 'diagnostics') {
   }
 
   function getMergedAccountSnapshotsList() {
+    sanitizeAccountSnapshotsRegistry();
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
     const activeFirmId = activeFirm ? activeFirm.id : 'vest';
     const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
-    const cleanCurrentName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : null;
+    const cleanCurrentName = currentAcc && currentAcc.name ? normalizeCanonicalAccountName(currentAcc.name) : null;
 
     const list = Object.values(accountSnapshotsRegistry)
       .filter(a => a && typeof a === 'object' && a.name && (!a.firmId || a.firmId === activeFirmId));
@@ -12772,7 +12862,7 @@ if (activeTab === 'diagnostics') {
         '[data-testid^="account-item-"], [role="menuitem"], [class*="account-item"], [class*="DropdownMenuItem"]'
       );
       if (!items.length) return false;
-      const DANGEROUS_ACTIONS = /disconnect|logout|log out|sign out|exit|leave|unlink|switch wallet|revoke|remove|deposit|withdraw|settings|create|new account|get funded/i;
+      const DANGEROUS_ACTIONS = /disconnect|logout|log out|sign out|exit|leave|unlink|switch wallet|revoke|remove|deposit|withdraw|settings|create|new account|get funded|add funded|add account|active positions|open orders/i;
       const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
       const firmId = activeFirm ? activeFirm.id : 'vest';
       let discoveredAny = false;
@@ -12783,20 +12873,22 @@ if (activeTab === 'diagnostics') {
         const rawText = (item.innerText || '').trim();
         if (!rawText || DANGEROUS_ACTIONS.test(rawText)) continue;
         const firstLine = rawText.split(/\r?\n/)[0].replace(/[↕▼⌄▾]/g, '').trim();
-        if (!firstLine || firstLine.length > 48) continue;
-        // Must look like an account name (e.g. "Account 76", "Account 59", "Evaluation...", "Funded...", or have data-testid account-item-)
         const isAccountTestId = Boolean(item.getAttribute('data-testid')?.startsWith('account-item-'));
         if (!isAccountTestId && !/account\s*\d+|evaluation|funded|subaccount/i.test(firstLine)) continue;
 
-        const key = `${firmId}::${firstLine}`;
+        const canonicalName = normalizeCanonicalAccountName(firstLine);
+        if (!canonicalName) continue;
+
+        const key = `${firmId}::${canonicalName}`;
         const maybeBal = parseDollarAmount(rawText);
         if (!accountSnapshotsRegistry[key]) {
           accountSnapshotsRegistry[key] = {
             key,
-            id: firstLine,
-            name: firstLine,
+            id: canonicalName,
+            name: canonicalName,
             firmId,
             balance: maybeBal,
+            balancePriority: maybeBal !== null ? 1 : 0,
             totalOpenPnl: null,
             inPositionsUsd: null,
             positionsBySymbol: {},
@@ -12806,6 +12898,7 @@ if (activeTab === 'diagnostics') {
           discoveredAny = true;
         } else if (maybeBal !== null && accountSnapshotsRegistry[key].balance === null) {
           accountSnapshotsRegistry[key].balance = maybeBal;
+          accountSnapshotsRegistry[key].balancePriority = 1;
           discoveredAny = true;
         }
       }
@@ -12823,22 +12916,23 @@ if (activeTab === 'diagnostics') {
     scrapeOpenAccountDropdownIntoRegistry();
 
     const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
-    const rawAccName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : null;
-    if (!rawAccName) return;
+    const canonicalName = currentAcc && currentAcc.name ? normalizeCanonicalAccountName(currentAcc.name) : null;
+    if (!canonicalName) return;
 
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
     const firmId = activeFirm ? activeFirm.id : 'vest';
-    const key = `${firmId}::${rawAccName}`;
+    const key = `${firmId}::${canonicalName}`;
 
     const health = scrapeAccountHealthMetricsFromDom();
     const posRes = scrapeActivePositionsMapFromDom(health.inPositionsUsd);
 
     const existing = accountSnapshotsRegistry[key] || {
       key,
-      id: rawAccName,
-      name: rawAccName,
+      id: canonicalName,
+      name: canonicalName,
       firmId,
       balance: null,
+      balancePriority: 0,
       totalOpenPnl: null,
       inPositionsUsd: null,
       positionsBySymbol: {},
@@ -12848,10 +12942,12 @@ if (activeTab === 'diagnostics') {
     const nextSnap = {
       ...existing,
       key,
-      id: rawAccName,
-      name: rawAccName,
+      id: canonicalName,
+      name: canonicalName,
       firmId,
       balance: health.balance !== null ? health.balance : existing.balance,
+      balancePriority: health.balance !== null ? 3 : (existing.balancePriority || 0),
+      source: 'live_dom',
       totalOpenPnl: health.totalOpenPnl !== null ? health.totalOpenPnl : existing.totalOpenPnl,
       inPositionsUsd: health.inPositionsUsd !== null ? health.inPositionsUsd : existing.inPositionsUsd,
       positionsBySymbol: posRes.reliable ? posRes.positionsBySymbol : (existing.positionsBySymbol || {}),
@@ -12887,15 +12983,16 @@ if (activeTab === 'diagnostics') {
 
     for (const raw of capturedList) {
       if (!raw || typeof raw !== 'object') continue;
-      const name = String(raw.name || raw.id || '').trim();
-      if (!name || name.length < 2) continue;
-      const key = `${firmId}::${name}`;
+      const canonicalName = normalizeCanonicalAccountName(raw.name || raw.id);
+      if (!canonicalName) continue;
+      const key = `${firmId}::${canonicalName}`;
       const existing = accountSnapshotsRegistry[key] || {
         key,
-        id: String(raw.id || name),
-        name,
+        id: canonicalName,
+        name: canonicalName,
         firmId,
         balance: null,
+        balancePriority: 0,
         totalOpenPnl: null,
         inPositionsUsd: null,
         positionsBySymbol: {},
@@ -12903,6 +13000,16 @@ if (activeTab === 'diagnostics') {
       };
 
       const incomingBal = (typeof raw.balance === 'number' && Number.isFinite(raw.balance)) ? raw.balance : null;
+      const incomingPrio = Number(raw.balancePriority) || (incomingBal !== null ? 1 : 0);
+      const existingPrio = Number(existing.balancePriority) || (existing.source === 'live_dom' ? 3 : 0);
+      const existingIsFreshLiveDom = existing.source === 'live_dom' && (Date.now() - (Number(existing.updatedAt) || 0)) < 20000;
+
+      // Never overwrite fresh live DOM Account Value with lower-priority/dust API fields
+      const takeIncomingBal = incomingBal !== null && (
+        existing.balance === null ||
+        (!existingIsFreshLiveDom && (incomingPrio > existingPrio || (incomingPrio === existingPrio && Math.abs(incomingBal) >= Math.abs(existing.balance))))
+      );
+
       const incomingPnl = (typeof raw.totalOpenPnl === 'number' && Number.isFinite(raw.totalOpenPnl)) ? raw.totalOpenPnl : null;
       const incomingPos = (raw.positionsBySymbol && typeof raw.positionsBySymbol === 'object') ? raw.positionsBySymbol : null;
       const hasIncomingPos = incomingPos && Object.keys(incomingPos).length > 0;
@@ -12915,11 +13022,12 @@ if (activeTab === 'diagnostics') {
       const nextSnap = {
         ...existing,
         key,
-        id: String(raw.id || existing.id || name),
-        name,
+        id: canonicalName,
+        name: canonicalName,
         firmId,
-        balance: incomingBal !== null ? incomingBal : existing.balance,
-        totalOpenPnl: incomingPnl !== null ? incomingPnl : existing.totalOpenPnl,
+        balance: takeIncomingBal ? incomingBal : existing.balance,
+        balancePriority: takeIncomingBal ? incomingPrio : existingPrio,
+        totalOpenPnl: (!existingIsFreshLiveDom && incomingPnl !== null) ? incomingPnl : existing.totalOpenPnl,
         positionsBySymbol: mergedPos,
         updatedAt: Date.now(),
         sourceTabId: tabInstanceId
@@ -12945,7 +13053,7 @@ if (activeTab === 'diagnostics') {
     settings.accountsRiskBox = arb;
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
     const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
-    const activeAccName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : '';
+    const activeAccName = currentAcc && currentAcc.name ? (normalizeCanonicalAccountName(currentAcc.name) || '') : '';
 
     postToMainWorlds({
       type: 'VEST_TV_ACCOUNTS_RISK_DATA',
