@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.92`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.93`) are documented in this file.
+
+---
+
+## [v1.1.93] — 2026-11-19
+
+### 🎨 Native Non-Draggable Chart Canvas Drawing & All-Firm Accounts Discovery
+- **Direct Chart Canvas Drawing (Not a Draggable Window)**:
+  - Converted the Accounts & Risk overlay from a draggable floating DOM window into a clean, non-draggable, click-through (`pointer-events: none`) canvas drawing rendered directly onto the TradingView chart overlay canvas (`renderAccountsRiskOnCanvas`) at top-left (`offsetX: 12`, `offsetY: 52`, directly below the OHLC legend).
+  - Never blocks chart panning, zooming, or drawing tools, and automatically cleans up any legacy floating box DOM element.
+- **All Accounts Discovery for the Active Prop/Perp Firm**:
+  - Added passive `window.fetch` + `XMLHttpRequest` API interception, React Fiber state tree scanning (`scanReactFiberForAccounts`), and `localStorage` scanning in `content-main.js` (`extractAccountsFromApiPayload`) to capture **all** accounts the site loads for the active firm — not just the currently selected account.
+  - Merges API/Fiber-discovered firm accounts (with balances, open PnL, and nested per-symbol positions) together with live DOM metrics and cross-tab account updates.
+- **Configurable Drawing Settings**:
+  - Settings drawer (`Cortex → Accounts & Risk Box...` or `Charting Indicators → Accounts & Risk Box`) includes configurable Risk % (with `0.5%`, `1%`, `2%`, `3%`, `5%` presets), box width, top-left Left/Top pixel offsets, opacity, accent border color, and a **Scan Firm Accounts** button.
 
 ---
 
