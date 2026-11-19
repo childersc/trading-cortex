@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.96`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.97`) are documented in this file.
+
+---
+
+## [v1.1.97] — 2026-11-19
+
+### 🔝 Front-Most Chart Overlay Layer & Lower Top-Left Offset
+- **Dedicated Front-Most Click-Through Overlay Canvas (`#vest-accounts-risk-overlay-canvas`)**:
+  - Moved the Accounts & Risk drawing onto its own dedicated `pointer-events: none` `<canvas>` mounted at `z-index: 2147483640` aligned to the TradingView chart pane, escaping inner TradingView stacking contexts so nothing on the chart (`↕ P&L`, position lines, order badges, FVGs, OBs, or legend widgets) can cover over it.
+- **Lower Default Top Offset (`offsetY: 108px`)**:
+  - Increased default `offsetY` to `108px` (with automatic migration from earlier `52px`/`76px` defaults) so the drawing sits cleanly below all top-left TradingView legend and indicator config controls.
 
 ---
 

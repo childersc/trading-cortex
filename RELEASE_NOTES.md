@@ -1,3 +1,8 @@
+Trading Cortex v1.1.97 — Front-Most Accounts & Risk Canvas Layer & Lower Top Offset
+
+- **Front-Most Chart Layer (`v1.1.97`)**: Moved the Accounts & Risk drawing onto a dedicated click-through (`pointer-events: none`) top-most overlay canvas (`z-index: 2147483640`) so nothing on the chart (`↕ P&L`, position/order badges, legend buttons, or indicators) can cover over it.
+- **Lower Top-Left Placement (`v1.1.97`)**: Nudged default `offsetY` down to `108px` (auto-migrating earlier defaults) so it sits cleanly below the top-left TradingView legend and indicator config controls.
+
 Trading Cortex v1.1.96 — Clean Account Names, Deduplication & UI Noise Filtering
 
 - **Clean Canonical Account Names (`v1.1.96`)**: Normalized concatenated Vest account strings (`76Account 76Instant`, `71Account 71Evaluati`) and bare numbers (`71`, `73`, `76`) into clean, deduplicated names (`Account 71`, `Account 73`, `Account 76`), with live `Account Value` prioritized over secondary balance fields.
