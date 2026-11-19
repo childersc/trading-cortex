@@ -1,3 +1,8 @@
+Trading Cortex v1.1.104 — Fixed Child-Iframe Clearing Loop & Price-Axis Compositor Flicker
+
+- **Fixed Child-Iframe Overlay Fighting (`v1.1.104`)**: Added `isYieldingChartToTopWindow()` at the top of `renderIctSessionIndicators()` so child iframes yielding to `window.top` exit immediately instead of calling `clearAllChartOverlays()` on every tick.
+- **Removed `will-change` Canvas Tearing (`v1.1.104`)**: Removed GPU layer hints (`will-change: contents`/`transform`) from price-axis session badges while keeping pooled DOM node reuse so labels stay rock-solid over TradingView's price axis canvas.
+
 Trading Cortex v1.1.103 — Eliminated Session Line Price-Axis Label Flickering
 
 - **Zero-Flicker Price-Axis Session Badges (`v1.1.103`)**: Replaced full `innerHTML` teardown on every price tick with persistent pooled badge nodes using GPU-composited `translate3d` positioning and owner-scoped cross-frame protection (`data-vest-owner`), eliminating flickering on session High/Low price scale labels.
