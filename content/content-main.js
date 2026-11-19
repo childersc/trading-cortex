@@ -3787,6 +3787,24 @@
         break;
       }
 
+      case 'VEST_TV_ACCOUNTS_RISK_DATA': {
+        if (payload && typeof payload === 'object') {
+          latestAccountsRiskOverlayData = payload;
+          if (payload.config && typeof payload.config === 'object') {
+            currentSettings.accountsRiskBox = payload.config;
+          }
+          scheduleIctSessionsRender(false);
+        }
+        break;
+      }
+
+      case 'VEST_SCAN_ACCOUNTS_NOW': {
+        if (typeof scanPlatformAccountsInMainWorld === 'function') {
+          scanPlatformAccountsInMainWorld();
+        }
+        break;
+      }
+
       case 'VEST_TV_CONFIG_UPDATE': {
         const wasRemembering = currentSettings.rememberSidebarTools !== false;
         const wasRememberingChart = currentSettings.rememberLastChartSettings !== false;
@@ -11267,6 +11285,239 @@
     }
   }
 
+  let latestAccountsRiskOverlayData = null;
+
+  function drawRoundedRectPath(ctx, x, y, w, h, r) {
+    const rad = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.lineTo(x + w - rad, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
+    ctx.lineTo(x + w, y + h - rad);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rad, y + h);
+    ctx.lineTo(x + rad, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rad);
+    ctx.lineTo(x, y + rad);
+    ctx.quadraticCurveTo(x, y, x + rad, y);
+    ctx.closePath();
+  }
+
+  function formatCanvasDollarPlain(val) {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return '--';
+    return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function formatCanvasDollarSigned(val) {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return '--';
+    const absStr = Math.abs(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (val > 0.0001) return `+$${absStr}`;
+    if (val < -0.0001) return `-$${absStr}`;
+    return '$0.00';
+  }
+
+  function normalizeCanvasInstrumentKey(raw) {
+    return String(raw || '')
+      .toUpperCase()
+      .replace(/^[A-Z0-9_]+:/, '')
+      .replace(/[-_/](PERP|USD|USDT|USDC)$/i, '')
+      .replace(/[^A-Z0-9]/g, '');
+  }
+
+  function renderAccountsRiskOnCanvas(ctx, overlayData, rawCfg, symbolKey, cssWidth, cssHeight) {
+    if (!ctx || !rawCfg || rawCfg.enabled === false) return;
+    const accounts = (overlayData && Array.isArray(overlayData.accounts)) ? overlayData.accounts : [];
+    const riskPct = Math.max(0.05, Math.min(50, Number(rawCfg.riskPercent) || 1.0));
+    const showOtherPnl = rawCfg.showOtherPnl !== false;
+    const boxW = Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || 248)));
+    const x = Math.max(4, Math.round(Number(rawCfg.offsetX ?? 12)));
+    const y = Math.max(4, Math.round(Number(rawCfg.offsetY ?? 52)));
+    const bgOpacity = Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? 82)));
+    const bgHex = typeof rawCfg.bgColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawCfg.bgColor) ? rawCfg.bgColor : '#0b101b';
+    const borderHex = typeof rawCfg.borderColor === 'string' && /^#[0-9a-f]{6}$/i.test(rawCfg.borderColor) ? rawCfg.borderColor : '#38bdf8';
+
+    const activeSym = normalizeCanvasInstrumentKey((overlayData && overlayData.currentInstrument) || symbolKey || '');
+    const activeAccName = (overlayData && overlayData.activeAccountName) ? String(overlayData.activeAccountName).trim() : '';
+
+    // Precompute row metrics so we know exact box height before drawing
+    const padX = 10;
+    const headerH = 24;
+    const rowGap = 5;
+    const padBottom = 8;
+
+    const preparedRows = accounts.map(acc => {
+      const bal = (typeof acc.balance === 'number' && Number.isFinite(acc.balance)) ? acc.balance : null;
+      const riskAmt = bal !== null ? Math.max(0, bal * (riskPct / 100)) : null;
+      const totalPnl = (typeof acc.totalOpenPnl === 'number' && Number.isFinite(acc.totalOpenPnl)) ? acc.totalOpenPnl : null;
+      const posMap = (acc.positionsBySymbol && typeof acc.positionsBySymbol === 'object') ? acc.positionsBySymbol : {};
+      let instPos = activeSym ? (posMap[activeSym] || null) : null;
+      if (!instPos && activeSym) {
+        for (const k of Object.keys(posMap)) {
+          const nk = normalizeCanvasInstrumentKey(k);
+          if (nk === activeSym || nk.startsWith(activeSym) || activeSym.startsWith(nk)) {
+            instPos = posMap[k];
+            break;
+          }
+        }
+      }
+      const isOpenOnInst = Boolean(instPos);
+      const hasSubLine = isOpenOnInst
+        ? (totalPnl !== null && instPos && typeof instPos.pnl === 'number' && Math.abs(totalPnl - instPos.pnl) >= 0.01)
+        : (showOtherPnl && totalPnl !== null && Math.abs(totalPnl) >= 0.005);
+      const rowH = hasSubLine ? 46 : 34;
+      const isCurrent = Boolean(activeAccName && acc.name === activeAccName);
+      return { acc, bal, riskAmt, totalPnl, instPos, isOpenOnInst, hasSubLine, rowH, isCurrent };
+    });
+
+    const maxVisibleH = Math.max(80, cssHeight - y - 16);
+    let contentH = 0;
+    const visibleRows = [];
+    if (preparedRows.length === 0) {
+      contentH = 24;
+    } else {
+      for (const r of preparedRows) {
+        const nextH = contentH + (visibleRows.length > 0 ? rowGap : 0) + r.rowH;
+        if (headerH + 8 + nextH + padBottom > maxVisibleH && visibleRows.length > 0) break;
+        contentH = nextH;
+        visibleRows.push(r);
+      }
+    }
+
+    const totalH = headerH + 6 + contentH + padBottom;
+    if (x + boxW > cssWidth - 4 && cssWidth > boxW + 16) return;
+
+    ctx.save();
+    // 1. Background panel (native chart drawing — non-draggable, pointer-events: none)
+    drawRoundedRectPath(ctx, x, y, boxW, totalH, 7);
+    ctx.fillStyle = hexToRgbaString(bgHex, bgOpacity);
+    ctx.fill();
+    ctx.strokeStyle = hexToRgbaString(borderHex, 48);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 2. Compact header strip
+    ctx.font = '700 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#e2e8f0';
+    const firmLabel = (overlayData && overlayData.firmName) ? String(overlayData.firmName).toUpperCase() : 'ACCOUNTS';
+    ctx.fillText(`${firmLabel} (${accounts.length})`, x + padX, y + headerH / 2 + 1);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#7dd3fc';
+    const rightHdr = activeSym ? `${activeSym} · ${riskPct}% RISK` : `${riskPct}% RISK`;
+    ctx.fillText(rightHdr, x + boxW - padX, y + headerH / 2 + 1);
+
+    // Header divider
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y + headerH);
+    ctx.lineTo(x + boxW - 6, y + headerH);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.09)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // 3. Account rows
+    let curY = y + headerH + 6;
+    if (visibleRows.length === 0) {
+      ctx.font = '500 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('Scanning firm accounts...', x + padX, curY + 11);
+    } else {
+      for (let i = 0; i < visibleRows.length; i++) {
+        const r = visibleRows[i];
+        const rx = x + 6;
+        const rw = boxW - 12;
+
+        // Subtle row card
+        drawRoundedRectPath(ctx, rx, curY, rw, r.rowH, 5);
+        ctx.fillStyle = r.isCurrent ? 'rgba(56, 189, 248, 0.11)' : 'rgba(255, 255, 255, 0.035)';
+        ctx.fill();
+        ctx.strokeStyle = r.isCurrent ? 'rgba(56, 189, 248, 0.36)' : 'rgba(255, 255, 255, 0.07)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Line 1: dot + Account Name (left) | Balance (right)
+        const line1Y = curY + 11;
+        const dotColor = r.isCurrent ? '#10b981' : '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(rx + 8, line1Y, 2.6, 0, Math.PI * 2);
+        ctx.fillStyle = dotColor;
+        ctx.fill();
+
+        ctx.font = '700 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#f8fafc';
+        const accNameStr = String(r.acc.name || r.acc.id || 'Account').slice(0, 20);
+        ctx.fillText(accNameStr, rx + 15, line1Y);
+
+        ctx.font = '700 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillText(formatCanvasDollarPlain(r.bal), rx + rw - 7, line1Y);
+
+        // Line 2: Open PnL on current instrument OR Risk/Trade if closed/flat
+        const line2Y = curY + 25;
+        if (r.isOpenOnInst && r.instPos) {
+          const isLong = r.instPos.side === 'long';
+          const tagColor = isLong ? '#34d399' : '#f87171';
+          const pnlVal = typeof r.instPos.pnl === 'number' ? r.instPos.pnl : null;
+          const pnlColor = pnlVal === null ? '#cbd5e1' : (pnlVal > 0.0001 ? '#34d399' : (pnlVal < -0.0001 ? '#f87171' : '#cbd5e1'));
+
+          ctx.font = '700 9.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillStyle = tagColor;
+          ctx.fillText(`${isLong ? 'LONG' : 'SHORT'} ${activeSym}`, rx + 7, line2Y);
+
+          ctx.font = '700 10.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.textAlign = 'right';
+          ctx.fillStyle = pnlColor;
+          const pnlStr = pnlVal !== null ? formatCanvasDollarSigned(pnlVal) : '--';
+          ctx.fillText(r.instPos.pnlPct ? `${pnlStr} (${r.instPos.pnlPct})` : pnlStr, rx + rw - 7, line2Y);
+
+          if (r.hasSubLine) {
+            const line3Y = curY + 38;
+            ctx.font = '600 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText('Total Open PnL', rx + 7, line3Y);
+
+            ctx.font = '600 9.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+            ctx.textAlign = 'right';
+            ctx.fillStyle = r.totalPnl >= 0 ? '#34d399' : '#f87171';
+            ctx.fillText(formatCanvasDollarSigned(r.totalPnl), rx + rw - 7, line3Y);
+          }
+        } else {
+          ctx.font = '700 9.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#7dd3fc';
+          ctx.fillText(`FLAT ${activeSym || 'CHART'} · RISK`, rx + 7, line2Y);
+
+          ctx.font = '700 10.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.textAlign = 'right';
+          ctx.fillStyle = '#fbbf24';
+          ctx.fillText(formatCanvasDollarPlain(r.riskAmt), rx + rw - 7, line2Y);
+
+          if (r.hasSubLine) {
+            const line3Y = curY + 38;
+            ctx.font = '600 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText('Other Open PnL', rx + 7, line3Y);
+
+            ctx.font = '600 9.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+            ctx.textAlign = 'right';
+            ctx.fillStyle = r.totalPnl >= 0 ? '#34d399' : '#f87171';
+            ctx.fillText(formatCanvasDollarSigned(r.totalPnl), rx + rw - 7, line3Y);
+          }
+        }
+
+        curY += r.rowH + rowGap;
+      }
+    }
+
+    ctx.restore();
+  }
+
   function renderIctSessionIndicators() {
     const renderStartTime = performance.now();
     ictSessionsRafId = null;
@@ -11277,10 +11528,12 @@
     const marketStructureConfig = currentSettings && currentSettings.marketStructure;
     const fvgConfig = currentSettings && currentSettings.autoFvg;
     const candleOhlcConfig = currentSettings && currentSettings.candleOhlc;
+    const accountsRiskConfig = currentSettings && currentSettings.accountsRiskBox;
     const failLinesEnabled = Boolean(currentSettings && currentSettings.failLines && currentSettings.failLines.enabled);
     const cortexIndicatorEnabled = Boolean(cortexConfig && cortexConfig.enabled);
     const orderBlocksEnabled = Boolean(orderBlocksConfig && orderBlocksConfig.enabled);
     const marketStructureEnabled = Boolean(marketStructureConfig && marketStructureConfig.enabled);
+    const accountsRiskEnabled = Boolean(accountsRiskConfig && accountsRiskConfig.enabled);
     if (!failLinesEnabled) removeFailPriceLineButtons();
     if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
     const sessionsEnabled = Boolean(config && config.enabled && isIntradayChartResolution());
@@ -11293,7 +11546,7 @@
       cleanupNativeAutoFvgShapes(null);
     }
 
-    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled) {
+    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled && !accountsRiskEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
       if (ictSessionsCanvas) {
         const ctx = ictSessionsCanvas.getContext('2d');
@@ -12327,6 +12580,11 @@
       renderCandleOhlcOnCanvas(ctx, bars, candleOhlcConfig, barToX, priceToY, barSpacing, cssWidth, cssHeight, symbolKey, tfLabel);
     } else {
       lastRenderedCandleOhlcHitBoxes = [];
+    }
+
+    // 7B. Render Non-Draggable Accounts & Per-Trade Risk Overlay directly on the top-left of the chart canvas
+    if (accountsRiskEnabled) {
+      renderAccountsRiskOnCanvas(ctx, latestAccountsRiskOverlayData, accountsRiskConfig, symbolKey, cssWidth, cssHeight);
     }
 
     if (failLinesEnabled) {
@@ -13374,10 +13632,231 @@
     } catch (e) {}
   }
 
+  function parseFiniteAccountNum(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    if (typeof v === 'string') {
+      const cleaned = v.replace(/[$,\s]/g, '');
+      if (!cleaned) return null;
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  function extractPositionsMapFromAccountObj(accObj) {
+    const map = {};
+    if (!accObj || typeof accObj !== 'object') return map;
+    const rawPos = accObj.positions || accObj.openPositions || accObj.activePositions || accObj.open_positions || accObj.active_positions;
+    if (!Array.isArray(rawPos)) return map;
+
+    for (const p of rawPos) {
+      if (!p || typeof p !== 'object') continue;
+      const rawSym = p.symbol || p.market || p.instrument || p.ticker || p.asset || p.pair || '';
+      const sym = normalizeCanvasInstrumentKey(rawSym);
+      if (!sym) continue;
+      const size = parseFiniteAccountNum(p.size ?? p.qty ?? p.quantity ?? p.amount ?? p.positionAmt ?? p.contracts);
+      if (size !== null && Math.abs(size) < 1e-9) continue;
+
+      const rawSide = String(p.side || p.direction || (p.isLong === true ? 'long' : (p.isLong === false ? 'short' : ''))).toLowerCase();
+      let side = 'long';
+      if (/short|sell/.test(rawSide) || (size !== null && size < 0)) {
+        side = 'short';
+      }
+      const pnl = parseFiniteAccountNum(p.unrealizedPnl ?? p.unrealized_pnl ?? p.unrPnl ?? p.openPnl ?? p.pnl ?? p.uPnl ?? p.upnl ?? p.floatingPnl);
+      const val = parseFiniteAccountNum(p.notional ?? p.value ?? p.positionValue ?? p.usdValue);
+      map[sym] = {
+        symbol: sym,
+        side,
+        pnl,
+        pnlPct: '',
+        value: val
+      };
+    }
+    return map;
+  }
+
+  function extractAccountsFromApiPayload(payload, sourceLabel = '') {
+    const found = [];
+    if (!payload || typeof payload !== 'object') return found;
+    const seenObjs = new WeakSet();
+    const seenKeys = new Set();
+
+    const walk = (node, depth) => {
+      if (!node || typeof node !== 'object' || depth > 7) return;
+      if (seenObjs.has(node)) return;
+      seenObjs.add(node);
+
+      if (Array.isArray(node)) {
+        for (let i = 0; i < Math.min(node.length, 250); i++) {
+          walk(node[i], depth + 1);
+        }
+        return;
+      }
+
+      // Skip obvious non-account objects (candles, orderbook levels, fills, orders)
+      const isCandle = node.open !== undefined && node.high !== undefined && node.low !== undefined && node.close !== undefined;
+      const isOrderOrFill = node.fillPrice !== undefined || node.executedQty !== undefined || node.triggerPrice !== undefined || node.limitPrice !== undefined;
+      const isMarketTicker = node.markPrice !== undefined && node.indexPrice !== undefined && node.fundingRate !== undefined;
+
+      if (!isCandle && !isOrderOrFill && !isMarketTicker) {
+        const balance = parseFiniteAccountNum(
+          node.accountValue ?? node.account_value ?? node.totalEquity ?? node.total_equity ??
+          node.equity ?? node.netLiquidation ?? node.net_liquidation ?? node.totalBalance ??
+          node.total_balance ?? node.balance ?? node.currentBalance ?? node.current_balance ??
+          node.walletBalance ?? node.wallet_balance ?? node.marginBalance ?? node.margin_balance ??
+          node.availableBalance ?? node.available_balance ?? node.nav ?? node.collateral
+        );
+
+        const totalOpenPnl = parseFiniteAccountNum(
+          node.unrealizedPnl ?? node.unrealized_pnl ?? node.unrPnl ?? node.unr_pnl ??
+          node.openPnl ?? node.open_pnl ?? node.uPnl ?? node.upnl ?? node.floatingPnl ?? node.floating_pnl
+        );
+
+        const rawName = node.accountName ?? node.account_name ?? node.nickname ?? node.displayName ??
+          node.display_name ?? node.label ?? node.name ?? node.title ?? null;
+        const rawNum = node.accountNumber ?? node.account_number ?? node.subaccountNumber ?? node.subaccount_number ?? null;
+        const rawId = node.accountId ?? node.account_id ?? node.subaccountId ?? node.subaccount_id ?? node.id ?? node.uuid ?? null;
+
+        let displayName = '';
+        if (typeof rawName === 'string' && rawName.trim()) {
+          displayName = rawName.trim();
+        } else if (rawNum !== null && rawNum !== undefined && String(rawNum).trim()) {
+          displayName = `Account ${String(rawNum).trim()}`;
+        } else if (rawId !== null && rawId !== undefined && typeof rawId !== 'object' && String(rawId).trim()) {
+          const idStr = String(rawId).trim();
+          if (/^\d{1,6}$/.test(idStr)) {
+            displayName = `Account ${idStr}`;
+          } else if (/account|eval|funded|sub|prop|challenge/i.test(idStr) && idStr.length <= 40) {
+            displayName = idStr;
+          }
+        }
+
+        const isCurrencyOrMarketName = /^(usdc|usdt|usd|btc|eth|sol|hype|nq|es|cl|gc|eur|gbp|jpy)$/i.test(displayName) ||
+          /-PERP$|-USD$|-USDT$|-USDC$/i.test(displayName) ||
+          /^(active|open|closed|pending|long|short|buy|sell|market|limit|default|null|undefined)$/i.test(displayName);
+
+        const hasPositionsArray = Array.isArray(node.positions) || Array.isArray(node.openPositions) || Array.isArray(node.activePositions);
+
+        if (displayName && displayName.length >= 2 && displayName.length <= 48 && !isCurrencyOrMarketName && (balance !== null || hasPositionsArray)) {
+          const idKey = String(rawId || displayName).trim();
+          const dedupeKey = `${displayName.toLowerCase()}::${idKey.toLowerCase()}`;
+          if (!seenKeys.has(dedupeKey)) {
+            seenKeys.add(dedupeKey);
+            found.push({
+              id: idKey,
+              name: displayName,
+              balance,
+              totalOpenPnl,
+              positionsBySymbol: extractPositionsMapFromAccountObj(node),
+              source: sourceLabel
+            });
+          }
+        }
+      }
+
+      const keys = Object.keys(node);
+      for (let i = 0; i < Math.min(keys.length, 60); i++) {
+        const k = keys[i];
+        if (k === 'parent' || k === 'return' || k === 'child' || k === 'sibling' || k === 'stateNode') continue;
+        const val = node[k];
+        if (val && typeof val === 'object') {
+          walk(val, depth + 1);
+        }
+      }
+    };
+
+    walk(payload, 0);
+    return found;
+  }
+
+  function scanReactFiberForAccounts() {
+    const found = [];
+    try {
+      const selectors = [
+        '[data-testid="account-selector-trigger"]',
+        'button[data-testid*="account"]',
+        '[class*="account-selector"]',
+        '[class*="accountSelector"]',
+        'header',
+        '#__next',
+        '#root'
+      ];
+      const visitedFibers = new Set();
+
+      for (const sel of selectors) {
+        const els = document.querySelectorAll(sel);
+        for (const el of els) {
+          const fiberKey = Object.keys(el).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+          if (!fiberKey) continue;
+          let curr = el[fiberKey];
+          let depth = 0;
+          while (curr && depth < 30) {
+            if (visitedFibers.has(curr)) break;
+            visitedFibers.add(curr);
+
+            if (curr.memoizedProps && typeof curr.memoizedProps === 'object') {
+              const ex = extractAccountsFromApiPayload(curr.memoizedProps, 'fiber_props');
+              if (ex.length > 0) found.push(...ex);
+            }
+            let st = curr.memoizedState;
+            let hookDepth = 0;
+            while (st && hookDepth < 25) {
+              const val = st.memoizedState;
+              if (val && typeof val === 'object') {
+                const ex = extractAccountsFromApiPayload(val, 'fiber_state');
+                if (ex.length > 0) found.push(...ex);
+              }
+              st = st.next;
+              hookDepth++;
+            }
+
+            curr = curr.return;
+            depth++;
+          }
+        }
+      }
+    } catch (e) {}
+    return found;
+  }
+
+  function scanPlatformAccountsInMainWorld() {
+    if (window.top !== window) return;
+    try {
+      const found = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (!k || k.startsWith('__trading_cortex_') || k.startsWith('tv-chart-drawings-')) continue;
+        if (/account|subaccount|portfolio|balance|prop|eval|funded|user|store|zustand|query/i.test(k)) {
+          try {
+            const parsed = JSON.parse(window.localStorage.getItem(k));
+            const ex = extractAccountsFromApiPayload(parsed, `ls:${k}`);
+            if (ex.length > 0) found.push(...ex);
+          } catch (e) {}
+        }
+      }
+
+      const fiberAccounts = scanReactFiberForAccounts();
+      if (fiberAccounts.length > 0) {
+        found.push(...fiberAccounts);
+      }
+
+      if (found.length > 0) {
+        postToIsolated({
+          type: 'VEST_ACCOUNTS_CAPTURED',
+          accounts: found
+        });
+      }
+    } catch (e) {}
+  }
+
   function setupPassiveTradeNetworkListener() {
     if (window.top !== window) return;
     if (window.__TRADING_CORTEX_TRADE_NET_HOOKED__) return;
     window.__TRADING_CORTEX_TRADE_NET_HOOKED__ = true;
+
+    const TRADE_URL_RE = /trade|fill|position|history|pnl|closed/i;
+    const ACCOUNT_URL_RE = /account|subaccount|portfolio|balance|equity|wallet|user|prop|eval|funded|challenge|trading|position|me|profile|graphql/i;
 
     try {
       const origFetch = window.fetch;
@@ -13386,15 +13865,22 @@
           const response = await origFetch.apply(this, args);
           try {
             const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
-            if (/trade|fill|position|history|pnl|closed/i.test(url)) {
+            const isTradeUrl = TRADE_URL_RE.test(url);
+            const isAccountUrl = ACCOUNT_URL_RE.test(url);
+            if (isTradeUrl || isAccountUrl) {
               const clone = response.clone();
               clone.json().then(data => {
-                const trades = extractTradesFromApiPayload(data, url);
-                if (trades.length > 0) {
-                  postToIsolated({
-                    type: 'VEST_TRADES_CAPTURED',
-                    trades
-                  });
+                if (isTradeUrl) {
+                  const trades = extractTradesFromApiPayload(data, url);
+                  if (trades.length > 0) {
+                    postToIsolated({ type: 'VEST_TRADES_CAPTURED', trades });
+                  }
+                }
+                if (isAccountUrl) {
+                  const accounts = extractAccountsFromApiPayload(data, url);
+                  if (accounts.length > 0) {
+                    postToIsolated({ type: 'VEST_ACCOUNTS_CAPTURED', accounts });
+                  }
                 }
               }).catch(() => {});
             }
@@ -13416,14 +13902,21 @@
           this.addEventListener('load', function () {
             try {
               const url = this.__tcUrl || '';
-              if (/trade|fill|position|history|pnl|closed/i.test(url) && this.responseText) {
+              const isTradeUrl = TRADE_URL_RE.test(url);
+              const isAccountUrl = ACCOUNT_URL_RE.test(url);
+              if ((isTradeUrl || isAccountUrl) && this.responseText) {
                 const data = JSON.parse(this.responseText);
-                const trades = extractTradesFromApiPayload(data, url);
-                if (trades.length > 0) {
-                  postToIsolated({
-                    type: 'VEST_TRADES_CAPTURED',
-                    trades
-                  });
+                if (isTradeUrl) {
+                  const trades = extractTradesFromApiPayload(data, url);
+                  if (trades.length > 0) {
+                    postToIsolated({ type: 'VEST_TRADES_CAPTURED', trades });
+                  }
+                }
+                if (isAccountUrl) {
+                  const accounts = extractAccountsFromApiPayload(data, url);
+                  if (accounts.length > 0) {
+                    postToIsolated({ type: 'VEST_ACCOUNTS_CAPTURED', accounts });
+                  }
                 }
               }
             } catch (e) {}
@@ -13432,6 +13925,11 @@
         };
       }
     } catch (e) {}
+
+    // Proactively scan React state / localStorage for already-loaded firm accounts
+    setTimeout(scanPlatformAccountsInMainWorld, 1500);
+    setTimeout(scanPlatformAccountsInMainWorld, 4500);
+    setInterval(scanPlatformAccountsInMainWorld, 10000);
   }
 
   // Initialize context menu listener immediately

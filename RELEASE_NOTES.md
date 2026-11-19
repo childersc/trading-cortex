@@ -1,3 +1,9 @@
+Trading Cortex v1.1.93 — Native Chart Canvas Accounts & Risk Drawing + All-Firm Account Discovery
+
+- **Non-Draggable Chart Canvas Drawing (`v1.1.93`)**: Replaced the floating draggable window with a native, click-through canvas drawing rendered directly onto the TradingView chart pane at top-left (right below the OHLC legend, inside the chart). Never blocks mouse interaction or drawing tools.
+- **All Firm Accounts Discovery (`v1.1.93`)**: Automatically discovers **all** accounts for the active prop/perp firm (not just the currently selected account) by passively inspecting site API responses (`fetch`/`XHR`), React Fiber state, `localStorage`, and live DOM/cross-tab state.
+- **Per-Instrument Open PnL & Configurable Risk % (`v1.1.93`)**: Each account row displays its current balance, live Open PnL if open on the current chart instrument, or exact dollar risk per trade (`Balance × Risk %`) when flat/closed on that instrument.
+
 Trading Cortex v1.1.92 — On-Chart Accounts & Per-Trade Risk Box (Top-Left Chart Overlay)
 
 - **Top-Left Chart Accounts & Risk Box (`v1.1.92`)**: Added a compact floating widget anchored inside the top-left of the TradingView chart (to the right of the drawing toolbar and below the OHLC legend). Draggable, pinnable, minimizable to the Cortex top bar, and synced across all open browsers.

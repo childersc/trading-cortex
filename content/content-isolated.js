@@ -589,19 +589,14 @@
 
   const DEFAULT_ACCOUNTS_RISK_BOX = {
     enabled: true,
-    collapsed: false,
-    pinned: false,
-    pinnedLeft: null,
-    pinnedTop: null,
-    relX: null,
-    relY: null,
-    boxWidth: 256,
+    boxWidth: 248,
+    offsetX: 12,
+    offsetY: 52,
     riskPercent: 1.0,
     showOtherPnl: true,
     bgColor: '#0b101b',
-    bgOpacity: 92,
-    borderColor: '#38bdf8',
-    manualAccounts: []
+    bgOpacity: 82,
+    borderColor: '#38bdf8'
   };
 
   const DEFAULT_POSITION_HUD = {
@@ -1162,48 +1157,24 @@
   function normalizeAccountsRiskBoxConfig(rawCfg) {
     const base = JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS_RISK_BOX));
     if (!rawCfg || typeof rawCfg !== 'object') return base;
-    const relX = rawCfg.relX !== null && rawCfg.relX !== undefined && isFinite(Number(rawCfg.relX))
-      ? Math.max(0, Math.min(1, Number(rawCfg.relX)))
-      : null;
-    const relY = rawCfg.relY !== null && rawCfg.relY !== undefined && isFinite(Number(rawCfg.relY))
-      ? Math.max(0, Math.min(1, Number(rawCfg.relY)))
-      : null;
-    const pinnedLeft = rawCfg.pinnedLeft !== null && rawCfg.pinnedLeft !== undefined && isFinite(Number(rawCfg.pinnedLeft))
-      ? Math.round(Number(rawCfg.pinnedLeft))
-      : null;
-    const pinnedTop = rawCfg.pinnedTop !== null && rawCfg.pinnedTop !== undefined && isFinite(Number(rawCfg.pinnedTop))
-      ? Math.round(Number(rawCfg.pinnedTop))
-      : null;
     const riskPctRaw = Number(rawCfg.riskPercent);
     const riskPercent = Number.isFinite(riskPctRaw)
       ? Math.max(0.05, Math.min(50, Math.round(riskPctRaw * 100) / 100))
       : base.riskPercent;
-    const manualAccounts = Array.isArray(rawCfg.manualAccounts)
-      ? rawCfg.manualAccounts
-          .filter(a => a && typeof a === 'object' && String(a.name || '').trim())
-          .map(a => ({
-            id: String(a.id || a.name).trim(),
-            name: String(a.name).trim(),
-            balance: Number.isFinite(Number(a.balance)) ? Number(a.balance) : 0
-          }))
-      : [];
+    const offsetXRaw = Number(rawCfg.offsetX);
+    const offsetYRaw = Number(rawCfg.offsetY);
     return {
       ...base,
       ...rawCfg,
       enabled: rawCfg.enabled !== false,
-      collapsed: Boolean(rawCfg.collapsed),
-      pinned: Boolean(rawCfg.pinned),
-      pinnedLeft,
-      pinnedTop,
-      relX,
-      relY,
       boxWidth: Math.max(200, Math.min(440, Math.round(Number(rawCfg.boxWidth) || base.boxWidth))),
+      offsetX: Number.isFinite(offsetXRaw) ? Math.max(4, Math.min(400, Math.round(offsetXRaw))) : base.offsetX,
+      offsetY: Number.isFinite(offsetYRaw) ? Math.max(4, Math.min(400, Math.round(offsetYRaw))) : base.offsetY,
       riskPercent,
       showOtherPnl: rawCfg.showOtherPnl !== false,
       bgColor: normalizeHexColor(rawCfg.bgColor || base.bgColor, base.bgColor),
       bgOpacity: Math.max(20, Math.min(100, Number(rawCfg.bgOpacity ?? base.bgOpacity))),
-      borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor),
-      manualAccounts
+      borderColor: normalizeHexColor(rawCfg.borderColor || base.borderColor, base.borderColor)
     };
   }
 
@@ -3448,6 +3419,10 @@
       if (isTopWindow && Array.isArray(event.data.trades) && event.data.trades.length > 0 && typeof mergeCapturedTrades === 'function') {
         mergeCapturedTrades(event.data.trades, Boolean(event.data.notifyToast));
       }
+    } else if (type === 'VEST_ACCOUNTS_CAPTURED') {
+      if (isTopWindow && Array.isArray(event.data.accounts) && event.data.accounts.length > 0 && typeof mergeCapturedFirmAccounts === 'function') {
+        mergeCapturedFirmAccounts(event.data.accounts);
+      }
     } else if (type === 'VEST_OUTSIDE_INTERACTION') {
       if (studioMenuOpen && typeof closeStudioDropdown === 'function') {
         closeStudioDropdown();
@@ -4114,13 +4089,6 @@
             renderChartDiagnosticsBox();
           } else {
             clampAndPositionChartDiagnosticsBox();
-          }
-        }
-        if (settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
-          if (!chartAccountsRiskBoxEl || !chartAccountsRiskBoxEl.isConnected) {
-            renderChartAccountsRiskBox();
-          } else {
-            clampAndPositionChartAccountsRiskBox();
           }
         }
         /* [HEARTBEAT_CLEANUP_BLOCK]
@@ -6937,20 +6905,33 @@
             <div>
               <label for="vest-arb-bg-opacity" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Background Opacity (<span id="vest-arb-opacity-val">${arb.bgOpacity}%</span>)</label>
               <input type="range" id="vest-arb-bg-opacity" min="20" max="100" step="2" value="${arb.bgOpacity}" style="width:100%;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;">
+                <div>
+                  <label for="vest-arb-offset-x" style="display:block;font-size:10.5px;color:#94a3b8;margin-bottom:3px;">Left Offset (px)</label>
+                  <input type="number" id="vest-arb-offset-x" min="4" max="400" step="2" value="${arb.offsetX}" style="width:100%;padding:4px 6px;border-radius:5px;background:#0b0e14;color:#f8fafc;border:1px solid #343a46;font-family:monospace;font-size:11px;">
+                </div>
+                <div>
+                  <label for="vest-arb-offset-y" style="display:block;font-size:10.5px;color:#94a3b8;margin-bottom:3px;">Top Offset (px)</label>
+                  <input type="number" id="vest-arb-offset-y" min="4" max="400" step="2" value="${arb.offsetY}" style="width:100%;padding:4px 6px;border-radius:5px;background:#0b0e14;color:#f8fafc;border:1px solid #343a46;font-family:monospace;font-size:11px;">
+                </div>
+              </div>
             </div>
             <div style="display:flex;align-items:flex-end;gap:8px;">
               <div style="flex:1;">
                 <label for="vest-arb-border-color" style="display:block;font-size:12px;color:#e4e4e7;margin-bottom:6px;">Accent Border</label>
                 <input type="color" id="vest-arb-border-color" value="${arb.borderColor || '#38bdf8'}" style="width:100%;height:32px;border:none;border-radius:6px;background:transparent;cursor:pointer;">
               </div>
-              <button type="button" class="vest-tvs-action-btn" id="vest-arb-reset-pos-btn" style="height:32px;padding:0 10px;font-size:11px;white-space:nowrap;">Reset to Top-Left</button>
+              <button type="button" class="vest-tvs-action-btn" id="vest-arb-reset-pos-btn" style="height:32px;padding:0 10px;font-size:11px;white-space:nowrap;">Reset Top-Left</button>
             </div>
           </div>
 
           <div style="margin-top:12px;padding:12px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span style="font-size:12px;font-weight:700;color:#f8fafc;">Tracked Accounts (${currentSnaps.length})</span>
-              <button type="button" id="vest-arb-clear-accounts-btn" style="background:rgba(239,68,68,0.14);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;border-radius:5px;padding:3px 8px;font-size:10.5px;cursor:pointer;">Clear Cached</button>
+              <span style="font-size:12px;font-weight:700;color:#f8fafc;">Firm Accounts (${currentSnaps.length})</span>
+              <div style="display:flex;gap:6px;">
+                <button type="button" id="vest-arb-scan-accounts-btn" style="background:rgba(56,189,248,0.16);border:1px solid rgba(56,189,248,0.4);color:#7dd3fc;border-radius:5px;padding:3px 8px;font-size:10.5px;cursor:pointer;">Scan Firm Accounts</button>
+                <button type="button" id="vest-arb-clear-accounts-btn" style="background:rgba(239,68,68,0.14);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;border-radius:5px;padding:3px 8px;font-size:10.5px;cursor:pointer;">Clear Cached</button>
+              </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:5px;max-height:140px;overflow-y:auto;">
               ${savedRowsHtml}
@@ -8314,8 +8295,10 @@
         if (masterArb) arb.enabled = Boolean(masterArb.checked);
         const q = (sel) => overlay.querySelector(sel);
         if (q('#vest-arb-risk-pct')) arb.riskPercent = Number(q('#vest-arb-risk-pct').value) || 1.0;
-        if (q('#vest-arb-width')) arb.boxWidth = Number(q('#vest-arb-width').value) || 256;
-        if (q('#vest-arb-bg-opacity')) arb.bgOpacity = Number(q('#vest-arb-bg-opacity').value) || 92;
+        if (q('#vest-arb-width')) arb.boxWidth = Number(q('#vest-arb-width').value) || 248;
+        if (q('#vest-arb-offset-x')) arb.offsetX = Number(q('#vest-arb-offset-x').value) || 12;
+        if (q('#vest-arb-offset-y')) arb.offsetY = Number(q('#vest-arb-offset-y').value) || 52;
+        if (q('#vest-arb-bg-opacity')) arb.bgOpacity = Number(q('#vest-arb-bg-opacity').value) || 82;
         if (q('#vest-arb-border-color')) arb.borderColor = q('#vest-arb-border-color').value || '#38bdf8';
         if (q('#vest-arb-show-other-pnl')) arb.showOtherPnl = Boolean(q('#vest-arb-show-other-pnl').checked);
         draftSettings.accountsRiskBox = normalizeAccountsRiskBoxConfig(arb);
@@ -9249,15 +9232,27 @@
       if (activeTab === 'accountsrisk' || activeTab === 'chartingindicators') {
         overlay.querySelector('#vest-arb-reset-pos-btn')?.addEventListener('click', () => {
           const arb = normalizeAccountsRiskBoxConfig(draftSettings.accountsRiskBox);
-          arb.relX = null;
-          arb.relY = null;
-          arb.pinned = false;
-          arb.pinnedLeft = null;
-          arb.pinnedTop = null;
-          arb.collapsed = false;
+          arb.offsetX = DEFAULT_ACCOUNTS_RISK_BOX.offsetX;
+          arb.offsetY = DEFAULT_ACCOUNTS_RISK_BOX.offsetY;
           draftSettings.accountsRiskBox = arb;
+          const ox = overlay.querySelector('#vest-arb-offset-x');
+          const oy = overlay.querySelector('#vest-arb-offset-y');
+          if (ox) ox.value = String(arb.offsetX);
+          if (oy) oy.value = String(arb.offsetY);
           broadcastLiveSessionDraft();
-          showToast('Accounts & Risk Box reset to top-left of chart');
+          showToast('Accounts & Risk drawing reset to top-left of chart');
+        });
+
+        overlay.querySelector('#vest-arb-scan-accounts-btn')?.addEventListener('click', () => {
+          postToMainWorlds({ type: 'VEST_SCAN_ACCOUNTS_NOW' });
+          if (typeof scrapeAndSyncCurrentAccountSnapshot === 'function') {
+            scrapeAndSyncCurrentAccountSnapshot(true);
+          }
+          setTimeout(() => {
+            targetIndicatorToScroll = 'accountsrisk';
+            renderDialog();
+          }, 350);
+          showToast('Scanning firm accounts...');
         });
 
         overlay.querySelectorAll('.vest-arb-preset-pct').forEach(btn => {
@@ -9276,7 +9271,7 @@
           }
           targetIndicatorToScroll = 'accountsrisk';
           renderDialog();
-          showToast('Cleared cached accounts — active tab account will re-sync');
+          showToast('Cleared cached accounts — active firm accounts will re-sync');
         });
 
         overlay.querySelectorAll('.vest-arb-remove-acc-btn').forEach(btn => {
@@ -9297,7 +9292,7 @@
           });
         });
 
-        ['#vest-arb-risk-pct', '#vest-arb-width', '#vest-arb-bg-opacity'].forEach(sel => {
+        ['#vest-arb-risk-pct', '#vest-arb-width', '#vest-arb-bg-opacity', '#vest-arb-offset-x', '#vest-arb-offset-y'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             const wEl = overlay.querySelector('#vest-arb-width');
             const wVal = overlay.querySelector('#vest-arb-width-val');
@@ -9754,9 +9749,6 @@ if (activeTab === 'diagnostics') {
     if (settings.orderBlocks && settings.orderBlocks.enabled && settings.orderBlocks.showStatsBox !== false && settings.orderBlocks.statsBoxCollapsed) {
       activeCollapsed.push('order_blocks_stats');
     }
-    if (settings.accountsRiskBox && settings.accountsRiskBox.enabled && settings.accountsRiskBox.collapsed) {
-      activeCollapsed.push('accounts_risk');
-    }
 
     const order = current.filter(id => activeCollapsed.includes(id));
     activeCollapsed.forEach(id => {
@@ -9818,9 +9810,6 @@ if (activeTab === 'diagnostics') {
       } else if (type === 'order_blocks_stats') {
         el = chartOrderBlockStatsBoxEl;
         defaultW = 230;
-      } else if (type === 'accounts_risk') {
-        el = chartAccountsRiskBoxEl;
-        defaultW = 215;
       }
 
       const boxW = (el && el.offsetWidth) || (type === boxType && boxEl && boxEl.offsetWidth) || defaultW;
@@ -9876,9 +9865,6 @@ if (activeTab === 'diagnostics') {
       } else if (boxType === 'order_blocks_stats') {
         el = chartOrderBlockStatsBoxEl;
         defaultW = 230;
-      } else if (boxType === 'accounts_risk') {
-        el = chartAccountsRiskBoxEl;
-        defaultW = 215;
       } else if (boxType === 'positions') {
         el = bottomPanelTopBarPillEl || document.getElementById('vest-bottom-panel-topbar-pill');
         defaultW = 195;
@@ -12543,8 +12529,8 @@ if (activeTab === 'diagnostics') {
         changed = true;
       }
     }
-    if (changed && chartAccountsRiskBoxEl && chartAccountsRiskBoxEl.style.display !== 'none') {
-      renderChartAccountsRiskBox();
+    if (changed && settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
+      pushAccountsRiskDataToChartCanvas();
     }
   }
 
@@ -12840,107 +12826,113 @@ if (activeTab === 'diagnostics') {
     }
   }
 
-  function getChartTopLeftAnchorRect() {
-    const vp = getScreenBoundsRect();
-    let chartRect = null;
-    let bestArea = 0;
-    try {
-      const iframes = Array.from(document.querySelectorAll('iframe'));
-      for (const frame of iframes) {
-        const r = frame.getBoundingClientRect();
-        if (r.width >= 300 && r.height >= 200) {
-          const area = r.width * r.height;
-          if (area > bestArea) {
-            bestArea = area;
-            chartRect = r;
-          }
-        }
-      }
-    } catch (e) {}
+  function mergeCapturedFirmAccounts(capturedList) {
+    if (!Array.isArray(capturedList) || capturedList.length === 0) return;
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const firmId = activeFirm ? activeFirm.id : 'vest';
+    let changed = false;
 
-    if (chartRect) {
-      // Position inside top-left of TradingView chart (clears ~52px drawing toolbar and ~92px top toolbar + OHLC legend)
-      return {
-        left: Math.round(chartRect.left + 58),
-        top: Math.round(chartRect.top + 92),
-        chartRect
+    for (const raw of capturedList) {
+      if (!raw || typeof raw !== 'object') continue;
+      const name = String(raw.name || raw.id || '').trim();
+      if (!name || name.length < 2) continue;
+      const key = `${firmId}::${name}`;
+      const existing = accountSnapshotsRegistry[key] || {
+        key,
+        id: String(raw.id || name),
+        name,
+        firmId,
+        balance: null,
+        totalOpenPnl: null,
+        inPositionsUsd: null,
+        positionsBySymbol: {},
+        updatedAt: 0
       };
+
+      const incomingBal = (typeof raw.balance === 'number' && Number.isFinite(raw.balance)) ? raw.balance : null;
+      const incomingPnl = (typeof raw.totalOpenPnl === 'number' && Number.isFinite(raw.totalOpenPnl)) ? raw.totalOpenPnl : null;
+      const incomingPos = (raw.positionsBySymbol && typeof raw.positionsBySymbol === 'object') ? raw.positionsBySymbol : null;
+      const hasIncomingPos = incomingPos && Object.keys(incomingPos).length > 0;
+
+      // Preserve live DOM-scraped active-tab positions if incoming API object didn't include positions
+      const mergedPos = hasIncomingPos
+        ? { ...(existing.positionsBySymbol || {}), ...incomingPos }
+        : (existing.positionsBySymbol || {});
+
+      const nextSnap = {
+        ...existing,
+        key,
+        id: String(raw.id || existing.id || name),
+        name,
+        firmId,
+        balance: incomingBal !== null ? incomingBal : existing.balance,
+        totalOpenPnl: incomingPnl !== null ? incomingPnl : existing.totalOpenPnl,
+        positionsBySymbol: mergedPos,
+        updatedAt: Date.now(),
+        sourceTabId: tabInstanceId
+      };
+
+      const prevDigest = JSON.stringify({ b: existing.balance, p: existing.totalOpenPnl, pos: existing.positionsBySymbol });
+      const nextDigest = JSON.stringify({ b: nextSnap.balance, p: nextSnap.totalOpenPnl, pos: nextSnap.positionsBySymbol });
+      if (!accountSnapshotsRegistry[key] || prevDigest !== nextDigest) {
+        accountSnapshotsRegistry[key] = nextSnap;
+        changed = true;
+      }
     }
-    return {
-      left: Math.round(vp.left + 64),
-      top: Math.round(vp.top + 140),
-      chartRect: null
-    };
+
+    if (changed) {
+      persistAndBroadcastAccountSnapshots();
+      pushAccountsRiskDataToChartCanvas();
+    }
   }
 
-  function clampAndPositionChartAccountsRiskBox() {
-    if (!chartAccountsRiskBoxEl || chartAccountsRiskBoxEl.style.display === 'none' || activeAccountsRiskBoxDrag) return;
+  function pushAccountsRiskDataToChartCanvas() {
+    if (!isTopWindow) return;
     const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
-    const vp = getScreenBoundsRect();
+    settings.accountsRiskBox = arb;
+    const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+    const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
+    const activeAccName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : '';
 
-    if (arb.collapsed) {
-      const minPos = getMinimizedCortexBarCoords('accounts_risk', chartAccountsRiskBoxEl);
-      chartAccountsRiskBoxEl.style.left = `${minPos.left}px`;
-      chartAccountsRiskBoxEl.style.top = `${minPos.top}px`;
-      return;
-    }
-
-    const boxW = chartAccountsRiskBoxEl.offsetWidth || arb.boxWidth || 256;
-    const boxH = chartAccountsRiskBoxEl.offsetHeight || 160;
-
-    let targetLeft;
-    let targetTop;
-    if (arb.pinned && arb.pinnedLeft !== null && arb.pinnedTop !== null) {
-      targetLeft = arb.pinnedLeft;
-      targetTop = arb.pinnedTop;
-    } else if (typeof arb.relX === 'number' && typeof arb.relY === 'number') {
-      const maxOffsetX = Math.max(0, vp.width - boxW);
-      const maxOffsetY = Math.max(0, vp.height - boxH);
-      targetLeft = Math.round(vp.left + arb.relX * maxOffsetX);
-      targetTop = Math.round(vp.top + arb.relY * maxOffsetY);
-    } else {
-      // Default: anchor cleanly inside top-left of the TradingView chart (red box region)
-      const anchor = getChartTopLeftAnchorRect();
-      targetLeft = anchor.left;
-      targetTop = anchor.top;
-    }
-
-    const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, targetLeft));
-    const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, targetTop));
-
-    chartAccountsRiskBoxEl.style.left = `${clampedLeft}px`;
-    chartAccountsRiskBoxEl.style.top = `${clampedTop}px`;
+    postToMainWorlds({
+      type: 'VEST_TV_ACCOUNTS_RISK_DATA',
+      payload: {
+        accounts: getMergedAccountSnapshotsList(),
+        activeAccountName: activeAccName,
+        firmName: activeFirm ? (activeFirm.shortName || activeFirm.name || 'Accounts') : 'Accounts',
+        currentInstrument: currentInstrument || '',
+        config: arb,
+        timestamp: Date.now()
+      }
+    });
   }
 
   function renderChartAccountsRiskBox() {
     if (!isTopWindow) return;
 
+    // Remove any legacy draggable floating box DOM node — this is rendered directly on the TradingView chart canvas
+    const legacyEl = chartAccountsRiskBoxEl || document.getElementById('vest-chart-accounts-risk-box');
+    if (legacyEl && legacyEl.isConnected) {
+      legacyEl.remove();
+    }
+    chartAccountsRiskBoxEl = null;
+
     const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
     settings.accountsRiskBox = arb;
 
     if (!arb.enabled) {
-      if (chartAccountsRiskBoxEl) {
-        chartAccountsRiskBoxEl.style.display = 'none';
-      }
       if (accountsRiskPollTimer) {
         clearInterval(accountsRiskPollTimer);
         accountsRiskPollTimer = null;
       }
+      pushAccountsRiskDataToChartCanvas();
       return;
-    }
-
-    if (!chartAccountsRiskBoxEl || !chartAccountsRiskBoxEl.isConnected) {
-      chartAccountsRiskBoxEl = document.getElementById('vest-chart-accounts-risk-box');
-      if (!chartAccountsRiskBoxEl) {
-        chartAccountsRiskBoxEl = document.createElement('div');
-        chartAccountsRiskBoxEl.id = 'vest-chart-accounts-risk-box';
-        document.body.appendChild(chartAccountsRiskBoxEl);
-      }
     }
 
     if (!accountsRiskPollTimer) {
       loadAccountSnapshotsFromLocalStorage();
       scrapeAndSyncCurrentAccountSnapshot(false);
+      postToMainWorlds({ type: 'VEST_SCAN_ACCOUNTS_NOW' });
       accountsRiskPollTimer = setInterval(() => {
         if (!isExtensionValid()) {
           clearInterval(accountsRiskPollTimer);
@@ -12953,301 +12945,7 @@ if (activeTab === 'diagnostics') {
       }, 1500);
     }
 
-    // Do not clobber inline risk input while user is actively typing inside it
-    const activeEl = document.activeElement;
-    if (activeEl && chartAccountsRiskBoxEl.contains(activeEl) && activeEl.id === 'vest-arb-inline-risk-pct') {
-      return;
-    }
-
-    chartAccountsRiskBoxEl.style.display = 'block';
-    chartAccountsRiskBoxEl.style.position = 'fixed';
-    chartAccountsRiskBoxEl.style.zIndex = '10003';
-    chartAccountsRiskBoxEl.style.width = arb.collapsed ? 'auto' : `${arb.boxWidth || 256}px`;
-    chartAccountsRiskBoxEl.style.background = hexToRgba(arb.bgColor || '#0b101b', (Number(arb.bgOpacity ?? 92)) / 100);
-    chartAccountsRiskBoxEl.style.backdropFilter = 'blur(10px)';
-    chartAccountsRiskBoxEl.style.borderRadius = '8px';
-    chartAccountsRiskBoxEl.style.border = `1px solid ${hexToRgba(arb.borderColor || '#38bdf8', arb.pinned ? 0.78 : 0.48)}`;
-    chartAccountsRiskBoxEl.style.boxShadow = `0 0 14px ${hexToRgba(arb.borderColor || '#38bdf8', 0.22)}, 0 6px 18px rgba(0,0,0,0.45)`;
-    chartAccountsRiskBoxEl.style.overflow = 'hidden';
-    chartAccountsRiskBoxEl.style.userSelect = 'none';
-    chartAccountsRiskBoxEl.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-
-    const accounts = getMergedAccountSnapshotsList();
-    const activeSym = typeof normalizeInstrumentKey === 'function'
-      ? normalizeInstrumentKey(currentInstrument || '')
-      : String(currentInstrument || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const currentAcc = typeof readCurrentSelectedAccount === 'function' ? readCurrentSelectedAccount() : null;
-    const activeAccName = currentAcc && currentAcc.name ? String(currentAcc.name).split(/\r?\n/)[0].trim() : null;
-
-    const totalBal = accounts.reduce((sum, a) => sum + (typeof a.balance === 'number' && Number.isFinite(a.balance) ? a.balance : 0), 0);
-
-    if (arb.collapsed) {
-      chartAccountsRiskBoxEl.innerHTML = `
-        <div id="vest-arb-restore-btn" style="
-          display: flex; align-items: center; gap: 7px; padding: 5px 11px;
-          background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff;
-          cursor: pointer; border-radius: 7px; font-size: 11px; font-weight: 700;
-        " title="Click to expand Accounts & Risk Box">
-          <span style="width: 7px; height: 7px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span>
-          <span>ACCOUNTS (${accounts.length}) · ${formatPlainDollar(totalBal)}</span>
-          <span style="opacity: 0.85;">↗</span>
-        </div>
-      `;
-    } else {
-      const rowsHtml = accounts.length > 0
-        ? accounts.map(acc => {
-            const st = computeAccountInstrumentStatus(acc, activeSym, arb.riskPercent);
-            const isCurrentTabAcc = Boolean(activeAccName && acc.name === activeAccName);
-            const isFresh = (Date.now() - (Number(acc.updatedAt) || 0)) < 15000;
-            const dotColor = isCurrentTabAcc ? '#10b981' : (isFresh ? '#38bdf8' : '#64748b');
-
-            let statusRowHtml = '';
-            if (st.hasOpenOnInstrument && st.instrumentPosition) {
-              const pos = st.instrumentPosition;
-              const isLong = pos.side === 'long';
-              const sideColor = isLong ? '#34d399' : '#f87171';
-              const sideBg = isLong ? 'rgba(16,185,129,0.14)' : 'rgba(239,68,68,0.14)';
-              const pnlNum = pos.pnl;
-              const pnlColor = pnlNum === null ? '#e2e8f0' : (pnlNum > 0.0001 ? '#34d399' : (pnlNum < -0.0001 ? '#f87171' : '#cbd5e1'));
-              const showAcctTotal = st.totalOpenPnl !== null && pnlNum !== null && Math.abs(st.totalOpenPnl - pnlNum) >= 0.01;
-              statusRowHtml = `
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
-                  <span style="font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:3px;background:${sideBg};color:${sideColor};letter-spacing:0.3px;">
-                    ${isLong ? 'LONG' : 'SHORT'} ${escapeHtml(st.symbol || '')}
-                  </span>
-                  <span style="font-size:11px;font-weight:700;font-family:monospace;color:${pnlColor};">
-                    ${pnlNum !== null ? formatSignedDollar(pnlNum) : '--'}${pos.pnlPct ? ` <span style="font-size:9.5px;opacity:0.8;">(${escapeHtml(pos.pnlPct)})</span>` : ''}
-                  </span>
-                </div>
-                ${showAcctTotal ? `
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;font-size:9.5px;color:#94a3b8;">
-                    <span>Total Open PnL</span>
-                    <span style="font-family:monospace;font-weight:600;color:${st.totalOpenPnl >= 0 ? '#34d399' : '#f87171'};">${formatSignedDollar(st.totalOpenPnl)}</span>
-                  </div>
-                ` : ''}
-              `;
-            } else {
-              // Position is CLOSED on this specific instrument -> show per-trade Risk amount!
-              const hasOtherPnl = arb.showOtherPnl !== false && st.totalOpenPnl !== null && Math.abs(st.totalOpenPnl) >= 0.005;
-              statusRowHtml = `
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">
-                  <span style="font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(56,189,248,0.12);color:#7dd3fc;letter-spacing:0.25px;">
-                    FLAT ${escapeHtml(st.symbol || 'CHART')} · RISK ${st.riskPercent}%
-                  </span>
-                  <span style="font-size:11.5px;font-weight:800;font-family:monospace;color:#fbbf24;">
-                    ${st.riskAmount !== null ? formatPlainDollar(st.riskAmount) : '--'}
-                  </span>
-                </div>
-                ${hasOtherPnl ? `
-                  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;font-size:9.5px;color:#94a3b8;">
-                    <span>Other Open PnL</span>
-                    <span style="font-family:monospace;font-weight:600;color:${st.totalOpenPnl >= 0 ? '#34d399' : '#f87171'};">${formatSignedDollar(st.totalOpenPnl)}</span>
-                  </div>
-                ` : ''}
-              `;
-            }
-
-            return `
-              <div style="padding:6px 8px;border-radius:6px;background:${isCurrentTabAcc ? 'rgba(56,189,248,0.08)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isCurrentTabAcc ? 'rgba(56,189,248,0.32)' : 'rgba(255,255,255,0.07)'};">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
-                  <div style="display:flex;align-items:center;gap:5px;min-width:0;">
-                    <span style="width:6px;height:6px;border-radius:50%;flex-shrink:0;background:${dotColor};box-shadow:0 0 6px ${dotColor};" title="${isCurrentTabAcc ? 'Active account in this tab' : (isFresh ? 'Live from another open tab' : 'Last known snapshot')}"></span>
-                    <span style="font-size:11px;font-weight:700;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(acc.name)}</span>
-                  </div>
-                  <span style="font-size:11.5px;font-weight:800;font-family:monospace;color:#f8fafc;flex-shrink:0;">
-                    ${st.balance !== null ? formatPlainDollar(st.balance) : '--'}
-                  </span>
-                </div>
-                ${statusRowHtml}
-              </div>
-            `;
-          }).join('')
-        : `<div style="padding:10px 6px;text-align:center;font-size:11px;color:#94a3b8;">Detecting account balance...</div>`;
-
-      chartAccountsRiskBoxEl.innerHTML = `
-        <div id="vest-arb-title-bar" style="
-          display: flex; align-items: center; justify-content: space-between;
-          padding: 6px 9px; background: linear-gradient(135deg, #0369a1, #0c4a6e);
-          color: #ffffff; cursor: move; border-bottom: 1px solid rgba(255,255,255,0.14);
-        ">
-          <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
-            <span style="font-weight: 800; font-size: 10.5px; letter-spacing: 0.45px; text-transform: uppercase; white-space: nowrap;">Accounts &amp; Risk</span>
-            ${activeSym ? `<span style="font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,0.18); color: #e0f2fe;">${escapeHtml(activeSym)}</span>` : ''}
-          </div>
-          <div style="display: flex; align-items: center; gap: 4px;">
-            <button type="button" id="vest-arb-pin-btn" style="background:${arb.pinned ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.15)'};border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;" title="${arb.pinned ? 'Pinned (sticky)' : 'Pin to exact screen position'}">
-              <svg viewBox="0 0 24 24" fill="${arb.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px;">
-                <line x1="12" y1="17" x2="12" y2="22"></line>
-                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
-              </svg>
-            </button>
-            <button type="button" id="vest-arb-btn-collapse" style="background:rgba(255,255,255,0.15);border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;" title="Minimize">_</button>
-            <button type="button" id="vest-arb-btn-settings" style="background:rgba(255,255,255,0.15);border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10.5px;line-height:1;" title="Accounts & Risk Settings">⚙</button>
-            <button type="button" id="vest-arb-btn-close" style="background:rgba(255,255,255,0.15);border:none;color:#ffffff;width:19px;height:19px;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10.5px;line-height:1;" title="Hide Box">✕</button>
-          </div>
-        </div>
-        <div style="padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto;">
-          ${rowsHtml}
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-top:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.22);font-size:10px;color:#94a3b8;">
-          <span style="font-weight:600;">Risk / Trade:</span>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <input type="number" id="vest-arb-inline-risk-pct" min="0.05" max="50" step="0.1" value="${arb.riskPercent}" style="width:48px;padding:2px 4px;border-radius:4px;background:rgba(15,23,42,0.9);color:#fbbf24;border:1px solid rgba(56,189,248,0.35);font-family:monospace;font-size:10.5px;font-weight:700;text-align:right;" title="Configurable risk % per trade" />
-            <span style="font-weight:700;color:#e2e8f0;">%</span>
-          </div>
-        </div>
-      `;
-    }
-
-    wireChartAccountsRiskBoxEvents();
-    clampAndPositionChartAccountsRiskBox();
-  }
-
-  function wireChartAccountsRiskBoxEvents() {
-    if (!chartAccountsRiskBoxEl) return;
-
-    const restoreBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-restore-btn');
-    if (restoreBtn) {
-      restoreBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
-        arb.collapsed = false;
-        settings.accountsRiskBox = arb;
-        markWindowAsRestored('accounts_risk');
-        queueSettingsSave({ accountsRiskBox: arb });
-        renderChartAccountsRiskBox();
-      });
-      return;
-    }
-
-    const pinBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-pin-btn');
-    if (pinBtn) {
-      pinBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
-        arb.pinned = !arb.pinned;
-        if (arb.pinned && chartAccountsRiskBoxEl) {
-          const rect = chartAccountsRiskBoxEl.getBoundingClientRect();
-          arb.pinnedLeft = Math.round(rect.left);
-          arb.pinnedTop = Math.round(rect.top);
-        }
-        settings.accountsRiskBox = arb;
-        queueSettingsSave({ accountsRiskBox: arb });
-        renderChartAccountsRiskBox();
-        showToast(arb.pinned ? 'Accounts & Risk Box pinned' : 'Accounts & Risk Box unpinned');
-      });
-    }
-
-    const collapseBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-btn-collapse');
-    if (collapseBtn) {
-      collapseBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
-        arb.collapsed = true;
-        settings.accountsRiskBox = arb;
-        markWindowAsMinimized('accounts_risk');
-        queueSettingsSave({ accountsRiskBox: arb });
-        renderChartAccountsRiskBox();
-      });
-    }
-
-    const settingsBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-btn-settings');
-    if (settingsBtn) {
-      settingsBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openStudioSettingsModal('chartingindicators', 'accountsrisk');
-      });
-    }
-
-    const closeBtn = chartAccountsRiskBoxEl.querySelector('#vest-arb-btn-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
-        arb.enabled = false;
-        settings.accountsRiskBox = arb;
-        queueSettingsSave({ accountsRiskBox: arb });
-        renderChartAccountsRiskBox();
-        renderStudioHeaderPill();
-        showToast('Accounts & Risk Box hidden (re-enable in Cortex menu)');
-      });
-    }
-
-    const inlineRiskInput = chartAccountsRiskBoxEl.querySelector('#vest-arb-inline-risk-pct');
-    if (inlineRiskInput) {
-      const commitInlineRisk = () => {
-        const val = Number(inlineRiskInput.value);
-        if (!Number.isFinite(val) || val <= 0) return;
-        const arb = normalizeAccountsRiskBoxConfig({ ...settings.accountsRiskBox, riskPercent: val });
-        settings.accountsRiskBox = arb;
-        queueSettingsSave({ accountsRiskBox: arb });
-        renderChartAccountsRiskBox();
-      };
-      inlineRiskInput.addEventListener('change', commitInlineRisk);
-      inlineRiskInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          inlineRiskInput.blur();
-          commitInlineRisk();
-        }
-      });
-    }
-
-    const dragHandle = chartAccountsRiskBoxEl.querySelector('#vest-arb-title-bar');
-    if (dragHandle) {
-      dragHandle.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        if (e.target.closest('button, input, label')) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const rect = chartAccountsRiskBoxEl.getBoundingClientRect();
-        activeAccountsRiskBoxDrag = {
-          offsetX: e.clientX - rect.left,
-          offsetY: e.clientY - rect.top
-        };
-        document.body.style.userSelect = 'none';
-
-        const onMove = (ev) => {
-          if (!activeAccountsRiskBoxDrag || !chartAccountsRiskBoxEl) return;
-          const vp = getScreenBoundsRect();
-          const boxW = chartAccountsRiskBoxEl.offsetWidth || 256;
-          const boxH = chartAccountsRiskBoxEl.offsetHeight || 160;
-
-          const rawLeft = ev.clientX - activeAccountsRiskBoxDrag.offsetX;
-          const rawTop = ev.clientY - activeAccountsRiskBoxDrag.offsetY;
-          const clampedLeft = Math.max(vp.left, Math.min(vp.right - boxW, rawLeft));
-          const clampedTop = Math.max(vp.top, Math.min(vp.bottom - boxH, rawTop));
-
-          chartAccountsRiskBoxEl.style.left = `${Math.round(clampedLeft)}px`;
-          chartAccountsRiskBoxEl.style.top = `${Math.round(clampedTop)}px`;
-
-          const maxOffsetX = Math.max(1, vp.width - boxW);
-          const maxOffsetY = Math.max(1, vp.height - boxH);
-          const relX = Math.max(0, Math.min(1, (clampedLeft - vp.left) / maxOffsetX));
-          const relY = Math.max(0, Math.min(1, (clampedTop - vp.top) / maxOffsetY));
-
-          const arb = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
-          arb.relX = Math.round(relX * 10000) / 10000;
-          arb.relY = Math.round(relY * 10000) / 10000;
-          if (arb.pinned) {
-            arb.pinnedLeft = Math.round(clampedLeft);
-            arb.pinnedTop = Math.round(clampedTop);
-          }
-          settings.accountsRiskBox = arb;
-        };
-
-        const onUp = () => {
-          activeAccountsRiskBoxDrag = null;
-          document.body.style.userSelect = '';
-          window.removeEventListener('mousemove', onMove);
-          window.removeEventListener('mouseup', onUp);
-          queueSettingsSave({ accountsRiskBox: settings.accountsRiskBox });
-        };
-
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
-      });
-    }
+    pushAccountsRiskDataToChartCanvas();
   }
 
   function renderChartDiagnosticsBox(animateFromRect = null) {
@@ -17256,8 +16954,9 @@ if (activeTab === 'diagnostics') {
         renderChartAccountsRiskBox();
         setTimeout(() => {
           if (settings.accountsRiskBox && settings.accountsRiskBox.enabled) {
+            postToMainWorlds({ type: 'VEST_SCAN_ACCOUNTS_NOW' });
             scrapeAndSyncCurrentAccountSnapshot(true);
-            clampAndPositionChartAccountsRiskBox();
+            pushAccountsRiskDataToChartCanvas();
           }
         }, 1200);
         setupIsolatedActionTracking();
