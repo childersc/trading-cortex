@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.94`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.95`) are documented in this file.
+
+---
+
+## [v1.1.95] — 2026-11-19
+
+### 🛠️ Non-Destructive In-Place Settings Sync (Eliminates Scrollbar Push-Back)
+- **Eliminated `renderDialog()` Destruction on Live Settings Events**:
+  - Replaced full `overlay.innerHTML` re-rendering inside `onLiveSettingsUpdated()` with non-destructive in-place DOM patching (`syncOpenModalControlsInPlace()`).
+  - Dragging the Settings modal scrollbar or scrolling through Charting Indicators is never interrupted, cancelled, or pushed back up by background storage/cross-tab updates, while indicator master switches, badges, and settings buttons still sync in real time across open browsers.
 
 ---
 
