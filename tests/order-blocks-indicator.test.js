@@ -91,9 +91,14 @@ assert(isolatedJs.includes("type === 'VEST_TV_OB_MITIGATED'"), 'Window message l
 
 // Autoplay policy unit test in isolated VM
 {
+  let audioCtxConstructed = 0;
   const sandbox = {
-    window: { addEventListener: () => {} },
-    navigator: { userActivation: { hasBeenActive: false } }
+    window: {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      AudioContext: function () { audioCtxConstructed++; this.state = 'running'; this.resume = () => Promise.resolve(); }
+    },
+    navigator: { userActivation: { isActive: false, hasBeenActive: false } }
   };
   vm.createContext(sandbox);
   const audioExtract = isolatedJs.match(/let sharedCortexAudioContext[\s\S]*?function playWithAudioContext\([\s\S]*?\n  \}/);
@@ -103,9 +108,20 @@ assert(isolatedJs.includes("type === 'VEST_TV_OB_MITIGATED'"), 'Window message l
   assert.strictEqual(sandbox.canPlayWebAudio(), false, 'canPlayWebAudio must return false before user activation');
   assert.strictEqual(sandbox.getCortexAudioContext(), null, 'getCortexAudioContext must return null when inactive to prevent Chrome autoplay error');
 
-  sandbox.markUserInteractionForAudio();
+  // Synthetic (untrusted) event must NOT unlock or instantiate AudioContext
+  sandbox.markUserInteractionForAudio({ isTrusted: false });
+  assert.strictEqual(audioCtxConstructed, 0, 'Synthetic untrusted events must never construct AudioContext');
+
+  // Event before Chrome grants userActivation must NOT instantiate AudioContext
+  sandbox.markUserInteractionForAudio({ isTrusted: true });
+  assert.strictEqual(audioCtxConstructed, 0, 'Must not construct AudioContext while navigator.userActivation is inactive');
   assert.strictEqual(sandbox.canPlayWebAudio(), true, 'canPlayWebAudio must return true after user interaction');
-  console.log('✓ Chrome autoplay policy protection verified: avoids premature AudioContext instantiation');
+
+  // Genuine trusted gesture with active userActivation unlocks AudioContext cleanly
+  sandbox.navigator.userActivation.isActive = true;
+  sandbox.markUserInteractionForAudio({ isTrusted: true });
+  assert.strictEqual(audioCtxConstructed, 1, 'Genuine trusted gesture with userActivation must construct AudioContext once');
+  console.log('✓ Chrome autoplay policy protection verified: avoids premature/untrusted AudioContext instantiation');
 }
 
 console.log('✓ Audible alerts (Speech voice synthesis + Web Audio chimes) verified');

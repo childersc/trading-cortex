@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.107`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.108`) are documented in this file.
+
+---
+
+## [v1.1.108] — 2026-11-19
+
+### 🔇 Eliminated Recurring `AudioContext was not allowed to start` Extension Error
+- **Fixed `markUserInteractionForAudio()` Chrome User-Activation Timing**:
+  - Switched Web Audio unlock listeners from `pointerdown`/`mousedown`/`touchstart` (which do **not** grant Chrome `UserActivation` yet, and are also fired synthetically by TradingView/React) to gesture-completion events (`click`, `mouseup`, `pointerup`, `touchend`, `keydown`).
+  - Added strict `e.isTrusted !== false` and `navigator.userActivation.isActive || hasBeenActive` guards before instantiating `new AudioContext()` or calling `.resume()`, and auto-detaches unlock listeners once the audio context is running.
 
 ---
 

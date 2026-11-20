@@ -1,3 +1,7 @@
+Trading Cortex v1.1.108 — Eliminated `AudioContext was not allowed to start` Chrome Extension Error
+
+- **Fixed Web Audio Autoplay Error (`v1.1.108`)**: Switched Web Audio unlock listeners from `pointerdown`/`mousedown` to genuine gesture-completion events (`click`, `mouseup`, `pointerup`, `touchend`, `keydown`) with strict `isTrusted` and `navigator.userActivation` guards so Chrome never logs an `AudioContext` autoplay error in `chrome://extensions`.
+
 Trading Cortex v1.1.107 — Dynamic Box-Fitted Order Block Text Sizing
 
 - **Session-Box Style Auto-Fitted OB Text (`v1.1.107`)**: Order Block labels now center and dynamically scale to fit each box's visible width and height (just like Session Boxes), with your Text Size sliders (`8px–48px`) acting as the max cap and the `×` dismiss pill neatly tucked in the top-right corner.

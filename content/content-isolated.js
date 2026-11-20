@@ -3134,8 +3134,27 @@
   let sharedCortexAudioContext = null;
   let userHasInteractedWithPage = false;
 
-  function markUserInteractionForAudio() {
+  const AUDIO_UNLOCK_EVENTS = ['click', 'mouseup', 'pointerup', 'touchend', 'keydown'];
+
+  function detachAudioUnlockListeners() {
+    if (typeof window === 'undefined') return;
+    AUDIO_UNLOCK_EVENTS.forEach(type => {
+      try {
+        window.removeEventListener(type, markUserInteractionForAudio, { capture: true });
+      } catch (e) {}
+    });
+  }
+
+  function markUserInteractionForAudio(e) {
+    // Reject synthetic/programmatic events dispatched by TradingView/React
+    if (e && e.isTrusted === false) return;
     userHasInteractedWithPage = true;
+    // Chrome strictly forbids new AudioContext() / resume() unless userActivation is active
+    // (pointerdown/mousedown do NOT grant userActivation in Chrome; only click/mouseup/pointerup/touchend/keydown do).
+    const hasActivation = (typeof navigator === 'undefined' || !navigator.userActivation)
+      ? true
+      : Boolean(navigator.userActivation.isActive || navigator.userActivation.hasBeenActive);
+    if (!hasActivation) return;
     try {
       const AudioCtx = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) || null;
       if (!AudioCtx) return;
@@ -3143,14 +3162,20 @@
         sharedCortexAudioContext = new AudioCtx();
       }
       if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'suspended') {
-        sharedCortexAudioContext.resume().catch(() => {});
+        sharedCortexAudioContext.resume().then(() => {
+          if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'running') {
+            detachAudioUnlockListeners();
+          }
+        }).catch(() => {});
+      } else if (sharedCortexAudioContext && sharedCortexAudioContext.state === 'running') {
+        detachAudioUnlockListeners();
       }
     } catch (e) {}
   }
 
-  // Register passive interaction listeners on window to unlock Web Audio on first gesture
+  // Register passive gesture-completion listeners on window to unlock Web Audio cleanly with zero Chrome autoplay errors
   if (typeof window !== 'undefined') {
-    ['pointerdown', 'mousedown', 'keydown', 'touchstart'].forEach(type => {
+    AUDIO_UNLOCK_EVENTS.forEach(type => {
       window.addEventListener(type, markUserInteractionForAudio, { capture: true, passive: true });
     });
   }
