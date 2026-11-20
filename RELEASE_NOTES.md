@@ -1,3 +1,7 @@
+Trading Cortex v1.1.107 — Dynamic Box-Fitted Order Block Text Sizing
+
+- **Session-Box Style Auto-Fitted OB Text (`v1.1.107`)**: Order Block labels now center and dynamically scale to fit each box's visible width and height (just like Session Boxes), with your Text Size sliders (`8px–48px`) acting as the max cap and the `×` dismiss pill neatly tucked in the top-right corner.
+
 Trading Cortex v1.1.106 — 1-Click Persistent Order Block Removal (×) & Restore
 
 - **1-Click Remove Invalid Order Blocks (`v1.1.106`)**: Every Order Block label (native chart & MTF `5m`/`15m`/`1h`/`4h`) now includes a compact **`×`** button. Clicking it immediately hides the Order Block and saves its persistent key (`SYMBOL|TF|SIDE|TIME`) so it never redraws across page reloads, timeframe switches, or browser tabs.

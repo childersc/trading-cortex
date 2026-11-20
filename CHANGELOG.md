@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.106`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.107`) are documented in this file.
+
+---
+
+## [v1.1.107] — 2026-11-19
+
+### 🔤 Dynamic Box-Fitted Order Block Text Sizing (Session-Box Style)
+- **Auto-Fitted Order Block Labels (`computeFittedObLabelFontSize`)**:
+  - Order Block labels (`Bullish OB`, `5m Bearish OB`, `1h Bullish OB`, `4h Bearish OB`, etc.) now dynamically scale and center inside each Order Block zone based on the box's visible width and height—matching the Session Boxes watermark style.
+  - Raised the Max Text Size sliders (`Max Chart OB Text Size (Auto-Fits Box)` and `Max MTF Text Size (Auto-Fits Box)`) to `8px–48px` (defaults `18px` / `22px`) to act as the maximum ceiling while automatically shrinking to fit smaller or narrower boxes.
+  - Compact `×` remove pill tucks cleanly into the top-right corner of the visible zone (with a left-aligned compact fallback for razor-thin boxes `< 18px` tall).
 
 ---
 

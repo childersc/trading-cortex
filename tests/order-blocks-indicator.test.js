@@ -312,8 +312,8 @@ for (const ctrl of mtfUiControls) {
 
 // Config normalization & clamping
 const normDefault = sandbox.normalizeOrderBlocksConfig({ enabled: true });
-assert.strictEqual(normDefault.labelFontSize, 10, 'Default labelFontSize must be 10');
-assert.strictEqual(normDefault.mtfLabelFontSize, 11, 'Default mtfLabelFontSize must be 11');
+assert.strictEqual(normDefault.labelFontSize, 18, 'Default labelFontSize must be 18');
+assert.strictEqual(normDefault.mtfLabelFontSize, 22, 'Default mtfLabelFontSize must be 22');
 assert.strictEqual(normDefault.mtfMaxBlocksPerTf, 4, 'Default mtfMaxBlocksPerTf must be 4');
 ['5m', '15m', '1h', '4h'].forEach(tf => {
   assert(normDefault.mtfTimeframes && normDefault.mtfTimeframes[tf], `mtfTimeframes must include ${tf}`);
@@ -447,5 +447,25 @@ assert.strictEqual(filteredBlocks.length, 1, 'Dismissed OB must be filtered out'
 assert.strictEqual(filteredBlocks[0].side, 'short', 'Non-dismissed OB must remain visible');
 
 console.log('✓ Persistent Order Block dismissal & cross-timeframe suppression verified');
+
+// 12. Verify Box-Fitted Dynamic Text Sizing (Session-Box Style)
+console.log('Testing box-fitted dynamic Order Block text sizing...');
+const fittedFnCode = extractFn('computeFittedObLabelFontSize', mainJs);
+vm.runInContext(fittedFnCode, mtfSandbox);
+const mockCtx = {
+  font: '',
+  measureText: (txt) => {
+    const m = / (\d+)px /.exec(mockCtx.font);
+    const sz = m ? Number(m[1]) : 12;
+    return { width: txt.length * sz * 0.6 };
+  }
+};
+const largeBoxPx = mtfSandbox.computeFittedObLabelFontSize(mockCtx, '4h Bullish OB', 320, 90, 28, false);
+const mediumBoxPx = mtfSandbox.computeFittedObLabelFontSize(mockCtx, '4h Bullish OB', 120, 26, 28, false);
+const smallBoxPx = mtfSandbox.computeFittedObLabelFontSize(mockCtx, '4h Bullish OB', 60, 14, 28, false);
+assert.strictEqual(largeBoxPx, 28, 'Large box should scale up to maxFontPx');
+assert(mediumBoxPx < largeBoxPx && mediumBoxPx >= 8, 'Medium box should scale proportionally smaller than large box');
+assert(smallBoxPx <= mediumBoxPx && smallBoxPx >= 8, 'Small/thin box should scale down cleanly to stay inside bounds');
+console.log('✓ Box-fitted dynamic Order Block text sizing verified');
 
 console.log('All Institutional Order Blocks Indicator Tests Passed Successfully!');

@@ -771,8 +771,8 @@
     bullishOpacity: 20,
     bearishColor: '#ef4444',
     bearishOpacity: 20,
-    labelFontSize: 10,
-    mtfLabelFontSize: 11,
+    labelFontSize: 18,
+    mtfLabelFontSize: 22,
     mtfMaxBlocksPerTf: 4,
     mtfTimeframes: {
       '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
@@ -829,8 +829,8 @@
       bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
       bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
       bearishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bearishOpacity) || 20))),
-      labelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.labelFontSize) || 10))),
-      mtfLabelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.mtfLabelFontSize) || 11))),
+      labelFontSize: Math.max(8, Math.min(48, Math.round(Number(cfg.labelFontSize) || 18))),
+      mtfLabelFontSize: Math.max(8, Math.min(48, Math.round(Number(cfg.mtfLabelFontSize) || 22))),
       mtfMaxBlocksPerTf: Math.max(1, Math.min(10, Math.round(Number(cfg.mtfMaxBlocksPerTf) || 4))),
       mtfTimeframes,
       dismissedOrderBlocks: Array.isArray(cfg.dismissedOrderBlocks)
@@ -7243,15 +7243,15 @@
             </div>
             ${range('vest-ob-bull-opacity', 'Bullish Zone Fill Opacity', 5, 80, 5, ob.bullishOpacity, '%')}
             ${range('vest-ob-bear-opacity', 'Bearish Zone Fill Opacity', 5, 80, 5, ob.bearishOpacity, '%')}
-            ${range('vest-ob-label-font-size', 'Chart OB Label Text Size', 8, 20, 1, ob.labelFontSize || 10, ' px')}
+            ${range('vest-ob-label-font-size', 'Max Chart OB Text Size (Auto-Fits Box)', 8, 48, 1, ob.labelFontSize || 18, ' px')}
           </div>
 
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
             <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:4px;">MULTI-TIMEFRAME ORDER BLOCKS (5m / 15m / 1h / 4h)</div>
             <p style="font-size:11px;color:#94a3b8;line-height:1.45;margin:0 0 10px;">
-              Project 5m, 15m, 1h, and 4h Order Blocks onto any active chart timeframe with custom bullish/bearish colors, fill opacity, and label text sizing.
+              Project 5m, 15m, 1h, and 4h Order Blocks onto any active chart timeframe with custom bullish/bearish colors, fill opacity, and box-fitted text sizing.
             </p>
-            ${range('vest-ob-mtf-label-font-size', 'MTF Label Text Size', 8, 20, 1, ob.mtfLabelFontSize || 11, ' px')}
+            ${range('vest-ob-mtf-label-font-size', 'Max MTF Text Size (Auto-Fits Box)', 8, 48, 1, ob.mtfLabelFontSize || 22, ' px')}
             ${range('vest-ob-mtf-max-blocks', 'Max Order Blocks per Timeframe', 1, 10, 1, ob.mtfMaxBlocksPerTf || 4, ' blocks')}
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
               ${['5m', '15m', '1h', '4h'].map(tf => {
@@ -8429,8 +8429,8 @@
         if (q('#vest-ob-bear-color')) ob.bearishColor = q('#vest-ob-bear-color').value || '#ef4444';
         if (q('#vest-ob-bear-color-hex')) q('#vest-ob-bear-color-hex').textContent = ob.bearishColor;
         if (q('#vest-ob-bear-opacity')) ob.bearishOpacity = Number(q('#vest-ob-bear-opacity').value) || 20;
-        if (q('#vest-ob-label-font-size')) ob.labelFontSize = Number(q('#vest-ob-label-font-size').value) || 10;
-        if (q('#vest-ob-mtf-label-font-size')) ob.mtfLabelFontSize = Number(q('#vest-ob-mtf-label-font-size').value) || 11;
+        if (q('#vest-ob-label-font-size')) ob.labelFontSize = Number(q('#vest-ob-label-font-size').value) || 18;
+        if (q('#vest-ob-mtf-label-font-size')) ob.mtfLabelFontSize = Number(q('#vest-ob-mtf-label-font-size').value) || 22;
         if (q('#vest-ob-mtf-max-blocks')) ob.mtfMaxBlocksPerTf = Number(q('#vest-ob-mtf-max-blocks').value) || 4;
         if (!ob.mtfTimeframes || typeof ob.mtfTimeframes !== 'object') ob.mtfTimeframes = {};
         ['5m', '15m', '1h', '4h'].forEach(tf => {

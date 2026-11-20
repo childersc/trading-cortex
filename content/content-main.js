@@ -8529,8 +8529,8 @@
     bullishOpacity: 20,
     bearishColor: '#ef4444',
     bearishOpacity: 20,
-    labelFontSize: 10,
-    mtfLabelFontSize: 11,
+    labelFontSize: 18,
+    mtfLabelFontSize: 22,
     mtfMaxBlocksPerTf: 4,
     mtfTimeframes: {
       '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
@@ -8587,8 +8587,8 @@
       bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
       bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
       bearishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bearishOpacity) || 20))),
-      labelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.labelFontSize) || 10))),
-      mtfLabelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.mtfLabelFontSize) || 11))),
+      labelFontSize: Math.max(8, Math.min(48, Math.round(Number(cfg.labelFontSize) || 18))),
+      mtfLabelFontSize: Math.max(8, Math.min(48, Math.round(Number(cfg.mtfLabelFontSize) || 22))),
       mtfMaxBlocksPerTf: Math.max(1, Math.min(10, Math.round(Number(cfg.mtfMaxBlocksPerTf) || 4))),
       mtfTimeframes,
       dismissedOrderBlocks: Array.isArray(cfg.dismissedOrderBlocks)
@@ -9297,6 +9297,28 @@
     });
   }
 
+  function computeFittedObLabelFontSize(ctx, labelText, boxW, boxH, maxFontPx, hasSubLabel) {
+    const cap = Math.max(8, Math.min(48, Math.round(Number(maxFontPx) || 18)));
+    const minPx = 8;
+    if (!labelText || boxW <= 0 || boxH <= 0) return minPx;
+    let fitted = cap;
+    // Scale to box height first (just like Session Boxes watermark sizing)
+    const heightFactor = hasSubLabel ? 0.52 : 0.68;
+    if (fitted > boxH * heightFactor) {
+      fitted = Math.max(minPx, Math.floor(boxH * heightFactor));
+    }
+    // Scale to visible box width (leaving comfortable horizontal padding)
+    if (ctx && typeof ctx.measureText === 'function') {
+      ctx.font = `600 ${fitted}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+      const measuredW = ctx.measureText(labelText).width;
+      const maxTextW = Math.max(20, boxW * 0.84);
+      if (measuredW > maxTextW && measuredW > 0) {
+        fitted = Math.max(minPx, Math.floor(fitted * (maxTextW / measuredW)));
+      }
+    }
+    return Math.max(minPx, Math.min(cap, fitted));
+  }
+
   function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars, symbolKey, fallbackTfLabel) {
     if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
     const cfg = normalizeOrderBlocksConfig(config);
@@ -9368,60 +9390,129 @@
       ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
       ctx.setLineDash([]);
 
-      // 3. Zone Label (with customizable text size, timeframe tag, and 1-click × dismiss button)
-      const labelPx = ob.timeframe ? (cfg.mtfLabelFontSize || 11) : (cfg.labelFontSize || 10);
-      ctx.font = `600 ${labelPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-      ctx.fillStyle = baseColor;
+      // 3. Zone Label — dynamically auto-fitted to the Order Block box dimensions (just like Session Boxes) + 1-click × dismiss button
+      const maxLabelPx = ob.timeframe ? (cfg.mtfLabelFontSize || 22) : (cfg.labelFontSize || 18);
       const tfPrefix = ob.timeframe ? `${ob.timeframe} ` : '';
       const labelText = `${tfPrefix}${isBull ? 'Bullish OB' : 'Bearish OB'}`;
-      const labelX = Math.max(6, boxLeft + 6);
-      const labelY = boxTop + labelPx + 3;
-      ctx.fillText(labelText, labelX, labelY);
-
-      // Draw compact × remove button immediately to the right of the label
+      const visLeft = Math.max(0, boxLeft);
+      const visRight = Math.min(cssWidth, boxLeft + boxWidth);
+      const visW = Math.max(0, visRight - visLeft);
       const dismissKey = buildOrderBlockDismissKey(symbolKey, ob, fallbackTfLabel);
-      if (dismissKey) {
-        const labelW = ctx.measureText(labelText).width;
-        const btnSize = Math.max(12, Math.min(18, Math.round(labelPx + 2)));
-        const btnX = Math.min(cssWidth - btnSize - 4, labelX + labelW + 5);
-        const btnY = boxTop + 3;
-        if (btnX > 0 && btnY >= 0 && btnY < cssHeight) {
-          ctx.save();
-          ctx.beginPath();
-          if (typeof ctx.roundRect === 'function') {
-            ctx.roundRect(btnX, btnY, btnSize, btnSize, 3);
-          } else {
-            ctx.rect(btnX, btnY, btnSize, btnSize);
-          }
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
-          ctx.fill();
-          ctx.strokeStyle = hexToRgbaString(baseColor, 65);
-          ctx.lineWidth = 0.9;
-          ctx.stroke();
+      const useCenteredBoxFit = boxHeight >= 18 && visW >= 36;
 
-          ctx.fillStyle = '#e2e8f0';
-          ctx.font = `700 ${Math.max(9, btnSize - 3)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('×', btnX + btnSize / 2, btnY + btnSize / 2 + 0.5);
-          ctx.restore();
+      if (useCenteredBoxFit) {
+        const btnSize = Math.max(12, Math.min(16, Math.round(Math.min(boxHeight * 0.45, 14))));
+        const fittedPx = computeFittedObLabelFontSize(
+          ctx,
+          labelText,
+          Math.max(20, visW - btnSize - 10),
+          boxHeight,
+          maxLabelPx,
+          Boolean(ob.isMitigated)
+        );
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(visLeft + 2, boxTop + 2, Math.max(1, visW - 4), Math.max(1, boxHeight - 4));
+        ctx.clip();
 
-          lastRenderedOrderBlockCloseHitBoxes.push({
-            key: dismissKey,
-            label: labelText,
-            left: btnX - 3,
-            top: btnY - 3,
-            right: btnX + btnSize + 3,
-            bottom: btnY + btnSize + 3
-          });
+        ctx.font = `600 ${fittedPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.fillStyle = hexToRgbaString(baseColor, 86);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const centerX = visLeft + visW / 2;
+        const centerY = ob.isMitigated
+          ? (boxTop + boxHeight * 0.42)
+          : (boxTop + boxHeight / 2);
+        ctx.fillText(labelText, centerX, centerY);
+
+        if (ob.isMitigated) {
+          const mitFontPx = Math.max(8, Math.min(13, Math.round(fittedPx * 0.58)));
+          ctx.font = `700 ${mitFontPx}px monospace`;
+          ctx.fillStyle = hexToRgbaString(baseColor, 78);
+          ctx.fillText('MITIGATED', centerX, boxTop + boxHeight * 0.74);
         }
-      }
+        ctx.restore();
 
-      if (ob.isMitigated) {
-        const mitFontPx = Math.max(8, Math.round(labelPx * 0.82));
-        ctx.font = `700 ${mitFontPx}px monospace`;
-        ctx.fillStyle = hexToRgbaString(baseColor, 80);
-        ctx.fillText('MITIGATED', labelX, boxTop + boxHeight - 4);
+        // Compact × remove button tucked cleanly in the top-right corner of the visible box
+        if (dismissKey) {
+          const btnX = Math.max(visLeft + 3, visRight - btnSize - 4);
+          const btnY = boxTop + 3;
+          if (btnX > 0 && btnY >= 0 && btnY < cssHeight) {
+            ctx.save();
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(btnX, btnY, btnSize, btnSize, 3);
+            } else {
+              ctx.rect(btnX, btnY, btnSize, btnSize);
+            }
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+            ctx.fill();
+            ctx.strokeStyle = hexToRgbaString(baseColor, 65);
+            ctx.lineWidth = 0.9;
+            ctx.stroke();
+
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = `700 ${Math.max(9, btnSize - 3)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('×', btnX + btnSize / 2, btnY + btnSize / 2 + 0.5);
+            ctx.restore();
+
+            lastRenderedOrderBlockCloseHitBoxes.push({
+              key: dismissKey,
+              label: labelText,
+              left: btnX - 3,
+              top: btnY - 3,
+              right: btnX + btnSize + 3,
+              bottom: btnY + btnSize + 3
+            });
+          }
+        }
+      } else {
+        // Razor-thin box fallback: compact label neatly aligned at the left edge + × pill right beside it
+        const compactPx = computeFittedObLabelFontSize(ctx, labelText, Math.max(24, visW - 18), Math.max(12, boxHeight), Math.min(maxLabelPx, 11), false);
+        ctx.font = `600 ${compactPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.fillStyle = baseColor;
+        const labelX = Math.max(6, boxLeft + 6);
+        const labelY = boxTop + compactPx + 1;
+        ctx.fillText(labelText, labelX, labelY);
+
+        if (dismissKey) {
+          const labelW = ctx.measureText(labelText).width;
+          const btnSize = 12;
+          const btnX = Math.min(cssWidth - btnSize - 4, labelX + labelW + 5);
+          const btnY = Math.max(2, boxTop + 1);
+          if (btnX > 0 && btnY >= 0 && btnY < cssHeight) {
+            ctx.save();
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') {
+              ctx.roundRect(btnX, btnY, btnSize, btnSize, 3);
+            } else {
+              ctx.rect(btnX, btnY, btnSize, btnSize);
+            }
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+            ctx.fill();
+            ctx.strokeStyle = hexToRgbaString(baseColor, 65);
+            ctx.lineWidth = 0.9;
+            ctx.stroke();
+
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '700 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('×', btnX + btnSize / 2, btnY + btnSize / 2 + 0.5);
+            ctx.restore();
+
+            lastRenderedOrderBlockCloseHitBoxes.push({
+              key: dismissKey,
+              label: labelText,
+              left: btnX - 3,
+              top: btnY - 3,
+              right: btnX + btnSize + 3,
+              bottom: btnY + btnSize + 3
+            });
+          }
+        }
       }
 
       // 4. Order Entry Icon on the mitigation bar (native chart timeframe OBs only to avoid multi-TF badge clutter)
