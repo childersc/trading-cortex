@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.105`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.106`) are documented in this file.
+
+---
+
+## [v1.1.106] — 2026-11-19
+
+### 🗑️ 1-Click Persistent Order Block Removal (`×`) & Restore Control
+- **Remove Invalid Order Blocks Directly on Chart (`×` Pill)**:
+  - Added a compact `×` remove button next to every rendered Order Block label (both current-chart and MTF `5m`/`15m`/`1h`/`4h` Order Blocks).
+  - Clicking `×` immediately removes the Order Block from the chart, suppresses its alerts/stats, and saves a deterministic cross-timeframe key (`SYMBOL|TF|SIDE|TIME`) into `settings.orderBlocks.dismissedOrderBlocks` so it never redraws across refreshes, timeframe switches, or browser tabs.
+- **Restore All Removed Order Blocks**:
+  - Added a hidden-count readout and **`Restore All Removed OBs`** button inside **Settings → Charting Indicators → Order Blocks (Smart Risk)**.
 
 ---
 

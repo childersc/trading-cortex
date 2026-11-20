@@ -1,3 +1,8 @@
+Trading Cortex v1.1.106 — 1-Click Persistent Order Block Removal (×) & Restore
+
+- **1-Click Remove Invalid Order Blocks (`v1.1.106`)**: Every Order Block label (native chart & MTF `5m`/`15m`/`1h`/`4h`) now includes a compact **`×`** button. Clicking it immediately hides the Order Block and saves its persistent key (`SYMBOL|TF|SIDE|TIME`) so it never redraws across page reloads, timeframe switches, or browser tabs.
+- **Restore Removed Order Blocks (`v1.1.106`)**: View how many Order Blocks are hidden and click **`Restore All Removed OBs`** anytime in **Settings → Charting Indicators → Order Blocks**.
+
 Trading Cortex v1.1.105 — Multi-Timeframe Order Blocks (5m / 15m / 1h / 4h) + Custom Colors & Text Sizing
 
 - **5m, 15m, 1h & 4h Order Blocks on Any Chart (`v1.1.105`)**: Overlay `5m`, `15m`, `1h`, and `4h` Order Blocks on any active chart timeframe using TradingView's native datafeed, passive timeframe caching, instant resampling, and live forming-bar stitching—with left-edge clamping so active HTF zones stay visible on lower-timeframe charts.

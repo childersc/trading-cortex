@@ -780,6 +780,7 @@
       '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
       '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
     },
+    dismissedOrderBlocks: [],
     showOrderEntryIcon: true,
     orderIconSize: 13,
     voiceAlertEnabled: true,
@@ -832,6 +833,9 @@
       mtfLabelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.mtfLabelFontSize) || 11))),
       mtfMaxBlocksPerTf: Math.max(1, Math.min(10, Math.round(Number(cfg.mtfMaxBlocksPerTf) || 4))),
       mtfTimeframes,
+      dismissedOrderBlocks: Array.isArray(cfg.dismissedOrderBlocks)
+        ? Array.from(new Set(cfg.dismissedOrderBlocks.filter(k => typeof k === 'string' && k.trim().length > 0).map(k => k.trim()))).slice(-300)
+        : [],
       showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
       orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
@@ -3239,6 +3243,19 @@
       handleRangeDetectedAlert(event.data.payload || {});
     } else     if (type === 'VEST_TV_OB_MITIGATED') {
       handleOrderBlockMitigatedAlert(event.data.payload || {});
+    } else if (type === 'VEST_TV_OB_DISMISS') {
+      const dismissKey = typeof event.data.key === 'string' ? event.data.key.trim() : '';
+      const label = typeof event.data.label === 'string' ? event.data.label.trim() : 'Order Block';
+      if (dismissKey) {
+        const ob = normalizeOrderBlocksConfig(settings.orderBlocks);
+        if (!ob.dismissedOrderBlocks.includes(dismissKey)) {
+          ob.dismissedOrderBlocks = [...ob.dismissedOrderBlocks, dismissKey].slice(-300);
+          settings.orderBlocks = normalizeOrderBlocksConfig(ob);
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          showToast(`Removed ${label} (saved)`);
+        }
+      }
     } else if (type === 'VEST_TV_CI_SIGNAL_FORMING') {
       speakCortexSignalAlert(event.data.payload || {}, false);
     } else if (type === 'VEST_TV_CI_SIGNAL_CONFIRMED') {
@@ -7266,6 +7283,15 @@
                 `;
               }).join('')}
             </div>
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:11px;color:#94a3b8;">
+                Click <strong style="color:#f87171;">×</strong> on any Order Block label to permanently hide it.
+                <strong id="vest-ob-dismissed-count" style="color:#cbd5e1;">${(Array.isArray(ob.dismissedOrderBlocks) ? ob.dismissedOrderBlocks.length : 0)}</strong> hidden.
+              </span>
+              <button type="button" class="vest-tvs-action-btn" id="vest-ob-restore-dismissed-btn" style="height:26px;padding:0 10px;font-size:11px;color:#cbd5e1;" ${(Array.isArray(ob.dismissedOrderBlocks) && ob.dismissedOrderBlocks.length > 0) ? '' : 'disabled'}>
+                Restore All Removed OBs
+              </button>
+            </div>
           </div>
 
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
@@ -9528,6 +9554,18 @@
           renderDialog();
           broadcastLiveSessionDraft();
           showToast('Reset Order Blocks settings to defaults');
+        });
+
+        overlay.querySelector('#vest-ob-restore-dismissed-btn')?.addEventListener('click', () => {
+          const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+          ob.dismissedOrderBlocks = [];
+          draftSettings.orderBlocks = ob;
+          settings.orderBlocks = JSON.parse(JSON.stringify(ob));
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          targetIndicatorToScroll = 'orderblocks';
+          renderDialog();
+          showToast('Restored all removed Order Blocks');
         });
 
         overlay.querySelector('#vest-ob-reset-stats-pos-btn')?.addEventListener('click', () => {
