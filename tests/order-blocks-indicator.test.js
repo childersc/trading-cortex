@@ -293,4 +293,128 @@ assert.strictEqual(violatedOb.isMitigated, true, 'OB was mitigated at bar 10');
 assert.strictEqual(violatedOb.isInvalidated, true, 'OB must be marked as invalidated when price closes below bottom');
 console.log('✓ Continuous invalidation tracking verified (violated OBs cleanly marked invalidated)');
 
+// 10. Verify Multi-Timeframe (5m / 15m / 1h / 4h) Order Blocks, Custom Colors, Text Sizing & Cross-TF Projection
+console.log('Testing Multi-Timeframe (5m/15m/1h/4h) Order Blocks, colors, text size & projection...');
+
+// UI controls presence
+const mtfUiControls = [
+  '#vest-ob-label-font-size',
+  '#vest-ob-mtf-label-font-size',
+  '#vest-ob-mtf-max-blocks',
+  'vest-ob-mtf-${tf}-enabled',
+  'vest-ob-mtf-${tf}-bull',
+  'vest-ob-mtf-${tf}-bear',
+  'vest-ob-mtf-${tf}-opacity'
+];
+for (const ctrl of mtfUiControls) {
+  assert(isolatedJs.includes(ctrl), `Order Blocks settings UI must include '${ctrl}'`);
+}
+
+// Config normalization & clamping
+const normDefault = sandbox.normalizeOrderBlocksConfig({ enabled: true });
+assert.strictEqual(normDefault.labelFontSize, 10, 'Default labelFontSize must be 10');
+assert.strictEqual(normDefault.mtfLabelFontSize, 11, 'Default mtfLabelFontSize must be 11');
+assert.strictEqual(normDefault.mtfMaxBlocksPerTf, 4, 'Default mtfMaxBlocksPerTf must be 4');
+['5m', '15m', '1h', '4h'].forEach(tf => {
+  assert(normDefault.mtfTimeframes && normDefault.mtfTimeframes[tf], `mtfTimeframes must include ${tf}`);
+  assert.strictEqual(normDefault.mtfTimeframes[tf].enabled, true, `${tf} MTF OB should default to enabled`);
+  assert(/^#[0-9a-f]{6}$/i.test(normDefault.mtfTimeframes[tf].bullishColor), `${tf} bullishColor must be hex`);
+  assert(/^#[0-9a-f]{6}$/i.test(normDefault.mtfTimeframes[tf].bearishColor), `${tf} bearishColor must be hex`);
+});
+
+const normCustom = sandbox.normalizeOrderBlocksConfig({
+  enabled: true,
+  labelFontSize: 16,
+  mtfLabelFontSize: 18,
+  mtfMaxBlocksPerTf: 6,
+  mtfTimeframes: {
+    '5m': { enabled: true, bullishColor: '#00ffaa', bearishColor: '#ff0055', opacity: 35 },
+    '4h': { enabled: false, bullishColor: '#112233', bearishColor: '#445566', opacity: 99 }
+  }
+});
+assert.strictEqual(normCustom.labelFontSize, 16);
+assert.strictEqual(normCustom.mtfLabelFontSize, 18);
+assert.strictEqual(normCustom.mtfMaxBlocksPerTf, 6);
+assert.strictEqual(normCustom.mtfTimeframes['5m'].bullishColor, '#00ffaa');
+assert.strictEqual(normCustom.mtfTimeframes['5m'].bearishColor, '#ff0055');
+assert.strictEqual(normCustom.mtfTimeframes['5m'].opacity, 35);
+assert.strictEqual(normCustom.mtfTimeframes['4h'].enabled, false);
+assert.strictEqual(normCustom.mtfTimeframes['4h'].opacity, 80, 'MTF opacity must clamp at 80');
+
+// VM test for stitchLiveChartBarsIntoTfBars, resolveObTimeToX, and computeMultiTimeframeOrderBlocks
+const stitchFnCode = extractFn('stitchLiveChartBarsIntoTfBars', mainJs);
+const resolveXFnCode = extractFn('resolveObTimeToX', mainJs);
+const aggFnCode = extractFn('aggregateBarsToInterval', mainJs);
+const mtfComputeFnCode = extractFn('computeMultiTimeframeOrderBlocks', mainJs);
+const mtfSpecsMatch = mainJs.match(/const MTF_OB_SPECS = \[[\s\S]*?\];/);
+assert(mtfSpecsMatch, 'Must extract MTF_OB_SPECS');
+
+const mtfSandbox = {
+  console,
+  Math,
+  isFinite,
+  Date,
+  Map,
+  DEFAULT_ORDER_BLOCKS: normDefault,
+  mtfOrderBlockBarsCache: new Map(),
+  requestMtfBarsFromDatafeed: () => {}
+};
+vm.createContext(mtfSandbox);
+vm.runInContext(`
+  ${mtfSpecsMatch[0]}
+  ${normFnCode}
+  ${computeFnCode}
+  ${aggFnCode}
+  ${stitchFnCode}
+  ${resolveXFnCode}
+  ${mtfComputeFnCode}
+`, mtfSandbox);
+
+// Seed a 4h dataset in cache that contains our valid Bullish OB setup from earlier (using 4h intervals)
+const base4h = 1700000000;
+const bars4h = syntheticBars.map((b, idx) => ({ ...b, timeSec: base4h + idx * 14400 }));
+mtfSandbox.mtfOrderBlockBarsCache.set('GC-PERP|4h', {
+  bars: bars4h,
+  fetchedAt: Date.now(),
+  source: 'datafeed',
+  inFlight: false,
+  lastErrorAt: 0
+});
+
+// Active chart is 1m bars near the tail of the 4h dataset
+const active1mStart = base4h + 18 * 14400;
+const active1mBars = [];
+for (let i = 0; i < 60; i++) {
+  active1mBars.push({
+    barIndex: i,
+    timeSec: active1mStart + i * 60,
+    open: 112, high: 116, low: 111, close: 115
+  });
+}
+
+const mtfResult = mtfSandbox.computeMultiTimeframeOrderBlocks(active1mBars, {
+  enabled: true,
+  swingLookback: 2,
+  mtfMaxBlocksPerTf: 4,
+  mtfTimeframes: {
+    '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
+    '15m': { enabled: true, bullishColor: '#3b82f6', bearishColor: '#ec4899', opacity: 18 },
+    '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
+    '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 25 }
+  }
+}, 'GC-PERP', 60, null);
+
+assert.strictEqual(mtfResult.activeTfCoveredByMtf, false, '1m chart should not be flagged as covered by 5m/15m/1h/4h');
+const ob4h = mtfResult.blocks.find(b => b.timeframe === '4h' && b.side === 'long');
+assert(ob4h, 'Must project 4h Bullish OB onto 1m chart');
+assert.strictEqual(ob4h.isMtf, true, '4h OB on 1m chart must be marked isMtf=true');
+assert.strictEqual(ob4h.customBullishColor, '#14b8a6', '4h OB must carry custom bullish color');
+assert.strictEqual(ob4h.customOpacity, 25, '4h OB must carry custom opacity');
+
+// Verify left-edge clamping when 4h OB formed before the leftmost loaded 1m bar
+const clampedX = mtfSandbox.resolveObTimeToX(ob4h, true, ob4h.barIndex, ob4h.timeSec, active1mBars, () => null, 1200);
+assert.strictEqual(clampedX, 0, '4h OB formed before visible 1m window must clamp startX to 0 so zone stays visible');
+
+console.log('✓ Multi-Timeframe (5m/15m/1h/4h) Order Blocks, custom colors, font size & left-edge clamping verified');
+
 console.log('All Institutional Order Blocks Indicator Tests Passed Successfully!');

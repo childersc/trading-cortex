@@ -771,6 +771,15 @@
     bullishOpacity: 20,
     bearishColor: '#ef4444',
     bearishOpacity: 20,
+    labelFontSize: 10,
+    mtfLabelFontSize: 11,
+    mtfMaxBlocksPerTf: 4,
+    mtfTimeframes: {
+      '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
+      '15m': { enabled: true, bullishColor: '#3b82f6', bearishColor: '#ec4899', opacity: 18 },
+      '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
+      '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
+    },
     showOrderEntryIcon: true,
     orderIconSize: 13,
     voiceAlertEnabled: true,
@@ -791,6 +800,24 @@
 
   function normalizeOrderBlocksConfig(rawCfg) {
     const cfg = { ...DEFAULT_ORDER_BLOCKS, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    const defaultMtf = {
+      '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
+      '15m': { enabled: true, bullishColor: '#3b82f6', bearishColor: '#ec4899', opacity: 18 },
+      '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
+      '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
+    };
+    const rawMtf = (cfg.mtfTimeframes && typeof cfg.mtfTimeframes === 'object') ? cfg.mtfTimeframes : {};
+    const mtfTimeframes = {};
+    ['5m', '15m', '1h', '4h'].forEach(tf => {
+      const def = defaultMtf[tf];
+      const src = (rawMtf[tf] && typeof rawMtf[tf] === 'object') ? rawMtf[tf] : {};
+      mtfTimeframes[tf] = {
+        enabled: src.enabled !== undefined ? Boolean(src.enabled) : def.enabled,
+        bullishColor: typeof src.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(src.bullishColor) ? src.bullishColor : def.bullishColor,
+        bearishColor: typeof src.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(src.bearishColor) ? src.bearishColor : def.bearishColor,
+        opacity: Math.max(5, Math.min(80, Math.round(Number(src.opacity) || def.opacity)))
+      };
+    });
     return {
       enabled: Boolean(cfg.enabled),
       swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
@@ -801,6 +828,10 @@
       bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
       bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
       bearishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bearishOpacity) || 20))),
+      labelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.labelFontSize) || 10))),
+      mtfLabelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.mtfLabelFontSize) || 11))),
+      mtfMaxBlocksPerTf: Math.max(1, Math.min(10, Math.round(Number(cfg.mtfMaxBlocksPerTf) || 4))),
+      mtfTimeframes,
       showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
       orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
@@ -7176,25 +7207,65 @@
           </div>
 
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
-            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">ZONE COLORS &amp; OPACITY</div>
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">ZONE COLORS, OPACITY &amp; TEXT SIZE</div>
             <div style="display:flex;gap:12px;margin-bottom:8px;">
               <div style="flex:1;">
                 <label for="vest-ob-bull-color" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">Bullish OB Color</label>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <input type="color" id="vest-ob-bull-color" value="${ob.bullishColor}" style="width:36px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;" />
-                  <span style="font-size:11px;color:#cbd5e1;">${ob.bullishColor}</span>
+                  <span id="vest-ob-bull-color-hex" style="font-size:11px;color:#cbd5e1;">${ob.bullishColor}</span>
                 </div>
               </div>
               <div style="flex:1;">
                 <label for="vest-ob-bear-color" style="display:block;font-size:11px;color:#94a3b8;margin-bottom:4px;">Bearish OB Color</label>
                 <div style="display:flex;align-items:center;gap:8px;">
                   <input type="color" id="vest-ob-bear-color" value="${ob.bearishColor}" style="width:36px;height:28px;border:none;border-radius:4px;cursor:pointer;background:none;" />
-                  <span style="font-size:11px;color:#cbd5e1;">${ob.bearishColor}</span>
+                  <span id="vest-ob-bear-color-hex" style="font-size:11px;color:#cbd5e1;">${ob.bearishColor}</span>
                 </div>
               </div>
             </div>
             ${range('vest-ob-bull-opacity', 'Bullish Zone Fill Opacity', 5, 80, 5, ob.bullishOpacity, '%')}
             ${range('vest-ob-bear-opacity', 'Bearish Zone Fill Opacity', 5, 80, 5, ob.bearishOpacity, '%')}
+            ${range('vest-ob-label-font-size', 'Chart OB Label Text Size', 8, 20, 1, ob.labelFontSize || 10, ' px')}
+          </div>
+
+          <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+            <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:4px;">MULTI-TIMEFRAME ORDER BLOCKS (5m / 15m / 1h / 4h)</div>
+            <p style="font-size:11px;color:#94a3b8;line-height:1.45;margin:0 0 10px;">
+              Project 5m, 15m, 1h, and 4h Order Blocks onto any active chart timeframe with custom bullish/bearish colors, fill opacity, and label text sizing.
+            </p>
+            ${range('vest-ob-mtf-label-font-size', 'MTF Label Text Size', 8, 20, 1, ob.mtfLabelFontSize || 11, ' px')}
+            ${range('vest-ob-mtf-max-blocks', 'Max Order Blocks per Timeframe', 1, 10, 1, ob.mtfMaxBlocksPerTf || 4, ' blocks')}
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+              ${['5m', '15m', '1h', '4h'].map(tf => {
+                const tfCfg = (ob.mtfTimeframes && ob.mtfTimeframes[tf]) || { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 };
+                return `
+                  <div style="padding:8px 10px;border:1px solid #1e293b;border-radius:6px;background:#0b0e14;display:flex;flex-direction:column;gap:6px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                      <label class="vest-ed-checkbox-label" style="margin:0;min-width:74px;">
+                        <input type="checkbox" id="vest-ob-mtf-${tf}-enabled" ${tfCfg.enabled ? 'checked' : ''} />
+                        <span style="font-weight:700;color:#f8fafc;font-size:12px;">${tf} OB</span>
+                      </label>
+                      <div style="display:flex;align-items:center;gap:10px;">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8;cursor:pointer;">
+                          <span>Bull</span>
+                          <input type="color" id="vest-ob-mtf-${tf}-bull" value="${tfCfg.bullishColor}" style="width:28px;height:22px;border:none;border-radius:4px;cursor:pointer;background:none;" />
+                        </label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#94a3b8;cursor:pointer;">
+                          <span>Bear</span>
+                          <input type="color" id="vest-ob-mtf-${tf}-bear" value="${tfCfg.bearishColor}" style="width:28px;height:22px;border:none;border-radius:4px;cursor:pointer;background:none;" />
+                        </label>
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="font-size:10.5px;color:#94a3b8;min-width:52px;">Opacity</span>
+                      <input id="vest-ob-mtf-${tf}-opacity" type="range" min="5" max="80" step="5" value="${tfCfg.opacity}" style="flex:1;accent-color:${tfCfg.bullishColor};" />
+                      <span id="vest-ob-mtf-${tf}-opacity-value" style="font-size:11px;color:#cbd5e1;min-width:30px;text-align:right;">${tfCfg.opacity}%</span>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
           </div>
 
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
@@ -8327,9 +8398,49 @@
         if (q('#vest-ob-min-fvg-ticks')) ob.minFvgTicks = Number(q('#vest-ob-min-fvg-ticks').value) || 1;
         if (q('#vest-ob-extend-mode')) ob.extendMode = q('#vest-ob-extend-mode').value || 'mitigation';
         if (q('#vest-ob-bull-color')) ob.bullishColor = q('#vest-ob-bull-color').value || '#10b981';
+        if (q('#vest-ob-bull-color-hex')) q('#vest-ob-bull-color-hex').textContent = ob.bullishColor;
         if (q('#vest-ob-bull-opacity')) ob.bullishOpacity = Number(q('#vest-ob-bull-opacity').value) || 20;
         if (q('#vest-ob-bear-color')) ob.bearishColor = q('#vest-ob-bear-color').value || '#ef4444';
+        if (q('#vest-ob-bear-color-hex')) q('#vest-ob-bear-color-hex').textContent = ob.bearishColor;
         if (q('#vest-ob-bear-opacity')) ob.bearishOpacity = Number(q('#vest-ob-bear-opacity').value) || 20;
+        if (q('#vest-ob-label-font-size')) ob.labelFontSize = Number(q('#vest-ob-label-font-size').value) || 10;
+        if (q('#vest-ob-mtf-label-font-size')) ob.mtfLabelFontSize = Number(q('#vest-ob-mtf-label-font-size').value) || 11;
+        if (q('#vest-ob-mtf-max-blocks')) ob.mtfMaxBlocksPerTf = Number(q('#vest-ob-mtf-max-blocks').value) || 4;
+        if (!ob.mtfTimeframes || typeof ob.mtfTimeframes !== 'object') ob.mtfTimeframes = {};
+        ['5m', '15m', '1h', '4h'].forEach(tf => {
+          const cur = ob.mtfTimeframes[tf] || {};
+          const enEl = q(`#vest-ob-mtf-${tf}-enabled`);
+          const bullEl = q(`#vest-ob-mtf-${tf}-bull`);
+          const bearEl = q(`#vest-ob-mtf-${tf}-bear`);
+          const opEl = q(`#vest-ob-mtf-${tf}-opacity`);
+          if (enEl || bullEl || bearEl || opEl) {
+            ob.mtfTimeframes[tf] = {
+              enabled: enEl ? Boolean(enEl.checked) : cur.enabled,
+              bullishColor: bullEl ? (bullEl.value || cur.bullishColor) : cur.bullishColor,
+              bearishColor: bearEl ? (bearEl.value || cur.bearishColor) : cur.bearishColor,
+              opacity: opEl ? (Number(opEl.value) || cur.opacity) : cur.opacity
+            };
+          }
+          const opVal = q(`#vest-ob-mtf-${tf}-opacity-value`);
+          if (opEl && opVal) opVal.textContent = `${opEl.value}%`;
+        });
+        [
+          ['#vest-ob-swing-lookback', ' bars'],
+          ['#vest-ob-max-blocks', ' blocks'],
+          ['#vest-ob-min-fvg-ticks', ' ticks'],
+          ['#vest-ob-bull-opacity', '%'],
+          ['#vest-ob-bear-opacity', '%'],
+          ['#vest-ob-label-font-size', ' px'],
+          ['#vest-ob-mtf-label-font-size', ' px'],
+          ['#vest-ob-mtf-max-blocks', ' blocks'],
+          ['#vest-ob-icon-size', ' px'],
+          ['#vest-ob-rr-ratio', ' R:R'],
+          ['#vest-ob-stats-rr-ratio', ' RR']
+        ].forEach(([sel, unit]) => {
+          const el = q(sel);
+          const valEl = q(`${sel}-value`);
+          if (el && valEl) valEl.textContent = `${el.value}${unit}`;
+        });
         if (q('#vest-ob-show-entry-icon')) ob.showOrderEntryIcon = Boolean(q('#vest-ob-show-entry-icon').checked);
         if (q('#vest-ob-icon-size')) ob.orderIconSize = Number(q('#vest-ob-icon-size').value) || 13;
         if (q('#vest-ob-voice-alert')) ob.voiceAlertEnabled = Boolean(q('#vest-ob-voice-alert').checked);
@@ -9444,14 +9555,30 @@
           speakCortexVoicePhrase('Bullish Order Block Mitigated. Enter Long.', voiceUri);
         });
 
-        ['#vest-ob-master-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-show-stats-box', '#vest-ob-voice-alert', '#vest-ob-chime-alert', '#vest-ob-extend-mode', '#vest-ob-voice-uri', '#vest-ob-bull-color', '#vest-ob-bear-color'].forEach(sel => {
+        const obChangeSelectors = [
+          '#vest-ob-master-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-show-stats-box',
+          '#vest-ob-voice-alert', '#vest-ob-chime-alert', '#vest-ob-extend-mode', '#vest-ob-voice-uri',
+          '#vest-ob-bull-color', '#vest-ob-bear-color'
+        ];
+        const obInputSelectors = [
+          '#vest-ob-swing-lookback', '#vest-ob-max-blocks', '#vest-ob-min-fvg-ticks',
+          '#vest-ob-bull-opacity', '#vest-ob-bear-opacity', '#vest-ob-label-font-size',
+          '#vest-ob-mtf-label-font-size', '#vest-ob-mtf-max-blocks',
+          '#vest-ob-icon-size', '#vest-ob-rr-ratio', '#vest-ob-stats-rr-ratio',
+          '#vest-ob-bull-color', '#vest-ob-bear-color'
+        ];
+        ['5m', '15m', '1h', '4h'].forEach(tf => {
+          obChangeSelectors.push(`#vest-ob-mtf-${tf}-enabled`, `#vest-ob-mtf-${tf}-bull`, `#vest-ob-mtf-${tf}-bear`);
+          obInputSelectors.push(`#vest-ob-mtf-${tf}-bull`, `#vest-ob-mtf-${tf}-bear`, `#vest-ob-mtf-${tf}-opacity`);
+        });
+        obChangeSelectors.forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('change', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
           });
         });
 
-        ['#vest-ob-swing-lookback', '#vest-ob-max-blocks', '#vest-ob-min-fvg-ticks', '#vest-ob-bull-opacity', '#vest-ob-bear-opacity', '#vest-ob-icon-size', '#vest-ob-rr-ratio', '#vest-ob-stats-rr-ratio'].forEach(sel => {
+        obInputSelectors.forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('input', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();

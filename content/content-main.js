@@ -175,6 +175,11 @@
   let lastActiveRangeState = false;
   const sentRangeAlerts = new Set();
   let cachedComputedOrderBlocks = [];
+  let cachedMtfOrderBlocksSignature = '';
+  let cachedComputedMtfOrderBlocks = [];
+  let cachedMtfCoversActiveTf = false;
+  let mtfBarsCacheVersion = 0;
+  const mtfOrderBlockBarsCache = new Map(); // `${symbolKey}|${tfKey}` -> { bars, fetchedAt, source, inFlight, lastErrorAt }
   let cachedMarketStructureSignature = '';
   let cachedComputedMarketStructure = [];
   let currentGlobalDrawings = [];
@@ -8523,6 +8528,15 @@
     bullishOpacity: 20,
     bearishColor: '#ef4444',
     bearishOpacity: 20,
+    labelFontSize: 10,
+    mtfLabelFontSize: 11,
+    mtfMaxBlocksPerTf: 4,
+    mtfTimeframes: {
+      '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
+      '15m': { enabled: true, bullishColor: '#3b82f6', bearishColor: '#ec4899', opacity: 18 },
+      '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
+      '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
+    },
     showOrderEntryIcon: true,
     orderIconSize: 13,
     voiceAlertEnabled: true,
@@ -8543,6 +8557,24 @@
 
   function normalizeOrderBlocksConfig(rawCfg) {
     const cfg = { ...DEFAULT_ORDER_BLOCKS, ...(rawCfg && typeof rawCfg === 'object' ? rawCfg : {}) };
+    const defaultMtf = {
+      '5m': { enabled: true, bullishColor: '#06b6d4', bearishColor: '#f97316', opacity: 18 },
+      '15m': { enabled: true, bullishColor: '#3b82f6', bearishColor: '#ec4899', opacity: 18 },
+      '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
+      '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
+    };
+    const rawMtf = (cfg.mtfTimeframes && typeof cfg.mtfTimeframes === 'object') ? cfg.mtfTimeframes : {};
+    const mtfTimeframes = {};
+    ['5m', '15m', '1h', '4h'].forEach(tf => {
+      const def = defaultMtf[tf];
+      const src = (rawMtf[tf] && typeof rawMtf[tf] === 'object') ? rawMtf[tf] : {};
+      mtfTimeframes[tf] = {
+        enabled: src.enabled !== undefined ? Boolean(src.enabled) : def.enabled,
+        bullishColor: typeof src.bullishColor === 'string' && /^#[0-9a-f]{6}$/i.test(src.bullishColor) ? src.bullishColor : def.bullishColor,
+        bearishColor: typeof src.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(src.bearishColor) ? src.bearishColor : def.bearishColor,
+        opacity: Math.max(5, Math.min(80, Math.round(Number(src.opacity) || def.opacity)))
+      };
+    });
     return {
       enabled: Boolean(cfg.enabled),
       swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
@@ -8553,6 +8585,10 @@
       bullishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bullishOpacity) || 20))),
       bearishColor: typeof cfg.bearishColor === 'string' && /^#[0-9a-f]{6}$/i.test(cfg.bearishColor) ? cfg.bearishColor : '#ef4444',
       bearishOpacity: Math.max(5, Math.min(80, Math.round(Number(cfg.bearishOpacity) || 20))),
+      labelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.labelFontSize) || 10))),
+      mtfLabelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.mtfLabelFontSize) || 11))),
+      mtfMaxBlocksPerTf: Math.max(1, Math.min(10, Math.round(Number(cfg.mtfMaxBlocksPerTf) || 4))),
+      mtfTimeframes,
       showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
       orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
@@ -8921,6 +8957,311 @@
     };
   }
 
+  const MTF_OB_SPECS = [
+    { key: '5m', tvRes: '5', sec: 300, ttlMs: 45000 },
+    { key: '15m', tvRes: '15', sec: 900, ttlMs: 90000 },
+    { key: '1h', tvRes: '60', sec: 3600, ttlMs: 180000 },
+    { key: '4h', tvRes: '240', sec: 14400, ttlMs: 300000 }
+  ];
+
+  function findTradingViewDatafeed(mainSeries) {
+    try {
+      if (activeWidget && activeWidget._options && activeWidget._options.datafeed && typeof activeWidget._options.datafeed.getBars === 'function') {
+        return activeWidget._options.datafeed;
+      }
+      if (activeWidget && activeWidget._iFrame && activeWidget._iFrame.contentWindow) {
+        const iw = activeWidget._iFrame.contentWindow;
+        for (const k of Object.keys(iw)) {
+          if (k.startsWith('tradingview_') || k === 'tvWidget' || k === 'widget') {
+            const w = iw[k];
+            if (w && w._options && w._options.datafeed && typeof w._options.datafeed.getBars === 'function') {
+              return w._options.datafeed;
+            }
+          }
+        }
+      }
+      if (mainSeries) {
+        if (mainSeries._datafeed && typeof mainSeries._datafeed.getBars === 'function') return mainSeries._datafeed;
+        if (mainSeries._model && mainSeries._model._datafeed && typeof mainSeries._model._datafeed.getBars === 'function') return mainSeries._model._datafeed;
+      }
+      if (activeChartApi && activeChartApi._datafeed && typeof activeChartApi._datafeed.getBars === 'function') {
+        return activeChartApi._datafeed;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function resolveCurrentSymbolInfoForDatafeed(mainSeries) {
+    try {
+      if (mainSeries && typeof mainSeries.symbolInfo === 'function') {
+        const info = mainSeries.symbolInfo();
+        if (info && (info.name || info.ticker)) return info;
+      }
+      const activeChart = (activeChartApi && typeof activeChartApi.activeChart === 'function') ? activeChartApi.activeChart() : null;
+      if (activeChart && typeof activeChart.symbolExt === 'function') {
+        const ext = activeChart.symbolExt();
+        if (ext && (ext.symbol || ext.full_name)) {
+          return { name: ext.symbol || ext.full_name, ticker: ext.symbol || ext.full_name, full_name: ext.full_name || ext.symbol };
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function normalizeDatafeedBars(rawBars) {
+    if (!Array.isArray(rawBars) || rawBars.length === 0) return [];
+    const out = [];
+    for (let i = 0; i < rawBars.length; i++) {
+      const b = rawBars[i];
+      if (!b || typeof b !== 'object') continue;
+      const rawTime = Number(b.time !== undefined ? b.time : b.timeSec);
+      const o = Number(b.open);
+      const h = Number(b.high);
+      const l = Number(b.low);
+      const c = Number(b.close);
+      if (!isFinite(rawTime) || !isFinite(o) || !isFinite(h) || !isFinite(l) || !isFinite(c)) continue;
+      const timeSec = rawTime > 1e11 ? Math.floor(rawTime / 1000) : Math.floor(rawTime);
+      out.push({ timeSec, open: o, high: h, low: l, close: c, barIndex: 0 });
+    }
+    out.sort((a, b) => a.timeSec - b.timeSec);
+    // Deduplicate identical timestamps (keep latest)
+    const dedup = [];
+    for (let i = 0; i < out.length; i++) {
+      if (dedup.length > 0 && dedup[dedup.length - 1].timeSec === out[i].timeSec) {
+        dedup[dedup.length - 1] = out[i];
+      } else {
+        dedup.push(out[i]);
+      }
+    }
+    for (let i = 0; i < dedup.length; i++) dedup[i].barIndex = i;
+    return dedup;
+  }
+
+  function stitchLiveChartBarsIntoTfBars(baseTfBars, liveBars, targetIntervalSec) {
+    if (!Array.isArray(baseTfBars) || baseTfBars.length === 0) return [];
+    if (!Array.isArray(liveBars) || liveBars.length === 0 || !targetIntervalSec || targetIntervalSec <= 0) {
+      return baseTfBars;
+    }
+    const merged = baseTfBars.map((b, idx) => ({ ...b, barIndex: idx }));
+    const lastBaseTime = merged[merged.length - 1].timeSec;
+    for (let i = 0; i < liveBars.length; i++) {
+      const lb = liveBars[i];
+      if (!lb || !isFinite(lb.timeSec)) continue;
+      const bucketTime = Math.floor(lb.timeSec / targetIntervalSec) * targetIntervalSec;
+      if (bucketTime < lastBaseTime) continue;
+      const tail = merged[merged.length - 1];
+      if (bucketTime === tail.timeSec) {
+        if (lb.high > tail.high) tail.high = lb.high;
+        if (lb.low < tail.low) tail.low = lb.low;
+        tail.close = lb.close;
+      } else if (bucketTime > tail.timeSec) {
+        merged.push({
+          timeSec: bucketTime,
+          open: lb.open,
+          high: lb.high,
+          low: lb.low,
+          close: lb.close,
+          barIndex: merged.length
+        });
+      }
+    }
+    return merged;
+  }
+
+  function requestMtfBarsFromDatafeed(symbolKey, tfSpec, mainSeries) {
+    if (!symbolKey || !tfSpec) return;
+    const cacheKey = `${symbolKey}|${tfSpec.key}`;
+    const existing = mtfOrderBlockBarsCache.get(cacheKey);
+    const now = Date.now();
+    if (existing) {
+      if (existing.inFlight) return;
+      if (existing.lastErrorAt && (now - existing.lastErrorAt) < 30000) return;
+      if (existing.bars && existing.bars.length > 0 && (now - existing.fetchedAt) < tfSpec.ttlMs) return;
+    }
+
+    const datafeed = findTradingViewDatafeed(mainSeries);
+    const symbolInfo = resolveCurrentSymbolInfoForDatafeed(mainSeries);
+    if (!datafeed || !symbolInfo) return;
+
+    const entry = existing || { bars: [], fetchedAt: 0, source: 'datafeed', inFlight: false, lastErrorAt: 0 };
+    entry.inFlight = true;
+    mtfOrderBlockBarsCache.set(cacheKey, entry);
+
+    const toSec = Math.floor(now / 1000) + tfSpec.sec;
+    const countBack = 200;
+    const fromSec = toSec - tfSpec.sec * countBack;
+
+    const onResult = (barsResult) => {
+      entry.inFlight = false;
+      const normalized = normalizeDatafeedBars(barsResult);
+      if (normalized.length >= 5) {
+        entry.bars = normalized;
+        entry.fetchedAt = Date.now();
+        entry.source = 'datafeed';
+        entry.lastErrorAt = 0;
+        mtfBarsCacheVersion++;
+        if (typeof scheduleIctSessionsRender === 'function') {
+          scheduleIctSessionsRender(true);
+        }
+      } else {
+        entry.lastErrorAt = Date.now();
+      }
+    };
+    const onError = () => {
+      entry.inFlight = false;
+      entry.lastErrorAt = Date.now();
+    };
+
+    try {
+      const periodParams = { from: fromSec, to: toSec, countBack, firstDataRequest: false };
+      if (datafeed.getBars.length >= 6) {
+        // Legacy TradingView Charting Library signature: (symbolInfo, resolution, from, to, onResult, onError, firstDataRequest)
+        datafeed.getBars(symbolInfo, tfSpec.tvRes, fromSec, toSec, onResult, onError, false);
+      } else {
+        // Modern TradingView Charting Library signature: (symbolInfo, resolution, periodParams, onResult, onError)
+        datafeed.getBars(symbolInfo, tfSpec.tvRes, periodParams, onResult, onError);
+      }
+    } catch (e) {
+      entry.inFlight = false;
+      entry.lastErrorAt = Date.now();
+    }
+  }
+
+  function computeMultiTimeframeOrderBlocks(bars, config, symbolKey, barIntervalSec, mainSeries) {
+    if (!bars || bars.length < 5 || !config || !config.enabled) {
+      return { blocks: [], activeTfCoveredByMtf: false };
+    }
+    const cfg = normalizeOrderBlocksConfig(config);
+    const mtfCfg = cfg.mtfTimeframes || {};
+    const safeBarInterval = Math.max(15, Number(barIntervalSec) || 300);
+
+    // Passively record the current chart's bars if its resolution matches one of the MTF specs
+    if (symbolKey) {
+      for (let s = 0; s < MTF_OB_SPECS.length; s++) {
+        const spec = MTF_OB_SPECS[s];
+        if (Math.abs(safeBarInterval - spec.sec) <= spec.sec * 0.15) {
+          const cacheKey = `${symbolKey}|${spec.key}`;
+          const prev = mtfOrderBlockBarsCache.get(cacheKey);
+          if (!prev || prev.source === 'chart' || bars.length >= (prev.bars ? prev.bars.length : 0)) {
+            mtfOrderBlockBarsCache.set(cacheKey, {
+              bars: bars.map((b, idx) => ({
+                timeSec: b.timeSec,
+                open: b.open,
+                high: b.high,
+                low: b.low,
+                close: b.close,
+                barIndex: idx
+              })),
+              fetchedAt: Date.now(),
+              source: 'chart',
+              inFlight: false,
+              lastErrorAt: 0
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    const allMtfBlocks = [];
+    let activeTfCoveredByMtf = false;
+
+    for (let s = 0; s < MTF_OB_SPECS.length; s++) {
+      const spec = MTF_OB_SPECS[s];
+      const tfSetting = mtfCfg[spec.key];
+      if (!tfSetting || !tfSetting.enabled) continue;
+
+      const isCurrentTf = Math.abs(safeBarInterval - spec.sec) <= spec.sec * 0.15;
+      if (isCurrentTf) activeTfCoveredByMtf = true;
+
+      let tfBars = null;
+      if (isCurrentTf) {
+        tfBars = bars;
+      } else {
+        const cacheKey = symbolKey ? `${symbolKey}|${spec.key}` : '';
+        const cached = cacheKey ? mtfOrderBlockBarsCache.get(cacheKey) : null;
+        if (cached && Array.isArray(cached.bars) && cached.bars.length >= 5) {
+          tfBars = (spec.sec >= safeBarInterval)
+            ? stitchLiveChartBarsIntoTfBars(cached.bars, bars, spec.sec)
+            : cached.bars;
+          if ((Date.now() - cached.fetchedAt) >= spec.ttlMs) {
+            requestMtfBarsFromDatafeed(symbolKey, spec, mainSeries);
+          }
+        } else {
+          if (spec.sec > safeBarInterval * 1.35 && typeof aggregateBarsToInterval === 'function') {
+            const resampled = aggregateBarsToInterval(bars, spec.sec);
+            if (resampled && resampled.length >= 5) {
+              tfBars = resampled;
+            }
+          }
+          // Request full historical bars from TradingView's datafeed when resampled history is short or TF < active chart TF
+          if (!tfBars || tfBars.length < 40) {
+            requestMtfBarsFromDatafeed(symbolKey, spec, mainSeries);
+          }
+        }
+      }
+
+      if (!tfBars || tfBars.length < 5) continue;
+
+      const tfObs = computeOrderBlocksFromBars(tfBars, {
+        ...cfg,
+        enabled: true,
+        maxBlocks: cfg.mtfMaxBlocksPerTf
+      });
+
+      for (let i = 0; i < tfObs.length; i++) {
+        const ob = tfObs[i];
+        allMtfBlocks.push({
+          ...ob,
+          id: `${spec.key}_${ob.id}`,
+          isMtf: !isCurrentTf,
+          timeframe: spec.key,
+          tfIntervalSec: spec.sec,
+          customBullishColor: tfSetting.bullishColor,
+          customBearishColor: tfSetting.bearishColor,
+          customOpacity: tfSetting.opacity
+        });
+      }
+    }
+
+    // Sort higher timeframes first so lower-timeframe zones render crisply on top of larger HTF zones
+    const tfOrder = { '4h': 0, '1h': 1, '15m': 2, '5m': 3 };
+    allMtfBlocks.sort((a, b) => (tfOrder[a.timeframe] ?? 9) - (tfOrder[b.timeframe] ?? 9));
+
+    return { blocks: allMtfBlocks, activeTfCoveredByMtf };
+  }
+
+  function resolveObTimeToX(ob, isStart, barIndex, timeSec, bars, barToX, cssWidth) {
+    if (!ob.isMtf) {
+      return barToX(barIndex, timeSec);
+    }
+    if (typeof timeSec === 'number' && timeSec > 0) {
+      const directX = barToX(null, timeSec);
+      if (directX !== null && isFinite(directX)) return directX;
+
+      if (Array.isArray(bars) && bars.length > 0) {
+        if (timeSec <= bars[0].timeSec) {
+          // Active HTF OB formed before the leftmost loaded bar on the active chart: anchor cleanly at the left edge!
+          return isStart ? 0 : null;
+        }
+        if (timeSec >= bars[bars.length - 1].timeSec) {
+          return barToX(bars[bars.length - 1].barIndex, bars[bars.length - 1].timeSec);
+        }
+        // Binary search for nearest bar at or before timeSec
+        let lo = 0;
+        let hi = bars.length - 1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (bars[mid].timeSec <= timeSec) lo = mid + 1;
+          else hi = mid - 1;
+        }
+        const nearestIdx = Math.max(0, Math.min(bars.length - 1, hi));
+        return barToX(bars[nearestIdx].barIndex, bars[nearestIdx].timeSec);
+      }
+    }
+    return null;
+  }
+
   function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
     if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
     const cfg = normalizeOrderBlocksConfig(config);
@@ -8931,7 +9272,7 @@
       const ob = orderBlocks[i];
       if (ob.isInvalidated) continue;
 
-      const rawStartX = barToX(ob.barIndex, ob.timeSec);
+      const rawStartX = resolveObTimeToX(ob, true, ob.barIndex, ob.timeSec, bars, barToX, cssWidth);
       if (rawStartX === null || !isFinite(rawStartX)) continue;
 
       const topY = priceToY(ob.top);
@@ -8939,16 +9280,16 @@
       if (topY === null || bottomY === null || !isFinite(topY) || !isFinite(bottomY)) continue;
 
       // Box starts strictly on the left edge of the Order Block candle — NEVER extends to the left!
-      const boxLeft = rawStartX - halfBarW;
+      const boxLeft = (ob.isMtf && rawStartX <= 0) ? 0 : (rawStartX - halfBarW);
       let boxRight = rawStartX + halfBarW;
 
-      if (cfg.extendMode === 'candle') {
+      if (cfg.extendMode === 'candle' && !ob.isMtf) {
         // Single candle only: Box is strictly on the actual origin bar!
         boxRight = rawStartX + halfBarW;
       } else if (ob.isMitigated) {
         // Extend forward to the mitigation touch candle, then stop
-        const mitX = barToX(ob.mitigatedBarIndex, ob.mitigatedTimeSec);
-        if (mitX !== null && isFinite(mitX) && mitX >= rawStartX) {
+        const mitX = resolveObTimeToX(ob, false, ob.mitigatedBarIndex, ob.mitigatedTimeSec, bars, barToX, cssWidth);
+        if (mitX !== null && isFinite(mitX) && mitX >= boxLeft) {
           boxRight = mitX + halfBarW;
         } else {
           boxRight = rawStartX + halfBarW;
@@ -8960,7 +9301,7 @@
         // Default "mitigation" mode while unmitigated: extend to the current forming bar
         const lastBar = bars && bars.length > 0 ? bars[bars.length - 1] : null;
         const lastX = lastBar ? barToX(lastBar.barIndex, lastBar.timeSec) : null;
-        if (lastX !== null && isFinite(lastX) && lastX >= rawStartX) {
+        if (lastX !== null && isFinite(lastX) && lastX >= boxLeft) {
           boxRight = lastX + halfBarW;
         } else {
           boxRight = rawStartX + halfBarW * 2;
@@ -8974,34 +9315,43 @@
       const boxWidth = Math.max(halfBarW * 2, boxRight - boxLeft);
 
       const isBull = ob.side === 'long';
-      const baseColor = isBull ? cfg.bullishColor : cfg.bearishColor;
-      const opacityPct = isBull ? cfg.bullishOpacity : cfg.bearishOpacity;
+      const baseColor = isBull
+        ? (ob.customBullishColor || cfg.bullishColor)
+        : (ob.customBearishColor || cfg.bearishColor);
+      const opacityPct = (typeof ob.customOpacity === 'number' && isFinite(ob.customOpacity))
+        ? ob.customOpacity
+        : (isBull ? cfg.bullishOpacity : cfg.bearishOpacity);
 
       // 1. Shaded Order Block Box
       ctx.fillStyle = hexToRgbaString(baseColor, opacityPct);
       ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
 
-      // 2. Dashed Border
+      // 2. Dashed Border (slightly thicker for higher timeframes so zones stay distinct)
       ctx.strokeStyle = hexToRgbaString(baseColor, Math.min(100, opacityPct + 35));
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = ob.timeframe === '4h' ? 1.6 : (ob.timeframe === '1h' ? 1.4 : (ob.timeframe ? 1.2 : 1));
+      ctx.setLineDash(ob.timeframe === '4h' ? [6, 3] : [4, 3]);
       ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
       ctx.setLineDash([]);
 
-      // 3. Zone Label
-      ctx.font = '600 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      // 3. Zone Label (with customizable text size and timeframe tag)
+      const labelPx = ob.timeframe ? (cfg.mtfLabelFontSize || 11) : (cfg.labelFontSize || 10);
+      ctx.font = `600 ${labelPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
       ctx.fillStyle = baseColor;
-      const labelText = isBull ? 'Bullish OB' : 'Bearish OB';
-      ctx.fillText(labelText, boxLeft + 6, boxTop + 12);
+      const tfPrefix = ob.timeframe ? `${ob.timeframe} ` : '';
+      const labelText = `${tfPrefix}${isBull ? 'Bullish OB' : 'Bearish OB'}`;
+      const labelX = Math.max(6, boxLeft + 6);
+      const labelY = boxTop + labelPx + 3;
+      ctx.fillText(labelText, labelX, labelY);
 
       if (ob.isMitigated) {
-        ctx.font = '700 8.5px monospace';
+        const mitFontPx = Math.max(8, Math.round(labelPx * 0.82));
+        ctx.font = `700 ${mitFontPx}px monospace`;
         ctx.fillStyle = hexToRgbaString(baseColor, 80);
-        ctx.fillText('MITIGATED', boxLeft + 6, boxTop + boxHeight - 5);
+        ctx.fillText('MITIGATED', labelX, boxTop + boxHeight - 4);
       }
 
-      // 4. Order Entry Icon on the mitigation bar
-      if (ob.isMitigated && cfg.showOrderEntryIcon && ob.mitigatedBarIndex >= 0) {
+      // 4. Order Entry Icon on the mitigation bar (native chart timeframe OBs only to avoid multi-TF badge clutter)
+      if (!ob.isMtf && ob.isMitigated && cfg.showOrderEntryIcon && ob.mitigatedBarIndex >= 0) {
         const mitBar = (bars && typeof ob.mitigatedArrayIndex === 'number' && ob.mitigatedArrayIndex >= 0 && ob.mitigatedArrayIndex < bars.length)
           ? bars[ob.mitigatedArrayIndex]
           : (bars ? (bars[ob.mitigatedBarIndex] || bars.find(b => b.barIndex === ob.mitigatedBarIndex)) : null);
@@ -11976,8 +12326,21 @@
           });
         }
       }
+
+      const mtfObSig = `${obSig}_mtf_${mtfBarsCacheVersion}_${barIntervalSec}`;
+      if (
+        ictSessionsNeedsFullRecompute ||
+        mtfObSig !== cachedMtfOrderBlocksSignature
+      ) {
+        const mtfResult = computeMultiTimeframeOrderBlocks(bars, orderBlocksConfig, symbolKey, barIntervalSec, mainSeries);
+        cachedComputedMtfOrderBlocks = mtfResult.blocks;
+        cachedMtfCoversActiveTf = mtfResult.activeTfCoveredByMtf;
+        cachedMtfOrderBlocksSignature = mtfObSig;
+      }
     } else {
       cachedComputedOrderBlocks = [];
+      cachedComputedMtfOrderBlocks = [];
+      cachedMtfCoversActiveTf = false;
       postToIsolated({
         type: 'VEST_TV_ORDER_BLOCKS_UPDATE',
         payload: {
@@ -12097,7 +12460,7 @@
     ctx.scale(dpr, dpr);
 
     const hasCanvasFvgs = autoFvgEnabled && !fvgConfig.syncNativeDrawings && cachedComputedAutoFvgs.length > 0;
-    const hasCanvasOrderBlocks = orderBlocksEnabled && cachedComputedOrderBlocks.length > 0;
+    const hasCanvasOrderBlocks = orderBlocksEnabled && (cachedComputedOrderBlocks.length > 0 || cachedComputedMtfOrderBlocks.length > 0);
     const hasCanvasMarketStructure = marketStructureEnabled && cachedComputedMarketStructure.length > 0;
     if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !hasCanvasOrderBlocks && !hasCanvasMarketStructure && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
@@ -12866,9 +13229,14 @@
       renderAutoFvgsOnCanvas(ctx, cachedComputedAutoFvgs, fvgConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
     }
 
-    // 5A. Render Institutional Order Blocks (Smart Risk) on canvas
+    // 5A. Render Institutional Order Blocks (Smart Risk + Multi-Timeframe 5m/15m/1h/4h) on canvas
     if (hasCanvasOrderBlocks) {
-      renderOrderBlocksOnCanvas(ctx, cachedComputedOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+      if (cachedComputedMtfOrderBlocks.length > 0) {
+        renderOrderBlocksOnCanvas(ctx, cachedComputedMtfOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+      }
+      if (cachedComputedOrderBlocks.length > 0 && !cachedMtfCoversActiveTf) {
+        renderOrderBlocksOnCanvas(ctx, cachedComputedOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+      }
     }
 
     // 5A-2. Render Market Structure (BOS / MSS / CHoCH) on canvas
@@ -13176,6 +13544,9 @@
     cachedComputedAutoFvgs = [];
     cachedOrderBlocksSignature = '';
     cachedComputedOrderBlocks = [];
+    cachedMtfOrderBlocksSignature = '';
+    cachedComputedMtfOrderBlocks = [];
+    cachedMtfCoversActiveTf = false;
     cachedMarketStructureSignature = '';
     cachedComputedMarketStructure = [];
     sentOrderBlockAlerts.clear();

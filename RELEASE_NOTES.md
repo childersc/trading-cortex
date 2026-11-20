@@ -1,3 +1,8 @@
+Trading Cortex v1.1.105 — Multi-Timeframe Order Blocks (5m / 15m / 1h / 4h) + Custom Colors & Text Sizing
+
+- **5m, 15m, 1h & 4h Order Blocks on Any Chart (`v1.1.105`)**: Overlay `5m`, `15m`, `1h`, and `4h` Order Blocks on any active chart timeframe using TradingView's native datafeed, passive timeframe caching, instant resampling, and live forming-bar stitching—with left-edge clamping so active HTF zones stay visible on lower-timeframe charts.
+- **Custom Per-Timeframe Colors, Opacity & Text Sizing (`v1.1.105`)**: Independently toggle `5m`, `15m`, `1h`, and `4h` Order Blocks, customize each timeframe's Bullish & Bearish colors and opacity, and adjust both standard and MTF Order Block label text sizes (`8px–20px`) in **Settings → Charting Indicators → Order Blocks**.
+
 Trading Cortex v1.1.104 — Fixed Child-Iframe Clearing Loop & Price-Axis Compositor Flicker
 
 - **Fixed Child-Iframe Overlay Fighting (`v1.1.104`)**: Added `isYieldingChartToTopWindow()` at the top of `renderIctSessionIndicators()` so child iframes yielding to `window.top` exit immediately instead of calling `clearAllChartOverlays()` on every tick.
