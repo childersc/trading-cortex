@@ -417,4 +417,35 @@ assert.strictEqual(clampedX, 0, '4h OB formed before visible 1m window must clam
 
 console.log('✓ Multi-Timeframe (5m/15m/1h/4h) Order Blocks, custom colors, font size & left-edge clamping verified');
 
+// 11. Verify Persistent Order Block Dismissal (× Button & Restore All)
+console.log('Testing persistent Order Block dismissal (× remove button & cross-TF key matching)...');
+assert(isolatedJs.includes("type === 'VEST_TV_OB_DISMISS'"), 'Isolated world must handle VEST_TV_OB_DISMISS');
+assert(isolatedJs.includes('vest-ob-restore-dismissed-btn'), 'Order Blocks settings must include Restore All Removed OBs button');
+assert(mainJs.includes('lastRenderedOrderBlockCloseHitBoxes'), 'Main world must track OB close button hitboxes');
+assert(mainJs.includes("type: 'VEST_TV_OB_DISMISS'"), 'Main world must post VEST_TV_OB_DISMISS on × click');
+
+const normTfFnCode = extractFn('normalizeObTimeframeKey', mainJs);
+const buildKeyFnCode = extractFn('buildOrderBlockDismissKey', mainJs);
+const filterDismissedFnCode = extractFn('filterDismissedOrderBlocks', mainJs);
+vm.runInContext(`${normTfFnCode}\n${buildKeyFnCode}\n${filterDismissedFnCode}`, mtfSandbox);
+
+const keyFrom5mChart = mtfSandbox.buildOrderBlockDismissKey('gc-perp', { side: 'long', timeSec: 1700000300 }, '5');
+const keyFrom1mMtf = mtfSandbox.buildOrderBlockDismissKey('GC-PERP', { side: 'long', timeSec: 1700000300, timeframe: '5m' }, '1m');
+assert.strictEqual(keyFrom5mChart, keyFrom1mMtf, 'Dismiss key must match identically whether dismissed on 5m chart or as 5m MTF OB on 1m chart');
+assert.strictEqual(keyFrom5mChart, 'GC-PERP|5m|long|1700000300');
+
+const filteredBlocks = mtfSandbox.filterDismissedOrderBlocks(
+  [
+    { side: 'long', timeSec: 1700000300, timeframe: '5m' },
+    { side: 'short', timeSec: 1700000900, timeframe: '5m' }
+  ],
+  'GC-PERP',
+  '1m',
+  { enabled: true, dismissedOrderBlocks: [keyFrom5mChart] }
+);
+assert.strictEqual(filteredBlocks.length, 1, 'Dismissed OB must be filtered out');
+assert.strictEqual(filteredBlocks[0].side, 'short', 'Non-dismissed OB must remain visible');
+
+console.log('✓ Persistent Order Block dismissal & cross-timeframe suppression verified');
+
 console.log('All Institutional Order Blocks Indicator Tests Passed Successfully!');

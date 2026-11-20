@@ -179,6 +179,7 @@
   let cachedComputedMtfOrderBlocks = [];
   let cachedMtfCoversActiveTf = false;
   let mtfBarsCacheVersion = 0;
+  let lastRenderedOrderBlockCloseHitBoxes = []; // [{ key, label, left, top, right, bottom }]
   const mtfOrderBlockBarsCache = new Map(); // `${symbolKey}|${tfKey}` -> { bars, fetchedAt, source, inFlight, lastErrorAt }
   let cachedMarketStructureSignature = '';
   let cachedComputedMarketStructure = [];
@@ -8537,6 +8538,7 @@
       '1h': { enabled: true, bullishColor: '#8b5cf6', bearishColor: '#eab308', opacity: 20 },
       '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
     },
+    dismissedOrderBlocks: [],
     showOrderEntryIcon: true,
     orderIconSize: 13,
     voiceAlertEnabled: true,
@@ -8589,6 +8591,9 @@
       mtfLabelFontSize: Math.max(8, Math.min(20, Math.round(Number(cfg.mtfLabelFontSize) || 11))),
       mtfMaxBlocksPerTf: Math.max(1, Math.min(10, Math.round(Number(cfg.mtfMaxBlocksPerTf) || 4))),
       mtfTimeframes,
+      dismissedOrderBlocks: Array.isArray(cfg.dismissedOrderBlocks)
+        ? Array.from(new Set(cfg.dismissedOrderBlocks.filter(k => typeof k === 'string' && k.trim().length > 0).map(k => k.trim()))).slice(-300)
+        : [],
       showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
       orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
@@ -9262,7 +9267,37 @@
     return null;
   }
 
-  function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars) {
+  function normalizeObTimeframeKey(rawTf) {
+    const s = String(rawTf || '').trim().toLowerCase();
+    if (!s) return 'chart';
+    if (s === '60' || s === '60m' || s === '1h') return '1h';
+    if (s === '240' || s === '240m' || s === '4h') return '4h';
+    if (/^\d+$/.test(s)) return `${s}m`;
+    return s;
+  }
+
+  function buildOrderBlockDismissKey(symbolKey, ob, fallbackTfLabel) {
+    if (!ob) return '';
+    const sym = String(symbolKey || 'GLOBAL').trim().toUpperCase() || 'GLOBAL';
+    const tf = normalizeObTimeframeKey(ob.timeframe || fallbackTfLabel);
+    const side = ob.side === 'short' ? 'short' : 'long';
+    const ts = Math.round(Number(ob.timeSec) || 0);
+    return `${sym}|${tf}|${side}|${ts}`;
+  }
+
+  function filterDismissedOrderBlocks(orderBlocks, symbolKey, fallbackTfLabel, config) {
+    if (!Array.isArray(orderBlocks) || orderBlocks.length === 0) return [];
+    const cfg = normalizeOrderBlocksConfig(config);
+    const list = cfg.dismissedOrderBlocks;
+    if (!Array.isArray(list) || list.length === 0) return orderBlocks;
+    const dismissedSet = new Set(list);
+    return orderBlocks.filter(ob => {
+      const key = buildOrderBlockDismissKey(symbolKey, ob, fallbackTfLabel);
+      return !dismissedSet.has(key);
+    });
+  }
+
+  function renderOrderBlocksOnCanvas(ctx, orderBlocks, config, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars, symbolKey, fallbackTfLabel) {
     if (!ctx || !orderBlocks || orderBlocks.length === 0) return;
     const cfg = normalizeOrderBlocksConfig(config);
 
@@ -9333,7 +9368,7 @@
       ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
       ctx.setLineDash([]);
 
-      // 3. Zone Label (with customizable text size and timeframe tag)
+      // 3. Zone Label (with customizable text size, timeframe tag, and 1-click × dismiss button)
       const labelPx = ob.timeframe ? (cfg.mtfLabelFontSize || 11) : (cfg.labelFontSize || 10);
       ctx.font = `600 ${labelPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
       ctx.fillStyle = baseColor;
@@ -9342,6 +9377,45 @@
       const labelX = Math.max(6, boxLeft + 6);
       const labelY = boxTop + labelPx + 3;
       ctx.fillText(labelText, labelX, labelY);
+
+      // Draw compact × remove button immediately to the right of the label
+      const dismissKey = buildOrderBlockDismissKey(symbolKey, ob, fallbackTfLabel);
+      if (dismissKey) {
+        const labelW = ctx.measureText(labelText).width;
+        const btnSize = Math.max(12, Math.min(18, Math.round(labelPx + 2)));
+        const btnX = Math.min(cssWidth - btnSize - 4, labelX + labelW + 5);
+        const btnY = boxTop + 3;
+        if (btnX > 0 && btnY >= 0 && btnY < cssHeight) {
+          ctx.save();
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(btnX, btnY, btnSize, btnSize, 3);
+          } else {
+            ctx.rect(btnX, btnY, btnSize, btnSize);
+          }
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+          ctx.fill();
+          ctx.strokeStyle = hexToRgbaString(baseColor, 65);
+          ctx.lineWidth = 0.9;
+          ctx.stroke();
+
+          ctx.fillStyle = '#e2e8f0';
+          ctx.font = `700 ${Math.max(9, btnSize - 3)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('×', btnX + btnSize / 2, btnY + btnSize / 2 + 0.5);
+          ctx.restore();
+
+          lastRenderedOrderBlockCloseHitBoxes.push({
+            key: dismissKey,
+            label: labelText,
+            left: btnX - 3,
+            top: btnY - 3,
+            right: btnX + btnSize + 3,
+            bottom: btnY + btnSize + 3
+          });
+        }
+      }
 
       if (ob.isMitigated) {
         const mitFontPx = Math.max(8, Math.round(labelPx * 0.82));
@@ -11283,6 +11357,47 @@
     const elapsedMs = now - downInfo.time;
     if (moveDist > 5 || elapsedMs > 500) return;
 
+    // 0. Check if user clicked a rendered Order Block "×" dismiss button (works regardless of Candle OHLC setting)
+    if (lastRenderedOrderBlockCloseHitBoxes.length > 0 && !isDrawingToolActivelySelectedOnChart()) {
+      const obTargetCanvas = findMainChartPaneCanvas();
+      if (obTargetCanvas) {
+        const obTargetDoc = obTargetCanvas.ownerDocument || document;
+        const obEventDoc = (e.target && e.target.ownerDocument) || document;
+        if (obTargetDoc === obEventDoc) {
+          const obRect = obTargetCanvas.getBoundingClientRect();
+          const obLocalX = (e.clientX || 0) - obRect.left;
+          const obLocalY = (e.clientY || 0) - obRect.top;
+          for (let i = lastRenderedOrderBlockCloseHitBoxes.length - 1; i >= 0; i--) {
+            const hit = lastRenderedOrderBlockCloseHitBoxes[i];
+            if (obLocalX >= hit.left && obLocalX <= hit.right && obLocalY >= hit.top && obLocalY <= hit.bottom) {
+              lastCandleClickToggleTimestamp = now;
+              if (!currentSettings.orderBlocks || typeof currentSettings.orderBlocks !== 'object') {
+                currentSettings.orderBlocks = normalizeOrderBlocksConfig(null);
+              }
+              const prevDismissed = Array.isArray(currentSettings.orderBlocks.dismissedOrderBlocks)
+                ? currentSettings.orderBlocks.dismissedOrderBlocks
+                : [];
+              if (!prevDismissed.includes(hit.key)) {
+                currentSettings.orderBlocks = {
+                  ...currentSettings.orderBlocks,
+                  dismissedOrderBlocks: [...prevDismissed, hit.key].slice(-300)
+                };
+              }
+              cachedOrderBlocksSignature = '';
+              cachedMtfOrderBlocksSignature = '';
+              postToIsolated({
+                type: 'VEST_TV_OB_DISMISS',
+                key: hit.key,
+                label: hit.label
+              });
+              scheduleIctSessionsRender(true);
+              return;
+            }
+          }
+        }
+      }
+    }
+
     const coCfg = (currentSettings && currentSettings.candleOhlc) || {};
     if (coCfg.clickCandleToToggle === false) return;
 
@@ -12199,6 +12314,7 @@
 
     const clearAllChartOverlays = () => {
       lastRenderedCandleOhlcHitBoxes = [];
+      lastRenderedOrderBlockCloseHitBoxes = [];
       if (ictSessionsCanvas) {
         const c = ictSessionsCanvas.getContext('2d');
         if (c) c.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
@@ -12283,7 +12399,12 @@
         ictSessionsNeedsFullRecompute ||
         obSig !== cachedOrderBlocksSignature
       ) {
-        cachedComputedOrderBlocks = computeOrderBlocksFromBars(bars, orderBlocksConfig);
+        cachedComputedOrderBlocks = filterDismissedOrderBlocks(
+          computeOrderBlocksFromBars(bars, orderBlocksConfig),
+          symbolKey,
+          tfLabel,
+          orderBlocksConfig
+        );
         cachedOrderBlocksSignature = obSig;
 
       
@@ -12333,7 +12454,12 @@
         mtfObSig !== cachedMtfOrderBlocksSignature
       ) {
         const mtfResult = computeMultiTimeframeOrderBlocks(bars, orderBlocksConfig, symbolKey, barIntervalSec, mainSeries);
-        cachedComputedMtfOrderBlocks = mtfResult.blocks;
+        cachedComputedMtfOrderBlocks = filterDismissedOrderBlocks(
+          mtfResult.blocks,
+          symbolKey,
+          tfLabel,
+          orderBlocksConfig
+        );
         cachedMtfCoversActiveTf = mtfResult.activeTfCoveredByMtf;
         cachedMtfOrderBlocksSignature = mtfObSig;
       }
@@ -13230,12 +13356,14 @@
     }
 
     // 5A. Render Institutional Order Blocks (Smart Risk + Multi-Timeframe 5m/15m/1h/4h) on canvas
+    lastRenderedOrderBlockCloseHitBoxes = [];
     if (hasCanvasOrderBlocks) {
+      const obTfLabel = formatCurrentResolutionLabel();
       if (cachedComputedMtfOrderBlocks.length > 0) {
-        renderOrderBlocksOnCanvas(ctx, cachedComputedMtfOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+        renderOrderBlocksOnCanvas(ctx, cachedComputedMtfOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars, symbolKey, obTfLabel);
       }
       if (cachedComputedOrderBlocks.length > 0 && !cachedMtfCoversActiveTf) {
-        renderOrderBlocksOnCanvas(ctx, cachedComputedOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars);
+        renderOrderBlocksOnCanvas(ctx, cachedComputedOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars, symbolKey, obTfLabel);
       }
     }
 
