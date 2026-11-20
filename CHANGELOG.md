@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.104`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.105`) are documented in this file.
+
+---
+
+## [v1.1.105] — 2026-11-19
+
+### ✨ Multi-Timeframe Order Blocks (5m / 15m / 1h / 4h) + Custom Colors & Text Sizing
+- **Project 5m, 15m, 1h & 4h Order Blocks on Any Chart**:
+  - Added `computeMultiTimeframeOrderBlocks()` with a 4-layer Multi-Timeframe Bar Provider: TradingView `datafeed.getBars()` fetching, passive per-symbol timeframe caching, instant higher-timeframe bar resampling, and live tick-by-tick forming-bar stitching.
+  - Projects `5m`, `15m`, `1h`, and `4h` Order Blocks onto **any** active chart timeframe (e.g., viewing `1h` and `4h` Order Blocks on a `1m` chart, or `5m` and `15m` Order Blocks on a `1h` chart), with automatic left-edge clamping so active HTF zones that formed earlier remain visible on lower timeframes.
+  - Automatically avoids duplicate boxes when the active chart timeframe is already enabled in the MTF list.
+- **Per-Timeframe Custom Colors, Opacity & Label Text Sizing**:
+  - Added **Chart OB Label Text Size** (`8px–20px`) and **MTF Label Text Size** (`8px–20px`) sliders plus **Max Order Blocks per Timeframe** (`1–10`) in Order Blocks settings.
+  - Added individual toggles, Bullish & Bearish color pickers, and Opacity sliders for `5m`, `15m`, `1h`, and `4h` Order Blocks.
 
 ---
 
