@@ -156,7 +156,13 @@ assert.strictEqual(isolatedContent.includes('function getPropFirmLogoSvg(firmId,
 assert.strictEqual(isolatedContent.includes('myfundedperpetuals'), true);
 assert.strictEqual(isolatedContent.includes('vestmarkets'), true);
 assert.strictEqual(isolatedContent.includes('kalshi'), true);
-console.log('✓ Official prop firm logos (MFP, Vest Markets, Kalshi Pro) verified');
+assert.strictEqual(isolatedContent.includes('hypernova'), true);
+assert.strictEqual(isolatedContent.includes('https://app.hypernova.xyz/trade'), true);
+const manifestJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../manifest.json'), 'utf8'));
+assert(manifestJson.host_permissions.includes('https://*.hypernova.xyz/*'), 'manifest host_permissions must include hypernova.xyz');
+assert(manifestJson.content_scripts.every(cs => cs.matches.includes('https://*.hypernova.xyz/*')), 'all content_scripts must match hypernova.xyz');
+assert(manifestJson.web_accessible_resources[0].matches.includes('https://*.hypernova.xyz/*'), 'web_accessible_resources must match hypernova.xyz');
+console.log('✓ Official prop firm logos (MFP, Vest Markets, Kalshi Pro, Hypernova) & Hypernova manifest support verified');
 
 // 4. Verify Vest account tracking & auto-restoration functions exist in content-isolated.js
 assert.strictEqual(isolatedContent.includes('function trackActiveAccount()'), true);

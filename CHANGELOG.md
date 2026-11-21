@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.108`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.109`) are documented in this file.
+
+---
+
+## [v1.1.109] — 2026-11-21
+
+### 🚀 Added Hypernova (`https://app.hypernova.xyz/trade`) Support
+- **Manifest Host & Content Script Support**:
+  - Added `https://*.hypernova.xyz/*` and `https://hypernova.xyz/*` to `host_permissions`, both `MAIN` and isolated `content_scripts`, and `web_accessible_resources` in `manifest.json`.
+- **Built-In Hypernova Perp Firm Profile & Branding**:
+  - Added **Hypernova** (`https://app.hypernova.xyz/trade`, `matchPatterns: ["app.hypernova.xyz", "hypernova.xyz"]`) to `DEFAULT_PERP_FIRMS` in both `content-isolated.js` and `service-worker.js`.
+  - Added a custom Hypernova SVG emblem in `getPropFirmLogoSvg()` and venue name recognition (`Hypernova`) in voice/range alerts across `content-isolated.js` and `content-main.js`.
 
 ---
 

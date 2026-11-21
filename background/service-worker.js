@@ -49,6 +49,22 @@ const DEFAULT_PERP_FIRMS = [
     notes: "Arbitrum perpetual DEX on Vest"
   },
   {
+    id: "hypernova",
+    name: "Hypernova",
+    url: "https://app.hypernova.xyz/trade",
+    matchPatterns: ["app.hypernova.xyz", "hypernova.xyz"],
+    enabled: true,
+    isBuiltin: true,
+    accountTier: "Perpetuals DEX",
+    topBarMode: "auto",
+    customTopBarOffsetPx: 0,
+    barMarginBottom: 8,
+    headerHeightPx: 48,
+    rememberOrderAmount: true,
+    defaultLeverage: "10x",
+    notes: "Hypernova perpetuals trading terminal (app.hypernova.xyz)"
+  },
+  {
     id: "vestexchange",
     name: "Vest Exchange",
     url: "https://vest.exchange",

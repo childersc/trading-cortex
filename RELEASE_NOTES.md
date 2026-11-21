@@ -1,3 +1,7 @@
+Trading Cortex v1.1.109 — Added Hypernova (app.hypernova.xyz/trade) Support
+
+- **Hypernova Built-In Support (`v1.1.109`)**: Trading Cortex now runs natively on `https://app.hypernova.xyz/trade` (`hypernova.xyz`), complete with a built-in **Hypernova** firm profile in Settings, custom SVG emblem, and venue recognition across alerts and overlays.
+
 Trading Cortex v1.1.108 — Eliminated `AudioContext was not allowed to start` Chrome Extension Error
 
 - **Fixed Web Audio Autoplay Error (`v1.1.108`)**: Switched Web Audio unlock listeners from `pointerdown`/`mousedown` to genuine gesture-completion events (`click`, `mouseup`, `pointerup`, `touchend`, `keydown`) with strict `isTrusted` and `navigator.userActivation` guards so Chrome never logs an `AudioContext` autoplay error in `chrome://extensions`.

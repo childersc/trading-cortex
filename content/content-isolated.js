@@ -1649,6 +1649,25 @@
       managePositionsPanel: true,
       defaultLeverage: "24x",
       notes: "Kalshi Pro prediction markets & perpetuals terminal"
+    },
+    {
+      id: "hypernova",
+      name: "Hypernova",
+      url: "https://app.hypernova.xyz/trade",
+      matchPatterns: ["app.hypernova.xyz", "hypernova.xyz"],
+      enabled: true,
+      isBuiltin: true,
+      enableTimeframeFavorites: true,
+      accountTier: "Perpetuals DEX",
+      topBarMode: "auto",
+      customTopBarOffsetPx: 0,
+      barMarginBottom: 8,
+      headerHeightPx: 48,
+      rememberOrderAmount: true,
+      restoreSelectedAccount: false,
+      managePositionsPanel: true,
+      defaultLeverage: "10x",
+      notes: "Hypernova perpetuals trading terminal (app.hypernova.xyz)"
     }
   ];
 
@@ -1796,6 +1815,25 @@
           </defs>
           <rect width="32" height="32" rx="7" fill="url(#kalshi_bg_${size})" stroke="#00D26A" stroke-width="1.2" stroke-opacity="0.5"/>
           <path d="M10 7.5V24.5M10 16L19 7.5M21 24.5L13.5 17.5" stroke="url(#kalshi_g_${size})" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      `;
+    }
+    if (id.includes('hypernova')) {
+      return `
+        <svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block; flex-shrink:0;">
+          <defs>
+            <linearGradient id="hn_g_${size}" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#38BDF8"/>
+              <stop offset="0.5" stop-color="#818CF8"/>
+              <stop offset="1" stop-color="#C084FC"/>
+            </linearGradient>
+            <linearGradient id="hn_bg_${size}" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#13102B"/>
+              <stop offset="1" stop-color="#090817"/>
+            </linearGradient>
+          </defs>
+          <rect width="32" height="32" rx="7" fill="url(#hn_bg_${size})" stroke="#818CF8" stroke-width="1.2" stroke-opacity="0.55"/>
+          <path d="M16 5.5L18.4 13.6L26.5 16L18.4 18.4L16 26.5L13.6 18.4L5.5 16L13.6 13.6L16 5.5Z" fill="url(#hn_g_${size})"/>
         </svg>
       `;
     }
@@ -12024,6 +12062,7 @@ if (activeTab === 'diagnostics') {
     const host = (typeof window !== 'undefined' && window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : '';
     if (host.includes('vest')) return 'Vest Markets';
     if (host.includes('kalshi')) return 'Kalshi Pro';
+    if (host.includes('hypernova')) return 'Hypernova';
     if (host.includes('myfundedperpetuals') || host.includes('myfundedperps') || host.includes('mfp')) return 'MyFundedPerpetuals';
     return 'the exchange';
   }

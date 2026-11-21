@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trading Cortex",
-  "version": "1.1.108",
+  "version": "1.1.109",
   "description": "Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges.",
   "icons": {
     "16": "icons/icon16.png",
@@ -32,6 +32,8 @@
     "https://vestmarkets.com/*",
     "https://*.kalshi.com/*",
     "https://kalshi.com/*",
+    "https://*.hypernova.xyz/*",
+    "https://hypernova.xyz/*",
     "https://api.github.com/*",
     "https://github.com/*",
     "https://*.github.com/*",
@@ -51,7 +53,9 @@
         "https://*.myfundedperpetuals.com/*",
         "https://myfundedperpetuals.com/*",
         "https://*.kalshi.com/*",
-        "https://kalshi.com/*"
+        "https://kalshi.com/*",
+        "https://*.hypernova.xyz/*",
+        "https://hypernova.xyz/*"
       ],
       "js": [
         "content/content-main.js"
@@ -69,7 +73,9 @@
         "https://*.myfundedperpetuals.com/*",
         "https://myfundedperpetuals.com/*",
         "https://*.kalshi.com/*",
-        "https://kalshi.com/*"
+        "https://kalshi.com/*",
+        "https://*.hypernova.xyz/*",
+        "https://hypernova.xyz/*"
       ],
       "js": [
         "content/cortex-execution.js",
@@ -96,7 +102,9 @@
         "https://*.myfundedperpetuals.com/*",
         "https://myfundedperpetuals.com/*",
         "https://*.kalshi.com/*",
-        "https://kalshi.com/*"
+        "https://kalshi.com/*",
+        "https://*.hypernova.xyz/*",
+        "https://hypernova.xyz/*"
       ]
     }
   ],

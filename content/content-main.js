@@ -12611,7 +12611,9 @@
               ? 'Vest Markets'
               : (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname.includes('kalshi')
                 ? 'Kalshi Pro'
-                : 'MyFundedPerpetuals');
+                : (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname.includes('hypernova')
+                  ? 'Hypernova'
+                  : 'MyFundedPerpetuals'));
             postToIsolated({
               type: 'VEST_TV_RANGE_ALERT',
               payload: {
