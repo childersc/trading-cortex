@@ -4977,7 +4977,11 @@
     for (let i = 0; i < docsToSearch.length; i++) {
       const { doc, iframe } = docsToSearch[i];
       try {
-        let indBtn = doc.querySelector('#header-toolbar-indicators, [data-name="open-indicators-dialog"]');
+        // Match ONLY a visible "Indicators" control in the top TradingView toolbar (top < 180px)
+        let indBtn = Array.from(doc.querySelectorAll('#header-toolbar-indicators, [data-name="open-indicators-dialog"]')).find(el => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 180;
+        });
         if (!indBtn) {
           const candidates = doc.querySelectorAll('button, [role="button"], div');
           for (let j = 0; j < candidates.length; j++) {
@@ -4987,7 +4991,7 @@
             const txt = (el.textContent || '').trim();
             if (/^indicators$/i.test(txt)) {
               const r = el.getBoundingClientRect();
-              if (r.width >= 24 && r.width <= 160 && r.height >= 16 && r.height <= 48) {
+              if (r.width >= 24 && r.width <= 160 && r.height >= 16 && r.height <= 48 && r.top >= 0 && r.top < 180) {
                 indBtn = el;
                 break;
               }
@@ -4996,10 +5000,18 @@
         }
         if (!indBtn || !indBtn.parentElement) continue;
 
-        // Mount directly inside `indBtn.parentElement` immediately after `indBtn` so the Cortex pill
-        // inherits the exact same flex order & horizontal slot as the "Indicators" button itself
-        // (guaranteed to sit immediately to the right of "Indicators", never jumping behind timeframe buttons!).
-        return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn };
+        // Exact TradingView 3-level toolbar hierarchy (same proven pattern as vest-timeframe-favorites):
+        //   indWrapper (#header-toolbar-indicators) -> toolbarGroup (.group-*, fixed-width/overflow-hidden) -> toolbarRow (.inner-*)
+        // Insert as a direct sibling right AFTER toolbarGroup inside toolbarRow, copying toolbarGroup's flex order!
+        const indWrapper = indBtn.closest('#header-toolbar-indicators, [data-name="open-indicators-dialog"]') || indBtn;
+        const toolbarGroup = indWrapper.parentElement || indBtn.parentElement;
+        const toolbarRow = toolbarGroup && toolbarGroup.parentElement ? toolbarGroup.parentElement : null;
+        if (toolbarRow && toolbarGroup) {
+          const gStyle = doc.defaultView ? doc.defaultView.getComputedStyle(toolbarGroup) : null;
+          const groupOrder = gStyle && gStyle.order && gStyle.order !== '0' ? gStyle.order : '';
+          return { doc, iframe, parent: toolbarRow, afterEl: toolbarGroup, groupOrder };
+        }
+        return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn, groupOrder: '' };
       } catch (e) {}
     }
     return null;
@@ -5009,20 +5021,11 @@
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
     if (!pill) return false;
 
-    // 1. Primary placement: inside TradingView's top chart toolbar immediately after "Indicators" with left & right separators
+    // 1. Primary placement: inside TradingView's top chart toolbar immediately after the "Indicators" group with left & right separators
     const tvAnchor = findTradingViewIndicatorsAnchor();
     if (tvAnchor && tvAnchor.parent && tvAnchor.afterEl && tvAnchor.doc) {
       const targetDoc = tvAnchor.doc;
       ensureCortexPillStylesInDoc(targetDoc);
-
-      // Ensure the immediate parent around "Indicators" expands cleanly as a horizontal flex row
-      try {
-        tvAnchor.parent.style.setProperty('display', 'inline-flex', 'important');
-        tvAnchor.parent.style.setProperty('align-items', 'center', 'important');
-        tvAnchor.parent.style.setProperty('width', 'auto', 'important');
-        tvAnchor.parent.style.setProperty('max-width', 'none', 'important');
-        tvAnchor.parent.style.setProperty('overflow', 'visible', 'important');
-      } catch (e) {}
 
       let slot = targetDoc.getElementById('vest-tv-cortex-toolbar-slot');
       if (!slot) {
@@ -5037,6 +5040,14 @@
         slot.appendChild(leftSep);
         slot.appendChild(rightSep);
       }
+      if (tvAnchor.groupOrder) {
+        slot.style.order = tvAnchor.groupOrder;
+      } else {
+        slot.style.order = '';
+      }
+      slot.style.position = 'relative';
+      slot.style.zIndex = '25';
+      slot.style.flex = '0 0 auto';
       if (slot.parentElement !== tvAnchor.parent || slot.previousSibling !== tvAnchor.afterEl) {
         tvAnchor.parent.insertBefore(slot, tvAnchor.afterEl.nextSibling);
       }

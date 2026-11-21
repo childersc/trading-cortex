@@ -1,6 +1,13 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.123`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.124`) are documented in this file.
+
+---
+
+## [v1.1.124] — 2026-11-21
+
+### 🎯 Exact TradingView `toolbarGroup -> toolbarRow` Placement for Cortex Pill
+- Matched the exact proven 3-level TradingView toolbar hierarchy (`#header-toolbar-indicators` → `.group-*` → `.inner-*` toolbar row) used by `#vest-timeframe-favorites`, inserting `#vest-tv-cortex-toolbar-slot` (`| CORTEX |`) as a direct sibling immediately after the `Indicators` group with matching flex `order` and `z-index: 25` so it sits visibly right after `Indicators` without clipping or drifting behind timeframe buttons.
 
 ---
 

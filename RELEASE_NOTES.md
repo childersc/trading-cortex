@@ -1,3 +1,7 @@
+Trading Cortex v1.1.124 — Fixed Cortex Pill Placement Right After Indicators Group
+
+- **Exact Toolbar Row Placement (`v1.1.124`)**: Inserts `| CORTEX |` directly into TradingView's `.inner-*` toolbar row immediately after the `Indicators` group (copying its flex `order` and using `z-index: 25`), matching the exact proven placement pattern of the favorite timeframes bar.
+
 Trading Cortex v1.1.123 — Pinned Cortex Pill Immediately After `Indicators`
 
 - **Exact `Indicators` Placement (`v1.1.123`)**: Mounted `| CORTEX |` directly adjacent to the `Indicators` button inside its own flex wrapper so it always sits immediately right after `Indicators` and never overlaps or hides behind timeframe buttons.
