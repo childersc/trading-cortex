@@ -1,6 +1,14 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.121`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.122`) are documented in this file.
+
+---
+
+## [v1.1.122] — 2026-11-21
+
+### ⚡ 5-Second Auto-Update Polling (Zero GitHub API Rate Limits)
+- Added `checkForUpdatesFastRaw()` in `background/service-worker.js` using unthrottled `raw.githubusercontent.com/<branch>/manifest.json` with cross-tab deduplication (`4.2s` window) so multiple open trading tabs never duplicate network traffic or hit GitHub's 60/hr API rate limit.
+- Added a 5-second `autoUpdatePollTimer` in `content-isolated.js` (active only while the tab is visible and `autoCheckUpdates !== false`) so the Cortex pill lights up within 5 seconds of any new dev or release push.
 
 ---
 

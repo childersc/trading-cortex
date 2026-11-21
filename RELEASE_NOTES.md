@@ -1,3 +1,7 @@
+Trading Cortex v1.1.122 — 5-Second Auto-Update Polling
+
+- **Instant 5-Second Update Detection (`v1.1.122`)**: Trading Cortex now automatically polls for new updates every 5 seconds while your chart tab is visible using the unthrottled raw manifest endpoint (with multi-tab deduplication and zero GitHub API rate-limit issues).
+
 Trading Cortex v1.1.121 — Renamed Template Menu to "Cortex Templates"
 
 - **Clearer Naming (`v1.1.121`)**: Renamed the right-click drawing menu item and drawing toolbar selector to **`Cortex Templates`** so it stands out clearly from TradingView's native `Template` item.

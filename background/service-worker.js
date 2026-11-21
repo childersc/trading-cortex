@@ -843,6 +843,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "checkForUpdatesFast") {
+    checkForUpdatesFastRaw().then((state) => {
+      sendResponse({ updaterState: state });
+    }).catch(() => {
+      sendResponse({ updaterState: null });
+    });
+    return true;
+  }
+
   if (request.action === "openUpdaterPage") {
     const updaterUrl = chrome.runtime.getURL("update/update.html");
     chrome.tabs.create({ url: updaterUrl });
@@ -941,6 +950,60 @@ async function checkAndRunPendingPostUpdateTabReload() {
   } catch (e) {
   } finally {
     isRunningPostUpdateTabReload = false;
+  }
+}
+
+let lastFastUpdateCheckAt = 0;
+let lastFastUpdateState = null;
+
+async function checkForUpdatesFastRaw() {
+  const now = Date.now();
+  if (lastFastUpdateState && (now - lastFastUpdateCheckAt) < 4200) {
+    return lastFastUpdateState;
+  }
+  lastFastUpdateCheckAt = now;
+  try {
+    const manifest = chrome.runtime.getManifest();
+    const manifestVer = cleanSemver(manifest.version || "1.1.0");
+    const stored = await chrome.storage.local.get(["settings", "updateChannel", "installedVersionOverride", "updaterState"]).catch(() => ({}));
+    if (stored.settings && stored.settings.autoCheckUpdates === false) {
+      return stored.updaterState || null;
+    }
+    const installedVer = stored.installedVersionOverride ? cleanSemver(stored.installedVersionOverride) : manifestVer;
+    const channel = stored.updateChannel || (stored.settings && stored.settings.updateChannel) || (/alpha/i.test(manifest.version || "") ? "dev" : "stable");
+    const branch = channel === "dev" ? "dev" : "main";
+
+    const rawResp = await fetch(`https://raw.githubusercontent.com/${GITHUB_REPO}/${branch}/manifest.json?t=${Math.floor(now / 5000)}`, { cache: "no-store" });
+    if (!rawResp.ok) return stored.updaterState || null;
+    const rawData = await rawResp.json();
+    const remoteVer = cleanSemver(rawData && rawData.version ? rawData.version : installedVer);
+    const hasUpdate = compareSemver(remoteVer, installedVer) > 0;
+
+    const updaterState = {
+      ...(stored.updaterState && typeof stored.updaterState === "object" ? stored.updaterState : {}),
+      channel,
+      lastCheckedAt: now,
+      latestVersion: channel === "dev" ? `v${remoteVer}` : remoteVer,
+      updateAvailable: hasUpdate,
+      htmlUrl: channel === "dev" ? `https://github.com/${GITHUB_REPO}/tree/dev` : `https://github.com/${GITHUB_REPO}/releases`
+    };
+    lastFastUpdateState = updaterState;
+
+    const prevAvail = Boolean(stored.updaterState && stored.updaterState.updateAvailable);
+    const prevVer = stored.updaterState && stored.updaterState.latestVersion;
+    if (prevAvail !== hasUpdate || prevVer !== updaterState.latestVersion) {
+      await chrome.storage.local.set({ updaterState, updateChannel: channel }).catch(() => {});
+    }
+    if (hasUpdate) {
+      await chrome.action.setBadgeText({ text: channel === "dev" ? "DEV" : "NEW" }).catch(() => {});
+      await chrome.action.setBadgeBackgroundColor({ color: channel === "dev" ? "#f59e0b" : "#10b981" }).catch(() => {});
+      await chrome.action.setTitle({ title: `Trading Cortex · Update Ready (v${remoteVer})` }).catch(() => {});
+    } else if (prevAvail) {
+      await chrome.action.setBadgeText({ text: "" }).catch(() => {});
+    }
+    return updaterState;
+  } catch (e) {
+    return lastFastUpdateState;
   }
 }
 

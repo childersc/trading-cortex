@@ -5103,7 +5103,9 @@
     return 0;
   }
 
-  async function triggerQuickUpdateCheck() {
+  let autoUpdatePollTimer = null;
+
+  async function triggerQuickUpdateCheck(fastPoll = false) {
     if (isCheckingForUpdate) return;
     isCheckingForUpdate = true;
 
@@ -5111,11 +5113,11 @@
       const installedVer = getSafeExtVersion();
       let state = null;
 
-      // 1. Try background service worker check first
+      // 1. Try background service worker check first (fast raw CDN poll every 5s avoids GitHub API rate limits)
       if (isExtensionValid() && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
         try {
           const resp = await new Promise((resolve) => {
-            chrome.runtime.sendMessage({ action: 'checkForUpdatesNow' }, (res) => {
+            chrome.runtime.sendMessage({ action: fastPoll ? 'checkForUpdatesFast' : 'checkForUpdatesNow' }, (res) => {
               if (chrome.runtime.lastError) {
                 resolve(null);
               } else {
@@ -5128,6 +5130,8 @@
           }
         } catch (e) {}
       }
+
+      if (fastPoll && !state) return;
 
       // 2. Direct fallback fetch to GitHub in case service worker was asleep or unreachable
       if (!state) {
@@ -18219,8 +18223,20 @@ if (activeTab === 'diagnostics') {
         }, 1200);
         setupIsolatedActionTracking();
         initVestAccountTracker();
-        // Run background update check on page refresh / load
-        triggerQuickUpdateCheck();
+        // Run background update check on page refresh / load, then poll every 5 seconds while tab is visible
+        triggerQuickUpdateCheck(false);
+        if (!autoUpdatePollTimer) {
+          autoUpdatePollTimer = setInterval(() => {
+            if (!isExtensionValid()) {
+              clearInterval(autoUpdatePollTimer);
+              autoUpdatePollTimer = null;
+              return;
+            }
+            if (document.visibilityState !== 'visible') return;
+            if (settings && settings.autoCheckUpdates === false) return;
+            triggerQuickUpdateCheck(true);
+          }, 5000);
+        }
       }
 
       setupHotkeys();
