@@ -2698,7 +2698,7 @@
       `;
       dropdownContainer.innerHTML = `
         <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${getActiveTemplate()?.color || '#22c55e'}; margin-right:5px;"></span>
-        <span>Template</span>
+        <span>Cortex Templates</span>
         <svg style="margin-left:4px; width:10px; height:10px; opacity:0.7;" viewBox="0 0 10 6" fill="currentColor">
           <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
@@ -3508,19 +3508,19 @@
       }
     }
 
-    // 2. Replace the text "Visual order" with "Template" inside the cloned text node
+    // 2. Replace the text "Visual order" with "Cortex Templates" inside the cloned text node
     const walker = doc.createTreeWalker(templateRow, NodeFilter.SHOW_TEXT, null);
     let node;
     let replaced = false;
     while ((node = walker.nextNode())) {
       if (/visual\s*order/i.test(node.nodeValue)) {
-        node.nodeValue = node.nodeValue.replace(/visual\s*order/i, 'Template');
+        node.nodeValue = node.nodeValue.replace(/visual\s*order/i, 'Cortex Templates');
         replaced = true;
       }
     }
     if (!replaced) {
       const labelEl = templateRow.querySelector('[class*="label-"], [class*="title-"]') || templateRow.children[1] || templateRow;
-      labelEl.textContent = 'Template';
+      labelEl.textContent = 'Cortex Templates';
     }
 
     // 3. Hovering "Template" opens the flyout submenu

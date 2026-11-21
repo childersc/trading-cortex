@@ -1,6 +1,13 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.120`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.121`) are documented in this file.
+
+---
+
+## [v1.1.121] — 2026-11-21
+
+### 🏷️ Renamed Injected Template Menu to "Cortex Templates"
+- Renamed the injected drawing context-menu row and floating drawing toolbar selector from `Template` to **`Cortex Templates`** so it is immediately distinct from TradingView's native `Template` menu.
 
 ---
 

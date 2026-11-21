@@ -1,3 +1,7 @@
+Trading Cortex v1.1.121 — Renamed Template Menu to "Cortex Templates"
+
+- **Clearer Naming (`v1.1.121`)**: Renamed the right-click drawing menu item and drawing toolbar selector to **`Cortex Templates`** so it stands out clearly from TradingView's native `Template` item.
+
 Trading Cortex v1.1.120 — Fixed Cortex Pill Visibility Inside TradingView Toolbar Iframe
 
 - **Cortex Pill Now Always Visible After `Indicators` (`v1.1.120`)**: Injects self-contained pill/separator CSS directly into TradingView's chart iframe and inserts `| CORTEX |` at the top-level horizontal toolbar strip right after the `Indicators` group so it can never be hidden or clipped.
