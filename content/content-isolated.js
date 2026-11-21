@@ -4994,30 +4994,12 @@
             }
           }
         }
-        if (!indBtn) continue;
+        if (!indBtn || !indBtn.parentElement) continue;
 
-        // Walk up to the actual horizontal toolbar strip (width >= 300, height 24..56, >= 3 children)
-        // and grab the direct child of that strip containing `indBtn` so our slot is never trapped in a narrow wrapper!
-        let cur = indBtn;
-        let depth = 0;
-        let bestMatch = null;
-        while (cur && cur.parentElement && depth < 6) {
-          const parent = cur.parentElement;
-          const pStyle = doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
-          const pRect = parent.getBoundingClientRect();
-          const isFlexRow = pStyle && pStyle.display && pStyle.display.includes('flex') && pStyle.flexDirection !== 'column';
-          if (isFlexRow && pRect.width >= 300 && pRect.height >= 24 && pRect.height <= 64 && parent.children.length >= 3) {
-            bestMatch = { doc, iframe, parent, afterEl: cur };
-            // Keep walking one more level only if this parent is itself inside an even wider toolbar inner row with height <= 56
-            break;
-          }
-          cur = parent;
-          depth++;
-        }
-        if (bestMatch) return bestMatch;
-        if (indBtn.parentElement) {
-          return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn };
-        }
+        // Mount directly inside `indBtn.parentElement` immediately after `indBtn` so the Cortex pill
+        // inherits the exact same flex order & horizontal slot as the "Indicators" button itself
+        // (guaranteed to sit immediately to the right of "Indicators", never jumping behind timeframe buttons!).
+        return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn };
       } catch (e) {}
     }
     return null;
@@ -5027,11 +5009,20 @@
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
     if (!pill) return false;
 
-    // 1. Primary placement: inside TradingView's top chart toolbar right after "Indicators" with left & right separators
+    // 1. Primary placement: inside TradingView's top chart toolbar immediately after "Indicators" with left & right separators
     const tvAnchor = findTradingViewIndicatorsAnchor();
     if (tvAnchor && tvAnchor.parent && tvAnchor.afterEl && tvAnchor.doc) {
       const targetDoc = tvAnchor.doc;
       ensureCortexPillStylesInDoc(targetDoc);
+
+      // Ensure the immediate parent around "Indicators" expands cleanly as a horizontal flex row
+      try {
+        tvAnchor.parent.style.setProperty('display', 'inline-flex', 'important');
+        tvAnchor.parent.style.setProperty('align-items', 'center', 'important');
+        tvAnchor.parent.style.setProperty('width', 'auto', 'important');
+        tvAnchor.parent.style.setProperty('max-width', 'none', 'important');
+        tvAnchor.parent.style.setProperty('overflow', 'visible', 'important');
+      } catch (e) {}
 
       let slot = targetDoc.getElementById('vest-tv-cortex-toolbar-slot');
       if (!slot) {

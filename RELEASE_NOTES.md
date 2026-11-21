@@ -1,3 +1,7 @@
+Trading Cortex v1.1.123 — Pinned Cortex Pill Immediately After `Indicators`
+
+- **Exact `Indicators` Placement (`v1.1.123`)**: Mounted `| CORTEX |` directly adjacent to the `Indicators` button inside its own flex wrapper so it always sits immediately right after `Indicators` and never overlaps or hides behind timeframe buttons.
+
 Trading Cortex v1.1.122 — 5-Second Auto-Update Polling
 
 - **Instant 5-Second Update Detection (`v1.1.122`)**: Trading Cortex now automatically polls for new updates every 5 seconds while your chart tab is visible using the unthrottled raw manifest endpoint (with multi-tab deduplication and zero GitHub API rate-limit issues).

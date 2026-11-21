@@ -1,6 +1,13 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.122`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.123`) are documented in this file.
+
+---
+
+## [v1.1.123] — 2026-11-21
+
+### 🎯 Pinned Cortex Pill Immediately After `Indicators` Button
+- Mounted `#vest-tv-cortex-toolbar-slot` (`| CORTEX |`) directly inside the `Indicators` button's own flex container immediately after `Indicators` (`display: inline-flex; width: auto; overflow: visible`) so it inherits the exact same flex order and always sits immediately to the right of `Indicators` instead of drifting left behind timeframe buttons.
 
 ---
 
