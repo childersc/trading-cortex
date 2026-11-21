@@ -4729,10 +4729,108 @@
 
   let cachedMarketRowEl = null;
   let cachedMarketPillEl = null;
+  let studioPillHostIframe = null;
+
+  function findTradingViewIndicatorsAnchor() {
+    const docsToSearch = [{ doc: document, iframe: null }];
+    try {
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try {
+          if (ifr.contentDocument && ifr.contentDocument.body) {
+            docsToSearch.push({ doc: ifr.contentDocument, iframe: ifr });
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
+
+    for (let i = 0; i < docsToSearch.length; i++) {
+      const { doc, iframe } = docsToSearch[i];
+      try {
+        let indBtn = doc.querySelector('#header-toolbar-indicators, [data-name="open-indicators-dialog"]');
+        if (!indBtn) {
+          const candidates = doc.querySelectorAll('button, [role="button"]');
+          for (let j = 0; j < candidates.length; j++) {
+            const el = candidates[j];
+            if (!el || el.closest('#vest-tv-cortex-toolbar-slot')) continue;
+            const txt = (el.textContent || '').trim();
+            if (/^indicators$/i.test(txt)) {
+              const r = el.getBoundingClientRect();
+              if (r.width >= 20 && r.height >= 16 && r.height <= 48) {
+                indBtn = el;
+                break;
+              }
+            }
+          }
+        }
+        if (!indBtn) continue;
+
+        // Walk up to the direct toolbar group/item inside the horizontal flex toolbar row
+        let anchorEl = indBtn;
+        let depth = 0;
+        while (anchorEl && anchorEl.parentElement && depth < 3) {
+          const p = anchorEl.parentElement;
+          const pStyle = doc.defaultView ? doc.defaultView.getComputedStyle(p) : null;
+          const pRect = p.getBoundingClientRect();
+          const isFlexRow = pStyle && pStyle.display && pStyle.display.includes('flex') && pStyle.flexDirection !== 'column';
+          if (isFlexRow && pRect.width >= 240 && p.children.length >= 2) {
+            // If parent is a tiny wrapper (<= 2 children & narrow), step up one more level to the main toolbar strip
+            if (p.children.length <= 2 && pRect.width < 220 && p.parentElement) {
+              anchorEl = p;
+              depth++;
+              continue;
+            }
+            return { doc, iframe, parent: p, afterEl: anchorEl };
+          }
+          anchorEl = p;
+          depth++;
+        }
+        if (indBtn.parentElement) {
+          return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn };
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
 
   function dockStudioPillNextToMarketSelector(pillArg) {
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
     if (!pill) return false;
+
+    // 1. Primary placement: inside TradingView's top chart toolbar right after "Indicators" with left & right separators
+    const tvAnchor = findTradingViewIndicatorsAnchor();
+    if (tvAnchor && tvAnchor.parent && tvAnchor.afterEl && tvAnchor.doc) {
+      const targetDoc = tvAnchor.doc;
+      let slot = targetDoc.getElementById('vest-tv-cortex-toolbar-slot');
+      if (!slot) {
+        slot = targetDoc.createElement('div');
+        slot.id = 'vest-tv-cortex-toolbar-slot';
+        const leftSep = targetDoc.createElement('span');
+        leftSep.className = 'vest-tv-cortex-sep';
+        leftSep.setAttribute('aria-hidden', 'true');
+        const rightSep = targetDoc.createElement('span');
+        rightSep.className = 'vest-tv-cortex-sep';
+        rightSep.setAttribute('aria-hidden', 'true');
+        slot.appendChild(leftSep);
+        slot.appendChild(rightSep);
+      }
+      if (slot.parentElement !== tvAnchor.parent || slot.previousSibling !== tvAnchor.afterEl) {
+        tvAnchor.parent.insertBefore(slot, tvAnchor.afterEl.nextSibling);
+      }
+      pill.classList.remove('vest-studio-pill-floating-fallback');
+      pill.classList.add('vest-studio-pill-tv-toolbar');
+      const seps = slot.querySelectorAll('.vest-tv-cortex-sep');
+      const rightSep = seps.length >= 2 ? seps[1] : null;
+      if (pill.parentElement !== slot) {
+        if (rightSep) slot.insertBefore(pill, rightSep);
+        else slot.appendChild(pill);
+      }
+      studioPillHostIframe = tvAnchor.iframe || null;
+      return true;
+    }
+
+    // 2. Fallback (non-chart pages like Portfolio / Markets): dock inside Cortex top bar
+    studioPillHostIframe = null;
+    pill.classList.remove('vest-studio-pill-tv-toolbar');
     const bar = ensureCortexTopBar();
     if (!bar) return false;
     pill.classList.remove('vest-studio-pill-floating-fallback');
@@ -4885,15 +4983,27 @@
     const triggerBtn = targetPill.querySelector('#vest-studio-pill-btn');
     if (!triggerBtn) return;
     const rect = triggerBtn.getBoundingClientRect();
+    let offsetLeft = 0;
+    let offsetTop = 0;
+    if (studioPillHostIframe && studioPillHostIframe.isConnected) {
+      try {
+        const ifrRect = studioPillHostIframe.getBoundingClientRect();
+        offsetLeft = ifrRect.left;
+        offsetTop = ifrRect.top;
+      } catch (e) {}
+    }
+    const absTop = rect.top + offsetTop;
+    const absBottom = rect.bottom + offsetTop;
+    const absLeft = rect.left + offsetLeft;
     menuEl.style.position = 'fixed';
     const menuHeight = menuEl.offsetHeight || 440;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - absBottom;
+    const spaceAbove = absTop;
     const opensAbove = spaceBelow < menuHeight && spaceAbove > spaceBelow;
     const top = opensAbove
-      ? Math.max(8, rect.top - menuHeight - 6)
-      : rect.bottom + 6;
-    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - menuEl.offsetWidth - 8));
+      ? Math.max(8, absTop - menuHeight - 6)
+      : absBottom + 6;
+    const left = Math.min(Math.max(8, absLeft), Math.max(8, window.innerWidth - menuEl.offsetWidth - 8));
     menuEl.style.top = `${Math.round(top)}px`;
     menuEl.style.left = `${Math.round(left)}px`;
     menuEl.style.zIndex = '2147483647';

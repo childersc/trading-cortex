@@ -1,3 +1,7 @@
+Trading Cortex v1.1.116 — Cortex Pill Moved Into TradingView Top Chart Toolbar
+
+- **Native TradingView Chart Toolbar Placement (`v1.1.116`)**: Moved the compact **CORTEX** pill directly into TradingView's top chart toolbar immediately after **Indicators**, framed by clean vertical separators (`| CORTEX |`), with cross-frame dropdown positioning so the menu always opens cleanly beneath it.
+
 Trading Cortex v1.1.115 — Viewport-Clamped Big FVGs & Always-Visible Lower-Timeframe Labels
 
 - **Big HTF FVG Labels Stay On-Screen on Lower Timeframes (`v1.1.115`)**: Extended or wide FVG rectangles (like `1H FVG` viewed on a `5m` or `1m` chart) now clamp cleanly to the right edge of the viewport (never past it) and automatically re-center their text inside the visible portion of the box on screen.

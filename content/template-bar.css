@@ -1510,6 +1510,64 @@ body.vest-cortex-top-bar-active {
   flex-shrink: 0;
 }
 
+#vest-tv-cortex-toolbar-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  margin: 0 2px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.vest-tv-cortex-sep {
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  background: rgba(148, 163, 184, 0.28);
+  flex-shrink: 0;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar {
+  margin-right: 0;
+  height: 26px;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger {
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 0 9px !important;
+  gap: 6px !important;
+  border-radius: 999px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-icon {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-icon svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-text {
+  flex-direction: row !important;
+  align-items: baseline !important;
+  gap: 5px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-title {
+  font-size: 11px !important;
+  line-height: 1 !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-sub {
+  font-size: 9.5px !important;
+  line-height: 1 !important;
+  opacity: 0.85;
+}
+
 #vest-studio-header-pill * {
   box-sizing: border-box;
 }

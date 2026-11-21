@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.115`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.116`) are documented in this file.
+
+---
+
+## [v1.1.116] — 2026-11-21
+
+### ✨ Moved Cortex Pill Into TradingView's Top Chart Toolbar (After Indicators)
+- **Native TradingView Top Toolbar Placement (`#vest-tv-cortex-toolbar-slot`)**:
+  - Added `findTradingViewIndicatorsAnchor()` in `content-isolated.js` to locate TradingView's `Indicators` button (both in top-level charts and same-origin chart iframes) and mount a compact `26px` Cortex pill right after `Indicators`, flanked by clean vertical separators (`| CORTEX |`).
+  - Updated `updateStudioDropdownPosition()` with iframe offset translation so clicking `CORTEX` inside TradingView's iframe opens the full Cortex dropdown menu on `window.top` directly beneath the pill with zero clipping.
+  - Automatically falls back to the Cortex top bar on non-chart pages (e.g., Portfolio / Markets).
 
 ---
 
