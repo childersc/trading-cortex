@@ -5108,14 +5108,23 @@
     for (let i = 0; i < docsToSearch.length; i++) {
       const { doc, iframe } = docsToSearch[i];
       try {
-        // Tier 1: Match a visible "Indicators" control in the top TradingView toolbar (top < 180px)
-        let indBtn = Array.from(doc.querySelectorAll(
-          '#header-toolbar-indicators, [data-name="open-indicators-dialog"], button[aria-label*="indicator" i], [data-tooltip*="indicator" i], [title*="indicator" i]'
-        )).find(el => {
+        // Tier 1a: Exact native TradingView Indicators button FIRST (separate query so document-order
+        // third-party buttons with "indicator" in title/aria-label, e.g. TV/Vela at x=211, NEVER shadow #header-toolbar-indicators!)
+        let indBtn = Array.from(doc.querySelectorAll('#header-toolbar-indicators, [data-name="open-indicators-dialog"]')).find(el => {
           if (!el || el.closest('#vest-tv-cortex-toolbar-slot')) return false;
           const r = el.getBoundingClientRect();
           return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 180;
         });
+        // Tier 1b: Icon-only Indicators button fallback (only when native #header-toolbar-indicators is absent)
+        if (!indBtn) {
+          indBtn = Array.from(doc.querySelectorAll(
+            'button[aria-label*="indicator" i], [data-tooltip*="indicator" i], [title*="indicator" i]'
+          )).find(el => {
+            if (!el || el.closest('#vest-tv-cortex-toolbar-slot')) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 180;
+          });
+        }
         if (!indBtn) {
           const candidates = doc.querySelectorAll('button, [role="button"], div');
           for (let j = 0; j < candidates.length; j++) {

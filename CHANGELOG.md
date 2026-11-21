@@ -1,6 +1,14 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.129`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.130`) are documented in this file.
+
+---
+
+## [v1.1.130] — 2026-11-21
+
+### 🎯 Fixed Vest Cortex Pill Matching Third-Party `indicator` Buttons Before `#header-toolbar-indicators`
+- **Root cause verified via live DOM**: `querySelectorAll('#header-toolbar-indicators, ..., [title*="indicator" i]')` returns elements in **document order**, not selector order — so on Vest, third-party toolbar buttons (`TV`/`Vela` at `x = 211px`) with `"indicator"` in their `title`/`aria-label` matched *before* TradingView's native `#header-toolbar-indicators` (`x = 550.5px`), placing `#vest-tv-cortex-toolbar-slot` at `x = 211.84px` right on top of `1m 4h`.
+- **Fix**: Split `#header-toolbar-indicators, [data-name="open-indicators-dialog"]` into its own primary query so native TradingView `Indicators` always wins over third-party buttons.
 
 ---
 

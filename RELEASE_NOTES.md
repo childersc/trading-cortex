@@ -1,3 +1,7 @@
+Trading Cortex v1.1.130 — Fixed Vest Cortex Pill Placement Immediately After Native Indicators
+
+- **Vest Cortex Pill Fix (`v1.1.130`)**: Queries `#header-toolbar-indicators` / `[data-name="open-indicators-dialog"]` first in its own selector pass so earlier third-party buttons with `"indicator"` in their tooltip/aria-label (e.g. `TV`/`Vela` at `x = 211px`) can never hijack the anchor ahead of TradingView's native `Indicators` button (`x = 550px`).
+
 Trading Cortex v1.1.129 — Fixed My Funded Perps Bottom Dock Covering Top Chart Toolbar & Cortex Pill
 
 - **My Funded Perps Bottom Dock & Cortex Pill Fix (`v1.1.129`)**: Fixed `findChartBottomDockMountPoint()` to walk past `position: absolute` chart iframe wrappers to the in-flow `flex-column` container so minimized windows dock at the true bottom of the chart instead of stacking at `y = 0` over TradingView's top toolbar and hiding the `| CORTEX |` pill. Also cleans up stale empty toolbar slots across documents.
