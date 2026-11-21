@@ -1243,10 +1243,25 @@
     try {
       const source = paneView._source || paneView.m_source;
       const { extendRight, extendLeft, horzAlign } = getRectSourceConfig(source, null);
-      if (!extendRight && !extendLeft) return;
 
       const paneWidth = getPaneWidthForPaneView(paneView, args);
       if (!paneWidth || paneWidth < 100) return;
+
+      // Determine the rectangle's raw screen X bounds from paneView._points if available
+      let pvRawLeft = null;
+      let pvRawRight = null;
+      if (Array.isArray(paneView._points) && paneView._points.length >= 2) {
+        const ax = Number(paneView._points[0] && paneView._points[0].x);
+        const bx = Number(paneView._points[1] && paneView._points[1].x);
+        if (isFinite(ax) && isFinite(bx)) {
+          pvRawLeft = Math.min(ax, bx);
+          pvRawRight = Math.max(ax, bx);
+        }
+      }
+
+      // Skip rectangles completely inside the viewport that are not extended
+      const spansOutsideViewport = (pvRawLeft !== null && pvRawRight !== null) && (pvRawLeft < 0 || pvRawRight > paneWidth);
+      if (!extendRight && !extendLeft && !spansOutsideViewport) return;
 
       // Locate any TextRenderer on paneView or inside its composite renderer
       const candidateRenderers = new Set();
@@ -1275,35 +1290,83 @@
           let d = null;
           try { d = r[rk]; } catch (e) {}
           if (d && typeof d === 'object' && typeof d.text === 'string' && d.text.trim() && Array.isArray(d.points) && d.points.length > 0) {
-            const effectiveHorzAlign = String(horzAlign || d.horzAlign || d.horzTextAlign || '').toLowerCase();
+            const effectiveHorzAlign = String(horzAlign || d.horzAlign || d.horzTextAlign || 'center').toLowerCase();
 
-            if (extendRight && effectiveHorzAlign === 'right') {
-              const pad = typeof d.offsetX === 'number' && d.offsetX > 0 ? 0 : 8;
-              const targetRightX = paneWidth - pad;
+            // Compute visible intersection of the rectangle with the current viewport [0, paneWidth]
+            let rawL = pvRawLeft;
+            let rawR = pvRawRight;
+            if (rawL === null || rawR === null) {
+              if (d.points.length >= 2) {
+                rawL = Math.min(d.points[0].x, d.points[1].x);
+                rawR = Math.max(d.points[0].x, d.points[1].x);
+              } else {
+                rawL = d.points[0].x;
+                rawR = d.points[0].x;
+              }
+            }
+            const effLeft = extendLeft ? 0 : rawL;
+            const effRight = extendRight ? paneWidth : rawR;
+            const visLeft = Math.max(0, effLeft);
+            const visRight = Math.min(paneWidth, effRight);
+            if (visRight <= visLeft + 12) continue;
 
+            const pad = typeof d.offsetX === 'number' && d.offsetX > 0 ? 0 : 8;
+            let didUpdate = false;
+
+            if (effectiveHorzAlign === 'right') {
+              // Clamp right-aligned label cleanly inside the right edge of the viewport (never past paneWidth)
+              const targetRightX = Math.max(visLeft + 12, visRight - pad);
               if (d.points.length === 1) {
                 d.points = [clonePointWithX(d.points[0], targetRightX)];
               } else if (d.points.length >= 2) {
                 const p0 = d.points[0];
                 const p1 = d.points[1];
                 if (p0.x <= p1.x) {
-                  d.points = [p0, clonePointWithX(p1, targetRightX)];
+                  d.points = [clonePointWithX(p0, visLeft), clonePointWithX(p1, targetRightX)];
                 } else {
-                  d.points = [clonePointWithX(p0, targetRightX), p1];
+                  d.points = [clonePointWithX(p0, targetRightX), clonePointWithX(p1, visLeft)];
                 }
               }
-
-              // Expand wordWrapWidth / maxWidth so narrow drawn boxes don't wrap or clip text at the far right
-              let leftX = 0;
-              if (Array.isArray(paneView._points) && paneView._points.length >= 2) {
-                leftX = extendLeft ? 0 : Math.max(0, Math.min(paneView._points[0].x, paneView._points[1].x));
+              didUpdate = true;
+            } else if (effectiveHorzAlign === 'center') {
+              // Keep centered text visibly centered inside [visLeft, visRight] even on lower timeframes!
+              const targetCenterX = (visLeft + visRight) / 2;
+              if (d.points.length === 1) {
+                d.points = [clonePointWithX(d.points[0], targetCenterX)];
+              } else if (d.points.length >= 2) {
+                const p0 = d.points[0];
+                const p1 = d.points[1];
+                if (p0.x <= p1.x) {
+                  d.points = [clonePointWithX(p0, visLeft), clonePointWithX(p1, visRight)];
+                } else {
+                  d.points = [clonePointWithX(p0, visRight), clonePointWithX(p1, visLeft)];
+                }
               }
-              const expandedWidth = Math.max(220, paneWidth - leftX - 16);
+              didUpdate = true;
+            } else if (effectiveHorzAlign === 'left') {
+              // Keep left-aligned label visible inside the left edge of the viewport
+              const targetLeftX = Math.min(visRight - 12, visLeft + pad);
+              if (d.points.length === 1) {
+                d.points = [clonePointWithX(d.points[0], targetLeftX)];
+              } else if (d.points.length >= 2) {
+                const p0 = d.points[0];
+                const p1 = d.points[1];
+                if (p0.x <= p1.x) {
+                  d.points = [clonePointWithX(p0, targetLeftX), clonePointWithX(p1, visRight)];
+                } else {
+                  d.points = [clonePointWithX(p0, visRight), clonePointWithX(p1, targetLeftX)];
+                }
+              }
+              didUpdate = true;
+            }
+
+            if (didUpdate) {
+              // Expand wordWrapWidth / maxWidth to match the visible span so text never wraps or clips
+              const expandedWidth = Math.max(160, Math.round(visRight - visLeft - 12));
               if (typeof d.wordWrapWidth === 'number') d.wordWrapWidth = Math.max(d.wordWrapWidth, expandedWidth);
               if (typeof d.maxWidth === 'number') d.maxWidth = Math.max(d.maxWidth, expandedWidth);
               if (typeof d.boxWidth === 'number') d.boxWidth = Math.max(d.boxWidth, expandedWidth);
 
-              // Clear cached layout on TextRenderer so it recalculates with new far-right point
               if (typeof r.setData === 'function') {
                 try { r.setData(d); } catch (e) {}
               }
@@ -11155,8 +11218,8 @@
       const boxBottom = Math.max(topY, bottomY);
       if (boxBottom < -20 || boxTop > cssHeight + 20) continue;
 
-      const clampedLeft = Math.max(-4, boxLeft);
-      const clampedRight = Math.min(cssWidth + 4, boxRight);
+      const clampedLeft = Math.max(0, boxLeft);
+      const clampedRight = Math.min(cssWidth, boxRight);
       const boxW = Math.max(2, clampedRight - clampedLeft);
       const boxH = Math.max(2, boxBottom - boxTop);
 

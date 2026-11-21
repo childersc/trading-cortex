@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.114`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.115`) are documented in this file.
+
+---
+
+## [v1.1.115] — 2026-11-21
+
+### 📌 Viewport-Clamped Extended FVG Boxes & Always-Visible Centered Text on Lower Timeframes
+- **Viewport-Bounded Text Alignment (`adjustRectanglePaneViewLabel`)**:
+  - Upgraded the TradingView rectangle pane-view hook so extended or wide HTF FVG rectangles (e.g., `1H FVG`, `4H FVG`, `15M FVG`) clamp their visible text span strictly to `[0, paneWidth]` (never past the right edge of the viewport).
+  - Centered text now re-centers automatically inside the **visible portion** of the rectangle when you switch down to lower timeframes (`5m`, `1m`), and left/right-aligned labels stay cleanly anchored inside the viewport instead of scrolling off-screen.
+- **Canvas Auto-FVG Viewport Clamping (`renderAutoFvgsOnCanvas`)**:
+  - Clamped canvas-rendered Auto FVG rectangles strictly to `[0, cssWidth]` so extended FVGs stop cleanly at the right edge of the viewport without overflowing past it.
 
 ---
 
