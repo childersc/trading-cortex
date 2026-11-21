@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.119`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.120`) are documented in this file.
+
+---
+
+## [v1.1.120] — 2026-11-21
+
+### 🛠️ Fixed Cortex Pill Visibility Inside TradingView Chart Iframe Toolbar
+- **Self-Contained Iframe Toolbar Styling & Top-Level Toolbar Insertion**:
+  - Added `ensureCortexPillStylesInDoc(targetDoc)` in `content-isolated.js` to inject the Cortex pill & separator CSS directly into TradingView's chart `<iframe>` `<head>` (solving missing styles in `about:blank`/`blob:`/`srcdoc` chart iframes).
+  - Updated `findTradingViewIndicatorsAnchor()` to walk up to the full horizontal toolbar strip (`width >= 300px`, `>= 3` items) and insert `#vest-tv-cortex-toolbar-slot` (`| CORTEX |`) right after the `Indicators` group using `targetDoc.adoptNode(pill)` so it is never clipped inside a narrow wrapper.
 
 ---
 

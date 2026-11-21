@@ -1,3 +1,7 @@
+Trading Cortex v1.1.120 — Fixed Cortex Pill Visibility Inside TradingView Toolbar Iframe
+
+- **Cortex Pill Now Always Visible After `Indicators` (`v1.1.120`)**: Injects self-contained pill/separator CSS directly into TradingView's chart iframe and inserts `| CORTEX |` at the top-level horizontal toolbar strip right after the `Indicators` group so it can never be hidden or clipped.
+
 Trading Cortex v1.1.119 — Collapsible Template Groups in Right-Click Menu & Template Manager
 
 - **Template Groups (`v1.1.119`)**: Create custom groups (e.g., `FVGs`, `Order Blocks`, `Inverted FVGs`) right from the chart's right-click **`Template ▸`** menu (`+ New Group...` and `📁` per template) or inside **Template Manager** (inline group dropdown, filter/delete chips, and editor Menu Group field). Groups expand/collapse right inside the right-click menu and remember their open/closed state.

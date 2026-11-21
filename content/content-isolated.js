@@ -4849,6 +4849,119 @@
   let cachedMarketPillEl = null;
   let studioPillHostIframe = null;
 
+  function ensureCortexPillStylesInDoc(targetDoc) {
+    if (!targetDoc || targetDoc === document || !targetDoc.head) return;
+    if (targetDoc.getElementById('vest-tv-cortex-pill-inline-styles')) return;
+    try {
+      const style = targetDoc.createElement('style');
+      style.id = 'vest-tv-cortex-pill-inline-styles';
+      style.textContent = `
+        #vest-tv-cortex-toolbar-slot {
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: 6px !important;
+          height: 100% !important;
+          margin: 0 4px !important;
+          flex-shrink: 0 !important;
+          vertical-align: middle !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+        .vest-tv-cortex-sep {
+          display: inline-block !important;
+          width: 1px !important;
+          height: 18px !important;
+          background: rgba(148, 163, 184, 0.32) !important;
+          flex-shrink: 0 !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar {
+          position: relative !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          height: 26px !important;
+          margin: 0 !important;
+          flex-shrink: 0 !important;
+          font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
+          user-select: none !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger {
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: 6px !important;
+          height: 26px !important;
+          min-height: 26px !important;
+          padding: 0 9px !important;
+          border-radius: 999px !important;
+          border: 1px solid rgba(56, 189, 248, 0.45) !important;
+          background: linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(17, 24, 39, 0.94)) !important;
+          color: #f8fafc !important;
+          cursor: pointer !important;
+          box-shadow: 0 0 10px rgba(56, 189, 248, 0.18) !important;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+          white-space: nowrap !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger.dev-channel {
+          border-color: rgba(239, 68, 68, 0.65) !important;
+          box-shadow: 0 0 10px rgba(239, 68, 68, 0.28) !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger:hover {
+          border-color: rgba(56, 189, 248, 0.85) !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger.dev-channel:hover {
+          border-color: rgba(248, 113, 113, 0.95) !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-icon {
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          width: 16px !important;
+          height: 16px !important;
+          border-radius: 50% !important;
+          background: rgba(56, 189, 248, 0.16) !important;
+          color: #38bdf8 !important;
+          flex-shrink: 0 !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger.dev-channel .vest-studio-pill-icon {
+          background: rgba(239, 68, 68, 0.18) !important;
+          color: #f87171 !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-icon svg {
+          width: 11px !important;
+          height: 11px !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-text {
+          display: inline-flex !important;
+          flex-direction: row !important;
+          align-items: baseline !important;
+          gap: 5px !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-title {
+          font-size: 11px !important;
+          font-weight: 800 !important;
+          letter-spacing: 0.04em !important;
+          color: #f8fafc !important;
+          line-height: 1 !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-sub {
+          font-size: 9.5px !important;
+          font-weight: 600 !important;
+          color: #94a3b8 !important;
+          line-height: 1 !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-trigger.dev-channel .vest-studio-pill-sub {
+          color: #fca5a5 !important;
+        }
+        #vest-studio-header-pill.vest-studio-pill-tv-toolbar .vest-studio-pill-chevron {
+          width: 11px !important;
+          height: 11px !important;
+          color: #94a3b8 !important;
+          flex-shrink: 0 !important;
+        }
+      `;
+      targetDoc.head.appendChild(style);
+    } catch (e) {}
+  }
+
   function findTradingViewIndicatorsAnchor() {
     const docsToSearch = [{ doc: document, iframe: null }];
     try {
@@ -4866,14 +4979,15 @@
       try {
         let indBtn = doc.querySelector('#header-toolbar-indicators, [data-name="open-indicators-dialog"]');
         if (!indBtn) {
-          const candidates = doc.querySelectorAll('button, [role="button"]');
+          const candidates = doc.querySelectorAll('button, [role="button"], div');
           for (let j = 0; j < candidates.length; j++) {
             const el = candidates[j];
             if (!el || el.closest('#vest-tv-cortex-toolbar-slot')) continue;
+            if (el.children && el.children.length > 3) continue;
             const txt = (el.textContent || '').trim();
             if (/^indicators$/i.test(txt)) {
               const r = el.getBoundingClientRect();
-              if (r.width >= 20 && r.height >= 16 && r.height <= 48) {
+              if (r.width >= 24 && r.width <= 160 && r.height >= 16 && r.height <= 48) {
                 indBtn = el;
                 break;
               }
@@ -4882,26 +4996,25 @@
         }
         if (!indBtn) continue;
 
-        // Walk up to the direct toolbar group/item inside the horizontal flex toolbar row
-        let anchorEl = indBtn;
+        // Walk up to the actual horizontal toolbar strip (width >= 300, height 24..56, >= 3 children)
+        // and grab the direct child of that strip containing `indBtn` so our slot is never trapped in a narrow wrapper!
+        let cur = indBtn;
         let depth = 0;
-        while (anchorEl && anchorEl.parentElement && depth < 3) {
-          const p = anchorEl.parentElement;
-          const pStyle = doc.defaultView ? doc.defaultView.getComputedStyle(p) : null;
-          const pRect = p.getBoundingClientRect();
+        let bestMatch = null;
+        while (cur && cur.parentElement && depth < 6) {
+          const parent = cur.parentElement;
+          const pStyle = doc.defaultView ? doc.defaultView.getComputedStyle(parent) : null;
+          const pRect = parent.getBoundingClientRect();
           const isFlexRow = pStyle && pStyle.display && pStyle.display.includes('flex') && pStyle.flexDirection !== 'column';
-          if (isFlexRow && pRect.width >= 240 && p.children.length >= 2) {
-            // If parent is a tiny wrapper (<= 2 children & narrow), step up one more level to the main toolbar strip
-            if (p.children.length <= 2 && pRect.width < 220 && p.parentElement) {
-              anchorEl = p;
-              depth++;
-              continue;
-            }
-            return { doc, iframe, parent: p, afterEl: anchorEl };
+          if (isFlexRow && pRect.width >= 300 && pRect.height >= 24 && pRect.height <= 64 && parent.children.length >= 3) {
+            bestMatch = { doc, iframe, parent, afterEl: cur };
+            // Keep walking one more level only if this parent is itself inside an even wider toolbar inner row with height <= 56
+            break;
           }
-          anchorEl = p;
+          cur = parent;
           depth++;
         }
+        if (bestMatch) return bestMatch;
         if (indBtn.parentElement) {
           return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn };
         }
@@ -4918,6 +5031,8 @@
     const tvAnchor = findTradingViewIndicatorsAnchor();
     if (tvAnchor && tvAnchor.parent && tvAnchor.afterEl && tvAnchor.doc) {
       const targetDoc = tvAnchor.doc;
+      ensureCortexPillStylesInDoc(targetDoc);
+
       let slot = targetDoc.getElementById('vest-tv-cortex-toolbar-slot');
       if (!slot) {
         slot = targetDoc.createElement('div');
@@ -4939,6 +5054,11 @@
       const seps = slot.querySelectorAll('.vest-tv-cortex-sep');
       const rightSep = seps.length >= 2 ? seps[1] : null;
       if (pill.parentElement !== slot) {
+        try {
+          if (pill.ownerDocument !== targetDoc && typeof targetDoc.adoptNode === 'function') {
+            targetDoc.adoptNode(pill);
+          }
+        } catch (e) {}
         if (rightSep) slot.insertBefore(pill, rightSep);
         else slot.appendChild(pill);
       }
