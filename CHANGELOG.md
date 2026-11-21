@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.116`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.117`) are documented in this file.
+
+---
+
+## [v1.1.117] — 2026-11-21
+
+### 📌 Bottom-of-Chart Minimized Windows Dock (Directly Below Chart Iframe)
+- **Clean Bottom-of-Chart Dock (`vest-cortex-bottom-dock`)**:
+  - Added `findChartBottomDockMountPoint()` in `content-isolated.js` to mount the minimized windows dock directly **below the chart viewport's `<iframe>`** (outside the viewport, in normal document flow).
+  - Automatically hides (`display: none`, `0px` height) when zero windows are minimized—removing the old top black bar completely on chart pages now that the Cortex pill lives in TradingView's top chart toolbar.
+  - Instantly appears whenever any floating Cortex window (`INSTRUMENT TRADES`, `OB STATS`, `UPCOMING NEWS`, `CORTEX DIAG`, `RANGE DETECTOR`, `POSITIONS`) is minimized and automatically repositions all minimized pills into the dock.
 
 ---
 

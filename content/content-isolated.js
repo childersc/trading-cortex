@@ -4378,13 +4378,79 @@
     return null;
   }
 
+  function findChartBottomDockMountPoint() {
+    try {
+      // 1. Prefer the TradingView chart iframe itself
+      let chartEl = null;
+      const iframes = Array.from(document.querySelectorAll('iframe'));
+      let bestArea = 0;
+      for (let i = 0; i < iframes.length; i++) {
+        const r = iframes[i].getBoundingClientRect();
+        const area = r.width * r.height;
+        if (r.width >= 320 && r.height >= 200 && area > bestArea) {
+          bestArea = area;
+          chartEl = iframes[i];
+        }
+      }
+      // 2. Fallback to a non-iframe chart container if the platform renders TradingView directly in the top document
+      if (!chartEl) {
+        const chartDivs = Array.from(document.querySelectorAll('[id*="tv_chart_container"], [class*="chart-container"], .layout__area--center'));
+        for (let i = 0; i < chartDivs.length; i++) {
+          const r = chartDivs[i].getBoundingClientRect();
+          const area = r.width * r.height;
+          if (r.width >= 320 && r.height >= 200 && area > bestArea) {
+            bestArea = area;
+            chartEl = chartDivs[i];
+          }
+        }
+      }
+      if (!chartEl || !chartEl.parentElement) return null;
+
+      // Walk up single-child wrapper divs (up to 3 levels) until we reach a flex-column or multi-child container
+      let targetEl = chartEl;
+      let depth = 0;
+      while (targetEl.parentElement && targetEl.parentElement !== document.body && depth < 3) {
+        const parent = targetEl.parentElement;
+        const pStyle = window.getComputedStyle(parent);
+        if (pStyle && pStyle.display && pStyle.display.includes('flex') && pStyle.flexDirection === 'column') {
+          return { parent, afterEl: targetEl, chartEl };
+        }
+        const visibleSibs = Array.from(parent.children).filter(c => c !== targetEl && c.id !== CORTEX_TOP_BAR_ID && c.getBoundingClientRect().height > 10);
+        if (visibleSibs.length > 0) {
+          return { parent, afterEl: targetEl, chartEl };
+        }
+        targetEl = parent;
+        depth++;
+      }
+      if (targetEl.parentElement && targetEl.parentElement !== document.body) {
+        return { parent: targetEl.parentElement, afterEl: targetEl, chartEl };
+      }
+      return { parent: chartEl.parentElement, afterEl: chartEl, chartEl };
+    } catch (e) {}
+    return null;
+  }
+
+  function clearLegacyTopBarLayoutOffsets() {
+    if (lastAdjustedContentEl) {
+      try {
+        lastAdjustedContentEl.style.marginTop = '';
+        lastAdjustedContentEl.style.maxHeight = '';
+      } catch (e) {}
+      lastAdjustedContentEl = null;
+    }
+    try {
+      document.documentElement.classList.remove('vest-cortex-top-bar-active');
+      document.body.classList.remove('vest-cortex-top-bar-active');
+    } catch (e) {}
+  }
+
   function ensureCortexTopBar() {
     if (!document.body) return null;
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
     if (activeFirm && !activeFirm.enabled) {
       const existingBar = document.getElementById(CORTEX_TOP_BAR_ID);
       if (existingBar) existingBar.remove();
-      document.body.classList.remove('vest-cortex-top-bar-active');
+      clearLegacyTopBarLayoutOffsets();
       return null;
     }
 
@@ -4393,8 +4459,60 @@
       bar = document.createElement('div');
       bar.id = CORTEX_TOP_BAR_ID;
       bar.setAttribute('role', 'region');
-      bar.setAttribute('aria-label', 'Trading Cortex toolbar');
+      bar.setAttribute('aria-label', 'Trading Cortex minimized windows dock');
     }
+
+    const pillInTvToolbar = Boolean(
+      studioPillEl &&
+      studioPillEl.isConnected &&
+      studioPillEl.classList.contains('vest-studio-pill-tv-toolbar')
+    );
+    const minimizedCount = typeof getActiveMinimizedWindowOrder === 'function'
+      ? getActiveMinimizedWindowOrder().length
+      : 0;
+    const chartBottomMount = findChartBottomDockMountPoint();
+
+    // Primary mode on any chart page: Cortex pill lives in TradingView's top toolbar,
+    // and minimized windows dock right below the chart viewport's iframe (hidden when 0 minimized!)
+    if (chartBottomMount && chartBottomMount.parent && chartBottomMount.afterEl && pillInTvToolbar) {
+      clearLegacyTopBarLayoutOffsets();
+
+      if (bar.parentElement !== chartBottomMount.parent || bar.previousSibling !== chartBottomMount.afterEl) {
+        chartBottomMount.parent.insertBefore(bar, chartBottomMount.afterEl.nextSibling);
+      }
+
+      bar.classList.remove('vest-cortex-hypernova-aligned');
+      bar.classList.remove('vest-cortex-inflow-bar');
+      bar.classList.add('vest-cortex-bottom-dock');
+      bar.style.top = '';
+      bar.style.left = '';
+      bar.style.right = '';
+      bar.style.marginTop = '';
+      bar.style.marginLeft = '';
+      bar.style.width = '100%';
+      bar.style.height = '38px';
+      bar.style.zIndex = '20';
+
+      if (minimizedCount > 0) {
+        bar.style.display = 'flex';
+        try {
+          const pStyle = window.getComputedStyle(chartBottomMount.parent);
+          if (!pStyle || !pStyle.display || !pStyle.display.includes('flex') || pStyle.flexDirection !== 'column') {
+            chartBottomMount.parent.style.display = 'flex';
+            chartBottomMount.parent.style.flexDirection = 'column';
+          }
+          chartBottomMount.afterEl.style.flex = '1 1 auto';
+          chartBottomMount.afterEl.style.minHeight = '0px';
+        } catch (e) {}
+      } else {
+        bar.style.display = 'none';
+      }
+      return bar;
+    }
+
+    // Fallback (before TradingView toolbar mounts or on non-chart pages like Portfolio / Markets)
+    bar.classList.remove('vest-cortex-bottom-dock');
+    bar.style.display = 'flex';
 
     if (isHypernovaHost()) {
       const mount = findHypernovaInflowMountPoint();
@@ -4825,6 +4943,8 @@
         else slot.appendChild(pill);
       }
       studioPillHostIframe = tvAnchor.iframe || null;
+      ensureCortexTopBar();
+      if (typeof repositionAllMinimizedBoxes === 'function') repositionAllMinimizedBoxes();
       return true;
     }
 
@@ -10501,14 +10621,21 @@ if (activeTab === 'diagnostics') {
     return liveEconomicNewsEvents;
   }
 
-  /** Available full-screen area, reserving space for the top header & Cortex bar. */
+  /** Available full-screen area, reserving space for the top header & Cortex bar (only when mounted at top). */
   function getScreenBoundsRect() {
     const left = 0;
     const headerBottom = typeof getMainHeaderBottom === 'function' ? getMainHeaderBottom() : 48;
     const barEl = document.getElementById(CORTEX_TOP_BAR_ID);
-    const barH = barEl ? barEl.offsetHeight : CORTEX_BAR_HEIGHT;
+    const isTopBarOccupyingTop = Boolean(
+      barEl &&
+      barEl.style.display !== 'none' &&
+      !barEl.classList.contains('vest-cortex-bottom-dock')
+    );
+    const barH = isTopBarOccupyingTop ? (barEl.offsetHeight || CORTEX_BAR_HEIGHT) : 0;
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
-    const barMargin = (activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM;
+    const barMargin = isTopBarOccupyingTop
+      ? ((activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM)
+      : 0;
     const top = Math.round(headerBottom + barH + barMargin);
     const right = Math.max(1, window.innerWidth);
     const bottom = Math.max(top + 50, window.innerHeight);
@@ -10520,10 +10647,13 @@ if (activeTab === 'diagnostics') {
   function getTaskbarStartLeft() {
     const bar = document.getElementById(CORTEX_TOP_BAR_ID);
     const barRect = bar ? bar.getBoundingClientRect() : { left: 0, top: 48, right: window.innerWidth };
+    if (bar && bar.classList.contains('vest-cortex-bottom-dock')) {
+      return Math.round(barRect.left + 10);
+    }
     let startX = barRect.left + 16;
 
     const studioPill = document.getElementById('vest-studio-header-pill') || document.getElementById('vest-studio-pill-btn');
-    if (studioPill && studioPill.isConnected) {
+    if (studioPill && studioPill.isConnected && !studioPill.classList.contains('vest-studio-pill-tv-toolbar')) {
       const r = studioPill.getBoundingClientRect();
       if (r.right > startX) startX = r.right;
     }
@@ -10579,6 +10709,7 @@ if (activeTab === 'diagnostics') {
     minimizedWindowOrder = order;
     settings.minimizedWindowOrder = order;
     queueSettingsSave({ minimizedWindowOrder: order });
+    ensureCortexTopBar();
     repositionAllMinimizedBoxes();
   }
 
@@ -10586,6 +10717,7 @@ if (activeTab === 'diagnostics') {
     minimizedWindowOrder = (minimizedWindowOrder || []).filter(id => id !== boxType);
     settings.minimizedWindowOrder = minimizedWindowOrder;
     queueSettingsSave({ minimizedWindowOrder: minimizedWindowOrder });
+    ensureCortexTopBar();
     repositionAllMinimizedBoxes();
   }
 

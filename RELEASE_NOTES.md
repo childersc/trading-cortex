@@ -1,3 +1,7 @@
+Trading Cortex v1.1.117 — Bottom-of-Chart Minimized Windows Dock (Right Below Chart Iframe)
+
+- **Dedicated Bottom-of-Chart Minimized Dock (`v1.1.117`)**: Minimized Cortex windows (`INSTRUMENT TRADES`, `OB STATS`, `UPCOMING NEWS`, `CORTEX DIAG`, `RANGE DETECTOR`, `POSITIONS`) now dock in a sleek `38px` bar directly **below the chart viewport's iframe** (outside the chart). When nothing is minimized, the dock hides completely—reclaiming the full top header height across Vest, Hypernova, MFP, and Kalshi Pro.
+
 Trading Cortex v1.1.116 — Cortex Pill Moved Into TradingView Top Chart Toolbar
 
 - **Native TradingView Chart Toolbar Placement (`v1.1.116`)**: Moved the compact **CORTEX** pill directly into TradingView's top chart toolbar immediately after **Indicators**, framed by clean vertical separators (`| CORTEX |`), with cross-frame dropdown positioning so the menu always opens cleanly beneath it.
