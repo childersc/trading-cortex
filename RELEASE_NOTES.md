@@ -1,3 +1,7 @@
+Trading Cortex v1.1.129 — Fixed My Funded Perps Bottom Dock Covering Top Chart Toolbar & Cortex Pill
+
+- **My Funded Perps Bottom Dock & Cortex Pill Fix (`v1.1.129`)**: Fixed `findChartBottomDockMountPoint()` to walk past `position: absolute` chart iframe wrappers to the in-flow `flex-column` container so minimized windows dock at the true bottom of the chart instead of stacking at `y = 0` over TradingView's top toolbar and hiding the `| CORTEX |` pill. Also cleans up stale empty toolbar slots across documents.
+
 Trading Cortex v1.1.128 — Width-Verified Cortex Pill Placement & My Funded Perps Canvas Chart Fix
 
 - **Exact `Indicators` Placement (`v1.1.128`)**: Replaced the fixed parent jump with a width-verified `toolbarRow` walk so `| CORTEX |` never overshoots into the outer wrapper behind `1m 4h`, and excluded `#vest-tv-cortex-toolbar-slot` from timeframe-favorites anchor scanning.

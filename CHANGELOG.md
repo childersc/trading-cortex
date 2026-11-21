@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.128`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.129`) are documented in this file.
+
+---
+
+## [v1.1.129] — 2026-11-21
+
+### 🎯 Fixed Bottom Dock Covering Top Toolbar on My Funded Perps (`position: absolute` Chart Iframe)
+- **Root cause verified via live DOM**: On My Funded Perps, the Cortex pill (`#vest-studio-header-pill`) was already mounted at the exact right spot inside TradingView's `innerWrap-P4LQzYFS` immediately after `#header-toolbar-indicators`, **but** the chart `<iframe>` is `position: absolute` inside `div.relative.bg-surface.h-full.min-h-0` — causing `vest-cortex-bottom-dock` (`position: relative`) to stack at `y = 0` (`top: 141px`, the top of the chart) and cover TradingView's entire top toolbar + Cortex pill!
+- **Fix (`findChartBottomDockMountPoint`)**: Walk up past any `position: absolute` / `fixed` wrapper (up to 7 levels) and skip horizontal `flex-row` parents until reaching an **in-flow** child of the vertical `flex-column` chart container so `vest-cortex-bottom-dock` always sits below the chart viewport and never covers the top toolbar.
+- **Ghost slot cleanup**: Remove any stale empty `#vest-tv-cortex-toolbar-slot` left in the top document once the pill mounts inside the TradingView iframe.
 
 ---
 

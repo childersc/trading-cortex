@@ -4516,22 +4516,43 @@
       }
       if (!chartEl || !chartEl.parentElement) return null;
 
-      // Walk up single-child wrapper divs (up to 3 levels) until we reach a flex-column or multi-child container
+      // Walk up wrapper divs (up to 7 levels) until targetEl is IN-FLOW (never position:absolute/fixed,
+      // which would cause a relative bottom dock sibling to stack at y=0 covering the top of the chart!)
+      // and lives inside a flex-column (or vertical block) container.
       let targetEl = chartEl;
       let depth = 0;
-      while (targetEl.parentElement && targetEl.parentElement !== document.body && depth < 3) {
+      let fallbackInFlow = null;
+      while (targetEl.parentElement && targetEl.parentElement !== document.body && depth < 7) {
         const parent = targetEl.parentElement;
+        const tStyle = window.getComputedStyle(targetEl);
         const pStyle = window.getComputedStyle(parent);
-        if (pStyle && pStyle.display && pStyle.display.includes('flex') && pStyle.flexDirection === 'column') {
-          return { parent, afterEl: targetEl, chartEl };
-        }
-        const visibleSibs = Array.from(parent.children).filter(c => c !== targetEl && c.id !== CORTEX_TOP_BAR_ID && c.getBoundingClientRect().height > 10);
-        if (visibleSibs.length > 0) {
-          return { parent, afterEl: targetEl, chartEl };
+        const isOutOfFlow = tStyle && (tStyle.position === 'absolute' || tStyle.position === 'fixed');
+        if (!isOutOfFlow) {
+          const isFlex = Boolean(pStyle && pStyle.display && pStyle.display.includes('flex'));
+          const isFlexCol = isFlex && pStyle.flexDirection === 'column';
+          const isFlexRow = isFlex && !isFlexCol;
+          if (isFlexCol) {
+            return { parent, afterEl: targetEl, chartEl };
+          }
+          if (!isFlexRow) {
+            if (!fallbackInFlow) {
+              fallbackInFlow = { parent, afterEl: targetEl, chartEl };
+            }
+            const visibleSibs = Array.from(parent.children).filter(c => {
+              if (!c || c === targetEl || c.id === CORTEX_TOP_BAR_ID) return false;
+              const cs = window.getComputedStyle(c);
+              if (cs && (cs.position === 'absolute' || cs.position === 'fixed')) return false;
+              return c.getBoundingClientRect().height > 10;
+            });
+            if (visibleSibs.length > 0) {
+              return { parent, afterEl: targetEl, chartEl };
+            }
+          }
         }
         targetEl = parent;
         depth++;
       }
+      if (fallbackInFlow) return fallbackInFlow;
       if (targetEl.parentElement && targetEl.parentElement !== document.body) {
         return { parent: targetEl.parentElement, afterEl: targetEl, chartEl };
       }
@@ -5282,6 +5303,22 @@
     if (tvAnchor && tvAnchor.parent && (tvAnchor.afterEl || tvAnchor.appendToParent) && tvAnchor.doc) {
       const targetDoc = tvAnchor.doc;
       ensureCortexPillStylesInDoc(targetDoc);
+
+      // Remove any stale empty toolbar slot left in another document (e.g. top doc before iframe loaded)
+      try {
+        if (targetDoc !== document) {
+          const staleTopSlot = document.getElementById('vest-tv-cortex-toolbar-slot');
+          if (staleTopSlot) staleTopSlot.remove();
+        }
+        document.querySelectorAll('iframe').forEach(ifr => {
+          try {
+            if (ifr.contentDocument && ifr.contentDocument !== targetDoc) {
+              const staleSlot = ifr.contentDocument.getElementById('vest-tv-cortex-toolbar-slot');
+              if (staleSlot) staleSlot.remove();
+            }
+          } catch (e) {}
+        });
+      } catch (e) {}
 
       let slot = targetDoc.getElementById('vest-tv-cortex-toolbar-slot');
       if (!slot) {
