@@ -1,3 +1,7 @@
+Trading Cortex v1.1.112 — Hypernova In-Flow Cortex Bar (Clean Top/Bottom Separation)
+
+- **In-Flow Layout Container on Hypernova (`v1.1.112`)**: The Cortex black bar now mounts directly in normal document flow as its own flex row right between Hypernova's top header (`Active Assessment` / `A1`) and the ticker/chart workspace below—forcing top content above it and bottom content below it with zero overlap.
+
 Trading Cortex v1.1.111 — Fixed Chart Viewport Snap-Back on Resize & Out-of-Focus Tab Fighting
 
 - **Zero Chart Snap-Back on Resize (`v1.1.111`)**: Fixed child-iframe focus flips, cleared stale `lastChartSettingsMeta` replays after dispatch, and added a 15-second interaction/resize shield so resizing, zooming, or panning a chart never snaps back to an older position.

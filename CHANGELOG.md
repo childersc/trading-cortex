@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.111`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.112`) are documented in this file.
+
+---
+
+## [v1.1.112] — 2026-11-21
+
+### 📐 Hypernova In-Flow Cortex Top Bar (`vest-cortex-inflow-bar`)
+- **Dedicated In-Flow Layout Div Between Header & Chart**:
+  - Added `findHypernovaInflowMountPoint()` in `content-isolated.js` and `#vest-cortex-top-bar.vest-cortex-inflow-bar` (`position: relative; width: 100%; flex-shrink: 0; z-index: 5`) in `template-bar.css`.
+  - Instead of floating with `position: fixed` over Hypernova's `Active Assessment` / `A1` header row, the Cortex black bar now inserts directly into normal document flow right between Hypernova's top header and the trading workspace below—pushing both top and bottom content cleanly outside of its own container with zero overlap over headers, dropdowns, or pull-out sidebars.
 
 ---
 

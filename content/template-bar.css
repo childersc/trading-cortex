@@ -1473,6 +1473,19 @@ body.vest-popout-body #vest-action-log-box {
   z-index: 15 !important;
 }
 
+#vest-cortex-top-bar.vest-cortex-inflow-bar {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  z-index: 5 !important;
+}
+
 /* Legacy bottom-bar active rules neutralized to prevent bottom page stretching */
 html.vest-cortex-bottom-bar-active,
 body.vest-cortex-bottom-bar-active {

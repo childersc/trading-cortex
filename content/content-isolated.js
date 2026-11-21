@@ -4193,6 +4193,53 @@
     return 48;
   }
 
+  function findHypernovaInflowMountPoint() {
+    if (!isHypernovaHost()) return null;
+    try {
+      // 1. Find Hypernova's top header inside the main right-hand column (e.g. "Active Assessment" / <header>)
+      const headerCandidates = Array.from(document.querySelectorAll('header, [role="banner"], div')).filter(el => {
+        if (!el || el.id === CORTEX_TOP_BAR_ID || el.id.startsWith('vest-') || el.closest('#' + CORTEX_TOP_BAR_ID)) return false;
+        const r = el.getBoundingClientRect();
+        if (r.top < -4 || r.top > 12 || r.height < 30 || r.height > 80 || r.width < window.innerWidth * 0.5) return false;
+        const parent = el.parentElement;
+        if (!parent || parent === document.body) return false;
+        // Must have a sibling below it (the trading content / chart area)
+        let sib = el.nextElementSibling;
+        while (sib && sib.id === CORTEX_TOP_BAR_ID) sib = sib.nextElementSibling;
+        if (!sib) return false;
+        const sr = sib.getBoundingClientRect();
+        return sr.height >= 240 && sr.width >= window.innerWidth * 0.5;
+      });
+
+      // Prefer semantic <header> or the deepest direct header bar right above the main trading workspace
+      headerCandidates.sort((a, b) => {
+        const aScore = (a.tagName === 'HEADER' ? 10 : 0) + (a.getBoundingClientRect().left >= 32 ? 5 : 0);
+        const bScore = (b.tagName === 'HEADER' ? 10 : 0) + (b.getBoundingClientRect().left >= 32 ? 5 : 0);
+        if (bScore !== aScore) return bScore - aScore;
+        return b.getBoundingClientRect().left - a.getBoundingClientRect().left;
+      });
+
+      if (headerCandidates.length > 0) {
+        const headerEl = headerCandidates[0];
+        let afterEl = headerEl.nextElementSibling;
+        while (afterEl && afterEl.id === CORTEX_TOP_BAR_ID) afterEl = afterEl.nextElementSibling;
+        if (headerEl.parentElement && afterEl) {
+          return { parent: headerEl.parentElement, beforeEl: afterEl, headerEl };
+        }
+      }
+
+      // 2. Fallback: locate <main> or the ticker row's top-level workspace container inside a flex-column parent
+      const mainEl = document.querySelector('main');
+      if (mainEl && mainEl.parentElement && mainEl.parentElement !== document.body) {
+        const mr = mainEl.getBoundingClientRect();
+        if (mr.height >= 240 && mr.width >= window.innerWidth * 0.5) {
+          return { parent: mainEl.parentElement, beforeEl: mainEl, headerEl: mainEl.previousElementSibling };
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function ensureCortexTopBar() {
     if (!document.body) return null;
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
@@ -4202,9 +4249,6 @@
       document.body.classList.remove('vest-cortex-top-bar-active');
       return null;
     }
-    const headerBottom = getMainHeaderBottom();
-    const barMargin = (activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM;
-    adjustLayoutForTopBar(headerBottom, CORTEX_BAR_HEIGHT, barMargin);
 
     let bar = document.getElementById(CORTEX_TOP_BAR_ID);
     if (!bar) {
@@ -4213,25 +4257,71 @@
       bar.setAttribute('role', 'region');
       bar.setAttribute('aria-label', 'Trading Cortex toolbar');
     }
-    if (bar.parentElement !== document.body) {
-      document.body.appendChild(bar);
-    }
-    bar.style.top = `${headerBottom}px`;
-    bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
+
     if (isHypernovaHost()) {
+      const mount = findHypernovaInflowMountPoint();
+      if (mount && mount.parent && mount.beforeEl) {
+        // Clear any legacy fixed-bar layout offsets so normal flex/block flow handles top & bottom spacing cleanly
+        if (lastAdjustedContentEl) {
+          try {
+            lastAdjustedContentEl.style.marginTop = '';
+            lastAdjustedContentEl.style.maxHeight = '';
+          } catch (e) {}
+          lastAdjustedContentEl = null;
+        }
+        if (bar.parentElement !== mount.parent || bar.nextElementSibling !== mount.beforeEl) {
+          mount.parent.insertBefore(bar, mount.beforeEl);
+        }
+        // Ensure the trading content container below shrinks cleanly inside 100vh without clipping
+        try {
+          if (!mount.beforeEl.style.minHeight) {
+            mount.beforeEl.style.minHeight = '0px';
+          }
+        } catch (e) {}
+        bar.classList.remove('vest-cortex-hypernova-aligned');
+        bar.classList.add('vest-cortex-inflow-bar');
+        bar.style.top = '';
+        bar.style.left = '';
+        bar.style.right = '';
+        bar.style.width = '100%';
+        bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
+        bar.style.zIndex = '5';
+        return bar;
+      }
+
+      // Hydration fallback before Hypernova's <header>/<main> finishes mounting
+      const headerBottom = getMainHeaderBottom();
+      const barMargin = (activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM;
+      adjustLayoutForTopBar(headerBottom, CORTEX_BAR_HEIGHT, barMargin);
+      if (bar.parentElement !== document.body) {
+        document.body.appendChild(bar);
+      }
       const leftInset = getHypernovaChartLeftInset();
+      bar.classList.remove('vest-cortex-inflow-bar');
       bar.classList.add('vest-cortex-hypernova-aligned');
+      bar.style.top = `${headerBottom}px`;
+      bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
       bar.style.left = `${leftInset}px`;
       bar.style.right = '0px';
       bar.style.width = 'auto';
       bar.style.zIndex = '15';
-    } else {
-      bar.classList.remove('vest-cortex-hypernova-aligned');
-      bar.style.left = '0px';
-      bar.style.right = '0px';
-      bar.style.width = '100%';
-      bar.style.zIndex = '';
+      return bar;
     }
+
+    const headerBottom = getMainHeaderBottom();
+    const barMargin = (activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM;
+    adjustLayoutForTopBar(headerBottom, CORTEX_BAR_HEIGHT, barMargin);
+    if (bar.parentElement !== document.body) {
+      document.body.appendChild(bar);
+    }
+    bar.classList.remove('vest-cortex-hypernova-aligned');
+    bar.classList.remove('vest-cortex-inflow-bar');
+    bar.style.top = `${headerBottom}px`;
+    bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
+    bar.style.left = '0px';
+    bar.style.right = '0px';
+    bar.style.width = '100%';
+    bar.style.zIndex = '';
     return bar;
   }
 
