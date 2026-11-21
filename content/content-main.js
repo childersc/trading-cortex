@@ -2117,6 +2117,38 @@
     }
   }
 
+  function getCurrentVenueBaseDomain() {
+    const host = getCurrentChartHostKey();
+    if (!host) return '';
+    const parts = host.split('.').filter(Boolean);
+    return parts.length >= 2 ? parts.slice(-2).join('.') : host;
+  }
+
+  function doesGlobalDrawingMatchCurrentVenue(record) {
+    if (!record || record.syncScope !== 'venue') return true;
+    const recHost = String(record.sourceHost || '').toLowerCase();
+    if (!recHost) return true;
+    const curHost = getCurrentChartHostKey();
+    if (!curHost) return true;
+    if (curHost === recHost) return true;
+    const curBase = getCurrentVenueBaseDomain();
+    const recParts = recHost.split('.').filter(Boolean);
+    const recBase = recParts.length >= 2 ? recParts.slice(-2).join('.') : recHost;
+    return Boolean(curBase && recBase && curBase === recBase);
+  }
+
+  function applyConfirmedGlobalSyncForShape(entityId, drawing) {
+    if (!entityId || !drawing || !drawing.id) return;
+    globalDrawingEntityMap.set(entityId, drawing.id);
+    globalDrawingEntityMap.set(String(entityId), drawing.id);
+    lastKnownLiveShapeIds.add(entityId);
+    lastKnownLiveShapeIds.add(String(entityId));
+    removedGlobalDrawingIds.delete(drawing.id);
+    const existingIdx = currentGlobalDrawings.findIndex(item => item && item.id === drawing.id);
+    if (existingIdx >= 0) currentGlobalDrawings[existingIdx] = drawing;
+    else currentGlobalDrawings = [...currentGlobalDrawings, drawing];
+  }
+
   function toggleGlobalSyncForShape(entityId) {
     const key = globalDrawingEntityMap.has(entityId) ? entityId : (globalDrawingEntityMap.has(String(entityId)) ? String(entityId) : null);
     if (key) {
@@ -2138,13 +2170,13 @@
       postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: 'Unable to sync this drawing globally' });
       return;
     }
-    globalDrawingEntityMap.set(entityId, drawing.id);
-    globalDrawingEntityMap.set(String(entityId), drawing.id);
-    lastKnownLiveShapeIds.add(entityId);
-    lastKnownLiveShapeIds.add(String(entityId));
-    removedGlobalDrawingIds.delete(drawing.id);
-    postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
-    postToIsolated({ type: 'VEST_TV_SHOW_TOAST', message: `Syncing ${drawing.timeframe} drawing globally across ${drawing.symbol} charts` });
+    drawing.sourceHost = getCurrentChartHostKey();
+    // Ask the user via modal whether to sync on the current venue only or across all venues (with index-price warning)
+    postToIsolated({
+      type: 'VEST_TV_GLOBAL_DRAWING_PROMPT_SCOPE',
+      entityId,
+      drawing
+    });
   }
 
   function queueGlobalDrawingUpdate(entityId, globalId) {
@@ -2157,7 +2189,15 @@
       const currentGlobalId = globalDrawingEntityMap.get(entityId) || globalDrawingEntityMap.get(String(entityId));
       if (currentGlobalId !== globalId) return;
       const drawing = serializeGlobalDrawing(entityId, globalId);
-      if (drawing) postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
+      if (drawing) {
+        const existingRec = currentGlobalDrawings.find(item => item && item.id === globalId);
+        if (existingRec) {
+          if (existingRec.syncScope) drawing.syncScope = existingRec.syncScope;
+          if (existingRec.sourceHost) drawing.sourceHost = existingRec.sourceHost;
+          if (existingRec.sourceVenue) drawing.sourceVenue = existingRec.sourceVenue;
+        }
+        postToIsolated({ type: 'VEST_TV_GLOBAL_DRAWING_UPSERT', drawing });
+      }
     }, 300);
     globalDrawingUpdateTimers.set(entityId, timer);
   }
@@ -2265,7 +2305,11 @@
       lastKnownLiveShapeIds.clear();
     }
     const withinInitialHydrationWindow = Date.now() - restoreState.startedAt < 6000;
-    const records = currentGlobalDrawings.filter(record => record && String(record.symbol).toUpperCase() === normalizedSymbol);
+    const records = currentGlobalDrawings.filter(record =>
+      record &&
+      String(record.symbol).toUpperCase() === normalizedSymbol &&
+      doesGlobalDrawingMatchCurrentVenue(record)
+    );
     let chartShapes = [];
     try { chartShapes = activeChart.getAllShapes() || []; } catch (e) { return; }
     const persistedShapes = getPersistedChartDrawingCandidates();
@@ -3846,6 +3890,12 @@
       case 'VEST_TV_GLOBAL_DRAWINGS_UPDATE': {
         updateGlobalDrawingsSnapshot(payload && payload.drawings);
         restoreGlobalDrawings();
+        break;
+      }
+      case 'VEST_TV_GLOBAL_DRAWING_SCOPE_CONFIRMED': {
+        if (payload && payload.entityId && payload.drawing) {
+          applyConfirmedGlobalSyncForShape(payload.entityId, payload.drawing);
+        }
         break;
       }
       case 'VEST_TV_CHART_MEMORY_FOCUS': {

@@ -3480,6 +3480,9 @@
         badge.className = `vest-sdm-badge-pill ${latestDrawingToolbarVisible ? 'on' : ''}`;
         badge.textContent = latestDrawingToolbarVisible ? 'VISIBLE' : 'HIDDEN';
       }
+    } else if (type === 'VEST_TV_GLOBAL_DRAWING_PROMPT_SCOPE') {
+      if (!isTopWindow || !isExtensionValid() || !event.data.drawing) return;
+      openGlobalSyncScopeModal(event.data.entityId, event.data.drawing);
     } else if (type === 'VEST_TV_GLOBAL_DRAWING_UPSERT') {
       if (!isTopWindow || !isExtensionValid() || !event.data.drawing) return;
       const drawing = event.data.drawing;
@@ -17086,6 +17089,145 @@ if (activeTab === 'diagnostics') {
   // -------------------------------------------------------------
   // TradingView Settings-Style "Template Manager" Dialog Box
   // -------------------------------------------------------------
+  function openGlobalSyncScopeModal(entityId, drawing) {
+    if (!isTopWindow || !drawing) return;
+    const existing = document.getElementById('vest-global-sync-scope-modal');
+    if (existing) existing.remove();
+
+    const venueName = typeof getActiveVenueName === 'function' ? getActiveVenueName() : (window.location.hostname || 'Current Venue');
+    const symbolLabel = String(drawing.symbol || currentInstrument || 'this instrument');
+    const tfLabel = String(drawing.timeframe || '').trim();
+    let selectedScope = 'venue'; // 'venue' | 'all'
+
+    const overlay = document.createElement('div');
+    overlay.id = 'vest-global-sync-scope-modal';
+    overlay.className = 'vest-tvs-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,0.68);backdrop-filter:blur(6px);';
+
+    overlay.innerHTML = `
+      <div style="width:440px;max-width:92vw;border-radius:12px;background:#0d1117;border:1px solid rgba(56,189,248,0.32);box-shadow:0 24px 64px rgba(0,0,0,0.65);color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,sans-serif;overflow:hidden;">
+        <div style="padding:14px 18px;border-bottom:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:15px;">🌐</span>
+            <span style="font-size:14px;font-weight:700;color:#f8fafc;">Sync Drawing Globally</span>
+          </div>
+          <button type="button" id="vest-gss-close-btn" style="background:none;border:none;color:#94a3b8;font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;">×</button>
+        </div>
+
+        <div style="padding:16px 18px;display:flex;flex-direction:column;gap:12px;">
+          <div style="font-size:12.5px;color:#cbd5e1;line-height:1.45;">
+            Choose where to sync this <strong>${escapeHtml(tfLabel ? `${tfLabel} ` : '')}${escapeHtml(symbolLabel)}</strong> drawing:
+          </div>
+
+          <label id="vest-gss-opt-venue" style="display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:8px;border:1.5px solid #38bdf8;background:rgba(56,189,248,0.1);cursor:pointer;transition:all 0.15s ease;">
+            <input type="radio" name="vest-gss-scope" value="venue" checked style="margin-top:3px;accent-color:#38bdf8;" />
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <div style="font-size:13px;font-weight:700;color:#f8fafc;">
+                Current Venue Only (${escapeHtml(venueName)})
+                <span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(16,185,129,0.2);color:#34d399;margin-left:6px;">Recommended</span>
+              </div>
+              <div style="font-size:11.5px;color:#94a3b8;line-height:1.4;">
+                Syncs across all open <strong>${escapeHtml(venueName)}</strong> charts &amp; timeframes for ${escapeHtml(symbolLabel)} with exact venue pricing.
+              </div>
+            </div>
+          </label>
+
+          <label id="vest-gss-opt-all" style="display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:8px;border:1.5px solid #334155;background:#111827;cursor:pointer;transition:all 0.15s ease;">
+            <input type="radio" name="vest-gss-scope" value="all" style="margin-top:3px;accent-color:#f59e0b;" />
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <div style="font-size:13px;font-weight:700;color:#f8fafc;">All Venues (Cross-Exchange)</div>
+              <div style="font-size:11.5px;color:#94a3b8;line-height:1.4;">
+                Syncs across Vest Markets, Hypernova, My Funded Perpetuals, Kalshi Pro, and all other exchanges for ${escapeHtml(symbolLabel)}.
+              </div>
+            </div>
+          </label>
+
+          <div id="vest-gss-warning" style="display:none;padding:10px 12px;border-radius:8px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.5);color:#fde68a;font-size:11.5px;line-height:1.45;">
+            <strong>⚠️ Pricing &amp; FVG Difference Warning:</strong> Each venue uses its own index/mark price feed, so pricing may be slightly off across exchanges and Fair Value Gaps (FVGs) or Order Blocks may not be identical on other venues.
+          </div>
+        </div>
+
+        <div style="padding:12px 18px;border-top:1px solid #1e293b;display:flex;align-items:center;justify-content:flex-end;gap:8px;background:#0a0e14;">
+          <button type="button" id="vest-gss-cancel-btn" class="vest-tvs-action-btn" style="height:32px;padding:0 14px;font-size:12px;">Cancel</button>
+          <button type="button" id="vest-gss-confirm-btn" class="vest-tvs-action-btn" style="height:32px;padding:0 16px;font-size:12px;font-weight:700;background:#0284c7;border-color:#38bdf8;color:#ffffff;">Sync on ${escapeHtml(venueName)}</button>
+        </div>
+      </div>
+    `;
+
+    const venueCard = overlay.querySelector('#vest-gss-opt-venue');
+    const allCard = overlay.querySelector('#vest-gss-opt-all');
+    const warningEl = overlay.querySelector('#vest-gss-warning');
+    const confirmBtn = overlay.querySelector('#vest-gss-confirm-btn');
+
+    const updateSelectionUi = () => {
+      if (selectedScope === 'all') {
+        venueCard.style.borderColor = '#334155';
+        venueCard.style.background = '#111827';
+        allCard.style.borderColor = '#f59e0b';
+        allCard.style.background = 'rgba(245,158,11,0.1)';
+        warningEl.style.display = 'block';
+        confirmBtn.textContent = 'Sync Across All Venues';
+        confirmBtn.style.background = '#d97706';
+        confirmBtn.style.borderColor = '#fbbf24';
+      } else {
+        venueCard.style.borderColor = '#38bdf8';
+        venueCard.style.background = 'rgba(56,189,248,0.1)';
+        allCard.style.borderColor = '#334155';
+        allCard.style.background = '#111827';
+        warningEl.style.display = 'none';
+        confirmBtn.textContent = `Sync on ${venueName}`;
+        confirmBtn.style.background = '#0284c7';
+        confirmBtn.style.borderColor = '#38bdf8';
+      }
+    };
+
+    overlay.querySelectorAll('input[name="vest-gss-scope"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        selectedScope = radio.value === 'all' ? 'all' : 'venue';
+        updateSelectionUi();
+      });
+    });
+
+    const closeModal = () => overlay.remove();
+    overlay.querySelector('#vest-gss-close-btn')?.addEventListener('click', closeModal);
+    overlay.querySelector('#vest-gss-cancel-btn')?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    confirmBtn?.addEventListener('click', async () => {
+      const finalizedDrawing = {
+        ...drawing,
+        syncScope: selectedScope,
+        sourceHost: String(drawing.sourceHost || window.location.hostname || '').toLowerCase(),
+        sourceVenue: venueName
+      };
+      globalDrawings = (globalDrawings || []).filter(item => item && item.id !== finalizedDrawing.id);
+      globalDrawings.push(finalizedDrawing);
+      postToMainWorlds({
+        type: 'VEST_TV_GLOBAL_DRAWING_SCOPE_CONFIRMED',
+        payload: { entityId, drawing: finalizedDrawing }
+      });
+      postToMainWorlds({
+        type: 'VEST_TV_GLOBAL_DRAWINGS_UPDATE',
+        payload: { drawings: globalDrawings }
+      });
+      const stored = await chrome.storage.local.get(['globalDrawings']).catch(() => ({}));
+      const latest = normalizeGlobalDrawings(stored.globalDrawings || globalDrawings);
+      const next = latest.filter(item => item && item.id !== finalizedDrawing.id);
+      next.push(finalizedDrawing);
+      saveGlobalDrawings(next);
+      showToast(
+        selectedScope === 'all'
+          ? `Syncing ${tfLabel} drawing across ALL venues for ${symbolLabel}`
+          : `Syncing ${tfLabel} drawing across ${venueName} ${symbolLabel} charts`
+      );
+      closeModal();
+    });
+
+    document.body.appendChild(overlay);
+  }
+
   function openTemplateManagerModal(initialCategory = 'all', initialEditTemplateId = null) {
     if (!isTopWindow) return;
     closeTemplateEditorModal();

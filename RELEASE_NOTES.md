@@ -1,3 +1,7 @@
+Trading Cortex v1.1.125 — Sync Globally Venue Scope Modal & Index Price Warning
+
+- **Venue-Scoped Global Sync (`v1.1.125`)**: Clicking **Sync globally** now prompts you to choose **Current Venue Only** (recommended, keeps exact venue pricing) or **All Venues (Cross-Exchange)** with a clear warning that different venues use different index prices and FVGs may not be identical across exchanges.
+
 Trading Cortex v1.1.124 — Fixed Cortex Pill Placement Right After Indicators Group
 
 - **Exact Toolbar Row Placement (`v1.1.124`)**: Inserts `| CORTEX |` directly into TradingView's `.inner-*` toolbar row immediately after the `Indicators` group (copying its flex `order` and using `z-index: 25`), matching the exact proven placement pattern of the favorite timeframes bar.

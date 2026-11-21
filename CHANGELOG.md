@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.124`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.125`) are documented in this file.
+
+---
+
+## [v1.1.125] — 2026-11-21
+
+### 🌐 Sync Globally Scope Modal (Current Venue vs. All Venues + Index Price Warning)
+- Clicking **Sync globally** on a drawing now opens a dedicated confirmation modal (`openGlobalSyncScopeModal`) letting you choose between:
+  - **Current Venue Only** *(Recommended)* — syncs across all charts & timeframes on the current exchange with exact venue pricing (`syncScope: 'venue'`, matched via `sourceHost` in `restoreGlobalDrawings()`).
+  - **All Venues (Cross-Exchange)** — syncs across all exchanges (`syncScope: 'all'`), displaying an amber warning explaining that each venue uses its own index/mark price feed so pricing may be slightly off and FVGs/Order Blocks may not be identical across venues.
 
 ---
 
