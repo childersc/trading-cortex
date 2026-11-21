@@ -3784,11 +3784,14 @@
         const wasFocused = chartMemoryTabFocused;
         chartMemoryTabFocused = Boolean(payload && payload.focused);
         if (wasFocused && !chartMemoryTabFocused) {
-          // Flush the final viewport before this tab stops being the publisher.
-          saveCurrentChartSettings(true);
+          // Only flush on blur if the user actually interacted with/resized this chart recently
+          // so idle/background charts never overwrite an actively used chart!
+          if (Date.now() - lastLocalChartInteractionAt < 15000) {
+            saveCurrentChartSettings(true);
+          }
         } else if (!wasFocused && chartMemoryTabFocused) {
-          // A newly focused tab becomes the single publisher for this chart key.
-          scheduleSaveCurrentChartSettings(80);
+          // Do not immediately overwrite shared storage just from clicking into a tab;
+          // wait until the user actually zooms/pans/resizes this chart.
         }
         break;
       }
@@ -5748,6 +5751,37 @@
   let isResettingChartView = false;
   let chartMemoryTabId = '';
   let chartMemoryTabFocused = false;
+  let lastLocalChartInteractionAt = 0;
+  function markLocalChartInteraction() {
+    lastLocalChartInteractionAt = Date.now();
+  }
+  function getCurrentChartHostKey() {
+    try {
+      const host = (window.top && window.top.location && window.top.location.hostname) ||
+        (window.location && window.location.hostname) || '';
+      return String(host).toLowerCase();
+    } catch (e) {
+      try {
+        return String((window.location && window.location.hostname) || '').toLowerCase();
+      } catch (e2) {
+        return '';
+      }
+    }
+  }
+  function hasLiveWindowFocus() {
+    try {
+      if (document.visibilityState === 'visible' && typeof document.hasFocus === 'function' && document.hasFocus()) {
+        return true;
+      }
+      if (window.top && window.top.document && window.top.document.visibilityState === 'visible' && typeof window.top.document.hasFocus === 'function' && window.top.document.hasFocus()) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  try {
+    window.addEventListener('resize', markLocalChartInteraction, { capture: true, passive: true });
+  } catch (e) {}
   try {
     chartMemoryTabId = window.__TRADING_CORTEX_CHART_MEMORY_TAB_ID__ ||
       `tc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
@@ -5809,9 +5843,13 @@
 
   function applyIncomingChartViewportIfNewer(meta = null) {
     if (currentSettings.rememberLastChartSettings === false || !activeChart) return;
-    // The focused tab is authoritative. Background tabs follow its updates but never
-    // push their own viewport back into the shared chart-memory record.
-    if (chartMemoryTabFocused) return;
+    // Never overwrite a focused, recently resized, or recently interacted chart!
+    if (chartMemoryTabFocused || hasLiveWindowFocus()) return;
+    if (Date.now() - lastLocalChartInteractionAt < 15000) return;
+    // Require explicit fresh viewport-change metadata from another tab on the SAME exchange host
+    if (!meta || !meta.sourceTabId || meta.sourceTabId === chartMemoryTabId) return;
+    const currentHost = getCurrentChartHostKey();
+    if (meta.host && currentHost && String(meta.host).toLowerCase() !== currentHost) return;
     const context = getActiveChartMemoryContext();
     if (!context) return;
 
@@ -5829,6 +5867,7 @@
 
     const state = getSavedViewportForActiveChart(currentSettings.lastChartSettings || {});
     if (!state || !state.viewport || state.sourceTabId === chartMemoryTabId) return;
+    if (state.host && currentHost && String(state.host).toLowerCase() !== currentHost) return;
 
     // Strict verification that stored state matches this chart's active resolution
     if (state.resolution && String(state.resolution).toUpperCase() !== String(context.resolution).toUpperCase()) {
@@ -6269,21 +6308,33 @@
       }
     } catch (e) {}
 
-    // Listen for canvas drag/pan (mouseup), mousewheel zoom (wheel), and toolbar/dialog clicks
+    // Listen for canvas drag/pan (mouseup), mousewheel zoom (wheel), resize, and toolbar/dialog clicks
     const docs = getSidebarDocuments();
     docs.forEach(doc => {
       try {
+        doc.addEventListener('pointerdown', markLocalChartInteraction, { capture: true, passive: true });
+        doc.addEventListener('mousedown', markLocalChartInteraction, { capture: true, passive: true });
         doc.addEventListener('mouseup', () => {
+          markLocalChartInteraction();
           scheduleSaveCurrentChartSettings(250);
         }, true);
 
         doc.addEventListener('wheel', () => {
+          markLocalChartInteraction();
           scheduleSaveCurrentChartSettings(350);
         }, { capture: true, passive: true });
 
         doc.addEventListener('touchend', () => {
+          markLocalChartInteraction();
           scheduleSaveCurrentChartSettings(300);
         }, { capture: true, passive: true });
+
+        if (doc.defaultView) {
+          doc.defaultView.addEventListener('resize', () => {
+            markLocalChartInteraction();
+            scheduleSaveCurrentChartSettings(350);
+          }, { capture: true, passive: true });
+        }
 
         doc.addEventListener('click', (e) => {
           const target = e.target;
@@ -6346,11 +6397,13 @@
       ? `${String(symbol).toUpperCase()}|${String(resolution).toUpperCase()}`
       : null;
     if (viewport) {
+      const currentHost = getCurrentChartHostKey();
       const chartState = {
         ...viewport,
         viewport,
         symbol,
         resolution,
+        host: currentHost,
         sourceTabId: chartMemoryTabId,
         updatedAt: savedAt
       };
@@ -6443,6 +6496,7 @@
         symbol,
         resolution,
         chartKey,
+        host: getCurrentChartHostKey(),
         sourceTabId: chartMemoryTabId
       }
     });

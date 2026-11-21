@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.110`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.111`) are documented in this file.
+
+---
+
+## [v1.1.111] — 2026-11-21
+
+### 🛠️ Fixed Chart Viewport Snap-Back on Resize & Cross-Tab / Cross-Exchange Viewport Fighting
+- **Eliminated Child-Iframe Focus Poisoning & Stale `settingsMeta` Replay**:
+  - Restricted `syncChartMemoryFocusState()` strictly to `isTopWindow` so TradingView child iframes never overwrite the active tab's focus state with `focused: false` during clicks or resizes.
+  - Cleared `lastChartSettingsMeta` immediately after `notifyMainWorldConfig()` dispatches it so unrelated config updates (account sync, OB stats, settings changes) never replay an old viewport.
+- **Protected Resized / Active Charts & Isolated Viewports by Host**:
+  - Added `lastLocalChartInteractionAt` tracking across `resize`, `wheel`, `pointerdown`, `mousedown`, `mouseup`, and `touchend`, blocking `applyIncomingChartViewportIfNewer()` for any focused or recently resized/interacted chart (`15s` cooldown).
+  - Scoped viewport sync metadata and saved chart states by exchange hostname (`meta.host` / `state.host`) so open charts on different venues (e.g., Vest Markets vs. Hypernova on `HYPE`) never overwrite each other.
+  - Prevented idle/out-of-focus charts from flushing stale viewports on blur unless recently interacted with.
 
 ---
 

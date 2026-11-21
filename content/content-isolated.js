@@ -2217,6 +2217,7 @@
   }
 
   function syncChartMemoryFocusState() {
+    if (!isTopWindow) return;
     let focused = false;
     try {
       focused = document.visibilityState === 'visible' && document.hasFocus();
@@ -2227,24 +2228,28 @@
     });
   }
 
-  window.addEventListener('focus', syncChartMemoryFocusState, true);
-  window.addEventListener('blur', syncChartMemoryFocusState, true);
-  document.addEventListener('visibilitychange', syncChartMemoryFocusState, true);
-  window.addEventListener('pageshow', syncChartMemoryFocusState, true);
-  setTimeout(syncChartMemoryFocusState, 0);
+  if (isTopWindow) {
+    window.addEventListener('focus', syncChartMemoryFocusState, true);
+    window.addEventListener('blur', syncChartMemoryFocusState, true);
+    document.addEventListener('visibilitychange', syncChartMemoryFocusState, true);
+    window.addEventListener('pageshow', syncChartMemoryFocusState, true);
+    setTimeout(syncChartMemoryFocusState, 0);
+  }
 
   let settingsLoaded = false;
   let lastChartSettingsMeta = null;
 
   function notifyMainWorldConfig() {
     if (!settingsLoaded) return;
+    const metaToSend = lastChartSettingsMeta;
+    lastChartSettingsMeta = null;
     postToMainWorlds({
       type: 'VEST_TV_CONFIG_UPDATE',
       payload: {
         templates,
         settings,
         globalDrawings,
-        settingsMeta: lastChartSettingsMeta
+        settingsMeta: metaToSend
       }
     });
     refreshCortexPaperStatsOnChart();

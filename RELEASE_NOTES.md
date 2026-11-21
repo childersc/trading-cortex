@@ -1,3 +1,8 @@
+Trading Cortex v1.1.111 — Fixed Chart Viewport Snap-Back on Resize & Out-of-Focus Tab Fighting
+
+- **Zero Chart Snap-Back on Resize (`v1.1.111`)**: Fixed child-iframe focus flips, cleared stale `lastChartSettingsMeta` replays after dispatch, and added a 15-second interaction/resize shield so resizing, zooming, or panning a chart never snaps back to an older position.
+- **Strict Per-Exchange & Focus Isolation (`v1.1.111`)**: Scoped chart viewport sync by exchange hostname (so Vest Markets and Hypernova charts on the same ticker never overwrite each other) and stopped idle/out-of-focus charts from flushing stale viewports on blur.
+
 Trading Cortex v1.1.110 — Hypernova Top Bar Chart Alignment & Zero Menu/Sidebar Overlap
 
 - **Hypernova Chart Alignment (`v1.1.110`)**: The Cortex black top bar now aligns flush with the left edge of the Hypernova chart workspace (clearing the left icon rail).
