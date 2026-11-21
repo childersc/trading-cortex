@@ -1,3 +1,7 @@
+Trading Cortex v1.1.113 — Fixed Hypernova Fixed-Header Overlap (Self-Measuring In-Flow Bar)
+
+- **Clean Separation Below Hypernova's `Active Assessment` Header (`v1.1.113`)**: Self-measures the in-flow Cortex bar against Hypernova's fixed top header and left icon rail so it always sits cleanly **below** `Active Assessment` / `A1` and pushes the ticker & chart directly below it with zero overlap.
+
 Trading Cortex v1.1.112 — Hypernova In-Flow Cortex Bar (Clean Top/Bottom Separation)
 
 - **In-Flow Layout Container on Hypernova (`v1.1.112`)**: The Cortex black bar now mounts directly in normal document flow as its own flex row right between Hypernova's top header (`Active Assessment` / `A1`) and the ticker/chart workspace below—forcing top content above it and bottom content below it with zero overlap.

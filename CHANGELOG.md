@@ -1,6 +1,14 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.112`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.113`) are documented in this file.
+
+---
+
+## [v1.1.113] — 2026-11-21
+
+### 📐 Fixed Hypernova Fixed-Header Overlap via Self-Measuring In-Flow Offset
+- **Clears Hypernova's `position: fixed` Top Header (`Active Assessment` / `A1`)**:
+  - Updated `ensureCortexTopBar()` on Hypernova to mount inside `<main>` when `<main>` uses `padding-top` to clear the fixed header, and self-measure `bar.getBoundingClientRect()` against `headerEl.getBoundingClientRect().bottom` and `getHypernovaChartLeftInset()` so `#vest-cortex-top-bar` always sits cleanly **below** `Active Assessment` / `A1` and pushes the ticker/chart workspace cleanly below it.
 
 ---
 

@@ -4269,23 +4269,68 @@
           } catch (e) {}
           lastAdjustedContentEl = null;
         }
-        if (bar.parentElement !== mount.parent || bar.nextElementSibling !== mount.beforeEl) {
-          mount.parent.insertBefore(bar, mount.beforeEl);
+
+        // If the main workspace container uses padding-top to clear a position:fixed header,
+        // mount our bar as its FIRST CHILD so the container's own padding-top places our bar
+        // right below the header with zero overlap and zero double-gap!
+        let targetParent = mount.parent;
+        let targetBefore = mount.beforeEl;
+        try {
+          const beforeStyle = window.getComputedStyle(mount.beforeEl);
+          const beforePadTop = parseFloat(beforeStyle && beforeStyle.paddingTop) || 0;
+          if (beforePadTop >= 24 && mount.beforeEl.firstChild) {
+            targetParent = mount.beforeEl;
+            targetBefore = mount.beforeEl.firstChild === bar ? bar.nextSibling : mount.beforeEl.firstChild;
+          }
+        } catch (e) {}
+
+        if (bar.parentElement !== targetParent || (targetBefore && bar.nextSibling !== targetBefore)) {
+          targetParent.insertBefore(bar, targetBefore);
         }
-        // Ensure the trading content container below shrinks cleanly inside 100vh without clipping
         try {
           if (!mount.beforeEl.style.minHeight) {
             mount.beforeEl.style.minHeight = '0px';
           }
         } catch (e) {}
+
         bar.classList.remove('vest-cortex-hypernova-aligned');
         bar.classList.add('vest-cortex-inflow-bar');
         bar.style.top = '';
         bar.style.left = '';
         bar.style.right = '';
-        bar.style.width = '100%';
         bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
         bar.style.zIndex = '5';
+
+        // Self-measure against Hypernova's actual rendered header bottom & left rail so our in-flow bar
+        // NEVER overlaps the "Active Assessment / A1" header bar or the left icon sidebar!
+        try {
+          const headerRect = mount.headerEl ? mount.headerEl.getBoundingClientRect() : null;
+          const headerBottom = (headerRect && headerRect.bottom >= 28 && headerRect.bottom <= 90)
+            ? Math.ceil(headerRect.bottom)
+            : getMainHeaderBottom();
+          const leftInset = getHypernovaChartLeftInset();
+
+          const currentMarginTop = parseFloat(bar.style.marginTop) || 0;
+          const barRect = bar.getBoundingClientRect();
+          const naturalTop = barRect.top - currentMarginTop;
+          const neededMarginTop = Math.max(0, Math.ceil(headerBottom - naturalTop));
+          bar.style.marginTop = neededMarginTop > 0 ? `${neededMarginTop}px` : '0px';
+
+          const currentMarginLeft = parseFloat(bar.style.marginLeft) || 0;
+          const naturalLeft = barRect.left - currentMarginLeft;
+          const neededMarginLeft = Math.max(0, Math.ceil(leftInset - naturalLeft));
+          if (neededMarginLeft > 0) {
+            bar.style.marginLeft = `${neededMarginLeft}px`;
+            bar.style.width = `calc(100% - ${neededMarginLeft}px)`;
+          } else {
+            bar.style.marginLeft = '0px';
+            bar.style.width = '100%';
+          }
+        } catch (e) {
+          bar.style.marginTop = '0px';
+          bar.style.marginLeft = '0px';
+          bar.style.width = '100%';
+        }
         return bar;
       }
 
