@@ -1,3 +1,7 @@
+Trading Cortex v1.1.127 — My Funded Perps Cortex Pill & Bottom Minimized Dock Fix
+
+- **My Funded Perps Chart Header Support (`v1.1.127`)**: Added 3-tier chart toolbar detection (icon-only Indicators buttons, compact TradingView toolbars, and custom exchange chart header bars directly above the chart iframe like My Funded Perps) so the **`| CORTEX |`** pill mounts in the chart header bar and minimized windows move cleanly to the bottom dock below the chart.
+
 Trading Cortex v1.1.126 — Right-Click Template Menu Groups (Collapsible Folders & Inline Picker)
 
 - **Create & Organize Groups Right in the Right-Click Menu (`v1.1.126`)**: Added **`+ New Group...`**, collapsible `📁` group folders (with inline rename & delete), and a hover **`📁`** button on every template row to move templates between groups directly inside the right-click **Cortex Templates** flyout submenu — fully synced with the Template Manager.

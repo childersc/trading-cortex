@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.126`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.127`) are documented in this file.
+
+---
+
+## [v1.1.127] — 2026-11-21
+
+### 🎯 My Funded Perps Chart Header Bar & Compact TradingView Toolbar Support
+- Expanded `findTradingViewIndicatorsAnchor()` in `content/content-isolated.js` with 3-tier anchor resolution so the **`| CORTEX |`** pill and **bottom-of-chart minimized windows dock** work reliably on exchanges that hide TradingView's native `Indicators` button or render a custom chart header bar (such as **My Funded Perps**):
+  1. Standard TradingView `Indicators` button (`#header-toolbar-indicators`, `[data-name="open-indicators-dialog"]`, icon-only `aria-label`/`data-tooltip`/`title` indicators button, or text `Indicators`).
+  2. Compact TradingView native toolbar fallback (`#header-toolbar-chart-styles`, `#header-toolbar-intervals`, `#header-toolbar-symbol-search`).
+  3. Custom exchange chart header bar directly above the chart iframe (`NVDA · 5m · ... | CORTEX | ... Alerts · Price Chart`), mounting `| CORTEX |` right after the left-side chart controls and switching minimized windows to the bottom dock below the chart viewport.
 
 ---
 

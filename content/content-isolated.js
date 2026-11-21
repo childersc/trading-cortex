@@ -5059,8 +5059,11 @@
     for (let i = 0; i < docsToSearch.length; i++) {
       const { doc, iframe } = docsToSearch[i];
       try {
-        // Match ONLY a visible "Indicators" control in the top TradingView toolbar (top < 180px)
-        let indBtn = Array.from(doc.querySelectorAll('#header-toolbar-indicators, [data-name="open-indicators-dialog"]')).find(el => {
+        // Tier 1: Match a visible "Indicators" control in the top TradingView toolbar (top < 180px)
+        let indBtn = Array.from(doc.querySelectorAll(
+          '#header-toolbar-indicators, [data-name="open-indicators-dialog"], button[aria-label*="indicator" i], [data-tooltip*="indicator" i], [title*="indicator" i]'
+        )).find(el => {
+          if (!el || el.closest('#vest-tv-cortex-toolbar-slot')) return false;
           const r = el.getBoundingClientRect();
           return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 180;
         });
@@ -5080,12 +5083,24 @@
             }
           }
         }
+        // Tier 2: Compact TradingView native toolbar without an Indicators button (e.g. chart-styles / intervals / symbol-search)
+        if (!indBtn) {
+          indBtn = Array.from(doc.querySelectorAll(
+            '#header-toolbar-chart-styles, #header-toolbar-intervals, #header-toolbar-symbol-search'
+          )).find(el => {
+            if (!el || el.closest('#vest-tv-cortex-toolbar-slot')) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 180;
+          });
+        }
         if (!indBtn || !indBtn.parentElement) continue;
 
         // Exact TradingView 3-level toolbar hierarchy (same proven pattern as vest-timeframe-favorites):
         //   indWrapper (#header-toolbar-indicators) -> toolbarGroup (.group-*, fixed-width/overflow-hidden) -> toolbarRow (.inner-*)
         // Insert as a direct sibling right AFTER toolbarGroup inside toolbarRow, copying toolbarGroup's flex order!
-        const indWrapper = indBtn.closest('#header-toolbar-indicators, [data-name="open-indicators-dialog"]') || indBtn;
+        const indWrapper = indBtn.closest(
+          '#header-toolbar-indicators, [data-name="open-indicators-dialog"], #header-toolbar-chart-styles, #header-toolbar-intervals, #header-toolbar-symbol-search'
+        ) || indBtn;
         const toolbarGroup = indWrapper.parentElement || indBtn.parentElement;
         const toolbarRow = toolbarGroup && toolbarGroup.parentElement ? toolbarGroup.parentElement : null;
         if (toolbarRow && toolbarGroup) {
@@ -5096,6 +5111,120 @@
         return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn, groupOrder: '' };
       } catch (e) {}
     }
+
+    // Tier 3: Custom exchange chart header bar directly above the chart viewport (e.g. My Funded Perps)
+    // where TradingView's native header_widget is disabled and the exchange renders its own chart toolbar row.
+    try {
+      const chartMount = findChartBottomDockMountPoint();
+      const chartEl = chartMount && chartMount.chartEl ? chartMount.chartEl : null;
+      if (chartEl) {
+        const chartRect = chartEl.getBoundingClientRect();
+        if (chartRect.width >= 320 && chartRect.height >= 200) {
+          let headerBar = null;
+
+          // Walk up from chartEl looking for an immediately preceding sibling bar directly above chartRect.top
+          let probe = chartEl;
+          let depth = 0;
+          while (probe && probe.parentElement && probe.parentElement !== document.body && depth < 5 && !headerBar) {
+            const sibs = Array.from(probe.parentElement.children);
+            const idx = sibs.indexOf(probe);
+            for (let s = idx - 1; s >= 0; s--) {
+              const cand = sibs[s];
+              if (!cand || cand.id === CORTEX_TOP_BAR_ID || cand.closest('#' + CORTEX_TOP_BAR_ID)) continue;
+              const r = cand.getBoundingClientRect();
+              if (
+                r.height >= 22 && r.height <= 56 &&
+                r.width >= chartRect.width * 0.6 &&
+                r.bottom <= chartRect.top + 14 &&
+                r.top >= chartRect.top - 64
+              ) {
+                headerBar = cand;
+                break;
+              }
+            }
+            probe = probe.parentElement;
+            depth++;
+          }
+
+          // Fallback scan: find a "Price Chart" / "Alerts" control in the band right above the chart and walk up to its row
+          if (!headerBar) {
+            const btns = document.querySelectorAll('button, [role="button"], span, div');
+            for (let b = 0; b < btns.length; b++) {
+              const el = btns[b];
+              if (!el || el.children.length > 3 || el.closest('#vest-tv-cortex-toolbar-slot')) continue;
+              const txt = (el.textContent || '').trim();
+              if (!/^(price chart|alerts|indicators)$/i.test(txt)) continue;
+              const r = el.getBoundingClientRect();
+              if (r.height < 14 || r.height > 44 || r.bottom > chartRect.top + 14 || r.top < chartRect.top - 64) continue;
+              if (r.left < chartRect.left - 16 || r.right > chartRect.right + 16) continue;
+              let cur = el.parentElement;
+              let up = 0;
+              while (cur && cur !== document.body && up < 5) {
+                const cr = cur.getBoundingClientRect();
+                if (cr.height >= 22 && cr.height <= 56 && cr.width >= chartRect.width * 0.6) {
+                  headerBar = cur;
+                  break;
+                }
+                cur = cur.parentElement;
+                up++;
+              }
+              if (headerBar) break;
+            }
+          }
+
+          if (headerBar) {
+            const barRect = headerBar.getBoundingClientRect();
+            const visibleChildren = Array.from(headerBar.children).filter(c => {
+              if (!c || c.id === 'vest-tv-cortex-toolbar-slot') return false;
+              const cr = c.getBoundingClientRect();
+              return cr.width > 0 && cr.height > 0;
+            });
+
+            if (visibleChildren.length > 0) {
+              const firstChild = visibleChildren[0];
+              const fcRect = firstChild.getBoundingClientRect();
+              const fcStyle = window.getComputedStyle(firstChild);
+              const isLeftGroup =
+                fcRect.right < barRect.left + barRect.width * 0.72 &&
+                fcStyle && fcStyle.display && fcStyle.display.includes('flex');
+
+              if (isLeftGroup) {
+                const groupKids = Array.from(firstChild.children).filter(c => {
+                  if (!c || c.id === 'vest-tv-cortex-toolbar-slot') return false;
+                  const kr = c.getBoundingClientRect();
+                  return kr.width > 0 && kr.height > 0;
+                });
+                const lastKid = groupKids.length > 0 ? groupKids[groupKids.length - 1] : null;
+                return {
+                  doc: document,
+                  iframe: null,
+                  parent: firstChild,
+                  afterEl: lastKid,
+                  appendToParent: !lastKid,
+                  groupOrder: ''
+                };
+              }
+
+              // Insert after the last left-half child inside headerBar
+              let lastLeft = visibleChildren[0];
+              for (let k = 0; k < visibleChildren.length; k++) {
+                const kr = visibleChildren[k].getBoundingClientRect();
+                if (kr.right < barRect.left + barRect.width * 0.65) {
+                  lastLeft = visibleChildren[k];
+                }
+              }
+              return {
+                doc: document,
+                iframe: null,
+                parent: headerBar,
+                afterEl: lastLeft,
+                groupOrder: ''
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {}
     return null;
   }
 
@@ -5105,7 +5234,7 @@
 
     // 1. Primary placement: inside TradingView's top chart toolbar immediately after the "Indicators" group with left & right separators
     const tvAnchor = findTradingViewIndicatorsAnchor();
-    if (tvAnchor && tvAnchor.parent && tvAnchor.afterEl && tvAnchor.doc) {
+    if (tvAnchor && tvAnchor.parent && (tvAnchor.afterEl || tvAnchor.appendToParent) && tvAnchor.doc) {
       const targetDoc = tvAnchor.doc;
       ensureCortexPillStylesInDoc(targetDoc);
 
@@ -5130,8 +5259,12 @@
       slot.style.position = 'relative';
       slot.style.zIndex = '25';
       slot.style.flex = '0 0 auto';
-      if (slot.parentElement !== tvAnchor.parent || slot.previousSibling !== tvAnchor.afterEl) {
-        tvAnchor.parent.insertBefore(slot, tvAnchor.afterEl.nextSibling);
+      if (tvAnchor.afterEl) {
+        if (slot.parentElement !== tvAnchor.parent || slot.previousSibling !== tvAnchor.afterEl) {
+          tvAnchor.parent.insertBefore(slot, tvAnchor.afterEl.nextSibling);
+        }
+      } else if (slot.parentElement !== tvAnchor.parent) {
+        tvAnchor.parent.appendChild(slot);
       }
       pill.classList.remove('vest-studio-pill-floating-fallback');
       pill.classList.add('vest-studio-pill-tv-toolbar');
