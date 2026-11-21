@@ -4149,6 +4149,45 @@
     }
   }
 
+  function isHypernovaHost() {
+    try {
+      return Boolean(window.location && window.location.hostname && window.location.hostname.toLowerCase().includes('hypernova'));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getHypernovaChartLeftInset() {
+    if (!isHypernovaHost()) return 0;
+    try {
+      // 1. Prefer the TradingView chart iframe or chart container left edge (when positioned right of the icon sidebar)
+      const chartCandidates = Array.from(document.querySelectorAll('iframe, [class*="chart"], [id*="chart"], [class*="tradingview"]'));
+      for (let i = 0; i < chartCandidates.length; i++) {
+        const r = chartCandidates[i].getBoundingClientRect();
+        if (r.width >= 320 && r.height >= 240 && r.left >= 32 && r.left <= 120) {
+          return Math.round(r.left);
+        }
+      }
+      // 2. Fallback to the ticker/market row left edge
+      const market = typeof findMarketSelectorElement === 'function' ? findMarketSelectorElement() : null;
+      if (market && market.rowEl) {
+        const mr = market.rowEl.getBoundingClientRect();
+        if (mr.left >= 32 && mr.left <= 120) {
+          return Math.round(mr.left);
+        }
+      }
+      // 3. Fallback to the collapsed left vertical navigation rail width (cap at <= 96px so expanding pull-out drawer glides over cleanly)
+      const sidebars = Array.from(document.querySelectorAll('aside, nav, [class*="sidebar"], [class*="Sidebar"]'));
+      for (let i = 0; i < sidebars.length; i++) {
+        const r = sidebars[i].getBoundingClientRect();
+        if (r.left <= 4 && r.height >= window.innerHeight * 0.5 && r.width >= 36 && r.width <= 96) {
+          return Math.round(r.right);
+        }
+      }
+    } catch (e) {}
+    return 48;
+  }
+
   function ensureCortexTopBar() {
     if (!document.body) return null;
     const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
@@ -4174,6 +4213,20 @@
     }
     bar.style.top = `${headerBottom}px`;
     bar.style.height = `${CORTEX_BAR_HEIGHT}px`;
+    if (isHypernovaHost()) {
+      const leftInset = getHypernovaChartLeftInset();
+      bar.classList.add('vest-cortex-hypernova-aligned');
+      bar.style.left = `${leftInset}px`;
+      bar.style.right = '0px';
+      bar.style.width = 'auto';
+      bar.style.zIndex = '15';
+    } else {
+      bar.classList.remove('vest-cortex-hypernova-aligned');
+      bar.style.left = '0px';
+      bar.style.right = '0px';
+      bar.style.width = '100%';
+      bar.style.zIndex = '';
+    }
     return bar;
   }
 

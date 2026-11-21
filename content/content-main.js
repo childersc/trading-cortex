@@ -11975,8 +11975,13 @@
       resized = true;
     }
 
+    const isHypernovaOverlay = Boolean(
+      (hostDoc && hostDoc.defaultView && hostDoc.defaultView.location && hostDoc.defaultView.location.hostname && hostDoc.defaultView.location.hostname.toLowerCase().includes('hypernova')) ||
+      (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname.toLowerCase().includes('hypernova'))
+    );
+    const canvasZRule = isHypernovaOverlay ? 'z-index:15' : 'z-index:2147483640';
     const nextStyle =
-      `position:fixed;left:${Math.round(absLeft)}px;top:${Math.round(absTop)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;z-index:2147483640;user-select:none;display:block;`;
+      `position:fixed;left:${Math.round(absLeft)}px;top:${Math.round(absTop)}px;width:${cssW}px;height:${cssH}px;pointer-events:none;${canvasZRule};user-select:none;display:block;`;
     if (nextStyle !== lastAccountsRiskCanvasStyle) {
       accountsRiskTopCanvas.style.cssText = nextStyle;
       lastAccountsRiskCanvasStyle = nextStyle;
@@ -12048,9 +12053,14 @@
       lastAccountsRiskBtnCollapsed = isCollapsed;
     }
 
+    const isHypernovaBtn = Boolean(
+      (hostDoc && hostDoc.defaultView && hostDoc.defaultView.location && hostDoc.defaultView.location.hostname && hostDoc.defaultView.location.hostname.toLowerCase().includes('hypernova')) ||
+      (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname.toLowerCase().includes('hypernova'))
+    );
+    const btnZRule = isHypernovaBtn ? 'z-index:16' : 'z-index:2147483641';
     const nextBtnStyle = isCollapsed
-      ? `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:transparent;border:none;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:block;`
-      : `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);border-radius:4px;color:#cbd5e1;font-size:10px;font-weight:800;line-height:1;padding:0;margin:0;cursor:pointer;pointer-events:auto;z-index:2147483641;display:flex;align-items:center;justify-content:center;`;
+      ? `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:transparent;border:none;padding:0;margin:0;cursor:pointer;pointer-events:auto;${btnZRule};display:block;`
+      : `position:fixed;left:${leftPx}px;top:${topPx}px;width:${wPx}px;height:${hPx}px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);border-radius:4px;color:#cbd5e1;font-size:10px;font-weight:800;line-height:1;padding:0;margin:0;cursor:pointer;pointer-events:auto;${btnZRule};display:flex;align-items:center;justify-content:center;`;
 
     if (nextBtnStyle !== lastAccountsRiskBtnStyle) {
       accountsRiskToggleBtn.style.cssText = nextBtnStyle;

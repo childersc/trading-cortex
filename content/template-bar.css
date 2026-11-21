@@ -1464,7 +1464,13 @@ body.vest-popout-body #vest-action-log-box {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55), 0 1px 6px rgba(37, 99, 235, 0.25);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   user-select: none;
-  transition: top 0.12s ease;
+  transition: top 0.12s ease, left 0.12s ease;
+}
+
+#vest-cortex-top-bar.vest-cortex-hypernova-aligned {
+  width: auto !important;
+  right: 0 !important;
+  z-index: 15 !important;
 }
 
 /* Legacy bottom-bar active rules neutralized to prevent bottom page stretching */

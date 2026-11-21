@@ -1,3 +1,8 @@
+Trading Cortex v1.1.110 — Hypernova Top Bar Chart Alignment & Zero Menu/Sidebar Overlap
+
+- **Hypernova Chart Alignment (`v1.1.110`)**: The Cortex black top bar now aligns flush with the left edge of the Hypernova chart workspace (clearing the left icon rail).
+- **No Overlap Over Menus, Dropdowns & Pull-Out Sidebars (`v1.1.110`)**: Adjusted layering (`z-index: 15`) on Hypernova for both the Cortex top bar and the Accounts & Risk pill so Hypernova's pull-out sidebar, dropdowns, and chart menus always appear cleanly on top.
+
 Trading Cortex v1.1.109 — Added Hypernova (app.hypernova.xyz/trade) Support
 
 - **Hypernova Built-In Support (`v1.1.109`)**: Trading Cortex now runs natively on `https://app.hypernova.xyz/trade` (`hypernova.xyz`), complete with a built-in **Hypernova** firm profile in Settings, custom SVG emblem, and venue recognition across alerts and overlays.

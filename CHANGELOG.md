@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.109`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.110`) are documented in this file.
+
+---
+
+## [v1.1.110] — 2026-11-21
+
+### 🎯 Hypernova Top Bar Chart Alignment & Non-Overlapping Z-Index Layering
+- **Aligned Cortex Black Bar Directly With the Chart**:
+  - Added `isHypernovaHost()` and `getHypernovaChartLeftInset()` in `content-isolated.js` so `#vest-cortex-top-bar` aligns flush with the left edge of the Hypernova chart/trading workspace (to the right of the left navigation rail instead of overhanging at `left: 0`).
+- **Zero Overlap Over Hypernova Menus, Dropdowns & Pull-Out Sidebars**:
+  - Lowered `#vest-cortex-top-bar` (`z-index: 15`) and the Hypernova Accounts & Risk overlay canvas/button (`z-index: 15` / `16`) so Hypernova's pull-out left sidebar, market dropdowns, and chart menus always float cleanly on top while keeping the Cortex dropdown menu (`#vest-studio-dropdown-menu`) on top when clicked.
 
 ---
 
