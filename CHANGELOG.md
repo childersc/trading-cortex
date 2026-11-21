@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.118`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.119`) are documented in this file.
+
+---
+
+## [v1.1.119] — 2026-11-21
+
+### 📁 Collapsible Drawing Template Groups in Right-Click `Template ▸` Menu & Template Manager
+- **Organize Right-Click `Template ▸` Menu Into Groups**:
+  - Added **`+ New Group...`** directly inside the right-click `Template ▸` submenu and a quick **`📁`** assign-group action on every template row.
+  - Grouped templates render under collapsible folder headers (`▾ FVGs (6)`, `▾ Order Blocks (2)`) with persisted expand/collapse state, while ungrouped templates stay cleanly listed below.
+- **Full Group Management in Template Manager**:
+  - Added **`+ New Group`**, interactive group filter/delete chips (deleting a group safely ungroups its templates), an inline **Group `<select>`** on every template card, and a **Menu Group** field with autocomplete in the Template Editor.
 
 ---
 

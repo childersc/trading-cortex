@@ -17346,18 +17346,27 @@ if (activeTab === 'diagnostics') {
       }
 
       // Otherwise render the Template List for the selected drawing category
-      const filtered = activeCategory === 'all'
+      const allGroups = getNormalizedTemplateGroups();
+      const catFiltered = activeCategory === 'all'
         ? templates
         : templates.filter(t => (t.drawingType || 'rectangle') === activeCategory);
+      const filtered = activeGroupFilter === '__all__'
+        ? catFiltered
+        : (activeGroupFilter === '__ungrouped__'
+          ? catFiltered.filter(t => !String(t.group || '').trim())
+          : catFiltered.filter(t => String(t.group || '').trim() === activeGroupFilter));
 
       const categoryTitle = activeCategory === 'all'
         ? 'ALL DRAWING TEMPLATES'
         : `${getDrawingTypeLabel(activeCategory).toUpperCase()} TEMPLATES`;
 
       return `
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:8px; flex-wrap:wrap;">
           <div class="vest-tvs-section-title" style="margin:0;">${escapeHtml(categoryTitle)} (${filtered.length})</div>
-          <div style="display:flex; align-items:center; gap:8px;">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="vest-tvs-action-btn" id="vest-tm-new-group-btn" style="height:30px; border-color:rgba(168,85,247,0.5); color:#c084fc; font-size:12px;" title="Create a new template menu group">
+              + New Group
+            </button>
             <button type="button" class="vest-tvs-action-btn" id="vest-tm-save-selected-chart-btn" style="height:30px; border-color:rgba(56,189,248,0.45); color:#38bdf8; font-size:12px;" title="Save the currently selected drawing on the chart as a template">
               + Save Selected Chart Drawing
             </button>
@@ -17366,6 +17375,24 @@ if (activeTab === 'diagnostics') {
             </button>
           </div>
         </div>
+
+        ${allGroups.length > 0 ? `
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:12px; padding:8px 10px; border-radius:8px; background:rgba(15,23,42,0.55); border:1px solid #1e293b;">
+            <span style="font-size:11px; color:#94a3b8; font-weight:600; margin-right:2px;">GROUPS:</span>
+            <button type="button" class="vest-tvs-action-btn vest-tm-group-filter-btn" data-group="__all__" style="height:24px; padding:0 9px; font-size:11px; ${activeGroupFilter === '__all__' ? 'background:rgba(56,189,248,0.2); border-color:#38bdf8; color:#e0f2fe;' : ''}">All (${catFiltered.length})</button>
+            ${allGroups.map(g => {
+              const cnt = catFiltered.filter(t => String(t.group || '').trim() === g).length;
+              const isAct = activeGroupFilter === g;
+              return `
+                <span style="display:inline-flex; align-items:center; border-radius:6px; border:1px solid ${isAct ? '#a855f7' : '#334155'}; background:${isAct ? 'rgba(168,85,247,0.22)' : 'rgba(30,41,59,0.7)'}; overflow:hidden;">
+                  <button type="button" class="vest-tm-group-filter-btn" data-group="${escapeHtml(g)}" style="background:none; border:none; color:${isAct ? '#f3e8ff' : '#cbd5e1'}; font-size:11px; padding:3px 8px; cursor:pointer;">📁 ${escapeHtml(g)} (${cnt})</button>
+                  <button type="button" class="vest-tm-group-delete-btn" data-group="${escapeHtml(g)}" title="Delete group '${escapeHtml(g)}' (templates will be ungrouped)" style="background:none; border:none; border-left:1px solid rgba(148,163,184,0.2); color:#94a3b8; font-size:11px; padding:3px 6px; cursor:pointer;">×</button>
+                </span>
+              `;
+            }).join('')}
+            <button type="button" class="vest-tvs-action-btn vest-tm-group-filter-btn" data-group="__ungrouped__" style="height:24px; padding:0 9px; font-size:11px; ${activeGroupFilter === '__ungrouped__' ? 'background:rgba(56,189,248,0.2); border-color:#38bdf8; color:#e0f2fe;' : ''}">Ungrouped (${catFiltered.filter(t => !String(t.group || '').trim()).length})</button>
+          </div>
+        ` : ''}
 
         ${filtered.length === 0 ? `
           <div class="vest-tvs-about-card" style="align-items:center; text-align:center; padding:34px 24px; gap:10px;">
@@ -17414,6 +17441,10 @@ if (activeTab === 'diagnostics') {
                     </div>
                   </div>
                   <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                    <select class="vest-ed-select vest-tm-quick-group-select" data-id="${escapeHtml(t.id)}" title="Assign template to a menu group" style="height:28px; padding:0 8px; font-size:11px; max-width:125px; background:#0b0e14; color:#cbd5e1; border:1px solid #334155; border-radius:6px;">
+                      <option value="">No Group</option>
+                      ${allGroups.map(g => `<option value="${escapeHtml(g)}" ${String(t.group || '').trim() === g ? 'selected' : ''}>📁 ${escapeHtml(g)}</option>`).join('')}
+                    </select>
                     <button type="button" class="vest-tvs-action-btn vest-tm-apply-btn" data-id="${escapeHtml(t.id)}" title="Apply to currently selected ${escapeHtml(dtLabel)} on the chart" style="height:28px; padding:0 10px; font-size:11.5px; border-color:rgba(16,185,129,0.45); color:#34d399;">
                       Apply
                     </button>
@@ -17617,6 +17648,57 @@ if (activeTab === 'diagnostics') {
           renderStudioHeaderPill();
           renderManagerDialog();
           showToast(`Removed "${tpl.name}"`);
+        });
+      });
+
+      // List view events
+      overlay.querySelector('#vest-tm-new-group-btn')?.addEventListener('click', () => {
+        const gName = prompt('Enter new Template Group name (e.g. FVGs, Order Blocks, Inverted FVGs):', '');
+        if (!gName || !gName.trim()) return;
+        const clean = gName.trim();
+        const cur = Array.isArray(settings.templateGroups) ? settings.templateGroups : [];
+        if (!cur.includes(clean)) {
+          settings.templateGroups = [...cur, clean];
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          showToast(`Created group "${clean}"`);
+        }
+        renderManagerDialog();
+      });
+
+      overlay.querySelectorAll('.vest-tm-group-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeGroupFilter = btn.dataset.group || '__all__';
+          renderManagerDialog();
+        });
+      });
+
+      overlay.querySelectorAll('.vest-tm-group-delete-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const g = btn.dataset.group;
+          if (!g) return;
+          settings.templateGroups = (Array.isArray(settings.templateGroups) ? settings.templateGroups : []).filter(item => item !== g);
+          templates = templates.map(t => (String(t.group || '').trim() === g ? { ...t, group: '' } : t));
+          if (activeGroupFilter === g) activeGroupFilter = '__all__';
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          renderManagerDialog();
+          showToast(`Removed group "${g}" (templates kept ungrouped)`);
+        });
+      });
+
+      overlay.querySelectorAll('.vest-tm-quick-group-select').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const id = sel.dataset.id;
+          const groupName = (sel.value || '').trim();
+          const idx = templates.findIndex(t => t.id === id);
+          if (idx === -1) return;
+          templates[idx] = { ...templates[idx], group: groupName };
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          renderManagerDialog();
+          showToast(groupName ? `Assigned "${templates[idx].name}" to "${groupName}"` : `Ungrouped "${templates[idx].name}"`);
         });
       });
 

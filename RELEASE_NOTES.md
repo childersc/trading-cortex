@@ -1,3 +1,7 @@
+Trading Cortex v1.1.119 — Collapsible Template Groups in Right-Click Menu & Template Manager
+
+- **Template Groups (`v1.1.119`)**: Create custom groups (e.g., `FVGs`, `Order Blocks`, `Inverted FVGs`) right from the chart's right-click **`Template ▸`** menu (`+ New Group...` and `📁` per template) or inside **Template Manager** (inline group dropdown, filter/delete chips, and editor Menu Group field). Groups expand/collapse right inside the right-click menu and remember their open/closed state.
+
 Trading Cortex v1.1.118 — Fixed Updater Automatic Extension Reload & Browser Window Refresh
 
 - **Automatic Post-Update Refresh Across All Trading Windows (`v1.1.118`)**: The updater now reloads the extension runtime immediately after syncing files and automatically refreshes all open trading browser windows/tabs (Vest Markets, Hypernova, MFP, Kalshi Pro, and custom firms) so every chart loads the new build automatically.
