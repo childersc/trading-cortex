@@ -781,6 +781,9 @@
       '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
     },
     dismissedOrderBlocks: [],
+    customOrderBlockOverrides: {},
+    learningEnabled: true,
+    learningData: { dismissedSamples: [], correctionSamples: [] },
     showOrderEntryIcon: true,
     orderIconSize: 13,
     voiceAlertEnabled: true,
@@ -819,6 +822,31 @@
         opacity: Math.max(5, Math.min(80, Math.round(Number(src.opacity) || def.opacity)))
       };
     });
+    const rawOverrides = (cfg.customOrderBlockOverrides && typeof cfg.customOrderBlockOverrides === 'object' && !Array.isArray(cfg.customOrderBlockOverrides))
+      ? cfg.customOrderBlockOverrides
+      : {};
+    const customOrderBlockOverrides = {};
+    Object.entries(rawOverrides).slice(-200).forEach(([k, v]) => {
+      if (!k || !v || typeof v !== 'object') return;
+      const top = Number(v.top);
+      const bottom = Number(v.bottom);
+      const timeSec = Number(v.timeSec);
+      if (!Number.isFinite(top) || !Number.isFinite(bottom) || !Number.isFinite(timeSec)) return;
+      customOrderBlockOverrides[String(k).trim()] = {
+        top: Math.max(top, bottom),
+        bottom: Math.min(top, bottom),
+        timeSec: Math.round(timeSec),
+        endTimeSec: (typeof v.endTimeSec === 'number' && Number.isFinite(v.endTimeSec) && v.endTimeSec > 0) ? Math.round(v.endTimeSec) : null,
+        updatedAt: Number(v.updatedAt) || Date.now()
+      };
+    });
+    const rawLearn = (cfg.learningData && typeof cfg.learningData === 'object') ? cfg.learningData : {};
+    const dismissedSamples = Array.isArray(rawLearn.dismissedSamples)
+      ? rawLearn.dismissedSamples.filter(s => s && typeof s === 'object').slice(-80)
+      : [];
+    const correctionSamples = Array.isArray(rawLearn.correctionSamples)
+      ? rawLearn.correctionSamples.filter(s => s && typeof s === 'object').slice(-80)
+      : [];
     return {
       enabled: Boolean(cfg.enabled),
       swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
@@ -836,6 +864,9 @@
       dismissedOrderBlocks: Array.isArray(cfg.dismissedOrderBlocks)
         ? Array.from(new Set(cfg.dismissedOrderBlocks.filter(k => typeof k === 'string' && k.trim().length > 0).map(k => k.trim()))).slice(-300)
         : [],
+      customOrderBlockOverrides,
+      learningEnabled: cfg.learningEnabled !== false,
+      learningData: { dismissedSamples, correctionSamples },
       showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
       orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
@@ -852,6 +883,71 @@
       statsBoxCollapsed: Boolean(cfg.statsBoxCollapsed),
       statsBoxRelX: typeof cfg.statsBoxRelX === 'number' && Number.isFinite(cfg.statsBoxRelX) ? Math.max(0, Math.min(1, cfg.statsBoxRelX)) : 0.04,
       statsBoxRelY: typeof cfg.statsBoxRelY === 'number' && Number.isFinite(cfg.statsBoxRelY) ? Math.max(0, Math.min(1, cfg.statsBoxRelY)) : 0.54
+    };
+  }
+
+  function deriveOrderBlockLearningProfile(learningData) {
+    const data = (learningData && typeof learningData === 'object') ? learningData : {};
+    const dismissed = Array.isArray(data.dismissedSamples) ? data.dismissedSamples : [];
+    const corrections = Array.isArray(data.correctionSamples) ? data.correctionSamples : [];
+
+    let requireCloseBos = false;
+    let minFvgRatio = 0;
+    let minDispRatio = 0;
+    let preferredZoneMode = 'auto'; // 'auto' | 'body' | 'wick'
+    let preferredOriginShift = 0;
+
+    if (dismissed.length >= 3) {
+      const wickOnlyCount = dismissed.filter(s => s && s.closeBreak === false).length;
+      if (wickOnlyCount >= 3 && (wickOnlyCount / dismissed.length) >= 0.6) {
+        requireCloseBos = true;
+      }
+      const fvgVals = dismissed.map(s => Number(s && s.fvgRatio)).filter(v => Number.isFinite(v) && v >= 0);
+      if (fvgVals.length >= 3) {
+        const smallFvgs = fvgVals.filter(v => v <= 0.5);
+        if (smallFvgs.length >= 3 && (smallFvgs.length / fvgVals.length) >= 0.6) {
+          const avgSmall = smallFvgs.reduce((a, b) => a + b, 0) / smallFvgs.length;
+          minFvgRatio = Math.min(0.65, Math.round((avgSmall + 0.08) * 100) / 100);
+        }
+      }
+      const dispVals = dismissed.map(s => Number(s && s.dispRatio)).filter(v => Number.isFinite(v) && v >= 0);
+      if (dispVals.length >= 3) {
+        const weakDisps = dispVals.filter(v => v <= 0.8);
+        if (weakDisps.length >= 3 && (weakDisps.length / dispVals.length) >= 0.6) {
+          const avgWeak = weakDisps.reduce((a, b) => a + b, 0) / weakDisps.length;
+          minDispRatio = Math.min(0.85, Math.round((avgWeak + 0.08) * 100) / 100);
+        }
+      }
+    }
+
+    if (corrections.length >= 3) {
+      const bodyCount = corrections.filter(c => c && c.zoneStyle === 'body').length;
+      const wickCount = corrections.filter(c => c && c.zoneStyle === 'wick').length;
+      const styledTotal = bodyCount + wickCount;
+      if (styledTotal >= 3) {
+        if ((bodyCount / styledTotal) >= 0.65) preferredZoneMode = 'body';
+        else if ((wickCount / styledTotal) >= 0.65) preferredZoneMode = 'wick';
+      }
+      const shifts = corrections.map(c => Number(c && c.deltaBars)).filter(v => Number.isFinite(v) && v !== 0 && Math.abs(v) <= 3);
+      if (shifts.length >= 3) {
+        const negCount = shifts.filter(v => v < 0).length;
+        const posCount = shifts.filter(v => v > 0).length;
+        if ((negCount / shifts.length) >= 0.65) {
+          preferredOriginShift = Math.max(-2, Math.round(shifts.filter(v => v < 0).reduce((a, b) => a + b, 0) / negCount));
+        } else if ((posCount / shifts.length) >= 0.65) {
+          preferredOriginShift = Math.min(2, Math.round(shifts.filter(v => v > 0).reduce((a, b) => a + b, 0) / posCount));
+        }
+      }
+    }
+
+    return {
+      requireCloseBos,
+      minFvgRatio,
+      minDispRatio,
+      preferredZoneMode,
+      preferredOriginShift,
+      dismissedCount: dismissed.length,
+      correctionCount: corrections.length
     };
   }
 
@@ -3314,15 +3410,57 @@
     } else if (type === 'VEST_TV_OB_DISMISS') {
       const dismissKey = typeof event.data.key === 'string' ? event.data.key.trim() : '';
       const label = typeof event.data.label === 'string' ? event.data.label.trim() : 'Order Block';
+      const features = (event.data.features && typeof event.data.features === 'object') ? event.data.features : null;
       if (dismissKey) {
         const ob = normalizeOrderBlocksConfig(settings.orderBlocks);
+        let changed = false;
         if (!ob.dismissedOrderBlocks.includes(dismissKey)) {
           ob.dismissedOrderBlocks = [...ob.dismissedOrderBlocks, dismissKey].slice(-300);
+          changed = true;
+        }
+        if (features) {
+          ob.learningData = {
+            dismissedSamples: [...(ob.learningData.dismissedSamples || []), { ...features, key: dismissKey, timestamp: Date.now() }].slice(-80),
+            correctionSamples: ob.learningData.correctionSamples || []
+          };
+          changed = true;
+        }
+        if (changed) {
           settings.orderBlocks = normalizeOrderBlocksConfig(ob);
           safeStorageSet({ templates, settings });
           notifyMainWorldConfig();
-          showToast(`Removed ${label} (saved)`);
+          showToast(`Removed ${label} (saved & learned)`);
         }
+      }
+    } else if (type === 'VEST_TV_OB_OVERRIDE') {
+      const key = typeof event.data.key === 'string' ? event.data.key.trim() : '';
+      const label = typeof event.data.label === 'string' ? event.data.label.trim() : 'Order Block';
+      const override = (event.data.override && typeof event.data.override === 'object') ? event.data.override : null;
+      const correction = (event.data.correction && typeof event.data.correction === 'object') ? event.data.correction : null;
+      if (key && override) {
+        const ob = normalizeOrderBlocksConfig(settings.orderBlocks);
+        ob.customOrderBlockOverrides = {
+          ...(ob.customOrderBlockOverrides || {}),
+          [key]: {
+            top: Number(override.top),
+            bottom: Number(override.bottom),
+            timeSec: Math.round(Number(override.timeSec)),
+            endTimeSec: (typeof override.endTimeSec === 'number' && Number.isFinite(override.endTimeSec) && override.endTimeSec > 0)
+              ? Math.round(override.endTimeSec)
+              : null,
+            updatedAt: Date.now()
+          }
+        };
+        if (correction) {
+          ob.learningData = {
+            dismissedSamples: ob.learningData.dismissedSamples || [],
+            correctionSamples: [...(ob.learningData.correctionSamples || []), { ...correction, key, timestamp: Date.now() }].slice(-80)
+          };
+        }
+        settings.orderBlocks = normalizeOrderBlocksConfig(ob);
+        safeStorageSet({ templates, settings });
+        notifyMainWorldConfig();
+        showToast(`Saved ${label} adjustment (learned)`);
       }
     } else if (type === 'VEST_TV_CI_SIGNAL_FORMING') {
       speakCortexSignalAlert(event.data.payload || {}, false);
@@ -7541,14 +7679,52 @@
             </div>
             <div style="margin-top:10px;padding-top:10px;border-top:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
               <span style="font-size:11px;color:#94a3b8;">
-                Click <strong style="color:#f87171;">×</strong> on any Order Block label to permanently hide it.
-                <strong id="vest-ob-dismissed-count" style="color:#cbd5e1;">${(Array.isArray(ob.dismissedOrderBlocks) ? ob.dismissedOrderBlocks.length : 0)}</strong> hidden.
+                Drag <strong style="color:#38bdf8;">✥</strong> to move, drag any box edge to resize, or click <strong style="color:#f87171;">×</strong> to hide.
+                <strong id="vest-ob-dismissed-count" style="color:#cbd5e1;">${(Array.isArray(ob.dismissedOrderBlocks) ? ob.dismissedOrderBlocks.length : 0)}</strong> hidden ·
+                <strong style="color:#cbd5e1;">${Object.keys(ob.customOrderBlockOverrides || {}).length}</strong> adjusted.
               </span>
-              <button type="button" class="vest-tvs-action-btn" id="vest-ob-restore-dismissed-btn" style="height:26px;padding:0 10px;font-size:11px;color:#cbd5e1;" ${(Array.isArray(ob.dismissedOrderBlocks) && ob.dismissedOrderBlocks.length > 0) ? '' : 'disabled'}>
-                Restore All Removed OBs
-              </button>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" class="vest-tvs-action-btn" id="vest-ob-clear-overrides-btn" style="height:26px;padding:0 10px;font-size:11px;color:#cbd5e1;" ${Object.keys(ob.customOrderBlockOverrides || {}).length > 0 ? '' : 'disabled'}>
+                  Reset Moved/Resized
+                </button>
+                <button type="button" class="vest-tvs-action-btn" id="vest-ob-restore-dismissed-btn" style="height:26px;padding:0 10px;font-size:11px;color:#cbd5e1;" ${(Array.isArray(ob.dismissedOrderBlocks) && ob.dismissedOrderBlocks.length > 0) ? '' : 'disabled'}>
+                  Restore Removed OBs
+                </button>
+              </div>
             </div>
           </div>
+
+          ${(() => {
+            const prof = deriveOrderBlockLearningProfile(ob.learningData);
+            const activeRules = [];
+            if (prof.requireCloseBos) activeRules.push('Require Close BOS');
+            if (prof.minFvgRatio > 0) activeRules.push(`Min FVG ≥ ${prof.minFvgRatio.toFixed(2)}× ATR`);
+            if (prof.minDispRatio > 0) activeRules.push(`Min Disp ≥ ${prof.minDispRatio.toFixed(2)}× ATR`);
+            if (prof.preferredZoneMode === 'body') activeRules.push('Body-Only Zones');
+            else if (prof.preferredZoneMode === 'wick') activeRules.push('Full-Wick Zones');
+            if (prof.preferredOriginShift !== 0) activeRules.push(`Candle Shift ${prof.preferredOriginShift > 0 ? '+' : ''}${prof.preferredOriginShift}`);
+            const summaryText = activeRules.length > 0
+              ? activeRules.join(' · ')
+              : 'Collecting feedback (dismiss ≥ 3 invalid OBs or move/resize ≥ 3 boxes to activate adaptive tuning)';
+            return `
+              <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+                  <div style="font-size:12px;font-weight:600;color:#f8fafc;">ADAPTIVE OB LEARNING ENGINE</div>
+                  <button type="button" class="vest-tvs-action-btn" id="vest-ob-reset-learning-btn" style="height:24px;padding:0 9px;font-size:10.5px;color:#94a3b8;" ${(prof.dismissedCount + prof.correctionCount) > 0 ? '' : 'disabled'}>
+                    Reset Learned Data
+                  </button>
+                </div>
+                <label class="vest-ed-checkbox-label" style="margin-bottom:8px;">
+                  <input type="checkbox" id="vest-ob-learning-enabled" ${ob.learningEnabled !== false ? 'checked' : ''} />
+                  <span>Learn automatically from my × removals, candle moves, and box resizes</span>
+                </label>
+                <div style="font-size:11px;color:#94a3b8;line-height:1.45;padding:8px 10px;border-radius:6px;background:#0b0e14;border:1px solid #1e293b;">
+                  <div><strong style="color:#38bdf8;">Feedback Samples:</strong> ${prof.dismissedCount} × removals · ${prof.correctionCount} moves/resizes</div>
+                  <div style="margin-top:4px;"><strong style="color:#34d399;">Active Learned Rules:</strong> <span style="color:#e2e8f0;">${summaryText}</span></div>
+                </div>
+              </div>
+            `;
+          })()}
 
           <div style="margin-top:12px;padding:14px;border:1px solid #272d38;border-radius:8px;background:#11151d;">
             <div style="font-size:12px;font-weight:600;color:#f8fafc;margin-bottom:8px;">ORDER ENTRY &amp; TARGETS</div>
@@ -8724,6 +8900,7 @@
           if (el && valEl) valEl.textContent = `${el.value}${unit}`;
         });
         if (q('#vest-ob-show-entry-icon')) ob.showOrderEntryIcon = Boolean(q('#vest-ob-show-entry-icon').checked);
+        if (q('#vest-ob-learning-enabled')) ob.learningEnabled = Boolean(q('#vest-ob-learning-enabled').checked);
         if (q('#vest-ob-icon-size')) ob.orderIconSize = Number(q('#vest-ob-icon-size').value) || 13;
         if (q('#vest-ob-voice-alert')) ob.voiceAlertEnabled = Boolean(q('#vest-ob-voice-alert').checked);
         if (q('#vest-ob-chime-alert')) ob.chimeAlertEnabled = Boolean(q('#vest-ob-chime-alert').checked);
@@ -9812,6 +9989,30 @@
           showToast('Reset Order Blocks settings to defaults');
         });
 
+        overlay.querySelector('#vest-ob-clear-overrides-btn')?.addEventListener('click', () => {
+          const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+          ob.customOrderBlockOverrides = {};
+          draftSettings.orderBlocks = ob;
+          settings.orderBlocks = JSON.parse(JSON.stringify(ob));
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          targetIndicatorToScroll = 'orderblocks';
+          renderDialog();
+          showToast('Cleared all manual Order Block moves & resizes');
+        });
+
+        overlay.querySelector('#vest-ob-reset-learning-btn')?.addEventListener('click', () => {
+          const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
+          ob.learningData = { dismissedSamples: [], correctionSamples: [] };
+          draftSettings.orderBlocks = ob;
+          settings.orderBlocks = JSON.parse(JSON.stringify(ob));
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          targetIndicatorToScroll = 'orderblocks';
+          renderDialog();
+          showToast('Reset Order Block adaptive learning data');
+        });
+
         overlay.querySelector('#vest-ob-restore-dismissed-btn')?.addEventListener('click', () => {
           const ob = normalizeOrderBlocksConfig(draftSettings.orderBlocks);
           ob.dismissedOrderBlocks = [];
@@ -9850,7 +10051,7 @@
         });
 
         const obChangeSelectors = [
-          '#vest-ob-master-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-show-stats-box',
+          '#vest-ob-master-enabled', '#vest-ob-learning-enabled', '#vest-ob-show-entry-icon', '#vest-ob-show-target-lines', '#vest-ob-show-stats-box',
           '#vest-ob-voice-alert', '#vest-ob-chime-alert', '#vest-ob-extend-mode', '#vest-ob-voice-uri',
           '#vest-ob-bull-color', '#vest-ob-bear-color'
         ];

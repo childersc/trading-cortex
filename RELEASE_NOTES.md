@@ -1,3 +1,8 @@
+Trading Cortex v1.1.114 — Interactive Order Block Move/Resize & Adaptive OB Learning Engine
+
+- **Move & Resize Order Blocks on Chart (`v1.1.114`)**: Drag the new **`✥`** handle beside `×` to move any Order Block to the exact candle/price, or hover and drag any of its 4 edges (Top, Bottom, Left, Right) to resize it—saved permanently across reloads.
+- **Adaptive Learning From Moves, Resizes & `×` Removals (`v1.1.114`)**: Cortex now learns from every `×` dismissal (e.g., filtering out weak wick-only BOS or tiny-FVG setups) and every manual move/resize (e.g., body-only vs full-wick zones and candle shift preferences). Inspect active learned rules or reset anytime in **Settings → Charting Indicators → Order Blocks**.
+
 Trading Cortex v1.1.113 — Fixed Hypernova Fixed-Header Overlap (Self-Measuring In-Flow Bar)
 
 - **Clean Separation Below Hypernova's `Active Assessment` Header (`v1.1.113`)**: Self-measures the in-flow Cortex bar against Hypernova's fixed top header and left icon rail so it always sits cleanly **below** `Active Assessment` / `A1` and pushes the ticker & chart directly below it with zero overlap.

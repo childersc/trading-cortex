@@ -179,7 +179,12 @@
   let cachedComputedMtfOrderBlocks = [];
   let cachedMtfCoversActiveTf = false;
   let mtfBarsCacheVersion = 0;
-  let lastRenderedOrderBlockCloseHitBoxes = []; // [{ key, label, left, top, right, bottom }]
+  let lastRenderedOrderBlockCloseHitBoxes = []; // [{ key, label, left, top, right, bottom, features }]
+  let lastRenderedOrderBlockBoxes = []; // [{ key, label, left, top, right, bottom, moveRect, topPrice, bottomPrice, timeSec, endTimeSec, origTimeSec, isMtf, timeframe, features }]
+  let activeObDragState = null; // { key, label, mode: 'move'|'top'|'bottom'|'left'|'right', startClientX, startClientY, startTopPrice, startBottomPrice, startTimeSec, startEndTimeSec, curTopPrice, curBottomPrice, curTimeSec, curEndTimeSec, origTimeSec, isMtf, timeframe, features }
+  let hoveredObKey = '';
+  let latestObChartCoordContext = null; // { bars, barToX, yToPrice, xToBar, barIntervalSec, cssWidth, cssHeight, targetCanvas }
+  const obDragListenerDocs = new WeakSet();
   const mtfOrderBlockBarsCache = new Map(); // `${symbolKey}|${tfKey}` -> { bars, fetchedAt, source, inFlight, lastErrorAt }
   let cachedMarketStructureSignature = '';
   let cachedComputedMarketStructure = [];
@@ -8593,6 +8598,9 @@
       '4h': { enabled: true, bullishColor: '#14b8a6', bearishColor: '#f43f5e', opacity: 22 }
     },
     dismissedOrderBlocks: [],
+    customOrderBlockOverrides: {},
+    learningEnabled: true,
+    learningData: { dismissedSamples: [], correctionSamples: [] },
     showOrderEntryIcon: true,
     orderIconSize: 13,
     voiceAlertEnabled: true,
@@ -8631,6 +8639,31 @@
         opacity: Math.max(5, Math.min(80, Math.round(Number(src.opacity) || def.opacity)))
       };
     });
+    const rawOverrides = (cfg.customOrderBlockOverrides && typeof cfg.customOrderBlockOverrides === 'object' && !Array.isArray(cfg.customOrderBlockOverrides))
+      ? cfg.customOrderBlockOverrides
+      : {};
+    const customOrderBlockOverrides = {};
+    Object.entries(rawOverrides).slice(-200).forEach(([k, v]) => {
+      if (!k || !v || typeof v !== 'object') return;
+      const top = Number(v.top);
+      const bottom = Number(v.bottom);
+      const timeSec = Number(v.timeSec);
+      if (!isFinite(top) || !isFinite(bottom) || !isFinite(timeSec)) return;
+      customOrderBlockOverrides[String(k).trim()] = {
+        top: Math.max(top, bottom),
+        bottom: Math.min(top, bottom),
+        timeSec: Math.round(timeSec),
+        endTimeSec: (typeof v.endTimeSec === 'number' && isFinite(v.endTimeSec) && v.endTimeSec > 0) ? Math.round(v.endTimeSec) : null,
+        updatedAt: Number(v.updatedAt) || Date.now()
+      };
+    });
+    const rawLearn = (cfg.learningData && typeof cfg.learningData === 'object') ? cfg.learningData : {};
+    const dismissedSamples = Array.isArray(rawLearn.dismissedSamples)
+      ? rawLearn.dismissedSamples.filter(s => s && typeof s === 'object').slice(-80)
+      : [];
+    const correctionSamples = Array.isArray(rawLearn.correctionSamples)
+      ? rawLearn.correctionSamples.filter(s => s && typeof s === 'object').slice(-80)
+      : [];
     return {
       enabled: Boolean(cfg.enabled),
       swingLookback: Math.max(3, Math.min(15, Math.round(Number(cfg.swingLookback) || 5))),
@@ -8648,6 +8681,9 @@
       dismissedOrderBlocks: Array.isArray(cfg.dismissedOrderBlocks)
         ? Array.from(new Set(cfg.dismissedOrderBlocks.filter(k => typeof k === 'string' && k.trim().length > 0).map(k => k.trim()))).slice(-300)
         : [],
+      customOrderBlockOverrides,
+      learningEnabled: cfg.learningEnabled !== false,
+      learningData: { dismissedSamples, correctionSamples },
       showOrderEntryIcon: cfg.showOrderEntryIcon !== false,
       orderIconSize: Math.max(10, Math.min(24, Math.round(Number(cfg.orderIconSize) || 13))),
       voiceAlertEnabled: cfg.voiceAlertEnabled !== false,
@@ -8667,11 +8703,79 @@
     };
   }
 
+  function deriveOrderBlockLearningProfile(learningData) {
+    const data = (learningData && typeof learningData === 'object') ? learningData : {};
+    const dismissed = Array.isArray(data.dismissedSamples) ? data.dismissedSamples : [];
+    const corrections = Array.isArray(data.correctionSamples) ? data.correctionSamples : [];
+
+    let requireCloseBos = false;
+    let minFvgRatio = 0;
+    let minDispRatio = 0;
+    let preferredZoneMode = 'auto';
+    let preferredOriginShift = 0;
+
+    if (dismissed.length >= 3) {
+      const wickOnlyCount = dismissed.filter(s => s && s.closeBreak === false).length;
+      if (wickOnlyCount >= 3 && (wickOnlyCount / dismissed.length) >= 0.6) {
+        requireCloseBos = true;
+      }
+      const fvgVals = dismissed.map(s => Number(s && s.fvgRatio)).filter(v => isFinite(v) && v >= 0);
+      if (fvgVals.length >= 3) {
+        const smallFvgs = fvgVals.filter(v => v <= 0.5);
+        if (smallFvgs.length >= 3 && (smallFvgs.length / fvgVals.length) >= 0.6) {
+          const avgSmall = smallFvgs.reduce((a, b) => a + b, 0) / smallFvgs.length;
+          minFvgRatio = Math.min(0.65, Math.round((avgSmall + 0.08) * 100) / 100);
+        }
+      }
+      const dispVals = dismissed.map(s => Number(s && s.dispRatio)).filter(v => isFinite(v) && v >= 0);
+      if (dispVals.length >= 3) {
+        const weakDisps = dispVals.filter(v => v <= 0.8);
+        if (weakDisps.length >= 3 && (weakDisps.length / dispVals.length) >= 0.6) {
+          const avgWeak = weakDisps.reduce((a, b) => a + b, 0) / weakDisps.length;
+          minDispRatio = Math.min(0.85, Math.round((avgWeak + 0.08) * 100) / 100);
+        }
+      }
+    }
+
+    if (corrections.length >= 3) {
+      const bodyCount = corrections.filter(c => c && c.zoneStyle === 'body').length;
+      const wickCount = corrections.filter(c => c && c.zoneStyle === 'wick').length;
+      const styledTotal = bodyCount + wickCount;
+      if (styledTotal >= 3) {
+        if ((bodyCount / styledTotal) >= 0.65) preferredZoneMode = 'body';
+        else if ((wickCount / styledTotal) >= 0.65) preferredZoneMode = 'wick';
+      }
+      const shifts = corrections.map(c => Number(c && c.deltaBars)).filter(v => isFinite(v) && v !== 0 && Math.abs(v) <= 3);
+      if (shifts.length >= 3) {
+        const negCount = shifts.filter(v => v < 0).length;
+        const posCount = shifts.filter(v => v > 0).length;
+        if ((negCount / shifts.length) >= 0.65) {
+          preferredOriginShift = Math.max(-2, Math.round(shifts.filter(v => v < 0).reduce((a, b) => a + b, 0) / negCount));
+        } else if ((posCount / shifts.length) >= 0.65) {
+          preferredOriginShift = Math.min(2, Math.round(shifts.filter(v => v > 0).reduce((a, b) => a + b, 0) / posCount));
+        }
+      }
+    }
+
+    return {
+      requireCloseBos,
+      minFvgRatio,
+      minDispRatio,
+      preferredZoneMode,
+      preferredOriginShift,
+      dismissedCount: dismissed.length,
+      correctionCount: corrections.length
+    };
+  }
+
   function computeOrderBlocksFromBars(bars, config) {
     if (!bars || bars.length < 5 || !config || !config.enabled) return [];
     const cfg = normalizeOrderBlocksConfig(config);
     const lookback = cfg.swingLookback;
     const maxBlocks = cfg.maxBlocks;
+    const learned = (cfg.learningEnabled !== false && typeof deriveOrderBlockLearningProfile === 'function')
+      ? deriveOrderBlockLearningProfile(cfg.learningData)
+      : null;
 
     // Calculate median/average candle range over bars to detect anomalous outlier candles
     let totalRange = 0;
@@ -8701,6 +8805,9 @@
           }
         }
         if (originIdx < 0) continue;
+        if (learned && learned.preferredOriginShift !== 0) {
+          originIdx = Math.max(0, Math.min(g - 1, originIdx + learned.preferredOriginShift));
+        }
         const originBar = bars[originIdx];
 
         // Valid Bearish OB requires breaking a prior Swing Low formed BEFORE the origin peak
@@ -8711,13 +8818,24 @@
         if (!isFinite(targetLow) || targetLow >= originBar.low) continue;
 
         let broke = false;
+        let closeBreak = false;
         let breakBarIndex = -1;
         for (let b = g; b < Math.min(bars.length, g + 6); b++) {
           if (bars[b].close < targetLow || bars[b].low < targetLow) {
             broke = true;
+            closeBreak = bars[b].close < targetLow;
             breakBarIndex = b;
             break;
           }
+        }
+
+        const fvgGap = Math.max(0, bars[g - 1].low - bars[g + 1].high);
+        const fvgRatio = Math.round((fvgGap / avgRange) * 1000) / 1000;
+        const dispRatio = Math.round((Math.abs(bars[g].close - bars[g].open) / avgRange) * 1000) / 1000;
+        if (learned) {
+          if (learned.requireCloseBos && !closeBreak) continue;
+          if (learned.minFvgRatio > 0 && fvgRatio < learned.minFvgRatio) continue;
+          if (learned.minDispRatio > 0 && dispRatio < learned.minDispRatio) continue;
         }
 
         if (broke) {
@@ -8728,6 +8846,13 @@
             const candleRange = originBar.high - originBar.low;
             if (candleRange > 3 * avgRange) {
               obBottom = Math.max(originBar.high - avgRange * 2, Math.min(originBar.open, originBar.close));
+            }
+            if (learned && learned.preferredZoneMode === 'body') {
+              obTop = Math.max(originBar.open, originBar.close);
+              obBottom = Math.min(originBar.open, originBar.close);
+            } else if (learned && learned.preferredZoneMode === 'wick') {
+              obTop = originBar.high;
+              obBottom = originBar.low;
             }
             const id = 'bear_ob_' + (originBar.timeSec || originIdx) + '_' + obTop.toFixed(4);
 
@@ -8748,7 +8873,18 @@
               mitigatedBarIndex: -1,
               mitigatedTimeSec: 0,
               mitigatedPrice: 0,
-              isInvalidated: false
+              isInvalidated: false,
+              features: {
+                side: 'short',
+                fvgRatio,
+                dispRatio,
+                closeBreak,
+                originOffset: g - originIdx,
+                candleHigh: originBar.high,
+                candleLow: originBar.low,
+                candleBodyTop: Math.max(originBar.open, originBar.close),
+                candleBodyBottom: Math.min(originBar.open, originBar.close)
+              }
             });
           }
         }
@@ -8770,6 +8906,9 @@
           }
         }
         if (originIdx < 0) continue;
+        if (learned && learned.preferredOriginShift !== 0) {
+          originIdx = Math.max(0, Math.min(g - 1, originIdx + learned.preferredOriginShift));
+        }
         const originBar = bars[originIdx];
 
         // Valid Bullish OB requires breaking a prior Swing High formed BEFORE the origin dip
@@ -8780,13 +8919,24 @@
         if (!isFinite(targetHigh) || targetHigh <= originBar.high) continue;
 
         let broke = false;
+        let closeBreak = false;
         let breakBarIndex = -1;
         for (let b = g; b < Math.min(bars.length, g + 6); b++) {
           if (bars[b].close > targetHigh || bars[b].high > targetHigh) {
             broke = true;
+            closeBreak = bars[b].close > targetHigh;
             breakBarIndex = b;
             break;
           }
+        }
+
+        const fvgGap = Math.max(0, bars[g + 1].low - bars[g - 1].high);
+        const fvgRatio = Math.round((fvgGap / avgRange) * 1000) / 1000;
+        const dispRatio = Math.round((Math.abs(bars[g].close - bars[g].open) / avgRange) * 1000) / 1000;
+        if (learned) {
+          if (learned.requireCloseBos && !closeBreak) continue;
+          if (learned.minFvgRatio > 0 && fvgRatio < learned.minFvgRatio) continue;
+          if (learned.minDispRatio > 0 && dispRatio < learned.minDispRatio) continue;
         }
 
         if (broke) {
@@ -8797,6 +8947,13 @@
             const candleRange = originBar.high - originBar.low;
             if (candleRange > 3 * avgRange) {
               obTop = Math.min(originBar.low + avgRange * 2, Math.max(originBar.open, originBar.close));
+            }
+            if (learned && learned.preferredZoneMode === 'body') {
+              obTop = Math.max(originBar.open, originBar.close);
+              obBottom = Math.min(originBar.open, originBar.close);
+            } else if (learned && learned.preferredZoneMode === 'wick') {
+              obTop = originBar.high;
+              obBottom = originBar.low;
             }
             const id = 'bull_ob_' + (originBar.timeSec || originIdx) + '_' + obTop.toFixed(4);
 
@@ -8817,7 +8974,18 @@
               mitigatedBarIndex: -1,
               mitigatedTimeSec: 0,
               mitigatedPrice: 0,
-              isInvalidated: false
+              isInvalidated: false,
+              features: {
+                side: 'long',
+                fvgRatio,
+                dispRatio,
+                closeBreak,
+                originOffset: g - originIdx,
+                candleHigh: originBar.high,
+                candleLow: originBar.low,
+                candleBodyTop: Math.max(originBar.open, originBar.close),
+                candleBodyBottom: Math.min(originBar.open, originBar.close)
+              }
             });
           }
         }
@@ -9383,18 +9551,36 @@
       const ob = orderBlocks[i];
       if (ob.isInvalidated) continue;
 
-      const rawStartX = resolveObTimeToX(ob, true, ob.barIndex, ob.timeSec, bars, barToX, cssWidth);
+      const dismissKey = buildOrderBlockDismissKey(symbolKey, ob, fallbackTfLabel);
+      const savedOverride = (dismissKey && cfg.customOrderBlockOverrides && cfg.customOrderBlockOverrides[dismissKey]) || null;
+      const liveDrag = (dismissKey && activeObDragState && activeObDragState.key === dismissKey) ? activeObDragState : null;
+
+      const effTop = liveDrag ? liveDrag.curTopPrice : (savedOverride ? savedOverride.top : ob.top);
+      const effBottom = liveDrag ? liveDrag.curBottomPrice : (savedOverride ? savedOverride.bottom : ob.bottom);
+      const effTimeSec = liveDrag ? liveDrag.curTimeSec : (savedOverride ? savedOverride.timeSec : ob.timeSec);
+      const effEndTimeSec = liveDrag ? liveDrag.curEndTimeSec : (savedOverride ? savedOverride.endTimeSec : null);
+      const timeWasMoved = Boolean(effTimeSec && ob.timeSec && effTimeSec !== ob.timeSec);
+
+      const startResolveOb = timeWasMoved ? { ...ob, isMtf: true } : ob;
+      const rawStartX = resolveObTimeToX(startResolveOb, true, timeWasMoved ? null : ob.barIndex, effTimeSec, bars, barToX, cssWidth);
       if (rawStartX === null || !isFinite(rawStartX)) continue;
 
-      const topY = priceToY(ob.top);
-      const bottomY = priceToY(ob.bottom);
+      const topY = priceToY(effTop);
+      const bottomY = priceToY(effBottom);
       if (topY === null || bottomY === null || !isFinite(topY) || !isFinite(bottomY)) continue;
 
       // Box starts strictly on the left edge of the Order Block candle — NEVER extends to the left!
-      const boxLeft = (ob.isMtf && rawStartX <= 0) ? 0 : (rawStartX - halfBarW);
+      const boxLeft = ((ob.isMtf || timeWasMoved) && rawStartX <= 0) ? 0 : (rawStartX - halfBarW);
       let boxRight = rawStartX + halfBarW;
 
-      if (cfg.extendMode === 'candle' && !ob.isMtf) {
+      if (effEndTimeSec && isFinite(effEndTimeSec) && effEndTimeSec > 0) {
+        const endX = resolveObTimeToX({ ...ob, isMtf: true }, false, null, effEndTimeSec, bars, barToX, cssWidth);
+        if (endX !== null && isFinite(endX) && endX >= boxLeft) {
+          boxRight = endX + halfBarW;
+        } else {
+          boxRight = Math.max(rawStartX + halfBarW * 2, boxLeft + halfBarW * 2);
+        }
+      } else if (cfg.extendMode === 'candle' && !ob.isMtf) {
         // Single candle only: Box is strictly on the actual origin bar!
         boxRight = rawStartX + halfBarW;
       } else if (ob.isMitigated) {
@@ -9444,22 +9630,44 @@
       ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
       ctx.setLineDash([]);
 
-      // 3. Zone Label — dynamically auto-fitted to the Order Block box dimensions (just like Session Boxes) + 1-click × dismiss button
+      // 3. Zone Label — dynamically auto-fitted to the Order Block box dimensions (just like Session Boxes) + ✥ move & × dismiss buttons
       const maxLabelPx = ob.timeframe ? (cfg.mtfLabelFontSize || 22) : (cfg.labelFontSize || 18);
       const tfPrefix = ob.timeframe ? `${ob.timeframe} ` : '';
       const labelText = `${tfPrefix}${isBull ? 'Bullish OB' : 'Bearish OB'}`;
       const visLeft = Math.max(0, boxLeft);
       const visRight = Math.min(cssWidth, boxLeft + boxWidth);
       const visW = Math.max(0, visRight - visLeft);
-      const dismissKey = buildOrderBlockDismissKey(symbolKey, ob, fallbackTfLabel);
       const useCenteredBoxFit = boxHeight >= 18 && visW >= 36;
+      const isActiveOrHovered = Boolean(dismissKey && (hoveredObKey === dismissKey || (activeObDragState && activeObDragState.key === dismissKey)));
+      let moveRect = null;
+
+      if (isActiveOrHovered) {
+        // Highlight border & draw 4 midpoint resize handles (Top, Bottom, Left, Right)
+        ctx.save();
+        ctx.strokeStyle = hexToRgbaString(baseColor, 95);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+        const hSz = 6;
+        const drawHandle = (hx, hy) => {
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(hx - hSz / 2, hy - hSz / 2, hSz, hSz);
+          ctx.strokeStyle = baseColor;
+          ctx.lineWidth = 1.4;
+          ctx.strokeRect(hx - hSz / 2, hy - hSz / 2, hSz, hSz);
+        };
+        drawHandle(visLeft + visW / 2, boxTop);
+        drawHandle(visLeft + visW / 2, boxTop + boxHeight);
+        if (boxLeft >= 0) drawHandle(boxLeft, boxTop + boxHeight / 2);
+        if (boxLeft + boxWidth <= cssWidth) drawHandle(boxLeft + boxWidth, boxTop + boxHeight / 2);
+        ctx.restore();
+      }
 
       if (useCenteredBoxFit) {
         const btnSize = Math.max(12, Math.min(16, Math.round(Math.min(boxHeight * 0.45, 14))));
         const fittedPx = computeFittedObLabelFontSize(
           ctx,
           labelText,
-          Math.max(20, visW - btnSize - 10),
+          Math.max(20, visW - btnSize * 2 - 14),
           boxHeight,
           maxLabelPx,
           Boolean(ob.isMitigated)
@@ -9487,10 +9695,29 @@
         }
         ctx.restore();
 
-        // Compact × remove button tucked cleanly in the top-right corner of the visible box
+        // Compact ✥ move & × remove buttons tucked cleanly in the top-right corner of the visible box
         if (dismissKey) {
           const btnX = Math.max(visLeft + 3, visRight - btnSize - 4);
           const btnY = boxTop + 3;
+          const moveX = btnX - btnSize - 3;
+          if (moveX > visLeft + 2 && btnY >= 0 && btnY < cssHeight) {
+            ctx.save();
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(moveX, btnY, btnSize, btnSize, 3);
+            else ctx.rect(moveX, btnY, btnSize, btnSize);
+            ctx.fillStyle = isActiveOrHovered ? 'rgba(56, 189, 248, 0.25)' : 'rgba(15, 23, 42, 0.72)';
+            ctx.fill();
+            ctx.strokeStyle = hexToRgbaString(baseColor, 65);
+            ctx.lineWidth = 0.9;
+            ctx.stroke();
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = `700 ${Math.max(9, btnSize - 3)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('✥', moveX + btnSize / 2, btnY + btnSize / 2 + 0.5);
+            ctx.restore();
+            moveRect = { left: moveX - 3, top: btnY - 3, right: moveX + btnSize + 3, bottom: btnY + btnSize + 3 };
+          }
           if (btnX > 0 && btnY >= 0 && btnY < cssHeight) {
             ctx.save();
             ctx.beginPath();
@@ -9518,13 +9745,14 @@
               left: btnX - 3,
               top: btnY - 3,
               right: btnX + btnSize + 3,
-              bottom: btnY + btnSize + 3
+              bottom: btnY + btnSize + 3,
+              features: ob.features || null
             });
           }
         }
       } else {
-        // Razor-thin box fallback: compact label neatly aligned at the left edge + × pill right beside it
-        const compactPx = computeFittedObLabelFontSize(ctx, labelText, Math.max(24, visW - 18), Math.max(12, boxHeight), Math.min(maxLabelPx, 11), false);
+        // Razor-thin box fallback: compact label neatly aligned at the left edge + ✥ move & × pill right beside it
+        const compactPx = computeFittedObLabelFontSize(ctx, labelText, Math.max(24, visW - 34), Math.max(12, boxHeight), Math.min(maxLabelPx, 11), false);
         ctx.font = `600 ${compactPx}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.fillStyle = baseColor;
         const labelX = Math.max(6, boxLeft + 6);
@@ -9534,8 +9762,27 @@
         if (dismissKey) {
           const labelW = ctx.measureText(labelText).width;
           const btnSize = 12;
-          const btnX = Math.min(cssWidth - btnSize - 4, labelX + labelW + 5);
+          const moveX = Math.min(cssWidth - btnSize * 2 - 7, labelX + labelW + 5);
+          const btnX = moveX + btnSize + 3;
           const btnY = Math.max(2, boxTop + 1);
+          if (moveX > 0 && btnY >= 0 && btnY < cssHeight) {
+            ctx.save();
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(moveX, btnY, btnSize, btnSize, 3);
+            else ctx.rect(moveX, btnY, btnSize, btnSize);
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+            ctx.fill();
+            ctx.strokeStyle = hexToRgbaString(baseColor, 65);
+            ctx.lineWidth = 0.9;
+            ctx.stroke();
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '700 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('✥', moveX + btnSize / 2, btnY + btnSize / 2 + 0.5);
+            ctx.restore();
+            moveRect = { left: moveX - 3, top: btnY - 3, right: moveX + btnSize + 3, bottom: btnY + btnSize + 3 };
+          }
           if (btnX > 0 && btnY >= 0 && btnY < cssHeight) {
             ctx.save();
             ctx.beginPath();
@@ -9563,10 +9810,31 @@
               left: btnX - 3,
               top: btnY - 3,
               right: btnX + btnSize + 3,
-              bottom: btnY + btnSize + 3
+              bottom: btnY + btnSize + 3,
+              features: ob.features || null
             });
           }
         }
+      }
+
+      if (dismissKey) {
+        lastRenderedOrderBlockBoxes.push({
+          key: dismissKey,
+          label: labelText,
+          left: boxLeft,
+          top: boxTop,
+          right: boxLeft + boxWidth,
+          bottom: boxTop + boxHeight,
+          moveRect,
+          topPrice: effTop,
+          bottomPrice: effBottom,
+          timeSec: effTimeSec,
+          endTimeSec: effEndTimeSec,
+          origTimeSec: ob.timeSec,
+          isMtf: Boolean(ob.isMtf),
+          timeframe: ob.timeframe || fallbackTfLabel || '',
+          features: ob.features || null
+        });
       }
 
       // 4. Order Entry Icon on the mitigation bar (native chart timeframe OBs only to avoid multi-TF badge clutter)
@@ -9659,6 +9927,213 @@
     }
 
     ctx.restore();
+  }
+
+  function hitTestOrderBlockDragTarget(localX, localY) {
+    // Exclude × close hitboxes so clicking × always dismisses cleanly
+    for (let i = lastRenderedOrderBlockCloseHitBoxes.length - 1; i >= 0; i--) {
+      const c = lastRenderedOrderBlockCloseHitBoxes[i];
+      if (localX >= c.left && localX <= c.right && localY >= c.top && localY <= c.bottom) {
+        return null;
+      }
+    }
+    const edgeTol = 6;
+    for (let i = lastRenderedOrderBlockBoxes.length - 1; i >= 0; i--) {
+      const b = lastRenderedOrderBlockBoxes[i];
+      if (b.moveRect && localX >= b.moveRect.left && localX <= b.moveRect.right && localY >= b.moveRect.top && localY <= b.moveRect.bottom) {
+        return { box: b, mode: 'move' };
+      }
+      const withinX = localX >= (b.left - edgeTol) && localX <= (b.right + edgeTol);
+      const withinY = localY >= (b.top - edgeTol) && localY <= (b.bottom + edgeTol);
+      if (!withinX || !withinY) continue;
+      if (Math.abs(localY - b.top) <= edgeTol) return { box: b, mode: 'top' };
+      if (Math.abs(localY - b.bottom) <= edgeTol) return { box: b, mode: 'bottom' };
+      if (b.left >= 0 && Math.abs(localX - b.left) <= edgeTol) return { box: b, mode: 'left' };
+      if (Math.abs(localX - b.right) <= edgeTol) return { box: b, mode: 'right' };
+    }
+    return null;
+  }
+
+  function classifyObZoneStyle(topPrice, bottomPrice, bar) {
+    if (!bar || !isFinite(topPrice) || !isFinite(bottomPrice)) return 'custom';
+    const fullRange = Math.max(0.0001, bar.high - bar.low);
+    const bodyTop = Math.max(bar.open, bar.close);
+    const bodyBottom = Math.min(bar.open, bar.close);
+    const bodyDist = (Math.abs(topPrice - bodyTop) + Math.abs(bottomPrice - bodyBottom)) / fullRange;
+    const wickDist = (Math.abs(topPrice - bar.high) + Math.abs(bottomPrice - bar.low)) / fullRange;
+    if (bodyDist <= 0.35 && bodyDist < wickDist) return 'body';
+    if (wickDist <= 0.35 && wickDist <= bodyDist) return 'wick';
+    return 'custom';
+  }
+
+  function attachOrderBlockDragListeners(doc) {
+    if (!doc || obDragListenerDocs.has(doc)) return;
+    obDragListenerDocs.add(doc);
+
+    const getLocalCoords = (e) => {
+      const ctxInfo = latestObChartCoordContext;
+      if (!ctxInfo || !ctxInfo.targetCanvas) return null;
+      const rect = ctxInfo.targetCanvas.getBoundingClientRect();
+      return {
+        x: (e.clientX || 0) - rect.left,
+        y: (e.clientY || 0) - rect.top,
+        rect
+      };
+    };
+
+    const onPointerDown = (e) => {
+      if (!e || (typeof e.button === 'number' && e.button !== 0)) return;
+      if (!lastRenderedOrderBlockBoxes.length || isDrawingToolActivelySelectedOnChart()) return;
+      const coords = getLocalCoords(e);
+      if (!coords) return;
+      const hit = hitTestOrderBlockDragTarget(coords.x, coords.y);
+      if (!hit) return;
+
+      const ctxInfo = latestObChartCoordContext;
+      const startPrice = ctxInfo && ctxInfo.yToPrice ? ctxInfo.yToPrice(coords.y) : null;
+      const startBar = ctxInfo && ctxInfo.xToBar ? ctxInfo.xToBar(coords.x) : null;
+      if (startPrice === null || !isFinite(startPrice)) return;
+
+      activeObDragState = {
+        key: hit.box.key,
+        label: hit.box.label,
+        mode: hit.mode,
+        startClientX: e.clientX || 0,
+        startClientY: e.clientY || 0,
+        startCursorPrice: startPrice,
+        startCursorTimeSec: startBar ? startBar.timeSec : hit.box.timeSec,
+        startTopPrice: hit.box.topPrice,
+        startBottomPrice: hit.box.bottomPrice,
+        startTimeSec: hit.box.timeSec,
+        startEndTimeSec: hit.box.endTimeSec,
+        curTopPrice: hit.box.topPrice,
+        curBottomPrice: hit.box.bottomPrice,
+        curTimeSec: hit.box.timeSec,
+        curEndTimeSec: hit.box.endTimeSec,
+        origTimeSec: hit.box.origTimeSec,
+        isMtf: hit.box.isMtf,
+        timeframe: hit.box.timeframe,
+        features: hit.box.features || null
+      };
+      hoveredObKey = hit.box.key;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      scheduleIctSessionsRender(false);
+    };
+
+    const onPointerMove = (e) => {
+      const coords = getLocalCoords(e);
+      if (!coords) return;
+      const ctxInfo = latestObChartCoordContext;
+
+      if (activeObDragState) {
+        e.preventDefault();
+        e.stopPropagation();
+        const curPrice = ctxInfo && ctxInfo.yToPrice ? ctxInfo.yToPrice(coords.y) : null;
+        const curBar = ctxInfo && ctxInfo.xToBar ? ctxInfo.xToBar(coords.x) : null;
+        const d = activeObDragState;
+        if (d.mode === 'top' && curPrice !== null && isFinite(curPrice)) {
+          d.curTopPrice = Math.max(curPrice, d.curBottomPrice + 0.0001);
+        } else if (d.mode === 'bottom' && curPrice !== null && isFinite(curPrice)) {
+          d.curBottomPrice = Math.min(curPrice, d.curTopPrice - 0.0001);
+        } else if (d.mode === 'left' && curBar && isFinite(curBar.timeSec)) {
+          d.curTimeSec = curBar.timeSec;
+        } else if (d.mode === 'right' && curBar && isFinite(curBar.timeSec)) {
+          d.curEndTimeSec = Math.max(d.curTimeSec + (ctxInfo.barIntervalSec || 60), curBar.timeSec);
+        } else if (d.mode === 'move') {
+          if (curPrice !== null && isFinite(curPrice)) {
+            const deltaPrice = curPrice - d.startCursorPrice;
+            d.curTopPrice = d.startTopPrice + deltaPrice;
+            d.curBottomPrice = d.startBottomPrice + deltaPrice;
+          }
+          if (curBar && isFinite(curBar.timeSec) && isFinite(d.startCursorTimeSec)) {
+            const deltaTime = curBar.timeSec - d.startCursorTimeSec;
+            d.curTimeSec = Math.max(1, Math.round(d.startTimeSec + deltaTime));
+            if (d.startEndTimeSec) {
+              d.curEndTimeSec = Math.max(d.curTimeSec + (ctxInfo.barIntervalSec || 60), Math.round(d.startEndTimeSec + deltaTime));
+            }
+          }
+        }
+        scheduleIctSessionsRender(false);
+        return;
+      }
+
+      // Hover highlight for resize/move affordance
+      if (lastRenderedOrderBlockBoxes.length > 0 && !isDrawingToolActivelySelectedOnChart()) {
+        const hit = hitTestOrderBlockDragTarget(coords.x, coords.y);
+        const nextHover = hit ? hit.box.key : '';
+        if (nextHover !== hoveredObKey) {
+          hoveredObKey = nextHover;
+          scheduleIctSessionsRender(false);
+        }
+      }
+    };
+
+    const onPointerUp = (e) => {
+      if (!activeObDragState) return;
+      const d = activeObDragState;
+      activeObDragState = null;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const ctxInfo = latestObChartCoordContext;
+      const top = Math.max(d.curTopPrice, d.curBottomPrice);
+      const bottom = Math.min(d.curTopPrice, d.curBottomPrice);
+      const timeSec = Math.round(d.curTimeSec);
+      const endTimeSec = (typeof d.curEndTimeSec === 'number' && isFinite(d.curEndTimeSec) && d.curEndTimeSec > 0)
+        ? Math.round(d.curEndTimeSec)
+        : null;
+
+      // Compute learning feedback from this move/resize (bar shift + body-vs-wick preference)
+      const intervalSec = Math.max(15, (ctxInfo && ctxInfo.barIntervalSec) || 300);
+      const deltaBars = isFinite(d.origTimeSec) && d.origTimeSec > 0
+        ? Math.round((timeSec - d.origTimeSec) / intervalSec)
+        : 0;
+      let targetBar = null;
+      if (ctxInfo && Array.isArray(ctxInfo.bars) && ctxInfo.bars.length > 0) {
+        let bestDiff = Infinity;
+        for (let bi = 0; bi < ctxInfo.bars.length; bi++) {
+          const diff = Math.abs(ctxInfo.bars[bi].timeSec - timeSec);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            targetBar = ctxInfo.bars[bi];
+          }
+        }
+      }
+      const zoneStyle = classifyObZoneStyle(top, bottom, targetBar);
+
+      if (!currentSettings.orderBlocks || typeof currentSettings.orderBlocks !== 'object') {
+        currentSettings.orderBlocks = normalizeOrderBlocksConfig(null);
+      }
+      currentSettings.orderBlocks = {
+        ...currentSettings.orderBlocks,
+        customOrderBlockOverrides: {
+          ...(currentSettings.orderBlocks.customOrderBlockOverrides || {}),
+          [d.key]: { top, bottom, timeSec, endTimeSec, updatedAt: Date.now() }
+        }
+      };
+
+      postToIsolated({
+        type: 'VEST_TV_OB_OVERRIDE',
+        key: d.key,
+        label: d.label,
+        override: { top, bottom, timeSec, endTimeSec },
+        correction: {
+          mode: d.mode,
+          deltaBars,
+          zoneStyle,
+          timeframe: d.timeframe || '',
+          side: (d.features && d.features.side) || ''
+        }
+      });
+      scheduleIctSessionsRender(false);
+    };
+
+    doc.addEventListener('pointerdown', onPointerDown, true);
+    doc.addEventListener('pointermove', onPointerMove, { capture: true, passive: false });
+    doc.addEventListener('pointerup', onPointerUp, true);
+    doc.addEventListener('pointercancel', onPointerUp, true);
   }
 
   // -------------------------------------------------------------
@@ -11533,7 +12008,8 @@
               postToIsolated({
                 type: 'VEST_TV_OB_DISMISS',
                 key: hit.key,
-                label: hit.label
+                label: hit.label,
+                features: hit.features || null
               });
               scheduleIctSessionsRender(true);
               return;
@@ -12470,6 +12946,7 @@
     const clearAllChartOverlays = () => {
       lastRenderedCandleOhlcHitBoxes = [];
       lastRenderedOrderBlockCloseHitBoxes = [];
+      lastRenderedOrderBlockBoxes = [];
       if (ictSessionsCanvas) {
         const c = ictSessionsCanvas.getContext('2d');
         if (c) c.clearRect(0, 0, ictSessionsCanvas.width, ictSessionsCanvas.height);
@@ -13514,7 +13991,40 @@
 
     // 5A. Render Institutional Order Blocks (Smart Risk + Multi-Timeframe 5m/15m/1h/4h) on canvas
     lastRenderedOrderBlockCloseHitBoxes = [];
+    lastRenderedOrderBlockBoxes = [];
     if (hasCanvasOrderBlocks) {
+      const yToPrice = (yPx) => {
+        try {
+          if (internalPs && typeof internalPs.coordinateToPrice === 'function') {
+            const p = internalPs.coordinateToPrice(yPx, firstValue);
+            if (typeof p === 'number' && isFinite(p)) return p;
+          }
+        } catch (e) {}
+        if (visiblePriceRange && visiblePriceRange.to > visiblePriceRange.from) {
+          const usableH = Math.max(1, cssHeight - psTopMargin - psBottomMargin);
+          const ratio = (yPx - psTopMargin) / usableH;
+          return visiblePriceRange.to - ratio * (visiblePriceRange.to - visiblePriceRange.from);
+        }
+        return null;
+      };
+      const xToBar = (xPx) => {
+        if (!Array.isArray(bars) || bars.length === 0) return null;
+        let bestBar = null;
+        let bestDist = Infinity;
+        for (let bi = 0; bi < bars.length; bi++) {
+          const bx = barToX(bars[bi].barIndex, bars[bi].timeSec);
+          if (bx === null || !isFinite(bx)) continue;
+          const dist = Math.abs(bx - xPx);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestBar = bars[bi];
+          }
+        }
+        return bestBar;
+      };
+      latestObChartCoordContext = { bars, barToX, yToPrice, xToBar, barIntervalSec, cssWidth, cssHeight, targetCanvas };
+      attachOrderBlockDragListeners(targetCanvas.ownerDocument || document);
+
       const obTfLabel = formatCurrentResolutionLabel();
       if (cachedComputedMtfOrderBlocks.length > 0) {
         renderOrderBlocksOnCanvas(ctx, cachedComputedMtfOrderBlocks, orderBlocksConfig, barToX, priceToY, halfBarW, cssWidth, cssHeight, barIntervalSec, bars, symbolKey, obTfLabel);

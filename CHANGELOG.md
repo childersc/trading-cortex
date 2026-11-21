@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.113`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.114`) are documented in this file.
+
+---
+
+## [v1.1.114] — 2026-11-21
+
+### 🧠 Interactive Order Block Move/Resize & On-Device Adaptive OB Learning Engine
+- **Move & Resize Any Order Block Directly on Chart**:
+  - Added a compact **`✥`** move handle beside the **`×`** dismiss button on every Order Block (native chart & MTF `5m`/`15m`/`1h`/`4h`), plus hover-revealed 4-edge resize handles (Top, Bottom, Left, Right).
+  - Dragging **`✥`** moves the entire box to any candle/price; dragging any edge resizes top/bottom price or start/end candle—automatically suppressing chart pan during the drag and persisting exact adjustments in `settings.orderBlocks.customOrderBlockOverrides`.
+- **Adaptive Order Block Learning Engine (`deriveOrderBlockLearningProfile`)**:
+  - Every **`×`** removal logs the rejected OB's structural features (`closeBreak`, `fvgRatio`, `dispRatio`, `originOffset`), and every **move/resize** logs candle shift (`deltaBars`) and zone style (`body` vs `wick`).
+  - Automatically adapts future Order Block detection as feedback accumulates (e.g., requiring close-based BOS, raising minimum FVG/displacement ratios, switching between body-only vs full-wick zones, and tuning origin candle selection).
+  - Added an **Adaptive OB Learning Engine** card in **Settings → Charting Indicators → Order Blocks** displaying live feedback sample counts, active learned rules, an enable/disable toggle, and 1-click **Reset Learned Data** / **Reset Moved/Resized** controls.
 
 ---
 

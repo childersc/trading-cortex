@@ -484,4 +484,63 @@ assert(mediumBoxPx < largeBoxPx && mediumBoxPx >= 8, 'Medium box should scale pr
 assert(smallBoxPx <= mediumBoxPx && smallBoxPx >= 8, 'Small/thin box should scale down cleanly to stay inside bounds');
 console.log('✓ Box-fitted dynamic Order Block text sizing verified');
 
+// 13. Verify Interactive OB Move/Resize Persistence & Adaptive OB Learning Engine
+console.log('Testing interactive OB move/resize persistence & adaptive learning engine...');
+assert(isolatedJs.includes("type === 'VEST_TV_OB_OVERRIDE'"), 'Isolated world must handle VEST_TV_OB_OVERRIDE');
+assert(isolatedJs.includes('vest-ob-learning-enabled'), 'Order Blocks settings must include Adaptive Learning toggle');
+assert(isolatedJs.includes('vest-ob-reset-learning-btn'), 'Order Blocks settings must include Reset Learned Data button');
+assert(isolatedJs.includes('vest-ob-clear-overrides-btn'), 'Order Blocks settings must include Reset Moved/Resized button');
+assert(mainJs.includes('function attachOrderBlockDragListeners('), 'Main world must define attachOrderBlockDragListeners');
+assert(mainJs.includes('function hitTestOrderBlockDragTarget('), 'Main world must define hitTestOrderBlockDragTarget');
+
+const learnProfileFnCode = extractFn('deriveOrderBlockLearningProfile', mainJs);
+const classifyZoneFnCode = extractFn('classifyObZoneStyle', mainJs);
+vm.runInContext(`${learnProfileFnCode}\n${classifyZoneFnCode}`, mtfSandbox);
+
+// Verify learning from × dismissals (wick-only BOS + small FVG)
+const learnedFromDismissals = mtfSandbox.deriveOrderBlockLearningProfile({
+  dismissedSamples: [
+    { closeBreak: false, fvgRatio: 0.12, dispRatio: 0.45 },
+    { closeBreak: false, fvgRatio: 0.18, dispRatio: 0.50 },
+    { closeBreak: false, fvgRatio: 0.15, dispRatio: 0.40 },
+    { closeBreak: true, fvgRatio: 0.20, dispRatio: 0.55 }
+  ],
+  correctionSamples: [
+    { deltaBars: -1, zoneStyle: 'body' },
+    { deltaBars: -1, zoneStyle: 'body' },
+    { deltaBars: -1, zoneStyle: 'body' }
+  ]
+});
+assert.strictEqual(learnedFromDismissals.requireCloseBos, true, 'Must learn requireCloseBos when >=60% of dismissals are wick-only BOS');
+assert(learnedFromDismissals.minFvgRatio > 0.15, 'Must raise minFvgRatio after repeated small-FVG dismissals');
+assert(learnedFromDismissals.minDispRatio > 0.45, 'Must raise minDispRatio after repeated weak-displacement dismissals');
+assert.strictEqual(learnedFromDismissals.preferredZoneMode, 'body', 'Must learn body-only zone style from repeated body resizes');
+assert.strictEqual(learnedFromDismissals.preferredOriginShift, -1, 'Must learn -1 candle shift from repeated leftward OB moves');
+
+// Verify classifyObZoneStyle detects body vs wick resizes accurately
+const sampleCandle = { open: 100, close: 104, high: 108, low: 96 };
+assert.strictEqual(mtfSandbox.classifyObZoneStyle(104.2, 99.8, sampleCandle), 'body', 'Resize near open/close must classify as body');
+assert.strictEqual(mtfSandbox.classifyObZoneStyle(108.0, 96.0, sampleCandle), 'wick', 'Resize near high/low must classify as wick');
+
+// Verify computeOrderBlocksFromBars applies learned body-only zone mode
+const learnedBodyBlocks = mtfSandbox.computeOrderBlocksFromBars(syntheticBars, {
+  enabled: true,
+  swingLookback: 2,
+  maxBlocks: 5,
+  learningEnabled: true,
+  learningData: {
+    dismissedSamples: [],
+    correctionSamples: [
+      { deltaBars: 0, zoneStyle: 'body' },
+      { deltaBars: 0, zoneStyle: 'body' },
+      { deltaBars: 0, zoneStyle: 'body' }
+    ]
+  }
+});
+const learnedBull = learnedBodyBlocks.find(x => x.side === 'long');
+assert(learnedBull, 'Must still detect valid Bullish OB with learned body profile');
+assert.strictEqual(learnedBull.top, 101.0, 'Learned body mode must snap Bullish OB top to candle open (101.0)');
+assert.strictEqual(learnedBull.bottom, 98.0, 'Learned body mode must snap Bullish OB bottom to candle close (98.0)');
+console.log('✓ Interactive OB move/resize & adaptive learning engine verified');
+
 console.log('All Institutional Order Blocks Indicator Tests Passed Successfully!');
