@@ -1,3 +1,8 @@
+Trading Cortex v1.1.128 — Width-Verified Cortex Pill Placement & My Funded Perps Canvas Chart Fix
+
+- **Exact `Indicators` Placement (`v1.1.128`)**: Replaced the fixed parent jump with a width-verified `toolbarRow` walk so `| CORTEX |` never overshoots into the outer wrapper behind `1m 4h`, and excluded `#vest-tv-cortex-toolbar-slot` from timeframe-favorites anchor scanning.
+- **My Funded Perps Canvas Chart & Header Detection (`v1.1.128`)**: Added `<canvas>` chart viewport fallback to `findChartBottomDockMountPoint()` and widened `Price Chart` / `Alerts` header-bar detection so My Funded Perps mounts `| CORTEX |` in its chart header bar and moves minimized windows to the bottom dock.
+
 Trading Cortex v1.1.127 — My Funded Perps Cortex Pill & Bottom Minimized Dock Fix
 
 - **My Funded Perps Chart Header Support (`v1.1.127`)**: Added 3-tier chart toolbar detection (icon-only Indicators buttons, compact TradingView toolbars, and custom exchange chart header bars directly above the chart iframe like My Funded Perps) so the **`| CORTEX |`** pill mounts in the chart header bar and minimized windows move cleanly to the bottom dock below the chart.

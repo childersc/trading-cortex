@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.127`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.128`) are documented in this file.
+
+---
+
+## [v1.1.128] — 2026-11-21
+
+### 🎯 Width-Verified TradingView Toolbar Walk, Timeframe Favorites Conflict Fix & Canvas Chart Fallback
+- **Prevented `toolbarRow` overshoot on Vest & TradingView**: Replaced the fixed 2-level parent jump in `findTradingViewIndicatorsAnchor()` with a width-verified walk (`parentRect.width >= 280 && visibleChildren >= 2`) so `#vest-tv-cortex-toolbar-slot` is always inserted inside the actual flex `toolbarRow` right after `Indicators` and never overshoots into the outer `.wrap-*` container.
+- **Stopped `1m 4h` timeframe favorites from fighting Cortex pill**: Excluded `#vest-tv-cortex-toolbar-slot` from `renderTimeframeFavorites()`'s third-party `Vela` anchor scan in `content/content-main.js`.
+- **My Funded Perps `<canvas>` chart & in-container header detection**: Added largest-`<canvas>` chart viewport detection to `findChartBottomDockMountPoint()` and expanded Tier 3 custom chart header bar detection to match `Price Chart` / `Alerts` bars whether mounted immediately above or at the top edge inside the chart container.
 
 ---
 

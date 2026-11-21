@@ -533,8 +533,9 @@
         const allChildren = Array.from(toolbarRow.children);
         for (const child of allChildren) {
           if (child === bar || child === toolbarGroup) continue;
-          const txt = (child.innerText || child.textContent || '').trim();
           const id = child.id || '';
+          if (id === 'vest-tv-cortex-toolbar-slot' || child.querySelector('#vest-studio-header-pill')) continue;
+          const txt = (child.innerText || child.textContent || '').trim();
           const dataName = child.getAttribute('data-name') || '';
           if (
             txt.includes('Vela') ||

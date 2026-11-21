@@ -4486,6 +4486,34 @@
           }
         }
       }
+      // 3. Fallback to the largest visible chart <canvas> (e.g. Tailwind/React canvas charts without iframe or chart-container class)
+      if (!chartEl) {
+        const canvases = Array.from(document.querySelectorAll('canvas'));
+        let bestCanvas = null;
+        for (let i = 0; i < canvases.length; i++) {
+          const r = canvases[i].getBoundingClientRect();
+          const area = r.width * r.height;
+          if (r.width >= 320 && r.height >= 200 && area > bestArea) {
+            bestArea = area;
+            bestCanvas = canvases[i];
+          }
+        }
+        if (bestCanvas) {
+          const cr = bestCanvas.getBoundingClientRect();
+          let wrap = bestCanvas;
+          let up = 0;
+          while (wrap.parentElement && wrap.parentElement !== document.body && up < 5) {
+            const pr = wrap.parentElement.getBoundingClientRect();
+            if (pr.width <= cr.width + 120 && pr.height <= cr.height + 80) {
+              wrap = wrap.parentElement;
+              up++;
+            } else {
+              break;
+            }
+          }
+          chartEl = wrap;
+        }
+      }
       if (!chartEl || !chartEl.parentElement) return null;
 
       // Walk up single-child wrapper divs (up to 3 levels) until we reach a flex-column or multi-child container
@@ -5095,18 +5123,35 @@
         }
         if (!indBtn || !indBtn.parentElement) continue;
 
-        // Exact TradingView 3-level toolbar hierarchy (same proven pattern as vest-timeframe-favorites):
-        //   indWrapper (#header-toolbar-indicators) -> toolbarGroup (.group-*, fixed-width/overflow-hidden) -> toolbarRow (.inner-*)
-        // Insert as a direct sibling right AFTER toolbarGroup inside toolbarRow, copying toolbarGroup's flex order!
+        // Width-verified TradingView toolbar hierarchy walk:
+        // Start at indWrapper and walk up ONLY while the parent is still a narrow single-control wrapper
+        // (width < 280px or <= 1 visible child). Stop the moment parentElement is the wide flex toolbarRow!
+        // This guarantees we NEVER overshoot toolbarRow into an outer .wrap-* container (which causes overlap).
         const indWrapper = indBtn.closest(
           '#header-toolbar-indicators, [data-name="open-indicators-dialog"], #header-toolbar-chart-styles, #header-toolbar-intervals, #header-toolbar-symbol-search'
         ) || indBtn;
-        const toolbarGroup = indWrapper.parentElement || indBtn.parentElement;
-        const toolbarRow = toolbarGroup && toolbarGroup.parentElement ? toolbarGroup.parentElement : null;
-        if (toolbarRow && toolbarGroup) {
-          const gStyle = doc.defaultView ? doc.defaultView.getComputedStyle(toolbarGroup) : null;
+        let toolbarGroup = indWrapper;
+        let walkDepth = 0;
+        while (toolbarGroup && toolbarGroup.parentElement && toolbarGroup.parentElement !== doc.body && walkDepth < 4) {
+          const parent = toolbarGroup.parentElement;
+          const pRect = parent.getBoundingClientRect();
+          const visKids = Array.from(parent.children).filter(c => {
+            if (!c || c.id === 'vest-tv-cortex-toolbar-slot') return false;
+            const cr = c.getBoundingClientRect();
+            return cr.width > 0 && cr.height > 0;
+          });
+          if (pRect.width >= 280 && visKids.length >= 2) {
+            const gStyle = doc.defaultView ? doc.defaultView.getComputedStyle(toolbarGroup) : null;
+            const groupOrder = gStyle && gStyle.order && gStyle.order !== '0' ? gStyle.order : '';
+            return { doc, iframe, parent, afterEl: toolbarGroup, groupOrder };
+          }
+          toolbarGroup = parent;
+          walkDepth++;
+        }
+        if (indWrapper.parentElement) {
+          const gStyle = doc.defaultView ? doc.defaultView.getComputedStyle(indWrapper) : null;
           const groupOrder = gStyle && gStyle.order && gStyle.order !== '0' ? gStyle.order : '';
-          return { doc, iframe, parent: toolbarRow, afterEl: toolbarGroup, groupOrder };
+          return { doc, iframe, parent: indWrapper.parentElement, afterEl: indWrapper, groupOrder };
         }
         return { doc, iframe, parent: indBtn.parentElement, afterEl: indBtn, groupOrder: '' };
       } catch (e) {}
@@ -5146,7 +5191,7 @@
             depth++;
           }
 
-          // Fallback scan: find a "Price Chart" / "Alerts" control in the band right above the chart and walk up to its row
+          // Fallback scan: find a "Price Chart" / "Alerts" control right above OR at the top edge of the chart and walk up to its row
           if (!headerBar) {
             const btns = document.querySelectorAll('button, [role="button"], span, div');
             for (let b = 0; b < btns.length; b++) {
@@ -5155,7 +5200,7 @@
               const txt = (el.textContent || '').trim();
               if (!/^(price chart|alerts|indicators)$/i.test(txt)) continue;
               const r = el.getBoundingClientRect();
-              if (r.height < 14 || r.height > 44 || r.bottom > chartRect.top + 14 || r.top < chartRect.top - 64) continue;
+              if (r.height < 14 || r.height > 44 || r.top > chartRect.top + 48 || r.top < chartRect.top - 72) continue;
               if (r.left < chartRect.left - 16 || r.right > chartRect.right + 16) continue;
               let cur = el.parentElement;
               let up = 0;
