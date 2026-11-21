@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.117`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.118`) are documented in this file.
+
+---
+
+## [v1.1.118] — 2026-11-21
+
+### 🔄 Fixed Updater Automatic Extension Reload & Trading Browser Window Refresh
+- **Post-Update Runtime Reload + Multi-Window Tab Refresh**:
+  - Updated `update/update.js` to set `pendingPostUpdateTabReload` and trigger `reloadExtensionAndTradingTabs` immediately after disk flush (instead of skipping tab reloads).
+  - Added `checkAndRunPendingPostUpdateTabReload()` and `getTradingTabUrlPatterns()` in `background/service-worker.js` so as soon as Chrome reloads the updated extension, it automatically refreshes **all open trading browser tabs/windows** across Vest Markets, Hypernova, My Funded Perpetuals, Kalshi Pro, and any custom perp firms with the brand-new code.
 
 ---
 

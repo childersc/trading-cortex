@@ -1265,11 +1265,16 @@
       try {
         vestTabs = await chrome.tabs.query({
           url: [
-            'https://next.vestmarkets.com/*',
+            'https://*.vestmarkets.com/*',
+            'https://vestmarkets.com/*',
             'https://*.vest.exchange/*',
             'https://vest.exchange/*',
             'https://*.myfundedperpetuals.com/*',
-            'https://myfundedperpetuals.com/*'
+            'https://myfundedperpetuals.com/*',
+            'https://*.kalshi.com/*',
+            'https://kalshi.com/*',
+            'https://*.hypernova.xyz/*',
+            'https://hypernova.xyz/*'
           ]
         });
         tradingTabsCount = vestTabs.length;
@@ -1280,6 +1285,7 @@
         installedDevSha: isDevDeploy ? devSha : null,
         updateChannel: currentChannel,
         reloadRuntimeOnUpdaterClose: true,
+        pendingPostUpdateTabReload: { requestedAt: Date.now() },
         updaterState: {
           channel: currentChannel,
           lastCheckedAt: Date.now(),
@@ -1290,9 +1296,8 @@
         }
       }).catch(() => {});
 
-      // Wait briefly for OS disk buffers to flush.
-      // Do NOT forcefully reload active trading tabs to avoid severing Web3 wallet sessions & delegated keys.
-      // Trading tabs are preserved intact; the user can refresh their chart tab at their own convenience.
+      // Wait briefly for OS disk buffers to flush, then reload the extension runtime so the
+      // newly booted service worker automatically refreshes all open trading browser windows/tabs.
       await new Promise(r => setTimeout(r, 450));
 
       updateStepState(step4Row, step4Badge, 'done', 4);
@@ -1300,19 +1305,31 @@
       statusHeading.textContent = isDevDeploy
         ? `Trading Cortex successfully updated to ${upcomingDevDeployVer} (${devSha})!`
         : `Trading Cortex successfully updated to v${targetVer}!`;
-      progressLabelLeft.textContent = `Update complete · ${isDevDeploy ? upcomingDevDeployVer : `v${targetVer}`} active`;
+      progressLabelLeft.textContent = `Update complete · Reloading extension & ${tradingTabsCount} trading tab(s)...`;
       if (btnRunUpdateLabel) btnRunUpdateLabel.textContent = isDevDeploy ? `Re-Sync ${upcomingDevDeployVer} (${devSha})` : `Re-Sync v${targetVer}`;
       btnRunUpdate.disabled = false;
 
       showSuccess(
         isDevDeploy
-          ? `✓ Trading Cortex has been updated to bleeding-edge dev branch commit (${devSha})! Active trading tabs preserved without disruptive reload. Refresh your chart tab when ready to load the update.`
-          : `✓ Trading Cortex has been successfully updated to v${targetVer}! Active trading tabs preserved without disruptive reload. Refresh your chart tab when ready to load the update.`
+          ? `✓ Trading Cortex updated to dev (${devSha})! Reloading extension & refreshing ${tradingTabsCount} open trading tab(s)...`
+          : `✓ Trading Cortex updated to v${targetVer}! Reloading extension & refreshing ${tradingTabsCount} open trading tab(s)...`
       );
       logTerm(
-        `Update to ${targetVer} complete (${total} files synced). Preserved ${tradingTabsCount} trading tab(s) without disruptive reload.`,
+        `Update to ${targetVer} complete (${total} files synced). Reloading extension & refreshing ${tradingTabsCount} trading tab(s)...`,
         'ok'
       );
+
+      setTimeout(() => {
+        try {
+          chrome.runtime.sendMessage({ action: 'reloadExtensionAndTradingTabs' }, () => {
+            if (chrome.runtime.lastError) {
+              try { chrome.runtime.reload(); } catch (e) {}
+            }
+          });
+        } catch (e) {
+          try { chrome.runtime.reload(); } catch (e2) {}
+        }
+      }, 300);
     } catch (err) {
       statusEyebrow.textContent = 'INTERRUPTED';
       statusHeading.textContent = 'Deployment paused';

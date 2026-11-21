@@ -434,6 +434,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
+  checkAndRunPendingPostUpdateTabReload();
   try {
     const localData = await chrome.storage.local.get(["templates", "settings", "globalDrawings", "dbSchemaVersion"]).catch(() => ({}));
     const syncData = await chrome.storage.sync.get(["templates", "settings"]).catch(() => ({}));
@@ -868,6 +869,83 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ ok: true });
     return true;
   }
+
+  if (request.action === "reloadExtensionAndTradingTabs") {
+    chrome.storage.local.set({
+      pendingPostUpdateTabReload: { requestedAt: Date.now() }
+    }).then(() => {
+      sendResponse({ ok: true });
+      setTimeout(() => {
+        try { chrome.runtime.reload(); } catch (e) {}
+      }, 150);
+    }).catch(() => {
+      sendResponse({ ok: false });
+      try { chrome.runtime.reload(); } catch (e) {}
+    });
+    return true;
+  }
 });
+
+async function getTradingTabUrlPatterns() {
+  const patterns = new Set([
+    "https://*.vestmarkets.com/*",
+    "https://vestmarkets.com/*",
+    "https://*.myfundedperpetuals.com/*",
+    "https://myfundedperpetuals.com/*",
+    "https://*.kalshi.com/*",
+    "https://kalshi.com/*",
+    "https://*.hypernova.xyz/*",
+    "https://hypernova.xyz/*",
+    "https://*.vest.exchange/*",
+    "https://vest.exchange/*"
+  ]);
+  try {
+    const data = await chrome.storage.local.get(["settings"]);
+    const firms = (data && data.settings && Array.isArray(data.settings.perpFirms)) ? data.settings.perpFirms : [];
+    for (const firm of firms) {
+      if (!firm || firm.enabled === false) continue;
+      const list = Array.isArray(firm.matchPatterns) ? firm.matchPatterns : [];
+      for (const raw of list) {
+        const clean = String(raw || "").trim().toLowerCase().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+        if (clean && clean.includes(".")) {
+          patterns.add(`https://${clean}/*`);
+          patterns.add(`https://*.${clean}/*`);
+        }
+      }
+    }
+  } catch (e) {}
+  return Array.from(patterns);
+}
+
+let isRunningPostUpdateTabReload = false;
+async function checkAndRunPendingPostUpdateTabReload() {
+  if (isRunningPostUpdateTabReload) return;
+  isRunningPostUpdateTabReload = true;
+  try {
+    const data = await chrome.storage.local.get(["pendingPostUpdateTabReload"]);
+    const pending = data && data.pendingPostUpdateTabReload;
+    if (!pending || !pending.requestedAt) return;
+    // Always consume the flag immediately so we never reload in a loop
+    await chrome.storage.local.remove(["pendingPostUpdateTabReload", "reloadRuntimeOnUpdaterClose"]).catch(() => {});
+    if (Date.now() - Number(pending.requestedAt) > 60000) return;
+
+    const urlPatterns = await getTradingTabUrlPatterns();
+    const tabs = await chrome.tabs.query({ url: urlPatterns }).catch(() => []);
+    for (const tab of tabs) {
+      if (tab && typeof tab.id === "number") {
+        try {
+          chrome.tabs.reload(tab.id).catch?.(() => {});
+        } catch (e) {}
+      }
+    }
+  } catch (e) {
+  } finally {
+    isRunningPostUpdateTabReload = false;
+  }
+}
+
+setTimeout(() => {
+  checkAndRunPendingPostUpdateTabReload();
+}, 250);
 
 

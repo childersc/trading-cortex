@@ -1,3 +1,7 @@
+Trading Cortex v1.1.118 — Fixed Updater Automatic Extension Reload & Browser Window Refresh
+
+- **Automatic Post-Update Refresh Across All Trading Windows (`v1.1.118`)**: The updater now reloads the extension runtime immediately after syncing files and automatically refreshes all open trading browser windows/tabs (Vest Markets, Hypernova, MFP, Kalshi Pro, and custom firms) so every chart loads the new build automatically.
+
 Trading Cortex v1.1.117 — Bottom-of-Chart Minimized Windows Dock (Right Below Chart Iframe)
 
 - **Dedicated Bottom-of-Chart Minimized Dock (`v1.1.117`)**: Minimized Cortex windows (`INSTRUMENT TRADES`, `OB STATS`, `UPCOMING NEWS`, `CORTEX DIAG`, `RANGE DETECTOR`, `POSITIONS`) now dock in a sleek `38px` bar directly **below the chart viewport's iframe** (outside the chart). When nothing is minimized, the dock hides completely—reclaiming the full top header height across Vest, Hypernova, MFP, and Kalshi Pro.
