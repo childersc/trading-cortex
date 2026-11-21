@@ -3635,6 +3635,85 @@
       notifyMainWorldConfig();
       showToast(`Deleted "${name}"`);
       if (isTopWindow) renderFloatingBar();
+    } else if (type === 'VEST_TV_CREATE_TEMPLATE_GROUP') {
+      const clean = String(event.data.groupName || '').trim();
+      if (clean) {
+        const cur = Array.isArray(settings.templateGroups) ? [...settings.templateGroups] : [];
+        if (!cur.includes(clean)) {
+          cur.push(clean);
+          settings.templateGroups = cur;
+          safeStorageSet({ templates, settings });
+          notifyMainWorldConfig();
+          showToast(`Created group "${clean}"`);
+        }
+      }
+    } else if (type === 'VEST_TV_RENAME_TEMPLATE_GROUP') {
+      const oldName = String(event.data.oldName || '').trim();
+      const newName = String(event.data.newName || '').trim();
+      if (oldName && newName && oldName !== newName) {
+        const cur = Array.isArray(settings.templateGroups) ? [...settings.templateGroups] : [];
+        const nextGroups = [];
+        const seen = new Set();
+        cur.forEach(g => {
+          const val = g === oldName ? newName : g;
+          if (val && !seen.has(val)) {
+            seen.add(val);
+            nextGroups.push(val);
+          }
+        });
+        if (!seen.has(newName)) nextGroups.push(newName);
+        settings.templateGroups = nextGroups;
+        templates = templates.map(t => (
+          String(t.group || '').trim() === oldName ? { ...t, group: newName } : t
+        ));
+        if (settings.collapsedTemplateGroups && typeof settings.collapsedTemplateGroups === 'object' && oldName in settings.collapsedTemplateGroups) {
+          settings.collapsedTemplateGroups[newName] = settings.collapsedTemplateGroups[oldName];
+          delete settings.collapsedTemplateGroups[oldName];
+        }
+        safeStorageSet({ templates, settings });
+        notifyMainWorldConfig();
+        showToast(`Renamed group "${oldName}" to "${newName}"`);
+      }
+    } else if (type === 'VEST_TV_DELETE_TEMPLATE_GROUP') {
+      const groupName = String(event.data.groupName || '').trim();
+      if (groupName) {
+        settings.templateGroups = (Array.isArray(settings.templateGroups) ? settings.templateGroups : [])
+          .filter(g => g !== groupName);
+        templates = templates.map(t => (
+          String(t.group || '').trim() === groupName ? { ...t, group: '' } : t
+        ));
+        if (settings.collapsedTemplateGroups && typeof settings.collapsedTemplateGroups === 'object') {
+          delete settings.collapsedTemplateGroups[groupName];
+        }
+        safeStorageSet({ templates, settings });
+        notifyMainWorldConfig();
+        showToast(`Removed group "${groupName}" (templates kept ungrouped)`);
+      }
+    } else if (type === 'VEST_TV_ASSIGN_TEMPLATE_GROUP') {
+      const cleanGroup = String(event.data.groupName || '').trim();
+      const idx = templates.findIndex(t => t.id === templateId);
+      if (idx !== -1) {
+        templates[idx] = { ...templates[idx], group: cleanGroup };
+        if (cleanGroup) {
+          const cur = Array.isArray(settings.templateGroups) ? [...settings.templateGroups] : [];
+          if (!cur.includes(cleanGroup)) {
+            cur.push(cleanGroup);
+            settings.templateGroups = cur;
+          }
+        }
+        safeStorageSet({ templates, settings });
+        notifyMainWorldConfig();
+        showToast(cleanGroup ? `Moved "${templates[idx].name}" to "${cleanGroup}"` : `Ungrouped "${templates[idx].name}"`);
+      }
+    } else if (type === 'VEST_TV_TOGGLE_TEMPLATE_GROUP_COLLAPSE') {
+      const groupName = String(event.data.groupName || '').trim();
+      if (groupName) {
+        if (!settings.collapsedTemplateGroups || typeof settings.collapsedTemplateGroups !== 'object') {
+          settings.collapsedTemplateGroups = {};
+        }
+        settings.collapsedTemplateGroups[groupName] = Boolean(event.data.collapsed);
+        queueSettingsSave({ collapsedTemplateGroups: settings.collapsedTemplateGroups });
+      }
     } else if (type === 'VEST_TV_SIDEBAR_STATE_CHANGED') {
       if (event.data.sidebarState) {
         const incoming = event.data.sidebarState;

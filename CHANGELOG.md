@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.125`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.126`) are documented in this file.
+
+---
+
+## [v1.1.126] — 2026-11-21
+
+### 📁 Right-Click Flyout Menu Template Groups (`+ New Group...`, Collapsible Folders & Inline Move Picker)
+- Wired collapsible **Template Groups** directly into the right-click **Cortex Templates** flyout submenu (`openTemplatesFlyoutSubmenu` in `content-main.js`) with full persistence in `content-isolated.js`:
+  - **`+ New Group...`** inline form right under `Template Manager...` (no blocking `window.prompt()` inside TradingView iframes).
+  - **Collapsible folder headers** (`▾ 📁 Group Name (N)`) with persistent open/collapsed state (`collapsedTemplateGroups`), inline **Rename (`✎`)**, and **Delete (`×`)** (keeps templates ungrouped).
+  - **Inline Move to Group (`📁`)** button on every template row opening a one-click pill bar (`Ungrouped`, existing groups, or `+ New...`) directly inside the menu.
 
 ---
 

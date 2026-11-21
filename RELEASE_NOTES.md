@@ -1,3 +1,7 @@
+Trading Cortex v1.1.126 — Right-Click Template Menu Groups (Collapsible Folders & Inline Picker)
+
+- **Create & Organize Groups Right in the Right-Click Menu (`v1.1.126`)**: Added **`+ New Group...`**, collapsible `📁` group folders (with inline rename & delete), and a hover **`📁`** button on every template row to move templates between groups directly inside the right-click **Cortex Templates** flyout submenu — fully synced with the Template Manager.
+
 Trading Cortex v1.1.125 — Sync Globally Venue Scope Modal & Index Price Warning
 
 - **Venue-Scoped Global Sync (`v1.1.125`)**: Clicking **Sync globally** now prompts you to choose **Current Venue Only** (recommended, keeps exact venue pricing) or **All Venues (Cross-Exchange)** with a clear warning that different venues use different index prices and FVGs may not be identical across exchanges.

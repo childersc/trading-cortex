@@ -3221,6 +3221,10 @@
         cursor: pointer !important;
         padding: 0 !important;
       }
+      .vest-tv-sub-icon-btn.group-btn:hover {
+        background: rgba(168, 85, 247, 0.2) !important;
+        color: #c084fc !important;
+      }
       .vest-tv-sub-icon-btn.edit-btn:hover {
         background: rgba(255, 255, 255, 0.12) !important;
         color: #38bdf8 !important;
@@ -3228,6 +3232,128 @@
       .vest-tv-sub-icon-btn.delete-btn:hover {
         background: rgba(239, 68, 68, 0.18) !important;
         color: #ef4444 !important;
+      }
+      .vest-tv-sub-group-header {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        min-height: 28px !important;
+        padding: 4px 12px 4px 12px !important;
+        cursor: pointer !important;
+        color: #c084fc !important;
+        font-size: 11.5px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.3px !important;
+        background: rgba(168, 85, 247, 0.08) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+        transition: background-color 0.08s ease !important;
+        box-sizing: border-box !important;
+        gap: 6px !important;
+      }
+      .vest-tv-sub-group-header:hover {
+        background: rgba(168, 85, 247, 0.16) !important;
+        color: #e9d5ff !important;
+      }
+      .vest-tv-sub-group-header:hover .vest-tv-sub-actions {
+        opacity: 1 !important;
+      }
+      .vest-tv-sub-group-title {
+        flex: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+      }
+      .vest-tv-sub-group-count {
+        font-size: 10px !important;
+        font-weight: 600 !important;
+        color: #94a3b8 !important;
+        background: rgba(15, 23, 42, 0.65) !important;
+        padding: 1px 5px !important;
+        border-radius: 999px !important;
+        flex-shrink: 0 !important;
+      }
+      .vest-tv-sub-row-grouped {
+        padding-left: 26px !important;
+      }
+      .vest-tv-sub-ungrouped-label {
+        padding: 5px 14px 3px 14px !important;
+        font-size: 10px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.6px !important;
+        text-transform: uppercase !important;
+        color: #64748b !important;
+      }
+      .vest-tv-sub-inline-form {
+        display: flex !important;
+        align-items: center !important;
+        gap: 5px !important;
+        padding: 6px 12px !important;
+        background: rgba(15, 23, 42, 0.85) !important;
+        border-top: 1px solid rgba(168, 85, 247, 0.3) !important;
+        border-bottom: 1px solid rgba(168, 85, 247, 0.3) !important;
+        box-sizing: border-box !important;
+      }
+      .vest-tv-sub-inline-input {
+        flex: 1 !important;
+        min-width: 0 !important;
+        height: 24px !important;
+        padding: 0 7px !important;
+        border-radius: 4px !important;
+        border: 1px solid rgba(168, 85, 247, 0.55) !important;
+        background: #0f172a !important;
+        color: #f8fafc !important;
+        font-size: 12px !important;
+        outline: none !important;
+        box-sizing: border-box !important;
+      }
+      .vest-tv-sub-inline-btn {
+        height: 24px !important;
+        padding: 0 8px !important;
+        border-radius: 4px !important;
+        border: 1px solid rgba(168, 85, 247, 0.55) !important;
+        background: rgba(168, 85, 247, 0.22) !important;
+        color: #f3e8ff !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        cursor: pointer !important;
+        flex-shrink: 0 !important;
+      }
+      .vest-tv-sub-inline-btn:hover {
+        background: rgba(168, 85, 247, 0.38) !important;
+      }
+      .vest-tv-sub-picker-bar {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        gap: 4px !important;
+        padding: 6px 12px 7px 20px !important;
+        background: rgba(15, 23, 42, 0.9) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      }
+      .vest-tv-sub-picker-pill {
+        padding: 2px 7px !important;
+        border-radius: 4px !important;
+        border: 1px solid rgba(148, 163, 184, 0.28) !important;
+        background: rgba(30, 41, 59, 0.85) !important;
+        color: #cbd5e1 !important;
+        font-size: 11px !important;
+        cursor: pointer !important;
+        line-height: 16px !important;
+      }
+      .vest-tv-sub-picker-pill:hover {
+        border-color: #c084fc !important;
+        color: #ffffff !important;
+      }
+      .vest-tv-sub-picker-pill.is-active {
+        border-color: #a855f7 !important;
+        background: rgba(168, 85, 247, 0.28) !important;
+        color: #f3e8ff !important;
+        font-weight: 600 !important;
       }
     `;
     (doc.head || doc.body).appendChild(style);
@@ -3355,10 +3481,259 @@
     });
 
     submenu.addEventListener('mouseleave', () => {
+      if (submenu.contains(doc.activeElement) && doc.activeElement.tagName === 'INPUT') {
+        return;
+      }
       submenuHideTimer = setTimeout(() => {
+        if (submenu.contains(doc.activeElement) && doc.activeElement.tagName === 'INPUT') {
+          return;
+        }
         closeAllContextMenus();
       }, 200);
     });
+
+    let isCreatingNewGroup = false;
+    let renamingGroupName = null;
+    let assigningTemplateId = null;
+
+    const getOrderedTemplateGroups = (matchingList) => {
+      const seen = new Set();
+      const groups = [];
+      const addGroup = (raw) => {
+        const clean = String(raw || '').trim();
+        if (!clean || seen.has(clean)) return;
+        seen.add(clean);
+        groups.push(clean);
+      };
+      if (Array.isArray(currentSettings.templateGroups)) {
+        currentSettings.templateGroups.forEach(addGroup);
+      }
+      (matchingList || []).forEach(t => addGroup(t && t.group));
+      return groups;
+    };
+
+    const isGroupCollapsed = (groupName) => {
+      const map = currentSettings.collapsedTemplateGroups;
+      return Boolean(map && typeof map === 'object' && map[groupName]);
+    };
+
+    const setGroupCollapsed = (groupName, collapsed) => {
+      if (!currentSettings.collapsedTemplateGroups || typeof currentSettings.collapsedTemplateGroups !== 'object') {
+        currentSettings.collapsedTemplateGroups = {};
+      }
+      currentSettings.collapsedTemplateGroups[groupName] = Boolean(collapsed);
+      postToIsolated({
+        type: 'VEST_TV_TOGGLE_TEMPLATE_GROUP_COLLAPSE',
+        groupName,
+        collapsed: Boolean(collapsed)
+      });
+    };
+
+    const createGroupNow = (rawName, assignToTemplateId = null) => {
+      const clean = String(rawName || '').trim();
+      if (!clean) return;
+      const cur = Array.isArray(currentSettings.templateGroups) ? [...currentSettings.templateGroups] : [];
+      if (!cur.includes(clean)) {
+        cur.push(clean);
+        currentSettings.templateGroups = cur;
+        postToIsolated({
+          type: 'VEST_TV_CREATE_TEMPLATE_GROUP',
+          groupName: clean
+        });
+      }
+      if (assignToTemplateId) {
+        currentTemplates = currentTemplates.map(item => (
+          item.id === assignToTemplateId ? { ...item, group: clean } : item
+        ));
+        postToIsolated({
+          type: 'VEST_TV_ASSIGN_TEMPLATE_GROUP',
+          templateId: assignToTemplateId,
+          groupName: clean
+        });
+      }
+      isCreatingNewGroup = false;
+      assigningTemplateId = null;
+      renderSubmenuContents();
+    };
+
+    const assignTemplateToGroup = (templateId, groupName) => {
+      const clean = String(groupName || '').trim();
+      currentTemplates = currentTemplates.map(item => (
+        item.id === templateId ? { ...item, group: clean } : item
+      ));
+      if (clean) {
+        const cur = Array.isArray(currentSettings.templateGroups) ? [...currentSettings.templateGroups] : [];
+        if (!cur.includes(clean)) {
+          cur.push(clean);
+          currentSettings.templateGroups = cur;
+        }
+      }
+      assigningTemplateId = null;
+      postToIsolated({
+        type: 'VEST_TV_ASSIGN_TEMPLATE_GROUP',
+        templateId,
+        groupName: clean
+      });
+      renderSubmenuContents();
+    };
+
+    const renderTemplateRow = (t, isGrouped, allGroups) => {
+      const row = doc.createElement('div');
+      row.className = isGrouped ? 'vest-tv-sub-row vest-tv-sub-row-grouped' : 'vest-tv-sub-row';
+      const swatchColor = t.color || '#22c55e';
+      const currentGroup = String(t.group || '').trim();
+      row.innerHTML = `
+        <span class="vest-tv-sub-label">
+          <span class="vest-tv-sub-swatch" style="background:${escapeHtml(swatchColor)};"></span>
+          <span>${escapeHtml(t.name)}</span>
+        </span>
+        <div class="vest-tv-sub-actions">
+          <button type="button" class="vest-tv-sub-icon-btn group-btn" title="${currentGroup ? `Group: ${escapeHtml(currentGroup)} (click to move)` : `Assign '${escapeHtml(t.name)}' to a group`}">📁</button>
+          <button type="button" class="vest-tv-sub-icon-btn edit-btn" title="Edit '${escapeHtml(t.name)}' in Template Manager">✎</button>
+          <button type="button" class="vest-tv-sub-icon-btn delete-btn" title="Remove '${escapeHtml(t.name)}'">×</button>
+        </div>
+      `;
+
+      // Click row to apply template ONLY to the right-clicked shape
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.vest-tv-sub-icon-btn')) return;
+        e.stopPropagation();
+        e.preventDefault();
+
+        applyTemplateToSelectedOrLast(t, targetShapeId);
+        currentSettings.activeTemplateId = t.id;
+        postToIsolated({
+          type: 'VEST_TV_ACTIVE_TEMPLATE_CHANGED',
+          templateId: t.id
+        });
+        postToIsolated({
+          type: 'VEST_TV_SHOW_TOAST',
+          message: `Applied "${t.name}" to ${drawingTypeLabel}`
+        });
+        closeTradingViewPopupMenu(templateRow);
+      });
+
+      // Folder (Group) button -> toggles inline group picker bar right under this row
+      const groupBtn = row.querySelector('.group-btn');
+      if (groupBtn) {
+        groupBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          assigningTemplateId = assigningTemplateId === t.id ? null : t.id;
+          isCreatingNewGroup = false;
+          renamingGroupName = null;
+          renderSubmenuContents();
+        });
+      }
+
+      // Pencil (Edit) button -> opens Template Manager directly on this template
+      const editBtn = row.querySelector('.edit-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          closeTradingViewPopupMenu(templateRow);
+          postToIsolated({
+            type: 'VEST_TV_EDIT_TEMPLATE_REQUEST',
+            templateId: t.id,
+            drawingType: targetDrawingType
+          });
+        });
+      }
+
+      // X (Delete) button
+      const deleteBtn = row.querySelector('.delete-btn');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          currentTemplates = currentTemplates.filter(item => item.id !== t.id);
+          if (currentSettings.activeTemplateId === t.id) {
+            currentSettings.activeTemplateId = currentTemplates[0]?.id || null;
+          }
+          renderSubmenuContents();
+          postToIsolated({
+            type: 'VEST_TV_DELETE_TEMPLATE_REQUEST',
+            templateId: t.id,
+            templateName: t.name
+          });
+        });
+      }
+
+      submenu.appendChild(row);
+
+      // Inline group assignment picker bar
+      if (assigningTemplateId === t.id) {
+        const picker = doc.createElement('div');
+        picker.className = 'vest-tv-sub-picker-bar';
+
+        const noneBtn = doc.createElement('button');
+        noneBtn.type = 'button';
+        noneBtn.className = `vest-tv-sub-picker-pill${!currentGroup ? ' is-active' : ''}`;
+        noneBtn.textContent = 'Ungrouped';
+        noneBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          assignTemplateToGroup(t.id, '');
+        });
+        picker.appendChild(noneBtn);
+
+        allGroups.forEach(g => {
+          const pill = doc.createElement('button');
+          pill.type = 'button';
+          pill.className = `vest-tv-sub-picker-pill${currentGroup === g ? ' is-active' : ''}`;
+          pill.textContent = `📁 ${g}`;
+          pill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            assignTemplateToGroup(t.id, g);
+          });
+          picker.appendChild(pill);
+        });
+
+        const addInlineBtn = doc.createElement('button');
+        addInlineBtn.type = 'button';
+        addInlineBtn.className = 'vest-tv-sub-picker-pill';
+        addInlineBtn.style.setProperty('color', '#c084fc', 'important');
+        addInlineBtn.style.setProperty('border-color', 'rgba(168,85,247,0.5)', 'important');
+        addInlineBtn.textContent = '+ New...';
+        addInlineBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          picker.innerHTML = '';
+          const input = doc.createElement('input');
+          input.type = 'text';
+          input.className = 'vest-tv-sub-inline-input';
+          input.placeholder = 'New group name...';
+          const okBtn = doc.createElement('button');
+          okBtn.type = 'button';
+          okBtn.className = 'vest-tv-sub-inline-btn';
+          okBtn.textContent = 'Add';
+          const submit = () => createGroupNow(input.value, t.id);
+          okBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            submit();
+          });
+          input.addEventListener('keydown', (ev) => {
+            ev.stopPropagation();
+            if (ev.key === 'Enter') {
+              ev.preventDefault();
+              submit();
+            } else if (ev.key === 'Escape') {
+              ev.preventDefault();
+              assigningTemplateId = null;
+              renderSubmenuContents();
+            }
+          });
+          picker.appendChild(input);
+          picker.appendChild(okBtn);
+          setTimeout(() => input.focus(), 10);
+        });
+        picker.appendChild(addInlineBtn);
+        submenu.appendChild(picker);
+      }
+    };
 
     const renderSubmenuContents = () => {
       submenu.innerHTML = '';
@@ -3400,94 +3775,227 @@
       });
       submenu.appendChild(mgrRow);
 
+      // 2b. "+ New Group..."
+      if (isCreatingNewGroup) {
+        const form = doc.createElement('div');
+        form.className = 'vest-tv-sub-inline-form';
+        const input = doc.createElement('input');
+        input.type = 'text';
+        input.className = 'vest-tv-sub-inline-input';
+        input.placeholder = 'Group name (e.g. FVGs)...';
+        const saveBtn = doc.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'vest-tv-sub-inline-btn';
+        saveBtn.textContent = 'Add';
+        const cancelBtn = doc.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'vest-tv-sub-icon-btn delete-btn';
+        cancelBtn.textContent = '×';
+        cancelBtn.title = 'Cancel';
+
+        const submitNewGroup = () => {
+          if (input.value && input.value.trim()) {
+            createGroupNow(input.value);
+          } else {
+            isCreatingNewGroup = false;
+            renderSubmenuContents();
+          }
+        };
+        saveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          submitNewGroup();
+        });
+        cancelBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          isCreatingNewGroup = false;
+          renderSubmenuContents();
+        });
+        input.addEventListener('keydown', (e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submitNewGroup();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            isCreatingNewGroup = false;
+            renderSubmenuContents();
+          }
+        });
+        form.appendChild(input);
+        form.appendChild(saveBtn);
+        form.appendChild(cancelBtn);
+        submenu.appendChild(form);
+        setTimeout(() => input.focus(), 10);
+      } else {
+        const newGroupRow = doc.createElement('div');
+        newGroupRow.className = 'vest-tv-sub-row';
+        newGroupRow.innerHTML = `<span class="vest-tv-sub-label" style="color:#c084fc;">+ New Group...</span>`;
+        newGroupRow.addEventListener('click', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          isCreatingNewGroup = true;
+          renamingGroupName = null;
+          assigningTemplateId = null;
+          renderSubmenuContents();
+        });
+        submenu.appendChild(newGroupRow);
+      }
+
       // Filter templates matching this drawing's type
       const matchingTemplates = currentTemplates.filter(
         t => canonicalizeDrawingType(t.drawingType || 'rectangle') === targetDrawingType
       );
+      const allGroups = getOrderedTemplateGroups(matchingTemplates);
 
       // 3. Divider
       const divider = doc.createElement('div');
       divider.className = 'vest-tv-sub-divider';
       submenu.appendChild(divider);
 
-      if (matchingTemplates.length === 0) {
+      if (matchingTemplates.length === 0 && allGroups.length === 0) {
         const emptyRow = doc.createElement('div');
         emptyRow.style.cssText = 'padding: 6px 16px; font-size: 12px; color: #787b86; font-style: italic;';
         emptyRow.textContent = `No saved ${drawingTypeLabel} templates`;
         submenu.appendChild(emptyRow);
+        return;
       }
 
-      // 4. Template items for this drawing type
-      matchingTemplates.forEach(t => {
-        const row = doc.createElement('div');
-        row.className = 'vest-tv-sub-row';
-        const swatchColor = t.color || '#22c55e';
-        row.innerHTML = `
-          <span class="vest-tv-sub-label">
-            <span class="vest-tv-sub-swatch" style="background:${escapeHtml(swatchColor)};"></span>
-            <span>${escapeHtml(t.name)}</span>
-          </span>
-          <div class="vest-tv-sub-actions">
-            <button type="button" class="vest-tv-sub-icon-btn edit-btn" title="Edit '${escapeHtml(t.name)}' in Template Manager">✎</button>
-            <button type="button" class="vest-tv-sub-icon-btn delete-btn" title="Remove '${escapeHtml(t.name)}'">×</button>
-          </div>
-        `;
+      // 4. Collapsible Group Folders
+      allGroups.forEach(groupName => {
+        const groupTemplates = matchingTemplates.filter(t => String(t.group || '').trim() === groupName);
+        const collapsed = isGroupCollapsed(groupName);
 
-        // Click row to apply template ONLY to the right-clicked shape
-        row.addEventListener('click', (e) => {
-          if (e.target.closest('.vest-tv-sub-icon-btn')) return;
-          e.stopPropagation();
-          e.preventDefault();
-
-          applyTemplateToSelectedOrLast(t, targetShapeId);
-          currentSettings.activeTemplateId = t.id;
-          postToIsolated({
-            type: 'VEST_TV_ACTIVE_TEMPLATE_CHANGED',
-            templateId: t.id
-          });
-          postToIsolated({
-            type: 'VEST_TV_SHOW_TOAST',
-            message: `Applied "${t.name}" to ${drawingTypeLabel}`
-          });
-          closeTradingViewPopupMenu(templateRow);
-        });
-
-        // Pencil (Edit) button -> opens Template Manager directly on this template
-        const editBtn = row.querySelector('.edit-btn');
-        if (editBtn) {
-          editBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            closeTradingViewPopupMenu(templateRow);
-            postToIsolated({
-              type: 'VEST_TV_EDIT_TEMPLATE_REQUEST',
-              templateId: t.id,
-              drawingType: targetDrawingType
-            });
-          });
-        }
-
-        // X (Delete) button
-        const deleteBtn = row.querySelector('.delete-btn');
-        if (deleteBtn) {
-          deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            currentTemplates = currentTemplates.filter(item => item.id !== t.id);
-            if (currentSettings.activeTemplateId === t.id) {
-              currentSettings.activeTemplateId = currentTemplates[0]?.id || null;
+        if (renamingGroupName === groupName) {
+          const form = doc.createElement('div');
+          form.className = 'vest-tv-sub-inline-form';
+          const input = doc.createElement('input');
+          input.type = 'text';
+          input.className = 'vest-tv-sub-inline-input';
+          input.value = groupName;
+          const saveBtn = doc.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.className = 'vest-tv-sub-inline-btn';
+          saveBtn.textContent = 'Save';
+          const submitRename = () => {
+            const next = String(input.value || '').trim();
+            renamingGroupName = null;
+            if (next && next !== groupName) {
+              currentSettings.templateGroups = (Array.isArray(currentSettings.templateGroups) ? currentSettings.templateGroups : [])
+                .map(g => (g === groupName ? next : g));
+              if (!currentSettings.templateGroups.includes(next)) {
+                currentSettings.templateGroups.push(next);
+              }
+              currentTemplates = currentTemplates.map(item => (
+                String(item.group || '').trim() === groupName ? { ...item, group: next } : item
+              ));
+              postToIsolated({
+                type: 'VEST_TV_RENAME_TEMPLATE_GROUP',
+                oldName: groupName,
+                newName: next
+              });
             }
             renderSubmenuContents();
-            postToIsolated({
-              type: 'VEST_TV_DELETE_TEMPLATE_REQUEST',
-              templateId: t.id,
-              templateName: t.name
-            });
+          };
+          saveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            submitRename();
           });
+          input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submitRename();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              renamingGroupName = null;
+              renderSubmenuContents();
+            }
+          });
+          form.appendChild(input);
+          form.appendChild(saveBtn);
+          submenu.appendChild(form);
+          setTimeout(() => { input.focus(); input.select(); }, 10);
+        } else {
+          const gHeader = doc.createElement('div');
+          gHeader.className = 'vest-tv-sub-group-header';
+          gHeader.innerHTML = `
+            <span class="vest-tv-sub-group-title">
+              <span>${collapsed ? '▸' : '▾'}</span>
+              <span>📁 ${escapeHtml(groupName)}</span>
+              <span class="vest-tv-sub-group-count">${groupTemplates.length}</span>
+            </span>
+            <div class="vest-tv-sub-actions">
+              <button type="button" class="vest-tv-sub-icon-btn edit-btn" title="Rename group '${escapeHtml(groupName)}'">✎</button>
+              <button type="button" class="vest-tv-sub-icon-btn delete-btn" title="Delete group '${escapeHtml(groupName)}' (templates stay ungrouped)">×</button>
+            </div>
+          `;
+          gHeader.addEventListener('click', (e) => {
+            if (e.target.closest('.vest-tv-sub-icon-btn')) return;
+            e.stopPropagation();
+            e.preventDefault();
+            setGroupCollapsed(groupName, !collapsed);
+            renderSubmenuContents();
+          });
+          const renameBtn = gHeader.querySelector('.edit-btn');
+          if (renameBtn) {
+            renameBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              renamingGroupName = groupName;
+              isCreatingNewGroup = false;
+              assigningTemplateId = null;
+              renderSubmenuContents();
+            });
+          }
+          const delGroupBtn = gHeader.querySelector('.delete-btn');
+          if (delGroupBtn) {
+            delGroupBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              currentSettings.templateGroups = (Array.isArray(currentSettings.templateGroups) ? currentSettings.templateGroups : [])
+                .filter(g => g !== groupName);
+              currentTemplates = currentTemplates.map(item => (
+                String(item.group || '').trim() === groupName ? { ...item, group: '' } : item
+              ));
+              postToIsolated({
+                type: 'VEST_TV_DELETE_TEMPLATE_GROUP',
+                groupName
+              });
+              renderSubmenuContents();
+            });
+          }
+          submenu.appendChild(gHeader);
         }
 
-        submenu.appendChild(row);
+        if (!collapsed) {
+          if (groupTemplates.length === 0) {
+            const emptyGroupRow = doc.createElement('div');
+            emptyGroupRow.style.cssText = 'padding: 4px 16px 6px 26px; font-size: 11px; color: #64748b; font-style: italic;';
+            emptyGroupRow.textContent = 'Empty — hover any template & click 📁';
+            submenu.appendChild(emptyGroupRow);
+          } else {
+            groupTemplates.forEach(t => renderTemplateRow(t, true, allGroups));
+          }
+        }
       });
+
+      // 5. Ungrouped Templates
+      const ungroupedTemplates = matchingTemplates.filter(t => !String(t.group || '').trim());
+      if (ungroupedTemplates.length > 0) {
+        if (allGroups.length > 0) {
+          const ungroupedDivider = doc.createElement('div');
+          ungroupedDivider.className = 'vest-tv-sub-divider';
+          submenu.appendChild(ungroupedDivider);
+          const ungroupedLabel = doc.createElement('div');
+          ungroupedLabel.className = 'vest-tv-sub-ungrouped-label';
+          ungroupedLabel.textContent = 'Ungrouped';
+          submenu.appendChild(ungroupedLabel);
+        }
+        ungroupedTemplates.forEach(t => renderTemplateRow(t, false, allGroups));
+      }
     };
 
     renderSubmenuContents();
