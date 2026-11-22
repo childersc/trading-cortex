@@ -1,6 +1,14 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.130`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.131`) are documented in this file.
+
+---
+
+## [v1.1.131] — 2026-11-21
+
+### 🎯 Visible Chart Header Pill on My Funded Perps + Native `group-*` Class & `elementFromPoint` Self-Check on Vest
+- **My Funded Perps**: Mounts `| CORTEX |` directly in My Funded Perps's visible chart header bar (`div.flex.h-8...`, right after the `[+]` tab button and before `div.ml-auto` `Alerts · Price Chart`) instead of inside the hidden TradingView iframe toolbar, so both the **Cortex pill** and the **bottom minimized windows dock** are 100% visible.
+- **Vest / TradingView**: Copies TradingView's native `group-*` class onto `#vest-tv-cortex-toolbar-slot`, enforces `!important` visibility & `z-index: 9999`, and adds a live `elementFromPoint()` self-check that hops right past any covering sibling if another toolbar element overlaps the slot.
 
 ---
 

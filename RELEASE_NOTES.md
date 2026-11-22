@@ -1,3 +1,8 @@
+Trading Cortex v1.1.131 — Visible My Funded Perps Chart Header Pill & Vest Toolbar Visibility Fix
+
+- **My Funded Perps Visible Chart Header Pill (`v1.1.131`)**: Mounts `| CORTEX |` directly in My Funded Perps's visible chart header bar (`[NVDA 5m] [+] | CORTEX | ... [Alerts] [Price Chart]`) instead of the hidden TradingView iframe toolbar, while keeping minimized windows docked below the chart.
+- **Vest Native Group Class & Occlusion Self-Check (`v1.1.131`)**: Copies TradingView's native `group-*` class onto `#vest-tv-cortex-toolbar-slot` with explicit visibility and an `elementFromPoint()` self-check so the pill stays 100% visible immediately after `Indicators` (or hops right past any covering sibling).
+
 Trading Cortex v1.1.130 — Fixed Vest Cortex Pill Placement Immediately After Native Indicators
 
 - **Vest Cortex Pill Fix (`v1.1.130`)**: Queries `#header-toolbar-indicators` / `[data-name="open-indicators-dialog"]` first in its own selector pass so earlier third-party buttons with `"indicator"` in their tooltip/aria-label (e.g. `TV`/`Vela` at `x = 211px`) can never hijack the anchor ahead of TradingView's native `Indicators` button (`x = 550px`).
