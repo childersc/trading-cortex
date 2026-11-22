@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.143`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.144`) are documented in this file.
+
+---
+
+## [v1.1.144] — 2026-11-22
+
+### 🎯 Fixed Position Box & TP/SL Submission on Kalshi Pro + Passive API/Fiber Open Positions on My Funded Perps
+- **Kalshi Pro Live DOM & Modal Wiring (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Fixed Kalshi Pro symbol normalization so `KX*PERP` chart tickers (`KXTSMPERP`, `KXHYPEPERP`, `KXUSTECH100PERP`) match the Positions blotter base names (`TSM`, `HYPE`, `USTECH100`).
+  - Added a dedicated dual-mode Kalshi Pro blotter scraper (`div[data-perps-blotter="true"]`) supporting BOTH Kalshi Pro's **Cards layout** (`[role="list"][aria-label="Positions"] li`) and **Desktop Table layout** (`[role="table"] [role="row"]`), parsing stacked `Entry / Liq` and `Position` cells, `[data-side="short"|"long"]`, and `[data-tpsl-focus="take_profit"|"stop_loss"]`.
+  - Wired Kalshi Pro's exact `Edit TP/SL` modal (`#perps-tpsl-title`, `#perps-tpsl-tp-price`, `#perps-tpsl-sl-price`, `Confirm`, `Delete`), including an **auto-fill guard** that clears Kalshi's pre-filled +15%/-15% opposite field when no existing TP/SL was set so only your dragged TP or SL is submitted.
+- **My Funded Perps Tab-Independent Live Positions + Ticker Extraction (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Added passive API (`fetch`/`XHR`) and React Fiber live open-position capture (`extractOpenPositionsFromApiPayload` + `scanReactFiberForOpenPositions`) bridged via `VEST_TV_API_POSITIONS_CAPTURED` so your open position box & TP/SL lines render on My Funded Perps even while viewing the **`Accounts`** or **`Open Orders`** tab instead of `Positions`.
+  - Stopped wiping cached positions when switching away from the `Positions` tab, stripped leverage prefixes (`5x`, `10x`) before parsing ticker names (`extractSymbolFromCellText`), and periodically re-broadcast live positions so newly recreated TradingView iframes on coin switches hydrate immediately.
 
 ---
 

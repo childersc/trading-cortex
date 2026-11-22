@@ -7968,6 +7968,10 @@
       .replace(/[^A-Z0-9]/g, '');
     s = s.replace(/(PERPETUAL|PERP|USDT|USDC|USD)$/i, '');
     s = s.replace(/(PERPETUAL|PERP|USDT|USDC|USD)$/i, '');
+    // Kalshi Pro perpetual contract tickers carry a leading "KX" prefix (e.g. KXTSMPERP -> TSM, KXHYPEPERP -> HYPE, KXUSTECH100PERP -> USTECH100)
+    if (/^KX[A-Z0-9]{2,}$/.test(s) && s.length >= 4) {
+      s = s.slice(2);
+    }
     return s;
   }
 
@@ -17368,6 +17372,144 @@
     return found;
   }
 
+  function extractOpenPositionsFromApiPayload(payload, url = '') {
+    const urlStr = String(url || '').toLowerCase();
+    // Skip historical/closed/orderbook/candle endpoints so we never misread closed trades as active positions
+    if (/(history|closed|candles|klines|bars|orderbook|l2book|funding|leaderboard|fills|trades\b)/i.test(urlStr) && !/open.?position|active.?position|positions\b/i.test(urlStr)) {
+      return [];
+    }
+    const found = [];
+    const seenSym = new Set();
+    const visited = new WeakSet();
+    let steps = 0;
+
+    const readNum = (obj, keys) => {
+      for (const k of keys) {
+        if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') {
+          const n = Number(obj[k]);
+          if (Number.isFinite(n)) return n;
+        }
+      }
+      return NaN;
+    };
+
+    const walk = (node, depth) => {
+      if (!node || typeof node !== 'object' || depth > 7 || steps > 2200) return;
+      if (visited.has(node)) return;
+      visited.add(node);
+      steps++;
+
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length && i < 120; i++) {
+          walk(node[i], depth + 1);
+        }
+        return;
+      }
+
+      // Check if this object looks like a live open position
+      const rawSym = node.symbol || node.coin || node.market || node.ticker || node.instrument || node.marketSymbol || node.asset || node.contract || node.pair || '';
+      if (typeof rawSym === 'string' && rawSym.length >= 2 && rawSym.length <= 36) {
+        const entryPrice = Math.abs(readNum(node, ['entryPrice', 'entryPx', 'avgEntryPrice', 'averageEntryPrice', 'openPrice', 'avgPrice', 'entry_price', 'avg_entry_price', 'open_price']));
+        const rawSize = readNum(node, ['size', 'qty', 'quantity', 'szi', 'positionAmt', 'positionSize', 'contracts', 'openSize', 'baseSize', 'netSize', 'amount']);
+        const rawNotional = Math.abs(readNum(node, ['positionValue', 'notional', 'notionalUsd', 'valueUsd', 'value', 'position_value']));
+        const hasClosedMarker = Boolean(
+          node.exitPrice || node.closePrice || node.closedAt || node.exitTime || node.closed_at || node.isClosed === true ||
+          (typeof node.status === 'string' && /^(closed|filled|canceled|cancelled|expired|settled|rejected)$/i.test(node.status))
+        );
+        const hasOpenSize = (Number.isFinite(rawSize) && Math.abs(rawSize) > 1e-12) || (Number.isFinite(rawNotional) && rawNotional > 0.01);
+        if (!hasClosedMarker && Number.isFinite(entryPrice) && entryPrice > 0 && hasOpenSize) {
+          const sym = normalizeHypernovaMainSymbol(rawSym);
+          if (sym && /^[A-Z0-9]{2,14}$/.test(sym) && !seenSym.has(sym)) {
+            let side = null;
+            const rawSide = String(node.side || node.direction || node.positionSide || '').toLowerCase();
+            if (/short|sell|no/.test(rawSide)) side = 'short';
+            else if (/long|buy|yes/.test(rawSide)) side = 'long';
+            else if (typeof node.isLong === 'boolean') side = node.isLong ? 'long' : 'short';
+            else if (typeof node.isShort === 'boolean') side = node.isShort ? 'short' : 'long';
+            else if (Number.isFinite(rawSize) && rawSize < 0) side = 'short';
+            else side = 'long';
+
+            const sizeQty = Number.isFinite(rawSize) && Math.abs(rawSize) > 0
+              ? Math.abs(rawSize)
+              : (Number.isFinite(rawNotional) ? rawNotional / entryPrice : null);
+            const notionalUsd = Number.isFinite(rawNotional) && rawNotional > 0
+              ? rawNotional
+              : (sizeQty ? sizeQty * entryPrice : null);
+            const markPrice = Math.abs(readNum(node, ['markPrice', 'markPx', 'indexPrice', 'lastPrice', 'currentPrice', 'mark_price']));
+            const unrealizedPnl = readNum(node, ['unrealizedPnl', 'unrealized_pnl', 'uPnl', 'upnl', 'pnl', 'totalPnl', 'unrealizedProfit']);
+            const tpPrice = Math.abs(readNum(node, ['takeProfitPrice', 'takeProfit', 'tpPrice', 'tp', 'take_profit_price']));
+            const slPrice = Math.abs(readNum(node, ['stopLossPrice', 'stopLoss', 'slPrice', 'sl', 'stop_loss_price']));
+
+            seenSym.add(sym);
+            found.push({
+              symbol: sym,
+              side,
+              entryPrice,
+              markPrice: Number.isFinite(markPrice) && markPrice > 0 ? markPrice : null,
+              sizeQty: Number.isFinite(sizeQty) && sizeQty > 0 ? sizeQty : null,
+              notionalUsd: Number.isFinite(notionalUsd) && notionalUsd > 0 ? notionalUsd : null,
+              unrealizedPnl: Number.isFinite(unrealizedPnl) ? unrealizedPnl : null,
+              tpPrice: Number.isFinite(tpPrice) && tpPrice > 0 ? tpPrice : null,
+              slPrice: Number.isFinite(slPrice) && slPrice > 0 ? slPrice : null
+            });
+          }
+        }
+      }
+
+      const keys = Object.keys(node);
+      for (let i = 0; i < keys.length && i < 60; i++) {
+        const k = keys[i];
+        if (/history|closed|candles|klines|orderbook|bids|asks|fills/i.test(k)) continue;
+        walk(node[k], depth + 1);
+      }
+    };
+
+    try { walk(payload, 0); } catch (e) {}
+    return found;
+  }
+
+  function scanReactFiberForOpenPositions() {
+    if (window.top !== window || !isHypernovaMainWorldHost()) return [];
+    const results = [];
+    try {
+      const roots = [document.getElementById('root'), document.getElementById('__next'), document.body].filter(Boolean);
+      const visited = new WeakSet();
+      const queue = [];
+      for (const el of roots) {
+        const fk = Object.keys(el).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactContainer$'));
+        if (fk && el[fk]) queue.push(el[fk]);
+      }
+      let checked = 0;
+      while (queue.length > 0 && checked < 600) {
+        const fiber = queue.shift();
+        if (!fiber || typeof fiber !== 'object' || visited.has(fiber)) continue;
+        visited.add(fiber);
+        checked++;
+        try {
+          let hook = fiber.memoizedState;
+          let hSteps = 0;
+          while (hook && hSteps < 20) {
+            hSteps++;
+            const st = hook.memoizedState;
+            if (st && typeof st === 'object') {
+              if (Array.isArray(st) && st.length > 0 && st.length <= 40 && st[0] && typeof st[0] === 'object') {
+                const ex = extractOpenPositionsFromApiPayload(st, 'fiber:positions');
+                if (ex.length > 0) results.push(...ex);
+              } else if (Array.isArray(st.positions) || Array.isArray(st.openPositions) || Array.isArray(st.activePositions)) {
+                const ex = extractOpenPositionsFromApiPayload(st.positions || st.openPositions || st.activePositions, 'fiber:positions');
+                if (ex.length > 0) results.push(...ex);
+              }
+            }
+            hook = hook.next;
+          }
+        } catch (e) {}
+        if (fiber.child) queue.push(fiber.child);
+        if (fiber.sibling) queue.push(fiber.sibling);
+      }
+    } catch (e) {}
+    return results;
+  }
+
   function scanPlatformAccountsInMainWorld() {
     if (window.top !== window) return;
     try {
@@ -17395,6 +17537,16 @@
           accounts: found
         });
       }
+
+      if (isHypernovaMainWorldHost()) {
+        const fiberPositions = scanReactFiberForOpenPositions();
+        if (fiberPositions.length > 0) {
+          postToIsolated({
+            type: 'VEST_TV_API_POSITIONS_CAPTURED',
+            positions: fiberPositions
+          });
+        }
+      }
     } catch (e) {}
   }
 
@@ -17404,7 +17556,28 @@
     window.__TRADING_CORTEX_TRADE_NET_HOOKED__ = true;
 
     const TRADE_URL_RE = /trade|fill|position|history|pnl|closed/i;
-    const ACCOUNT_URL_RE = /account|subaccount|portfolio|balance|equity|wallet|user|prop|eval|funded|challenge|trading|position|me|profile|graphql/i;
+    const ACCOUNT_URL_RE = /account|subaccount|portfolio|balance|equity|wallet|user|prop|eval|funded|challenge|trading|position|me|profile|graphql|perp|blotter|summary|state/i;
+
+    const processCapturedNetworkJson = (data, url, isTradeUrl, isAccountUrl) => {
+      if (isTradeUrl) {
+        const trades = extractTradesFromApiPayload(data, url);
+        if (trades.length > 0) {
+          postToIsolated({ type: 'VEST_TRADES_CAPTURED', trades });
+        }
+      }
+      if (isAccountUrl) {
+        const accounts = extractAccountsFromApiPayload(data, url);
+        if (accounts.length > 0) {
+          postToIsolated({ type: 'VEST_ACCOUNTS_CAPTURED', accounts });
+        }
+      }
+      if (isHypernovaMainWorldHost() && (isTradeUrl || isAccountUrl)) {
+        const openPos = extractOpenPositionsFromApiPayload(data, url);
+        if (openPos.length > 0) {
+          postToIsolated({ type: 'VEST_TV_API_POSITIONS_CAPTURED', positions: openPos });
+        }
+      }
+    };
 
     try {
       const origFetch = window.fetch;
@@ -17418,18 +17591,7 @@
             if (isTradeUrl || isAccountUrl) {
               const clone = response.clone();
               clone.json().then(data => {
-                if (isTradeUrl) {
-                  const trades = extractTradesFromApiPayload(data, url);
-                  if (trades.length > 0) {
-                    postToIsolated({ type: 'VEST_TRADES_CAPTURED', trades });
-                  }
-                }
-                if (isAccountUrl) {
-                  const accounts = extractAccountsFromApiPayload(data, url);
-                  if (accounts.length > 0) {
-                    postToIsolated({ type: 'VEST_ACCOUNTS_CAPTURED', accounts });
-                  }
-                }
+                processCapturedNetworkJson(data, url, isTradeUrl, isAccountUrl);
               }).catch(() => {});
             }
           } catch (e) {}
@@ -17454,18 +17616,7 @@
               const isAccountUrl = ACCOUNT_URL_RE.test(url);
               if ((isTradeUrl || isAccountUrl) && this.responseText) {
                 const data = JSON.parse(this.responseText);
-                if (isTradeUrl) {
-                  const trades = extractTradesFromApiPayload(data, url);
-                  if (trades.length > 0) {
-                    postToIsolated({ type: 'VEST_TRADES_CAPTURED', trades });
-                  }
-                }
-                if (isAccountUrl) {
-                  const accounts = extractAccountsFromApiPayload(data, url);
-                  if (accounts.length > 0) {
-                    postToIsolated({ type: 'VEST_ACCOUNTS_CAPTURED', accounts });
-                  }
-                }
+                processCapturedNetworkJson(data, url, isTradeUrl, isAccountUrl);
               }
             } catch (e) {}
           });

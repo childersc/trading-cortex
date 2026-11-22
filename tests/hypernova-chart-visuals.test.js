@@ -103,10 +103,14 @@ function extractBlock(src, startMarker, endMarker) {
     ctx
   );
 
-  // Symbol normalization
+  // Symbol normalization (Hypernova, My Funded Perps, and Kalshi Pro KX*PERP tickers)
   assert.strictEqual(ctx.normalizeHypernovaMainSymbol('HYPERNOVA:BTC-USD'), 'BTC');
   assert.strictEqual(ctx.normalizeHypernovaMainSymbol('ETH-PERP'), 'ETH');
   assert.strictEqual(ctx.normalizeHypernovaMainSymbol('SOLUSDT'), 'SOL');
+  assert.strictEqual(ctx.normalizeHypernovaMainSymbol('KXTSMPERP'), 'TSM');
+  assert.strictEqual(ctx.normalizeHypernovaMainSymbol('KXHYPEPERP'), 'HYPE');
+  assert.strictEqual(ctx.normalizeHypernovaMainSymbol('KXUSTECH100PERP'), 'USTECH100');
+  assert.strictEqual(ctx.normalizeHypernovaMainSymbol('BTC-USD perpetual'), 'BTC');
 
   // Long TP & SL dollar amounts + Breakeven
   const longPos = { side: 'long', entryPrice: 60000, sizeQty: 0.5 };
@@ -200,6 +204,71 @@ function extractBlock(src, startMarker, endMarker) {
   assert.strictEqual(isolatedSrc.includes('#take-profit-price'), true);
   assert.strictEqual(isolatedSrc.includes('#stop-loss-price'), true);
   assert.strictEqual(isolatedSrc.includes('isChartVisualsHost()'), true);
+  assert.strictEqual(isolatedSrc.includes('data-perps-blotter="true"'), true);
+  assert.strictEqual(isolatedSrc.includes('perps-blotter__market-name'), true);
+  assert.strictEqual(isolatedSrc.includes('data-tpsl-focus="take_profit"'), true);
+  assert.strictEqual(isolatedSrc.includes('data-tpsl-focus="stop_loss"'), true);
+  assert.strictEqual(isolatedSrc.includes('#perps-tpsl-tp-price'), true);
+  assert.strictEqual(isolatedSrc.includes('#perps-tpsl-sl-price'), true);
+  assert.strictEqual(isolatedSrc.includes('VEST_TV_API_POSITIONS_CAPTURED'), true);
+
+  // Test extractSymbolFromCellText (ignores leverage badges like 5x / 10x and Long/Short labels)
+  const symCellBlock = extractBlock(
+    isolatedSrc,
+    'function normalizeHypernovaBaseSymbol(raw)',
+    'function parseHypernovaNumber('
+  );
+  const symCellCtx = {};
+  vm.runInNewContext(
+    `${symCellBlock}
+     this.normalizeHypernovaBaseSymbol = normalizeHypernovaBaseSymbol;
+     this.extractSymbolFromCellText = extractSymbolFromCellText;`,
+    symCellCtx
+  );
+  assert.strictEqual(symCellCtx.normalizeHypernovaBaseSymbol('KXTSMPERP'), 'TSM');
+  assert.strictEqual(symCellCtx.normalizeHypernovaBaseSymbol('KXHYPEPERP'), 'HYPE');
+  assert.strictEqual(symCellCtx.normalizeHypernovaBaseSymbol('KXUSTECH100PERP'), 'USTECH100');
+  assert.strictEqual(symCellCtx.extractSymbolFromCellText('5x BTC-USD'), 'BTC');
+  assert.strictEqual(symCellCtx.extractSymbolFromCellText('HYPE 2x'), 'HYPE');
+  assert.strictEqual(symCellCtx.extractSymbolFromCellText('USTECH100 Short'), 'USTECH100');
+  assert.strictEqual(symCellCtx.extractSymbolFromCellText('10x 1000PEPE-USD'), '1000PEPE');
+
+  // Test passive API open-position extraction in content-main.js (supports MFP Accounts tab & Kalshi Pro)
+  const apiPosBlock = extractBlock(
+    mainSrc,
+    'function extractOpenPositionsFromApiPayload(',
+    'function scanReactFiberForOpenPositions()'
+  );
+  const normSymBlock = extractBlock(
+    mainSrc,
+    'function normalizeHypernovaMainSymbol(raw)',
+    'function formatHypernovaDisplayPrice('
+  );
+  const apiPosCtx = {};
+  vm.runInNewContext(
+    `${normSymBlock}\n${apiPosBlock}\nthis.extractOpenPositionsFromApiPayload = extractOpenPositionsFromApiPayload;`,
+    apiPosCtx
+  );
+  const mockApiRes = {
+    data: {
+      openPositions: [
+        { symbol: 'NVDA-USD', side: 'LONG', entryPrice: 130.59, size: 10, unrealizedPnl: 12.5, stopLossPrice: 128.0, takeProfitPrice: 138.0 },
+        { symbol: 'KXHYPEPERP', szi: -0.7, avgEntryPrice: 62.42, markPrice: 62.10, stopLoss: 65.5 },
+        { symbol: 'ETH-USD', side: 'LONG', entryPrice: 2500, exitPrice: 2550, size: 1, status: 'closed' }
+      ]
+    }
+  };
+  const extractedApiPos = apiPosCtx.extractOpenPositionsFromApiPayload(mockApiRes, '/api/v1/account/positions');
+  assert.strictEqual(extractedApiPos.length, 2, 'Should extract 2 live open positions and skip the closed trade');
+  assert.strictEqual(extractedApiPos[0].symbol, 'NVDA');
+  assert.strictEqual(extractedApiPos[0].side, 'long');
+  assert.strictEqual(extractedApiPos[0].slPrice, 128);
+  assert.strictEqual(extractedApiPos[0].tpPrice, 138);
+  assert.strictEqual(extractedApiPos[1].symbol, 'HYPE');
+  assert.strictEqual(extractedApiPos[1].side, 'short');
+  assert.strictEqual(extractedApiPos[1].sizeQty, 0.7);
+  assert.strictEqual(extractedApiPos[1].slPrice, 65.5);
+  assert.strictEqual(apiPosCtx.extractOpenPositionsFromApiPayload(mockApiRes, '/api/v1/trade/history').length, 0, 'Should ignore history endpoints');
 
   // Test getChartVisualsMainWorldFirmId across all 4 venues
   const hostFnBlock = extractBlock(
@@ -216,7 +285,7 @@ function extractBlock(src, startMarker, endMarker) {
   assert.strictEqual(runHostCheck('myfundedperpetuals.com'), 'myfundedperpetuals');
   assert.strictEqual(runHostCheck('pro.kalshi.com'), 'kalshipro');
   assert.strictEqual(runHostCheck('next.vestmarkets.com'), null, 'Vest Markets should remain excluded');
-  console.log('✓ Multi-venue Chart Visuals rollout (Hypernova, My Funded Perps, Kalshi Pro), exact data-testid/Base UI TP/SL submission & tick formatting verified');
+  console.log('✓ Multi-venue Chart Visuals rollout (Hypernova, My Funded Perps, Kalshi Pro), Kalshi blotter & KX symbol mapping, passive API position capture & tick formatting verified');
 }
 
 // 4. Test native TradingView Current Price line styling helpers (modifies existing native line, no duplicate)

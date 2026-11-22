@@ -3632,6 +3632,10 @@
       if (isTopWindow && isChartVisualsHost()) {
         executeHypernovaClosePositionAction(event.data.payload || {});
       }
+    } else if (type === 'VEST_TV_API_POSITIONS_CAPTURED') {
+      if (isTopWindow && isChartVisualsHost() && typeof ingestApiCapturedPositions === 'function') {
+        ingestApiCapturedPositions(event.data.positions || []);
+      }
     } else if (type === 'VEST_TV_TEMPLATE_CREATED_FROM_SHAPE') {
       if (template) {
         const hydrated = hydrateTemplateForEditor(template);
@@ -4495,16 +4499,33 @@
   // -------------------------------------------------------------
   let lastHypernovaPositionsSig = '';
   let hypernovaPositionsTimer = null;
+  let lastKnownDomPositions = [];
+  let lastApiCapturedPositions = [];
+  let lastApiPositionsCapturedAt = 0;
+  let hypernovaSyncTickCount = 0;
 
   function normalizeHypernovaBaseSymbol(raw) {
-    let s = String(raw || '')
-      .toUpperCase()
+    const rawStr = String(raw || '').toUpperCase().trim();
+    let s = rawStr
       .replace(/^.*:/, '')
       .replace(/\b(PERP|PERPETUAL|USD|USDT|USDC)\b/gi, '')
       .replace(/[^A-Z0-9]/g, '');
     s = s.replace(/(PERPETUAL|PERP|USDT|USDC|USD)$/i, '');
     s = s.replace(/(PERPETUAL|PERP|USDT|USDC|USD)$/i, '');
+    // Kalshi Pro perpetual contract tickers carry a leading "KX" prefix (e.g. KXTSMPERP -> TSM, KXHYPEPERP -> HYPE, KXUSTECH100PERP -> USTECH100)
+    if (/^KX[A-Z0-9]{2,}$/.test(s) && s.length >= 4) {
+      s = s.slice(2);
+    }
     return s;
+  }
+
+  function extractSymbolFromCellText(raw) {
+    const cleaned = String(raw || '')
+      .replace(/\b\d+(?:\.\d+)?x\b/gi, ' ')
+      .replace(/\b(long|short|cross|isolated|perp|perpetual)\b/gi, ' ')
+      .trim();
+    const m = cleaned.match(/\b([A-Z][A-Z0-9]{1,13}(?:[-/_](?:USD|USDT|USDC|PERP))?|\d{2,4}[A-Z]{2,10}(?:[-/_](?:USD|USDT|USDC|PERP))?)\b/i);
+    return m ? normalizeHypernovaBaseSymbol(m[1]) : '';
   }
 
   function parseHypernovaNumber(text) {
@@ -4639,17 +4660,262 @@
 
   async function ensureHypernovaPositionsTabActive() {
     if (document.querySelector('tr[data-testid^="positions-row-"]')) return true;
+    const kalshiBlotter = document.querySelector('div[data-perps-blotter="true"]');
+    if (kalshiBlotter) {
+      const hasKalshiPos = Boolean(
+        kalshiBlotter.querySelector('[role="list"][aria-label="Positions"] a.perps-blotter__market-name') ||
+        kalshiBlotter.querySelector('[role="table"] [role="row"] a.perps-blotter__market-name')
+      );
+      if (hasKalshiPos) return true;
+    }
     const tabs = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"], .trade-tabs-list [role="tab"]'));
     const posTab = tabs.find(t => /^positions\b/i.test((t.innerText || t.textContent || '').trim()));
     if (posTab && posTab.getAttribute('aria-selected') !== 'true') {
       dispatchHypernovaClick(posTab);
       await waitForHypernovaCondition(() =>
-        document.querySelector('tr[data-testid^="positions-row-"]') || findHypernovaPositionsTableAndRows(),
-        500,
+        document.querySelector('tr[data-testid^="positions-row-"]') ||
+        document.querySelector('div[data-perps-blotter="true"] a.perps-blotter__market-name') ||
+        findHypernovaPositionsTableAndRows(),
+        550,
         40
       );
     }
     return true;
+  }
+
+  function parseKalshiTpSlSpans(container) {
+    let tpPrice = null;
+    let slPrice = null;
+    if (!container) return { tpPrice, slPrice };
+    const tpEl = container.querySelector('[data-tpsl-focus="take_profit"]');
+    const slEl = container.querySelector('[data-tpsl-focus="stop_loss"]');
+    if (tpEl) {
+      const v = Math.abs(parseHypernovaNumber(tpEl.innerText || tpEl.textContent || ''));
+      if (Number.isFinite(v) && v > 0) tpPrice = v;
+    }
+    if (slEl) {
+      const v = Math.abs(parseHypernovaNumber(slEl.innerText || slEl.textContent || ''));
+      if (Number.isFinite(v) && v > 0) slPrice = v;
+    }
+    return { tpPrice, slPrice };
+  }
+
+  function extractKalshiRowSymbol(el) {
+    const link = el && el.querySelector ? el.querySelector('a.perps-blotter__market-name') : null;
+    if (link) {
+      const txt = (link.innerText || link.textContent || '').trim();
+      if (txt) {
+        const sym = normalizeHypernovaBaseSymbol(txt);
+        if (sym) return sym;
+      }
+      const href = String(link.getAttribute('href') || '');
+      const hm = href.match(/\/perpetuals\/([^/?#]+)/i);
+      if (hm) return normalizeHypernovaBaseSymbol(hm[1]);
+    }
+    return '';
+  }
+
+  function scrapeKalshiProOpenPositions() {
+    const blotter = document.querySelector('div[data-perps-blotter="true"]');
+    if (!blotter) return { foundTable: false, positions: [] };
+
+    // Verify Positions tab is active (so Orders / Trade history rows are never misread as open positions)
+    const tabs = Array.from(blotter.querySelectorAll('[role="tablist"] [role="tab"]'));
+    const posTab = tabs.find(t => /^positions\b/i.test((t.innerText || t.textContent || '').trim()));
+    if (posTab && posTab.getAttribute('aria-selected') === 'false') {
+      return { foundTable: false, positions: [] };
+    }
+
+    const positions = [];
+
+    // Presentation A: Cards mode (narrower viewports, e.g. 1145px) -> `[role="list"][aria-label="Positions"] li`
+    const cardList = blotter.querySelector('[role="list"][aria-label="Positions"]');
+    if (cardList) {
+      const cards = Array.from(cardList.querySelectorAll('li')).filter(li => li.querySelector('a.perps-blotter__market-name'));
+      for (const li of cards) {
+        const symbol = extractKalshiRowSymbol(li);
+        if (!symbol) continue;
+        const sideEl = li.querySelector('[data-side]');
+        const sideAttr = sideEl ? String(sideEl.getAttribute('data-side') || '').toLowerCase() : '';
+        const liAria = String(li.getAttribute('aria-label') || '').toLowerCase();
+        const side = (sideAttr === 'short' || /\bshort\b/.test(liAria)) ? 'short' : 'long';
+
+        const fields = {};
+        li.querySelectorAll('[data-card-field="true"]').forEach(f => {
+          const dt = f.querySelector('dt');
+          const dd = f.querySelector('dd');
+          if (dt && dd) {
+            const k = (dt.innerText || dt.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            fields[k] = (dd.innerText || dd.textContent || '').replace(/\s+/g, ' ').trim();
+          }
+        });
+
+        const entryText = fields['avg entry'] || fields['entry'] || fields['entry price'] || '';
+        const markText = fields['mark price'] || fields['current price'] || fields['mark'] || '';
+        const qtyText = fields['quantity'] || fields['size'] || '';
+        const valText = fields['value'] || '';
+
+        const entryPrice = Math.abs(parseHypernovaNumber(entryText));
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+        const markPrice = Math.abs(parseHypernovaNumber(markText));
+        const sizeQty = Math.abs(parseHypernovaNumber(qtyText));
+        const notionalUsd = Math.abs(parseHypernovaNumber(valText));
+
+        let unrealizedPnl = NaN;
+        const headerEl = li.querySelector('[data-card-header="true"]');
+        if (headerEl) {
+          const pnlSpan = headerEl.querySelector('[data-tone="positive"], [data-tone="negative"]');
+          const pnlRaw = pnlSpan ? (pnlSpan.innerText || pnlSpan.textContent || '') : (headerEl.innerText || '');
+          const mPnl = pnlRaw.replace(/,/g, '').match(/([+-]?\s*\$\s*\d+(?:\.\d+)?)/);
+          if (mPnl) {
+            unrealizedPnl = parseHypernovaNumber(mPnl[1]);
+            if (pnlSpan && pnlSpan.getAttribute('data-tone') === 'negative' && unrealizedPnl > 0) {
+              unrealizedPnl = -Math.abs(unrealizedPnl);
+            }
+          }
+        }
+
+        const { tpPrice, slPrice } = parseKalshiTpSlSpans(li);
+        const priceDecimals = Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText));
+        positions.push({
+          symbol,
+          side,
+          entryPrice,
+          markPrice: Number.isFinite(markPrice) && markPrice > 0 ? markPrice : null,
+          sizeQty: Number.isFinite(sizeQty) && sizeQty > 0 ? sizeQty : (Number.isFinite(notionalUsd) ? notionalUsd / entryPrice : null),
+          notionalUsd: Number.isFinite(notionalUsd) && notionalUsd > 0 ? notionalUsd : (Number.isFinite(sizeQty) ? sizeQty * entryPrice : null),
+          unrealizedPnl: Number.isFinite(unrealizedPnl) ? unrealizedPnl : null,
+          tpPrice,
+          slPrice,
+          priceDecimals
+        });
+      }
+      return { foundTable: true, positions };
+    }
+
+    // Presentation B: Desktop CSS-grid Table mode -> `[role="table"] [role="row"]`
+    const tableEl = blotter.querySelector('[role="table"]');
+    if (tableEl) {
+      const allRows = Array.from(tableEl.querySelectorAll('[role="row"]'));
+      const headerRow = allRows[0];
+      const headerCells = headerRow
+        ? Array.from(headerRow.children).map(c => (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase())
+        : [];
+      const idxPos = headerCells.findIndex(h => /position|size|qty/.test(h));
+      const idxMark = headerCells.findIndex(h => /current\s*price|mark/.test(h));
+      const idxEntry = headerCells.findIndex(h => /entry/.test(h));
+      const idxPnl = headerCells.findIndex(h => /\bpnl\b|profit/.test(h));
+
+      for (const row of allRows.slice(1)) {
+        if (!row.querySelector('a.perps-blotter__market-name')) continue;
+        const symbol = extractKalshiRowSymbol(row);
+        if (!symbol) continue;
+        const sideEl = row.querySelector('[data-side]');
+        const sideAttr = sideEl ? String(sideEl.getAttribute('data-side') || '').toLowerCase() : '';
+        const side = sideAttr === 'short' ? 'short' : 'long';
+
+        const cols = Array.from(row.children);
+        const posCol = idxPos >= 0 ? cols[idxPos] : cols[1];
+        const markCol = idxMark >= 0 ? cols[idxMark] : cols[2];
+        const entryCol = idxEntry >= 0 ? cols[idxEntry] : cols[3];
+        const pnlCol = idxPnl >= 0 ? cols[idxPnl] : cols[6];
+
+        // Entry / Liq cell is stacked (`$62.420` on first line, `Liq $80.421` on second line)
+        const entryLines = entryCol
+          ? (entryCol.innerText || entryCol.textContent || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+          : [];
+        const entryText = entryLines.find(l => !/^liq/i.test(l)) || entryLines[0] || '';
+        const markText = markCol ? (markCol.innerText || markCol.textContent || '').trim() : '';
+
+        const entryPrice = Math.abs(parseHypernovaNumber(entryText));
+        if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+        const markPrice = Math.abs(parseHypernovaNumber(markText));
+
+        // Position cell is stacked (`0.7 HYPE` on line 1, `$43.6947` on line 2)
+        const posLines = posCol
+          ? (posCol.innerText || posCol.textContent || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+          : [];
+        let sizeQty = NaN;
+        let notionalUsd = NaN;
+        for (const pl of posLines) {
+          if (pl.includes('$') && !Number.isFinite(notionalUsd)) {
+            notionalUsd = Math.abs(parseHypernovaNumber(pl));
+          } else if (!pl.includes('$') && !Number.isFinite(sizeQty)) {
+            sizeQty = Math.abs(parseHypernovaNumber(pl));
+          }
+        }
+        if (!Number.isFinite(sizeQty) && Number.isFinite(notionalUsd) && entryPrice > 0) sizeQty = notionalUsd / entryPrice;
+        if (!Number.isFinite(notionalUsd) && Number.isFinite(sizeQty) && entryPrice > 0) notionalUsd = sizeQty * entryPrice;
+
+        let unrealizedPnl = NaN;
+        if (pnlCol) {
+          const pnlText = (pnlCol.innerText || pnlCol.textContent || '').trim();
+          unrealizedPnl = parseHypernovaNumber(pnlText);
+          const negTone = pnlCol.querySelector('[data-tone="negative"]');
+          if (negTone && unrealizedPnl > 0) unrealizedPnl = -Math.abs(unrealizedPnl);
+        }
+
+        const { tpPrice, slPrice } = parseKalshiTpSlSpans(row);
+        const priceDecimals = Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText));
+        positions.push({
+          symbol,
+          side,
+          entryPrice,
+          markPrice: Number.isFinite(markPrice) && markPrice > 0 ? markPrice : null,
+          sizeQty: Number.isFinite(sizeQty) && sizeQty > 0 ? sizeQty : null,
+          notionalUsd: Number.isFinite(notionalUsd) && notionalUsd > 0 ? notionalUsd : null,
+          unrealizedPnl: Number.isFinite(unrealizedPnl) ? unrealizedPnl : null,
+          tpPrice,
+          slPrice,
+          priceDecimals
+        });
+      }
+      return { foundTable: true, positions };
+    }
+
+    return { foundTable: false, positions: [] };
+  }
+
+  function findKalshiProPositionRowBySymbol(symbol) {
+    const targetSym = normalizeHypernovaBaseSymbol(symbol);
+    const blotter = document.querySelector('div[data-perps-blotter="true"]');
+    if (!blotter) return null;
+    const candidates = [
+      ...Array.from(blotter.querySelectorAll('[role="list"][aria-label="Positions"] li')),
+      ...Array.from(blotter.querySelectorAll('[role="table"] [role="row"]'))
+    ].filter(el => Boolean(el.querySelector('a.perps-blotter__market-name')));
+
+    for (const row of candidates) {
+      const rowSym = extractKalshiRowSymbol(row);
+      if (!targetSym || rowSym === targetSym) {
+        const tpSlTrigger =
+          row.querySelector('button[aria-label="Edit TP/SL"]') ||
+          Array.from(row.querySelectorAll('button')).find(b => /edit\s*tp\s*\/?\s*sl/i.test((b.innerText || b.textContent || '').trim())) ||
+          null;
+        const closeTrigger =
+          row.querySelector('button[data-action="close"]') ||
+          row.querySelector('button[aria-label="Close"]') ||
+          Array.from(row.querySelectorAll('button')).find(b => /^close$/i.test((b.innerText || b.textContent || '').trim())) ||
+          null;
+        const { tpPrice, slPrice } = parseKalshiTpSlSpans(row);
+        const rowText = (row.innerText || row.textContent || '');
+        const priceMatch = rowText.match(/\$[\d,]+\.(\d+)/);
+        const priceDecimals = priceMatch ? priceMatch[1].length : null;
+        return {
+          row,
+          cells: [],
+          headers: [],
+          idxTpSl: -1,
+          tpSlTrigger,
+          closeTrigger,
+          priceDecimals,
+          existingTpPrice: tpPrice,
+          existingSlPrice: slPrice,
+          isKalshiPro: true
+        };
+      }
+    }
+    return null;
   }
 
   function findHypernovaPositionsTableAndRows() {
@@ -4691,12 +4957,15 @@
     return null;
   }
 
-  function scrapeHypernovaOpenPositions() {
-    if (!isTopWindow || !isChartVisualsHost()) return [];
+  function scrapeVenueOpenPositionsWithMeta() {
+    if (!isTopWindow || !isChartVisualsHost()) return { foundTable: false, positions: [] };
+    if (getChartVisualsHostFirmId() === 'kalshipro') {
+      return scrapeKalshiProOpenPositions();
+    }
     const positions = [];
     try {
       const found = findHypernovaPositionsTableAndRows();
-      if (!found || !found.rows.length) return positions;
+      if (!found) return { foundTable: false, positions: [] };
       const { headers, rows } = found;
       const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument|ticker/.test(h)));
       const idxSide = headers.findIndex(h => /\bside\b|\bdirection\b/.test(h));
@@ -4727,8 +4996,7 @@
         const rawSymStr = symTextEl
           ? (symTextEl.innerText || symTextEl.textContent || '').trim()
           : (cellTexts[idxSym] || cellTexts[0] || '');
-        const symMatch = rawSymStr.match(/([A-Z0-9]{2,14}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
-        const symbol = symMatch ? normalizeHypernovaBaseSymbol(symMatch[1]) : '';
+        const symbol = extractSymbolFromCellText(rawSymStr);
         if (!symbol) continue;
 
         const sideText = idxSide >= 0 ? (cellTexts[idxSide] || '') : '';
@@ -4812,15 +5080,87 @@
           priceDecimals
         });
       }
+      return { foundTable: true, positions };
     } catch (e) {}
-    return positions;
+    return { foundTable: false, positions: [] };
+  }
+
+  function scrapeHypernovaOpenPositions() {
+    return scrapeVenueOpenPositionsWithMeta().positions;
+  }
+
+  function ingestApiCapturedPositions(incoming) {
+    if (!Array.isArray(incoming)) return;
+    const normalized = [];
+    const seen = new Set();
+    for (const raw of incoming) {
+      if (!raw || typeof raw !== 'object') continue;
+      const sym = normalizeHypernovaBaseSymbol(raw.symbol || '');
+      const entryPrice = Number(raw.entryPrice);
+      if (!sym || !Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+      if (seen.has(sym)) continue;
+      seen.add(sym);
+      normalized.push({
+        symbol: sym,
+        side: raw.side === 'short' ? 'short' : 'long',
+        entryPrice,
+        markPrice: Number.isFinite(Number(raw.markPrice)) && Number(raw.markPrice) > 0 ? Number(raw.markPrice) : null,
+        sizeQty: Number.isFinite(Number(raw.sizeQty)) && Number(raw.sizeQty) > 0 ? Number(raw.sizeQty) : null,
+        notionalUsd: Number.isFinite(Number(raw.notionalUsd)) && Number(raw.notionalUsd) > 0 ? Number(raw.notionalUsd) : null,
+        unrealizedPnl: Number.isFinite(Number(raw.unrealizedPnl)) ? Number(raw.unrealizedPnl) : null,
+        tpPrice: Number.isFinite(Number(raw.tpPrice)) && Number(raw.tpPrice) > 0 ? Number(raw.tpPrice) : null,
+        slPrice: Number.isFinite(Number(raw.slPrice)) && Number(raw.slPrice) > 0 ? Number(raw.slPrice) : null,
+        priceDecimals: Number.isInteger(raw.priceDecimals) ? raw.priceDecimals : null
+      });
+    }
+    lastApiCapturedPositions = normalized;
+    lastApiPositionsCapturedAt = Date.now();
+    syncHypernovaPositionsToMainWorld(true);
+  }
+
+  function getMergedVenueOpenPositions() {
+    const domRes = scrapeVenueOpenPositionsWithMeta();
+    if (domRes.foundTable) {
+      // Positions table IS currently mounted — it is authoritative!
+      // Enrich DOM rows with TP/SL from API snapshot if the table didn't show a TP/SL column (e.g. MFP)
+      const apiBySym = new Map(lastApiCapturedPositions.map(p => [p.symbol, p]));
+      const mergedDom = domRes.positions.map(p => {
+        const api = apiBySym.get(p.symbol);
+        if (!api) return p;
+        return {
+          ...p,
+          tpPrice: p.tpPrice !== null ? p.tpPrice : api.tpPrice,
+          slPrice: p.slPrice !== null ? p.slPrice : api.slPrice
+        };
+      });
+      lastKnownDomPositions = mergedDom;
+      return mergedDom;
+    }
+    // Positions table is NOT currently visible (e.g. user is viewing `Accounts`, `Open Orders`, or `History` tab).
+    // Check if the `Positions (0)` tab badge explicitly says 0; otherwise preserve API / last known DOM positions!
+    const posTab = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"]'))
+      .find(t => /^positions\b/i.test((t.innerText || t.textContent || '').trim()));
+    if (posTab) {
+      const m = (posTab.innerText || posTab.textContent || '').match(/\bpositions\s*\(?\s*(\d+)\s*\)?/i);
+      if (m && Number(m[1]) === 0) {
+        lastKnownDomPositions = [];
+        return [];
+      }
+    }
+    if (lastApiCapturedPositions.length > 0 && (Date.now() - lastApiPositionsCapturedAt < 120000)) {
+      return lastApiCapturedPositions;
+    }
+    return lastKnownDomPositions;
   }
 
   function syncHypernovaPositionsToMainWorld(force = false) {
     if (!isTopWindow || !isChartVisualsHost()) return;
-    const positions = scrapeHypernovaOpenPositions();
+    hypernovaSyncTickCount++;
+    const positions = getMergedVenueOpenPositions();
     const sig = JSON.stringify(positions);
-    if (!force && sig === lastHypernovaPositionsSig) return;
+    // Periodically rebroadcast every 4th tick (~3.2s) so newly recreated TradingView iframes on coin switches always hydrate!
+    const periodicRefresh = (hypernovaSyncTickCount % 4 === 0) && positions.length > 0;
+    if (!force && !periodicRefresh && sig === lastHypernovaPositionsSig) return;
     lastHypernovaPositionsSig = sig;
     postToMainWorlds({
       type: 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE',
@@ -4829,6 +5169,9 @@
   }
 
   function findHypernovaPositionRowBySymbol(symbol) {
+    if (getChartVisualsHostFirmId() === 'kalshipro') {
+      return findKalshiProPositionRowBySymbol(symbol);
+    }
     const targetSym = normalizeHypernovaBaseSymbol(symbol);
     const found = findHypernovaPositionsTableAndRows();
     if (!found || !found.rows.length) return null;
@@ -4845,8 +5188,7 @@
       const symText = symTextEl
         ? (symTextEl.innerText || symTextEl.textContent || '').trim()
         : (cells[idxSym] ? (cells[idxSym].innerText || cells[idxSym].textContent) : (row.innerText || '')).trim();
-      const m = symText.match(/([A-Z0-9]{2,14}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
-      const rowSym = m ? normalizeHypernovaBaseSymbol(m[1]) : '';
+      const rowSym = extractSymbolFromCellText(symText);
       if (!targetSym || rowSym === targetSym) {
         const entryTd = row.querySelector('td[data-testid$="-entry"]') || (idxEntry >= 0 ? cells[idxEntry] : null);
         const markTd = row.querySelector('td[data-testid$="-mark"]') || (idxMark >= 0 ? cells[idxMark] : null);
@@ -4879,18 +5221,26 @@
             return /^(market|close|market\s+close|exit|×|x)$/i.test(t) || /close|exit/i.test(aria);
           }) ||
           null;
-        return { row, cells, headers, idxTpSl, tpSlTrigger, closeTrigger, priceDecimals };
+        return { row, cells, headers, idxTpSl, tpSlTrigger, closeTrigger, priceDecimals, existingTpPrice: null, existingSlPrice: null, isKalshiPro: false };
       }
     }
     return null;
   }
 
   function findHypernovaTpSlDialog() {
-    const exact = document.querySelector('[role="dialog"][data-testid="tpsl"]');
-    if (exact) {
-      const st = exact.getAttribute('data-state');
-      const r = exact.getBoundingClientRect();
-      if (st !== 'closed' && r.width > 120 && r.height > 80) return exact;
+    // Fast-path 1: Hypernova exact `[role="dialog"][data-testid="tpsl"]`
+    const exactHn = document.querySelector('[role="dialog"][data-testid="tpsl"]');
+    if (exactHn) {
+      const st = exactHn.getAttribute('data-state');
+      const r = exactHn.getBoundingClientRect();
+      if (st !== 'closed' && r.width > 120 && r.height > 80) return exactHn;
+    }
+    // Fast-path 2: Kalshi Pro exact `[role="dialog"][aria-labelledby="perps-tpsl-title"]`
+    const exactKalshi = document.querySelector('[role="dialog"][aria-labelledby="perps-tpsl-title"]') ||
+      (document.getElementById('perps-tpsl-title') ? document.getElementById('perps-tpsl-title').closest('[role="dialog"]') : null);
+    if (exactKalshi) {
+      const r = exactKalshi.getBoundingClientRect();
+      if (r.width > 120 && r.height > 80) return exactKalshi;
     }
     return Array.from(document.querySelectorAll('[role="dialog"], [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="sheet-content"], [class*="tpsl-modal" i], [class*="modal" i]')).find(d => {
       if (d.id && d.id.startsWith('vest-')) return false;
@@ -4898,7 +5248,7 @@
       const r = d.getBoundingClientRect();
       if (r.width <= 160 || r.height <= 90) return false;
       return Boolean(
-        d.querySelector('[data-testid="tpsl-tp-price-input"], [data-testid="tpsl-sl-price-input"], [data-testid="tpsl-confirm"], #take-profit-price, #stop-loss-price') ||
+        d.querySelector('[data-testid="tpsl-tp-price-input"], [data-testid="tpsl-sl-price-input"], [data-testid="tpsl-confirm"], #perps-tpsl-tp-price, #perps-tpsl-sl-price, #take-profit-price, #stop-loss-price') ||
         /tp\s*\/\s*sl|take\s*profit|stop\s*loss/i.test(d.innerText || '')
       );
     }) || null;
@@ -4907,23 +5257,23 @@
   function findTpSlInputInRoot(root, kind) {
     if (!root) return null;
     const wantTp = kind === 'tp';
-    // Fast-path: Hypernova exact `data-testid` inputs & My Funded Perps exact `#take-profit-price` / `#stop-loss-price` IDs
+    // Fast-path: Hypernova (`tpsl-*-price-input`), Kalshi Pro (`#perps-tpsl-*-price`), My Funded Perps (`#take-profit-price` / `#stop-loss-price`)
     const exact = root.querySelector(
       wantTp
-        ? '[data-testid="tpsl-tp-price-input"], #take-profit-price'
-        : '[data-testid="tpsl-sl-price-input"], #stop-loss-price'
+        ? '[data-testid="tpsl-tp-price-input"], #perps-tpsl-tp-price, #take-profit-price'
+        : '[data-testid="tpsl-sl-price-input"], #perps-tpsl-sl-price, #stop-loss-price'
     );
     if (exact && !exact.disabled) return exact;
 
     const matchRe = wantTp ? /take\s*profit|\btp\b/i : /stop\s*loss|\bsl\b/i;
-    const excludeRe = wantTp ? /stop\s*loss|\bsl\b|gain|percent|roe|%/i : /take\s*profit|\btp\b|loss\s*%|gain|percent|roe|%/i;
+    const excludeRe = wantTp ? /stop\s*loss|\bsl\b|gain|percent|roi|roe|%/i : /take\s*profit|\btp\b|loss\s*%|gain|percent|roi|roe|%/i;
     const inputs = Array.from(root.querySelectorAll('input[type="text"], input[type="number"], input:not([type])')).filter(inp => {
       const r = inp.getBoundingClientRect();
       return r.width > 20 && r.height > 12 && !inp.disabled;
     });
     for (const inp of inputs) {
       const attrs = `${inp.placeholder || ''} ${inp.name || ''} ${inp.id || ''} ${inp.getAttribute('aria-label') || ''} ${inp.getAttribute('data-testid') || ''}`;
-      if (matchRe.test(attrs) && !excludeRe.test(attrs) && !/loss$/i.test(inp.id || '')) return inp;
+      if (matchRe.test(attrs) && !excludeRe.test(attrs) && !/loss$|percent$/i.test(inp.id || '')) return inp;
       let parent = inp.parentElement;
       for (let up = 0; up < 3 && parent && parent !== root; up++) {
         const txt = (parent.innerText || parent.textContent || '').replace(/\s+/g, ' ').trim();
@@ -4988,20 +5338,51 @@
         return;
       }
 
+      // Kalshi Pro auto-fills suggested +15%/-15% TP & SL defaults when opening Edit TP/SL on a position with no TP/SL set.
+      // Clear the untouched opposite field if that position did NOT previously have one so we ONLY submit what the user dragged!
+      const isKalshiModal = Boolean(dialog.querySelector('#perps-tpsl-tp-price, #perps-tpsl-sl-price') || (rowInfo && rowInfo.isKalshiPro));
+      if (isKalshiModal) {
+        const otherKind = kind === 'tp' ? 'sl' : 'tp';
+        const otherInput = findTpSlInputInRoot(dialog, otherKind);
+        const hadOther = otherKind === 'tp'
+          ? Boolean(rowInfo && rowInfo.existingTpPrice)
+          : Boolean(rowInfo && rowInfo.existingSlPrice);
+        if (otherInput && !hadOther && String(otherInput.value || '').trim() !== '') {
+          setReactNativeInputValue(otherInput, '');
+        }
+        // If clearing the ONLY active TP/SL on Kalshi Pro, click Kalshi's dedicated `Delete` button!
+        if (isClear && !hadOther) {
+          const deleteBtn = Array.from(dialog.querySelectorAll('button')).find(b => /^delete$/i.test((b.innerText || b.textContent || '').trim()) && !b.disabled);
+          if (deleteBtn) {
+            dispatchHypernovaClick(deleteBtn);
+            const closedAfterDelete = await waitForHypernovaCondition(() => !findHypernovaTpSlDialog(), 3000, 60);
+            if (closedAfterDelete) {
+              showToast(`Cleared ${venueLabel} ${kind.toUpperCase()} order`);
+              notifyResult(true, { price: null });
+              setTimeout(() => syncHypernovaPositionsToMainWorld(true), 300);
+              setTimeout(() => syncHypernovaPositionsToMainWorld(true), 1000);
+              return;
+            }
+          }
+        }
+      }
+
       setReactNativeInputValue(input, formatted);
 
       // Wait for React state & validation to enable the modal Confirm/Submit button
       const confirmBtn = await waitForHypernovaCondition(() => {
         const btn = dialog.querySelector('[data-testid="tpsl-confirm"]') ||
+          dialog.querySelector('button[type="submit"]') ||
           Array.from(dialog.querySelectorAll('button')).find(b => /^(confirm|save|update|apply|set|submit|place)/i.test((b.innerText || b.textContent || '').trim()));
         return btn && !btn.disabled ? btn : null;
-      }, 700, 40);
+      }, 800, 40);
 
       if (!confirmBtn) {
         const errTxt = extractHypernovaDialogErrorText(dialog);
         const cancelBtn = dialog.querySelector('[data-testid="tpsl-cancel"]') ||
+          dialog.querySelector('button[aria-label="Close TP/SL modal"]') ||
           dialog.querySelector('.dialog-close-btn') ||
-          Array.from(dialog.querySelectorAll('button')).find(b => /^cancel$/i.test((b.innerText || b.textContent || '').trim()));
+          Array.from(dialog.querySelectorAll('button')).find(b => /^(cancel|close)$/i.test((b.innerText || b.textContent || '').trim()));
         if (cancelBtn) dispatchHypernovaClick(cancelBtn);
         showToast(
           errTxt
