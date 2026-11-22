@@ -2454,10 +2454,16 @@
     }
 
     if (incomingSettings && typeof incomingSettings === 'object') {
+      const preserveLocalPillPos = Boolean(
+        isDraggingStudioPill ||
+        (typeof lastLocalStudioPillPosSavedAt === 'number' && (Date.now() - lastLocalStudioPillPosSavedAt < 3000))
+      );
+      const localPillPos = settings.studioPillPosByHost;
       settings = {
         ...settings,
         ...incomingSettings,
-        lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings)
+        lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings),
+        ...(preserveLocalPillPos ? { studioPillPosByHost: localPillPos } : {})
       };
       hasChanged = true;
     }
@@ -2570,10 +2576,16 @@
         }
         if (changes.settings && changes.settings.newValue) {
           const incomingSettings = changes.settings.newValue;
+          const preserveLocalPillPos = Boolean(
+            isDraggingStudioPill ||
+            (typeof lastLocalStudioPillPosSavedAt === 'number' && (Date.now() - lastLocalStudioPillPosSavedAt < 3000))
+          );
+          const localPillPos = settings.studioPillPosByHost;
           settings = {
             ...settings,
             ...incomingSettings,
-            lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings)
+            lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings),
+            ...(preserveLocalPillPos ? { studioPillPosByHost: localPillPos } : {})
           };
           settingsChanged = true;
         }
@@ -4896,6 +4908,7 @@
             if (
               targetEl.id === 'vest-minimized-dock' ||
               targetEl.id === 'vest-studio-header-pill' ||
+              targetEl.id === 'vest-studio-pill-drag-shield' ||
               targetEl.id === 'vest-panel-toggle-pill' ||
               targetEl.id === 'vest-template-bar-root' ||
               targetEl.id === 'vest-action-log-box' ||
@@ -5358,6 +5371,7 @@
   let isDraggingStudioPill = false;
   let studioPillJustDragged = false;
   let studioPillResizeHooked = false;
+  let lastLocalStudioPillPosSavedAt = 0;
 
   function getStudioPillHostKey() {
     try {
@@ -5993,10 +6007,9 @@
               triggerBtn.releasePointerCapture(pointerId);
             }
           } catch (err) {}
-          removeDragShield();
           if (moved) {
-            isDraggingStudioPill = false;
-            pill.classList.remove('dragging');
+            // Update in-memory position & stamp shield BEFORE releasing drag/removing shield
+            // so MutationObservers or in-flight storage echoes can NEVER flash the pill back!
             const finalRect = pill.getBoundingClientRect();
             const hostKey = getStudioPillHostKey();
             const prevMap = (settings && settings.studioPillPosByHost && typeof settings.studioPillPosByHost === 'object')
@@ -6009,8 +6022,20 @@
                 top: Math.round(finalRect.top)
               }
             };
-            queueSettingsSave({ studioPillPosByHost: settings.studioPillPosByHost });
+            lastLocalStudioPillPosSavedAt = Date.now();
+            if (pendingSettingsUpdate && typeof pendingSettingsUpdate === 'object') {
+              pendingSettingsUpdate = {
+                ...pendingSettingsUpdate,
+                studioPillPosByHost: settings.studioPillPosByHost
+              };
+            }
+            safeStorageSet({ settings: { ...settings, studioPillPosByHost: settings.studioPillPosByHost } });
+            removeDragShield();
+            isDraggingStudioPill = false;
+            pill.classList.remove('dragging');
             setTimeout(() => { studioPillJustDragged = false; }, 120);
+          } else {
+            removeDragShield();
           }
         };
 
@@ -6030,7 +6055,8 @@
             const nextMap = { ...settings.studioPillPosByHost };
             delete nextMap[hostKey];
             settings.studioPillPosByHost = nextMap;
-            queueSettingsSave({ studioPillPosByHost: settings.studioPillPosByHost });
+            lastLocalStudioPillPosSavedAt = Date.now();
+            safeStorageSet({ settings: { ...settings, studioPillPosByHost: settings.studioPillPosByHost } });
           }
           applyFloatingStudioPillPosition(pill);
           showToast('Cortex pill centered at top-middle');

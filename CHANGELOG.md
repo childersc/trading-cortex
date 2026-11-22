@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.137`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.138`) are documented in this file.
+
+---
+
+## [v1.1.138] — 2026-11-21
+
+### 🎯 Eliminated Cortex Pill Snap-Back Flash on Drag Release
+- **Root cause**: On `pointerup`, `removeDragShield()` and `isDraggingStudioPill = false` ran before `settings.studioPillPosByHost` was updated and persisted — and `queueSettingsSave` debounced the write, allowing `MutationObserver` / in-flight `chrome.storage.onChanged` echoes to flash the pill back to its previous coordinates for ~300ms before settling on the new drop spot.
+- **Fix (`content/content-isolated.js`)**:
+  - Commits `settings.studioPillPosByHost` and flushes immediately via `safeStorageSet()` *before* clearing `isDraggingStudioPill` and removing the drag shield.
+  - Protects local `studioPillPosByHost` for 3 seconds (`lastLocalStudioPillPosSavedAt`) inside both `chrome.storage.onChanged` and `handleIncomingLiveSettings` so stale storage echoes can never bounce the pill back, and ignores `#vest-studio-pill-drag-shield` in `panelObserver`.
 
 ---
 

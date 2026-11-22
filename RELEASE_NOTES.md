@@ -1,3 +1,7 @@
+Trading Cortex v1.1.138 — Instant Drop Settling for Draggable Cortex Pill
+
+- **Zero Snap-Back Flash on Drop (`v1.1.138`)**: Commits and persists the pill's dropped coordinates immediately before releasing the drag state and shields against stale in-flight storage echoes for 3 seconds so releasing the **Cortex** pill stays locked right where you drop it.
+
 Trading Cortex v1.1.137 — Silky Fast-Drag for Floating Cortex Pill Over Chart Iframes
 
 - **Smooth Fast-Drag (`v1.1.137`)**: Added `setPointerCapture()`, a transparent full-screen iframe drag shield, and a mid-drag re-render guard so dragging the floating **Cortex** pill rapidly across TradingView chart iframes never drops or loses the drag.
