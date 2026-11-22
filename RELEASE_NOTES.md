@@ -1,3 +1,10 @@
+Trading Cortex v1.1.140 — Hypernova Chart Visuals: Interactive LONG/SHORT BE/TP/SL Box, Green TP & Red SL Boxes, and Customizable Current Price Line
+
+- **Interactive 2-Row Position Entry Box (`LONG` / `SHORT`) (`v1.1.140`)**: On Hypernova, open trades now display a crisp 2-row floating box on your entry line with **`LONG`/`SHORT`**, size, live PnL, **`×`** close button, entry price, and 3 action buttons: **`BE`** (move SL to breakeven), **`TP`** (grab & drag vertically to set Take Profit), and **`SL`** (grab & drag vertically to set Stop Loss).
+- **Green TP & Red SL Dollar + Price Boxes (`v1.1.140`)**: Take Profit renders in a glowing green box and Stop Loss in a glowing red box directly on their chart lines, showing both the **exact dollar amount (`+$XX.XX` / `-$XX.XX`)** and the **exact price**, with re-drag support and automatic anti-overlap shifting at breakeven.
+- **Customizable "Current Price" Line (`v1.1.140`)**: Style your live current price line however you want (color, solid/dashed/dotted, thickness, opacity, label position, show/hide price) with custom label text defaulting to **`"Current Price"`**.
+- **Toggleable in Hypernova Settings (All ON by Default) (`v1.1.140`)**: Open **Perp Firms → Hypernova** (or click **Hypernova Chart Visuals...** in the Cortex menu) to toggle any or all visual enhancements on/off with live chart preview.
+
 Trading Cortex v1.1.139 — Permanently Fixed Chart Self-Resizing / Scale Snap-Back
 
 - **Fixed All 4 Self-Resizing Root Causes (`v1.1.139`)**:

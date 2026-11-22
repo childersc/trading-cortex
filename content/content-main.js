@@ -4396,6 +4396,12 @@
         scheduleIctSessionsRender(false);
         break;
       }
+      case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE': {
+        const incoming = payload && Array.isArray(payload.positions) ? payload.positions : [];
+        liveHypernovaPositions = incoming;
+        scheduleIctSessionsRender(false);
+        break;
+      }
       case 'VEST_TV_GLOBAL_DRAWINGS_UPDATE': {
         updateGlobalDrawingsSnapshot(payload && payload.drawings);
         restoreGlobalDrawings();
@@ -4524,6 +4530,9 @@
           applyCustomCandleWidthToChart(currentSettings.candleOhlc.candleWidthPx, false);
         }
         syncExtendedRectangleTextHooks();
+        if (isHypernovaMainWorldHost() && getHypernovaVisualsConfig().enabled) {
+          setupIctSessionIndicators();
+        }
         scheduleIctSessionsRender(true);
         break;
       }
@@ -7583,6 +7592,980 @@
     button.style.width = `${Math.max(55, width)}px`;
     button.style.height = `${Math.max(14, height)}px`;
     button.style.fontSize = `${Math.max(8, fontSize)}px`;
+  }
+
+  // -------------------------------------------------------------
+  // Hypernova Enhanced Chart Visuals & Interactive Trade Controls
+  // -------------------------------------------------------------
+  let liveHypernovaPositions = [];
+  const hypernovaManualTpSlBySymbol = {};
+  const hypernovaOverlayEls = { entry: null, tp: null, sl: null };
+  let activeHypernovaDrag = null; // { kind: 'tp' | 'sl', symbol, side, entryPrice, sizeQty, previewPrice }
+  let latestHypernovaYToPriceFn = null;
+  let latestHypernovaPaneRect = null;
+
+  function isHypernovaMainWorldHost() {
+    try {
+      const topHost = window.top && window.top.location && window.top.location.hostname
+        ? String(window.top.location.hostname).toLowerCase()
+        : '';
+      if (topHost.includes('hypernova')) return true;
+    } catch (e) {}
+    try {
+      const selfHost = window.location && window.location.hostname
+        ? String(window.location.hostname).toLowerCase()
+        : '';
+      if (selfHost.includes('hypernova')) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  function getHypernovaVisualsConfig() {
+    const defaults = {
+      enabled: true,
+      positionOverlayEnabled: true,
+      tpSlBoxesEnabled: true,
+      currentPriceLineEnabled: true,
+      currentPriceColor: '#38bdf8',
+      currentPriceStyle: 'dashed',
+      currentPriceWidth: 1.5,
+      currentPriceOpacity: 85,
+      currentPriceText: 'Current Price',
+      currentPriceShowLabel: true,
+      currentPriceShowPrice: true,
+      currentPriceLabelAlign: 'right'
+    };
+    const firms = currentSettings && Array.isArray(currentSettings.perpFirms) ? currentSettings.perpFirms : [];
+    const hnFirm = firms.find(f => f && f.id === 'hypernova');
+    if (hnFirm && hnFirm.enabled === false) {
+      return { ...defaults, enabled: false };
+    }
+    const raw = (hnFirm && hnFirm.hypernovaVisuals && typeof hnFirm.hypernovaVisuals === 'object')
+      ? hnFirm.hypernovaVisuals
+      : {};
+    const style = ['solid', 'dashed', 'dotted'].includes(raw.currentPriceStyle) ? raw.currentPriceStyle : defaults.currentPriceStyle;
+    const align = ['left', 'center', 'right'].includes(raw.currentPriceLabelAlign) ? raw.currentPriceLabelAlign : defaults.currentPriceLabelAlign;
+    const rawColor = typeof raw.currentPriceColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(raw.currentPriceColor.trim())
+      ? raw.currentPriceColor.trim()
+      : defaults.currentPriceColor;
+    const w = Number(raw.currentPriceWidth);
+    const op = Number(raw.currentPriceOpacity);
+    return {
+      enabled: raw.enabled !== false,
+      positionOverlayEnabled: raw.positionOverlayEnabled !== false,
+      tpSlBoxesEnabled: raw.tpSlBoxesEnabled !== false,
+      currentPriceLineEnabled: raw.currentPriceLineEnabled !== false,
+      currentPriceColor: rawColor,
+      currentPriceStyle: style,
+      currentPriceWidth: Number.isFinite(w) ? Math.max(1, Math.min(4, w)) : defaults.currentPriceWidth,
+      currentPriceOpacity: Number.isFinite(op) ? Math.max(15, Math.min(100, op)) : defaults.currentPriceOpacity,
+      currentPriceText: typeof raw.currentPriceText === 'string' ? raw.currentPriceText : defaults.currentPriceText,
+      currentPriceShowLabel: raw.currentPriceShowLabel !== false,
+      currentPriceShowPrice: raw.currentPriceShowPrice !== false,
+      currentPriceLabelAlign: align
+    };
+  }
+
+  function normalizeHypernovaMainSymbol(raw) {
+    let s = String(raw || '')
+      .toUpperCase()
+      .replace(/^.*:/, '')
+      .replace(/\b(PERP|PERPETUAL|USD|USDT|USDC)\b/gi, '')
+      .replace(/[^A-Z0-9]/g, '');
+    s = s.replace(/(PERPETUAL|PERP|USDT|USDC|USD)$/i, '');
+    s = s.replace(/(PERPETUAL|PERP|USDT|USDC|USD)$/i, '');
+    return s;
+  }
+
+  function formatHypernovaDisplayPrice(price) {
+    const p = Number(price);
+    if (!Number.isFinite(p) || p <= 0) return '0.00';
+    if (p >= 1000) return p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (p >= 10) return p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+    if (p >= 1) return p.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 4 });
+    return p.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+  }
+
+  function formatHypernovaDollarAmount(usd) {
+    if (!Number.isFinite(usd)) return '';
+    if (Math.abs(usd) < 0.005) return '$0.00';
+    const sign = usd > 0 ? '+' : '-';
+    return `${sign}$${Math.abs(usd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function formatHypernovaQty(qty) {
+    const q = Number(qty);
+    if (!Number.isFinite(q) || q <= 0) return '';
+    if (q >= 1000) return q.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    if (q >= 1) return parseFloat(q.toFixed(4)).toString();
+    return parseFloat(q.toFixed(5)).toString();
+  }
+
+  function computeHypernovaTargetPnlUsd(pos, targetPrice) {
+    if (!pos || !Number.isFinite(pos.entryPrice) || !Number.isFinite(targetPrice)) return null;
+    const dir = pos.side === 'short' ? -1 : 1;
+    let qty = Number(pos.sizeQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      if (Number.isFinite(pos.notionalUsd) && pos.notionalUsd > 0 && pos.entryPrice > 0) {
+        qty = pos.notionalUsd / pos.entryPrice;
+      } else if (
+        Number.isFinite(pos.unrealizedPnl) &&
+        Number.isFinite(latestChartMarketPrice) &&
+        Math.abs(latestChartMarketPrice - pos.entryPrice) > 1e-9
+      ) {
+        qty = Math.abs(pos.unrealizedPnl / (latestChartMarketPrice - pos.entryPrice));
+      }
+    }
+    if (!Number.isFinite(qty) || qty <= 0) return null;
+    return (targetPrice - pos.entryPrice) * qty * dir;
+  }
+
+  function extractNativeHypernovaChartLines(model) {
+    const result = { position: null, tpLine: null, slLine: null };
+    try {
+      const sources = [];
+      if (model) {
+        if (typeof model.sources === 'function') {
+          const s = model.sources();
+          if (Array.isArray(s)) sources.push(...s);
+        }
+        if (Array.isArray(model._lineTools)) sources.push(...model._lineTools);
+        if (typeof model.panes === 'function') {
+          const panes = model.panes() || [];
+          panes.forEach(pane => {
+            if (pane && typeof pane.dataSources === 'function') {
+              const ds = pane.dataSources();
+              if (Array.isArray(ds)) sources.push(...ds);
+            }
+          });
+        }
+      }
+      const seen = new Set();
+      for (const src of sources) {
+        if (!src || seen.has(src)) continue;
+        seen.add(src);
+        const ctorName = String((src.constructor && src.constructor.name) || '').toLowerCase();
+        const hasGetPrice = typeof src.getPrice === 'function' || typeof src.price === 'function';
+        const isPosSource = ctorName.includes('position') ||
+          Boolean(src._positionLineAdapter) ||
+          typeof src.onClose === 'function' ||
+          typeof src.onReverse === 'function' ||
+          typeof src.callCloseCallback === 'function';
+        const isOrdSource = !isPosSource && (
+          ctorName.includes('order') ||
+          Boolean(src._orderLineAdapter) ||
+          typeof src.onCancel === 'function' ||
+          typeof src.callCancelCallback === 'function'
+        );
+        if (!isPosSource && !isOrdSource && !hasGetPrice) continue;
+
+        let price = NaN;
+        try {
+          if (typeof src.getPrice === 'function') price = Number(src.getPrice());
+          else if (typeof src.price === 'function') price = Number(src.price());
+          else if (typeof src._price === 'number') price = Number(src._price);
+          else if (typeof src.points === 'function') {
+            const pts = src.points();
+            if (Array.isArray(pts) && pts[0] && Number.isFinite(Number(pts[0].price))) {
+              price = Number(pts[0].price);
+            }
+          }
+        } catch (e) {}
+        if (!Number.isFinite(price) || price <= 0) continue;
+
+        let text = '';
+        let qtyText = '';
+        let colorStr = '';
+        try {
+          if (typeof src.getText === 'function') text = String(src.getText() || '');
+          else if (typeof src.text === 'function') text = String(src.text() || '');
+          else if (src._text) text = String(src._text);
+          if (typeof src.getQuantity === 'function') qtyText = String(src.getQuantity() || '');
+          else if (typeof src.quantity === 'function') qtyText = String(src.quantity() || '');
+          else if (src._quantity) qtyText = String(src._quantity);
+          if (typeof src.getLineColor === 'function') colorStr = String(src.getLineColor() || '');
+          else if (typeof src.lineColor === 'function') colorStr = String(src.lineColor() || '');
+          else if (typeof src.getBodyBackgroundColor === 'function') colorStr = String(src.getBodyBackgroundColor() || '');
+        } catch (e) {}
+
+        const combinedText = `${text} ${qtyText}`.trim();
+        const lower = combinedText.toLowerCase();
+
+        if (isPosSource || (!isOrdSource && (/\bpnl\b|\blong\b|\bshort\b/i.test(lower) || /[+-]\s*\$?\d/.test(text)))) {
+          let side = null;
+          if (/\bshort\b/i.test(lower)) side = 'short';
+          else if (/\blong\b/i.test(lower)) side = 'long';
+          const qtyMatch = qtyText.replace(/,/g, '').match(/[+-]?\d+(?:\.\d+)?/);
+          const qtyNum = qtyMatch ? parseFloat(qtyMatch[0]) : NaN;
+          if (!side && Number.isFinite(qtyNum) && qtyNum !== 0) {
+            side = qtyNum < 0 ? 'short' : 'long';
+          }
+          if (!side && colorStr) {
+            const cLow = colorStr.toLowerCase();
+            if (cLow.includes('ef4444') || cLow.includes('f23645') || cLow.includes('f43f5e') || cLow.includes('red') || /rgba?\(\s*2[0-5]\d,\s*[0-9]{1,2},/.test(cLow)) {
+              side = 'short';
+            } else {
+              side = 'long';
+            }
+          }
+          const pnlMatch = text.replace(/,/g, '').match(/([+-])\s*\$?\s*(\d+(?:\.\d+)?)/);
+          const pnlUsd = pnlMatch ? parseFloat(pnlMatch[2]) * (pnlMatch[1] === '-' ? -1 : 1) : NaN;
+          const nativeCloseFn = () => {
+            try {
+              if (typeof src.callCloseCallback === 'function') { src.callCloseCallback(); return true; }
+              if (src._closeCallback && typeof src._closeCallback === 'function') { src._closeCallback(); return true; }
+              if (src._onClose && typeof src._onClose === 'function') { src._onClose(); return true; }
+            } catch (e) {}
+            return false;
+          };
+          result.position = {
+            entryPrice: price,
+            side: side || 'long',
+            sizeQty: Number.isFinite(qtyNum) && qtyNum !== 0 ? Math.abs(qtyNum) : null,
+            unrealizedPnl: Number.isFinite(pnlUsd) ? pnlUsd : null,
+            nativeCloseFn
+          };
+        } else if (isOrdSource) {
+          if (/\btp\b|take\s*profit/i.test(lower)) {
+            result.tpLine = { price, src };
+          } else if (/\bsl\b|stop\s*loss|stop/i.test(lower)) {
+            result.slLine = { price, src };
+          }
+        }
+      }
+    } catch (e) {}
+    return result;
+  }
+
+  function resolveActiveHypernovaPosition(symbolKey, model, livePrice) {
+    const normSym = normalizeHypernovaMainSymbol(symbolKey);
+    const nativeLines = extractNativeHypernovaChartLines(model);
+    const domMatch = Array.isArray(liveHypernovaPositions)
+      ? liveHypernovaPositions.find(p => p && normalizeHypernovaMainSymbol(p.symbol) === normSym)
+      : null;
+
+    if (!nativeLines.position && !domMatch) {
+      if (normSym && hypernovaManualTpSlBySymbol[normSym]) {
+        delete hypernovaManualTpSlBySymbol[normSym];
+      }
+      return null;
+    }
+
+    const entryPrice = Number((domMatch && domMatch.entryPrice) || (nativeLines.position && nativeLines.position.entryPrice));
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0) return null;
+
+    const side = (domMatch && domMatch.side) || (nativeLines.position && nativeLines.position.side) || 'long';
+    const sizeQty = (domMatch && Number.isFinite(domMatch.sizeQty) && domMatch.sizeQty > 0)
+      ? domMatch.sizeQty
+      : (nativeLines.position && Number.isFinite(nativeLines.position.sizeQty) && nativeLines.position.sizeQty > 0
+        ? nativeLines.position.sizeQty
+        : null);
+    const notionalUsd = (domMatch && Number.isFinite(domMatch.notionalUsd) && domMatch.notionalUsd > 0)
+      ? domMatch.notionalUsd
+      : (sizeQty ? sizeQty * entryPrice : null);
+
+    let unrealizedPnl = null;
+    if (sizeQty && Number.isFinite(livePrice) && livePrice > 0) {
+      unrealizedPnl = (livePrice - entryPrice) * sizeQty * (side === 'short' ? -1 : 1);
+    } else if (domMatch && Number.isFinite(domMatch.unrealizedPnl)) {
+      unrealizedPnl = domMatch.unrealizedPnl;
+    } else if (nativeLines.position && Number.isFinite(nativeLines.position.unrealizedPnl)) {
+      unrealizedPnl = nativeLines.position.unrealizedPnl;
+    }
+
+    // Clear stale manual TP/SL overrides if entryPrice changed meaningfully (new trade)
+    const manual = hypernovaManualTpSlBySymbol[normSym];
+    if (manual && manual.entryPrice && Math.abs(manual.entryPrice - entryPrice) / entryPrice > 0.0005) {
+      delete hypernovaManualTpSlBySymbol[normSym];
+    }
+    const activeManual = hypernovaManualTpSlBySymbol[normSym] || {};
+
+    const tpPrice = activeManual.tpPrice !== undefined
+      ? activeManual.tpPrice
+      : ((domMatch && domMatch.tpPrice) || (nativeLines.tpLine && nativeLines.tpLine.price) || null);
+    const slPrice = activeManual.slPrice !== undefined
+      ? activeManual.slPrice
+      : ((domMatch && domMatch.slPrice) || (nativeLines.slLine && nativeLines.slLine.price) || null);
+
+    return {
+      symbol: normSym || symbolKey || 'PERP',
+      side,
+      entryPrice,
+      sizeQty,
+      notionalUsd,
+      unrealizedPnl,
+      tpPrice: Number.isFinite(Number(tpPrice)) && Number(tpPrice) > 0 ? Number(tpPrice) : null,
+      slPrice: Number.isFinite(Number(slPrice)) && Number(slPrice) > 0 ? Number(slPrice) : null,
+      nativeCloseFn: nativeLines.position ? nativeLines.position.nativeCloseFn : null
+    };
+  }
+
+  function ensureHypernovaVisualStyles(doc) {
+    if (!doc || !doc.head || doc.getElementById('vest-hypernova-chart-visuals-styles')) return;
+    try {
+      const style = doc.createElement('style');
+      style.id = 'vest-hypernova-chart-visuals-styles';
+      style.textContent = `
+        .vest-hn-chart-box {
+          position: absolute !important;
+          z-index: 16 !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: 5px !important;
+          height: 26px !important;
+          padding: 0 7px !important;
+          border-radius: 7px !important;
+          font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
+          font-size: 11px !important;
+          font-weight: 700 !important;
+          line-height: 1 !important;
+          color: #f8fafc !important;
+          user-select: none !important;
+          pointer-events: auto !important;
+          white-space: nowrap !important;
+          box-sizing: border-box !important;
+          backdrop-filter: blur(8px) !important;
+          -webkit-backdrop-filter: blur(8px) !important;
+        }
+        .vest-hn-entry-box {
+          display: flex !important;
+          flex-direction: column !important;
+          align-items: stretch !important;
+          justify-content: center !important;
+          gap: 4px !important;
+          height: auto !important;
+          min-width: 184px !important;
+          padding: 5px 7px !important;
+          background: linear-gradient(180deg, rgba(16, 21, 34, 0.96), rgba(10, 14, 24, 0.97)) !important;
+          border: 1px solid rgba(148, 163, 184, 0.35) !important;
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6) !important;
+        }
+        .vest-hn-entry-box.is-long {
+          border-color: rgba(16, 185, 129, 0.75) !important;
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 14px rgba(16, 185, 129, 0.22) !important;
+        }
+        .vest-hn-entry-box.is-short {
+          border-color: rgba(244, 63, 94, 0.75) !important;
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 14px rgba(244, 63, 94, 0.22) !important;
+        }
+        .vest-hn-entry-top,
+        .vest-hn-entry-bottom {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          gap: 7px !important;
+          width: 100% !important;
+        }
+        .vest-hn-entry-top-left,
+        .vest-hn-entry-top-right,
+        .vest-hn-btn-group {
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: 5px !important;
+        }
+        .vest-hn-side-badge {
+          padding: 0 !important;
+          border-radius: 3px !important;
+          font-size: 10.5px !important;
+          font-weight: 800 !important;
+          letter-spacing: 0.05em !important;
+          text-transform: uppercase !important;
+          background: transparent !important;
+          border: none !important;
+        }
+        .vest-hn-side-badge.is-long { color: #34d399 !important; }
+        .vest-hn-side-badge.is-short { color: #fb7185 !important; }
+        .vest-hn-qty-val {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 10px !important;
+          font-weight: 600 !important;
+          color: #cbd5e1 !important;
+        }
+        .vest-hn-pnl-val {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 11px !important;
+          font-weight: 800 !important;
+          padding: 0 2px !important;
+        }
+        .vest-hn-pnl-val.pos { color: #34d399 !important; }
+        .vest-hn-pnl-val.neg { color: #fb7185 !important; }
+        .vest-hn-pnl-val.flat { color: #cbd5e1 !important; }
+        .vest-hn-entry-price {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 10.5px !important;
+          font-weight: 700 !important;
+          color: #e2e8f0 !important;
+          letter-spacing: 0.01em !important;
+        }
+        .vest-hn-ctrl-btn {
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          height: 17px !important;
+          padding: 0 5px !important;
+          border-radius: 4px !important;
+          font-size: 9.5px !important;
+          font-weight: 800 !important;
+          letter-spacing: 0.03em !important;
+          cursor: pointer !important;
+          transition: transform 0.08s ease, filter 0.12s ease !important;
+          border: 1px solid transparent !important;
+          outline: none !important;
+        }
+        .vest-hn-ctrl-btn:hover { filter: brightness(1.22) !important; }
+        .vest-hn-ctrl-btn.be-btn {
+          background: rgba(56, 189, 248, 0.2) !important;
+          border-color: rgba(56, 189, 248, 0.62) !important;
+          color: #7dd3fc !important;
+        }
+        .vest-hn-ctrl-btn.tp-btn {
+          background: rgba(16, 185, 129, 0.22) !important;
+          border-color: rgba(16, 185, 129, 0.72) !important;
+          color: #34d399 !important;
+          cursor: ns-resize !important;
+        }
+        .vest-hn-ctrl-btn.sl-btn {
+          background: rgba(239, 68, 68, 0.22) !important;
+          border-color: rgba(239, 68, 68, 0.72) !important;
+          color: #f87171 !important;
+          cursor: ns-resize !important;
+        }
+        .vest-hn-ctrl-btn.close-btn {
+          width: 17px !important;
+          height: 17px !important;
+          padding: 0 !important;
+          background: rgba(148, 163, 184, 0.14) !important;
+          border-color: rgba(148, 163, 184, 0.3) !important;
+          color: #cbd5e1 !important;
+          font-size: 11.5px !important;
+        }
+        .vest-hn-ctrl-btn.close-btn:hover {
+          background: rgba(239, 68, 68, 0.35) !important;
+          border-color: rgba(239, 68, 68, 0.75) !important;
+          color: #ffffff !important;
+        }
+        .vest-hn-tpsl-box {
+          cursor: ns-resize !important;
+          padding: 0 6px 0 7px !important;
+          gap: 6px !important;
+          transition: box-shadow 0.12s ease !important;
+        }
+        .vest-hn-tpsl-box.is-dragging {
+          filter: brightness(1.16) !important;
+        }
+        .vest-hn-tp-box {
+          background: linear-gradient(135deg, rgba(6, 78, 59, 0.95), rgba(4, 47, 46, 0.96)) !important;
+          border: 1px solid rgba(16, 185, 129, 0.9) !important;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(16, 185, 129, 0.3) !important;
+          color: #ecfdf5 !important;
+        }
+        .vest-hn-sl-box {
+          background: linear-gradient(135deg, rgba(127, 29, 29, 0.95), rgba(69, 10, 10, 0.96)) !important;
+          border: 1px solid rgba(239, 68, 68, 0.9) !important;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(239, 68, 68, 0.3) !important;
+          color: #fef2f2 !important;
+        }
+        .vest-hn-tpsl-tag {
+          padding: 2px 5px !important;
+          border-radius: 4px !important;
+          font-size: 9.5px !important;
+          font-weight: 800 !important;
+          letter-spacing: 0.05em !important;
+        }
+        .vest-hn-tp-box .vest-hn-tpsl-tag {
+          background: rgba(16, 185, 129, 0.28) !important;
+          color: #6ee7b7 !important;
+        }
+        .vest-hn-sl-box .vest-hn-tpsl-tag {
+          background: rgba(239, 68, 68, 0.28) !important;
+          color: #fca5a5 !important;
+        }
+        .vest-hn-tpsl-usd {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 11.5px !important;
+          font-weight: 800 !important;
+        }
+        .vest-hn-tp-box .vest-hn-tpsl-usd { color: #34d399 !important; }
+        .vest-hn-sl-box .vest-hn-tpsl-usd { color: #f87171 !important; }
+        .vest-hn-tpsl-sep {
+          opacity: 0.4 !important;
+          font-weight: 400 !important;
+        }
+        .vest-hn-tpsl-price {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: 11px !important;
+          font-weight: 700 !important;
+          color: #f8fafc !important;
+        }
+        .vest-hn-tpsl-clear {
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          width: 17px !important;
+          height: 17px !important;
+          margin-left: 2px !important;
+          border-radius: 4px !important;
+          border: none !important;
+          background: rgba(255, 255, 255, 0.1) !important;
+          color: #e2e8f0 !important;
+          font-size: 12px !important;
+          line-height: 1 !important;
+          cursor: pointer !important;
+          padding: 0 !important;
+        }
+        .vest-hn-tpsl-clear:hover {
+          background: rgba(255, 255, 255, 0.24) !important;
+          color: #ffffff !important;
+        }
+      `;
+      doc.head.appendChild(style);
+    } catch (e) {}
+  }
+
+  function removeHypernovaOverlayWidgets(onlyKey = null) {
+    const keys = onlyKey ? [onlyKey] : ['entry', 'tp', 'sl'];
+    keys.forEach(k => {
+      const el = hypernovaOverlayEls[k];
+      if (el && el.isConnected) {
+        try { el.remove(); } catch (e) {}
+      }
+      hypernovaOverlayEls[k] = null;
+    });
+  }
+
+  function startHypernovaTpSlDrag(e, kind, pos, ownerDoc) {
+    if (e.button !== 0 || !pos || !latestHypernovaYToPriceFn) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const pointerId = e.pointerId;
+    const captureEl = e.currentTarget;
+    const view = (ownerDoc && ownerDoc.defaultView) || window;
+    const initialPrice = kind === 'tp'
+      ? (pos.tpPrice || (pos.side === 'short' ? pos.entryPrice * 0.99 : pos.entryPrice * 1.01))
+      : (pos.slPrice || (pos.side === 'short' ? pos.entryPrice * 1.01 : pos.entryPrice * 0.99));
+
+    activeHypernovaDrag = {
+      kind,
+      symbol: pos.symbol,
+      side: pos.side,
+      entryPrice: pos.entryPrice,
+      sizeQty: pos.sizeQty,
+      notionalUsd: pos.notionalUsd,
+      unrealizedPnl: pos.unrealizedPnl,
+      previewPrice: initialPrice
+    };
+
+    try {
+      if (captureEl && typeof captureEl.setPointerCapture === 'function' && pointerId !== undefined) {
+        captureEl.setPointerCapture(pointerId);
+      }
+    } catch (err) {}
+
+    const updatePriceFromEvent = (ev) => {
+      if (!activeHypernovaDrag || !latestHypernovaYToPriceFn || !latestHypernovaPaneRect) return;
+      const localY = Math.max(4, Math.min(latestHypernovaPaneRect.height - 4, ev.clientY - latestHypernovaPaneRect.top));
+      const p = latestHypernovaYToPriceFn(localY);
+      if (Number.isFinite(p) && p > 0) {
+        activeHypernovaDrag.previewPrice = p;
+        scheduleIctSessionsRender(false);
+      }
+    };
+
+    const onMove = (mv) => {
+      mv.stopPropagation();
+      updatePriceFromEvent(mv);
+    };
+
+    const onUp = (upEv) => {
+      view.removeEventListener('pointermove', onMove, true);
+      view.removeEventListener('pointerup', onUp, true);
+      view.removeEventListener('pointercancel', onUp, true);
+      try {
+        if (captureEl && typeof captureEl.releasePointerCapture === 'function' && pointerId !== undefined) {
+          captureEl.releasePointerCapture(pointerId);
+        }
+      } catch (err) {}
+      if (!activeHypernovaDrag) return;
+      updatePriceFromEvent(upEv);
+      const finalPrice = activeHypernovaDrag.previewPrice;
+      const sym = activeHypernovaDrag.symbol;
+      const dragPos = { ...pos };
+      activeHypernovaDrag = null;
+      if (Number.isFinite(finalPrice) && finalPrice > 0) {
+        const prev = hypernovaManualTpSlBySymbol[sym] || { entryPrice: dragPos.entryPrice };
+        hypernovaManualTpSlBySymbol[sym] = {
+          ...prev,
+          entryPrice: dragPos.entryPrice,
+          ...(kind === 'tp' ? { tpPrice: finalPrice } : { slPrice: finalPrice })
+        };
+        const pnlUsd = computeHypernovaTargetPnlUsd(dragPos, finalPrice);
+        const pnlText = pnlUsd !== null ? formatHypernovaDollarAmount(pnlUsd) : '';
+        try {
+          window.top.postMessage({
+            type: 'VEST_TV_HYPERNOVA_SET_TP_SL',
+            payload: { symbol: sym, side: dragPos.side, type: kind, price: finalPrice, entryPrice: dragPos.entryPrice, pnlText }
+          }, '*');
+        } catch (err) {}
+      }
+      scheduleIctSessionsRender(false);
+    };
+
+    view.addEventListener('pointermove', onMove, true);
+    view.addEventListener('pointerup', onUp, true);
+    view.addEventListener('pointercancel', onUp, true);
+    scheduleIctSessionsRender(false);
+  }
+
+  function renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, model, priceToY, yToPrice, cssWidth, cssHeight) {
+    if (!isHypernovaMainWorldHost()) {
+      removeHypernovaOverlayWidgets();
+      return;
+    }
+    const hnCfg = getHypernovaVisualsConfig();
+    if (!hnCfg.enabled) {
+      removeHypernovaOverlayWidgets();
+      return;
+    }
+
+    latestHypernovaYToPriceFn = yToPrice;
+    try {
+      latestHypernovaPaneRect = targetCanvas ? targetCanvas.getBoundingClientRect() : null;
+    } catch (e) {
+      latestHypernovaPaneRect = null;
+    }
+
+    const parentEl = ictSessionsCanvas && ictSessionsCanvas.parentElement;
+    const ownerDoc = (ictSessionsCanvas && ictSessionsCanvas.ownerDocument) || document;
+    ensureHypernovaVisualStyles(ownerDoc);
+
+    // 1. Custom Styled "Current Price" Line & Label
+    if (hnCfg.currentPriceLineEnabled && Number.isFinite(latestChartMarketPrice) && latestChartMarketPrice > 0) {
+      const curY = priceToY(latestChartMarketPrice);
+      if (curY !== null && Number.isFinite(curY) && curY >= -4 && curY <= cssHeight + 4) {
+        const clampedY = Math.max(2, Math.min(cssHeight - 2, curY));
+        const dashPattern = hnCfg.currentPriceStyle === 'solid'
+          ? []
+          : (hnCfg.currentPriceStyle === 'dotted' ? [2, 4] : [7, 5]);
+        ctx.save();
+        ctx.strokeStyle = hnCfg.currentPriceColor;
+        ctx.globalAlpha = Math.max(0.15, Math.min(1, hnCfg.currentPriceOpacity / 100));
+        ctx.lineWidth = hnCfg.currentPriceWidth;
+        ctx.setLineDash(dashPattern);
+        ctx.beginPath();
+        ctx.moveTo(0, clampedY);
+        ctx.lineTo(cssWidth, clampedY);
+        ctx.stroke();
+
+        if (hnCfg.currentPriceShowLabel) {
+          const baseText = (hnCfg.currentPriceText || '').trim();
+          const priceStr = `$${formatHypernovaDisplayPrice(latestChartMarketPrice)}`;
+          const labelStr = baseText
+            ? (hnCfg.currentPriceShowPrice ? `${baseText} · ${priceStr}` : baseText)
+            : (hnCfg.currentPriceShowPrice ? priceStr : '');
+          if (labelStr) {
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 0.96;
+            ctx.font = '700 10.5px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+            const textW = ctx.measureText(labelStr).width;
+            const dotSpace = 12;
+            const padX = 8;
+            const pillH = 20;
+            const pillW = textW + dotSpace + padX * 2;
+            let pillX = cssWidth - pillW - 10;
+            if (hnCfg.currentPriceLabelAlign === 'left') pillX = 10;
+            else if (hnCfg.currentPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
+            pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
+            const pillY = Math.max(4, Math.min(cssHeight - pillH - 4, clampedY - pillH / 2));
+
+            ctx.beginPath();
+            ctx.roundRect(pillX, pillY, pillW, pillH, 6);
+            ctx.fillStyle = 'rgba(11, 17, 32, 0.92)';
+            ctx.fill();
+            ctx.strokeStyle = hnCfg.currentPriceColor;
+            ctx.lineWidth = 1.25;
+            ctx.stroke();
+
+            // Glowing live dot
+            ctx.beginPath();
+            ctx.arc(pillX + padX + 3, pillY + pillH / 2, 3, 0, Math.PI * 2);
+            ctx.fillStyle = hnCfg.currentPriceColor;
+            ctx.fill();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelStr, pillX + padX + dotSpace, pillY + pillH / 2 + 0.5);
+          }
+        }
+        ctx.restore();
+      }
+    }
+
+    // 2. Resolve Active Position + Live Drag Preview for TP & SL
+    const pos = resolveActiveHypernovaPosition(symbolKey, model, latestChartMarketPrice);
+    if (!pos) {
+      removeHypernovaOverlayWidgets();
+      return;
+    }
+
+    const activeTpPrice = (activeHypernovaDrag && activeHypernovaDrag.kind === 'tp')
+      ? activeHypernovaDrag.previewPrice
+      : pos.tpPrice;
+    const activeSlPrice = (activeHypernovaDrag && activeHypernovaDrag.kind === 'sl')
+      ? activeHypernovaDrag.previewPrice
+      : pos.slPrice;
+
+    const entryY = priceToY(pos.entryPrice);
+    const tpY = activeTpPrice ? priceToY(activeTpPrice) : null;
+    const slY = activeSlPrice ? priceToY(activeSlPrice) : null;
+
+    // 2a. Entry Line + Position Control Box (LONG/SHORT + BE + TP + SL + X)
+    if (hnCfg.positionOverlayEnabled && entryY !== null && Number.isFinite(entryY)) {
+      const clampedEntryY = Math.max(14, Math.min(cssHeight - 14, entryY));
+      const sideColor = pos.side === 'short' ? '#f43f5e' : '#10b981';
+
+      ctx.save();
+      ctx.strokeStyle = sideColor;
+      ctx.globalAlpha = 0.78;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, clampedEntryY);
+      ctx.lineTo(cssWidth, clampedEntryY);
+      ctx.stroke();
+      ctx.restore();
+
+      if (parentEl) {
+        let entryBox = hypernovaOverlayEls.entry;
+        if (!entryBox || !entryBox.isConnected || entryBox.parentElement !== parentEl) {
+          if (entryBox && entryBox.isConnected) entryBox.remove();
+          entryBox = ownerDoc.createElement('div');
+          entryBox.id = 'vest-hn-position-box';
+          entryBox.className = 'vest-hn-chart-box vest-hn-entry-box';
+          entryBox.innerHTML = `
+            <div class="vest-hn-entry-top">
+              <div class="vest-hn-entry-top-left">
+                <span class="vest-hn-side-badge"></span>
+                <span class="vest-hn-qty-val"></span>
+              </div>
+              <div class="vest-hn-entry-top-right">
+                <span class="vest-hn-pnl-val"></span>
+                <button type="button" class="vest-hn-ctrl-btn close-btn" title="Close position">×</button>
+              </div>
+            </div>
+            <div class="vest-hn-entry-bottom">
+              <div class="vest-hn-btn-group">
+                <button type="button" class="vest-hn-ctrl-btn be-btn" title="Move Stop Loss to Breakeven (Entry Price)">BE</button>
+                <button type="button" class="vest-hn-ctrl-btn tp-btn" title="Grab & drag vertically to set Take Profit">TP</button>
+                <button type="button" class="vest-hn-ctrl-btn sl-btn" title="Grab & drag vertically to set Stop Loss">SL</button>
+              </div>
+              <span class="vest-hn-entry-price"></span>
+            </div>
+          `;
+          ['mousedown', 'pointerdown', 'click'].forEach(evt => {
+            entryBox.addEventListener(evt, ev => ev.stopPropagation());
+          });
+          parentEl.appendChild(entryBox);
+          hypernovaOverlayEls.entry = entryBox;
+        }
+
+        const isShort = pos.side === 'short';
+        entryBox.classList.toggle('is-long', !isShort);
+        entryBox.classList.toggle('is-short', isShort);
+        const sideBadge = entryBox.querySelector('.vest-hn-side-badge');
+        if (sideBadge) {
+          sideBadge.textContent = isShort ? 'SHORT' : 'LONG';
+          sideBadge.className = `vest-hn-side-badge ${isShort ? 'is-short' : 'is-long'}`;
+        }
+        const qtyEl = entryBox.querySelector('.vest-hn-qty-val');
+        if (qtyEl) {
+          const qStr = formatHypernovaQty(pos.sizeQty);
+          if (qStr) {
+            qtyEl.textContent = qStr;
+            qtyEl.style.display = '';
+          } else {
+            qtyEl.style.display = 'none';
+          }
+        }
+        const pnlEl = entryBox.querySelector('.vest-hn-pnl-val');
+        if (pnlEl) {
+          if (Number.isFinite(pos.unrealizedPnl)) {
+            pnlEl.textContent = formatHypernovaDollarAmount(pos.unrealizedPnl);
+            pnlEl.className = `vest-hn-pnl-val ${pos.unrealizedPnl > 0 ? 'pos' : (pos.unrealizedPnl < 0 ? 'neg' : 'flat')}`;
+            pnlEl.style.display = '';
+          } else {
+            pnlEl.style.display = 'none';
+          }
+        }
+        const entryPriceEl = entryBox.querySelector('.vest-hn-entry-price');
+        if (entryPriceEl) {
+          entryPriceEl.textContent = formatHypernovaDisplayPrice(pos.entryPrice);
+        }
+
+        // Bind live position callbacks (refreshed with latest pos snapshot)
+        const beBtn = entryBox.querySelector('.be-btn');
+        if (beBtn) {
+          beBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            const prev = hypernovaManualTpSlBySymbol[pos.symbol] || {};
+            hypernovaManualTpSlBySymbol[pos.symbol] = {
+              ...prev,
+              entryPrice: pos.entryPrice,
+              slPrice: pos.entryPrice
+            };
+            try {
+              window.top.postMessage({
+                type: 'VEST_TV_HYPERNOVA_SET_TP_SL',
+                payload: { symbol: pos.symbol, side: pos.side, type: 'be', price: pos.entryPrice, entryPrice: pos.entryPrice, pnlText: '$0.00' }
+              }, '*');
+            } catch (err) {}
+            scheduleIctSessionsRender(false);
+          };
+        }
+        const tpBtn = entryBox.querySelector('.tp-btn');
+        if (tpBtn) {
+          tpBtn.onpointerdown = (ev) => startHypernovaTpSlDrag(ev, 'tp', pos, ownerDoc);
+        }
+        const slBtn = entryBox.querySelector('.sl-btn');
+        if (slBtn) {
+          slBtn.onpointerdown = (ev) => startHypernovaTpSlDrag(ev, 'sl', pos, ownerDoc);
+        }
+        const closeBtn = entryBox.querySelector('.close-btn');
+        if (closeBtn) {
+          closeBtn.onclick = (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            const closedNative = typeof pos.nativeCloseFn === 'function' ? pos.nativeCloseFn() : false;
+            if (!closedNative) {
+              try {
+                window.top.postMessage({
+                  type: 'VEST_TV_HYPERNOVA_CLOSE_POSITION',
+                  payload: { symbol: pos.symbol, side: pos.side }
+                }, '*');
+              } catch (err) {}
+            }
+          };
+        }
+
+        const boxH = entryBox.offsetHeight || 44;
+        const boxW = entryBox.offsetWidth || 196;
+        const leftPx = Math.max(8, cssWidth - boxW - 14);
+        const topPx = Math.max(4, Math.min(cssHeight - boxH - 4, clampedEntryY - boxH / 2));
+        entryBox.style.left = `${Math.round(leftPx)}px`;
+        entryBox.style.top = `${Math.round(topPx)}px`;
+      }
+    } else {
+      removeHypernovaOverlayWidgets('entry');
+    }
+
+    // 2b. Helper for Green TP Box & Red SL Box (Dollar Amount + Line Price, Re-draggable)
+    const renderTpSlLineAndBox = (kind, targetPrice, lineY) => {
+      if (!hnCfg.tpSlBoxesEnabled || !Number.isFinite(targetPrice) || targetPrice <= 0 || lineY === null || !Number.isFinite(lineY)) {
+        removeHypernovaOverlayWidgets(kind);
+        return;
+      }
+      const isTp = kind === 'tp';
+      const isDraggingThis = Boolean(activeHypernovaDrag && activeHypernovaDrag.kind === kind);
+      const clampedY = Math.max(14, Math.min(cssHeight - 14, lineY));
+      const strokeColor = isTp ? '#10b981' : '#ef4444';
+
+      ctx.save();
+      ctx.strokeStyle = strokeColor;
+      ctx.globalAlpha = isDraggingThis ? 1 : 0.9;
+      ctx.lineWidth = isDraggingThis ? 2 : 1.5;
+      ctx.setLineDash(isDraggingThis ? [] : [6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, clampedY);
+      ctx.lineTo(cssWidth, clampedY);
+      ctx.stroke();
+      ctx.restore();
+
+      if (!parentEl) return;
+      let box = hypernovaOverlayEls[kind];
+      if (!box || !box.isConnected || box.parentElement !== parentEl) {
+        if (box && box.isConnected) box.remove();
+        box = ownerDoc.createElement('div');
+        box.id = isTp ? 'vest-hn-tp-box' : 'vest-hn-sl-box';
+        box.className = `vest-hn-chart-box vest-hn-tpsl-box ${isTp ? 'vest-hn-tp-box' : 'vest-hn-sl-box'}`;
+        box.title = `Drag vertically to adjust ${isTp ? 'Take Profit' : 'Stop Loss'}`;
+        box.innerHTML = `
+          <span class="vest-hn-tpsl-tag">${isTp ? 'TP' : 'SL'}</span>
+          <span class="vest-hn-tpsl-usd"></span>
+          <span class="vest-hn-tpsl-sep">·</span>
+          <span class="vest-hn-tpsl-price"></span>
+          <button type="button" class="vest-hn-tpsl-clear" title="Clear ${isTp ? 'Take Profit' : 'Stop Loss'} line">×</button>
+        `;
+        ['mousedown', 'click'].forEach(evt => {
+          box.addEventListener(evt, ev => ev.stopPropagation());
+        });
+        parentEl.appendChild(box);
+        hypernovaOverlayEls[kind] = box;
+      }
+
+      const pnlUsd = computeHypernovaTargetPnlUsd(pos, targetPrice);
+      const pctMove = pos.entryPrice > 0
+        ? ((targetPrice - pos.entryPrice) / pos.entryPrice) * 100 * (pos.side === 'short' ? -1 : 1)
+        : null;
+      const usdText = pnlUsd !== null
+        ? formatHypernovaDollarAmount(pnlUsd)
+        : (pctMove !== null ? `${pctMove >= 0 ? '+' : ''}${pctMove.toFixed(2)}%` : '$0.00');
+      const priceText = `$${formatHypernovaDisplayPrice(targetPrice)}`;
+
+      const usdEl = box.querySelector('.vest-hn-tpsl-usd');
+      if (usdEl) usdEl.textContent = usdText;
+      const priceEl = box.querySelector('.vest-hn-tpsl-price');
+      if (priceEl) priceEl.textContent = priceText;
+
+      box.classList.toggle('is-dragging', isDraggingThis);
+      box.onpointerdown = (ev) => {
+        if (ev.target && ev.target.closest && ev.target.closest('.vest-hn-tpsl-clear')) {
+          ev.stopPropagation();
+          return;
+        }
+        startHypernovaTpSlDrag(ev, kind, pos, ownerDoc);
+      };
+      const clearBtn = box.querySelector('.vest-hn-tpsl-clear');
+      if (clearBtn) {
+        clearBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          const prev = hypernovaManualTpSlBySymbol[pos.symbol] || { entryPrice: pos.entryPrice };
+          hypernovaManualTpSlBySymbol[pos.symbol] = {
+            ...prev,
+            entryPrice: pos.entryPrice,
+            ...(isTp ? { tpPrice: null } : { slPrice: null })
+          };
+          try {
+            window.top.postMessage({
+              type: 'VEST_TV_HYPERNOVA_CLEAR_TP_SL',
+              payload: { symbol: pos.symbol, type: kind }
+            }, '*');
+          } catch (err) {}
+          scheduleIctSessionsRender(false);
+        };
+      }
+
+      const boxH = 26;
+      const boxW = box.offsetWidth || 168;
+      // Anti-overlap: if this TP/SL sits right on top of the Entry box (e.g., SL moved to Breakeven!),
+      // offset horizontally to the left of the Entry box so BOTH remain 100% readable & clickable!
+      let rightEdgeOffset = 14;
+      if (
+        hypernovaOverlayEls.entry &&
+        hypernovaOverlayEls.entry.isConnected &&
+        entryY !== null &&
+        Math.abs(clampedY - Math.max(24, Math.min(cssHeight - 24, entryY))) < 40
+      ) {
+        rightEdgeOffset = (hypernovaOverlayEls.entry.offsetWidth || 196) + 22;
+      }
+      const leftPx = Math.max(8, cssWidth - boxW - rightEdgeOffset);
+      const topPx = Math.max(4, Math.min(cssHeight - boxH - 4, clampedY - boxH / 2));
+      box.style.left = `${Math.round(leftPx)}px`;
+      box.style.top = `${Math.round(topPx)}px`;
+    };
+
+    renderTpSlLineAndBox('tp', activeTpPrice, tpY);
+    renderTpSlLineAndBox('sl', activeSlPrice, slY);
   }
 
   const nyDateFormatter = (() => {
@@ -13554,8 +14537,10 @@
     const orderBlocksEnabled = Boolean(orderBlocksConfig && orderBlocksConfig.enabled);
     const marketStructureEnabled = Boolean(marketStructureConfig && marketStructureConfig.enabled);
     const accountsRiskEnabled = Boolean(accountsRiskConfig && accountsRiskConfig.enabled);
+    const hypernovaVisualsEnabled = isHypernovaMainWorldHost() && getHypernovaVisualsConfig().enabled;
     if (!failLinesEnabled) removeFailPriceLineButtons();
     if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
+    if (!hypernovaVisualsEnabled) removeHypernovaOverlayWidgets();
     const sessionsEnabled = Boolean(config && config.enabled && isIntradayChartResolution());
     const autoFvgEnabled = Boolean(fvgConfig && fvgConfig.enabled);
     const candleNumbersEnabled = Boolean(candleOhlcConfig && candleOhlcConfig.showCandleNumbers);
@@ -13578,10 +14563,11 @@
       clearAccountsRiskTopOverlayCanvas();
       clearIctPriceScaleBadges();
       removeFailPriceLineButtons();
+      removeHypernovaOverlayWidgets();
       syncCortexManualBuyButton(false, '', null);
     };
 
-    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled && !accountsRiskEnabled) {
+    if (!sessionsEnabled && !autoFvgEnabled && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !failLinesEnabled && !cortexIndicatorEnabled && !orderBlocksEnabled && !marketStructureEnabled && !accountsRiskEnabled && !hypernovaVisualsEnabled) {
       clearAllChartOverlays();
       return;
     }
@@ -13845,9 +14831,10 @@
     const hasCanvasFvgs = autoFvgEnabled && !fvgConfig.syncNativeDrawings && cachedComputedAutoFvgs.length > 0;
     const hasCanvasOrderBlocks = orderBlocksEnabled && (cachedComputedOrderBlocks.length > 0 || cachedComputedMtfOrderBlocks.length > 0);
     const hasCanvasMarketStructure = marketStructureEnabled && cachedComputedMarketStructure.length > 0;
-    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !hasCanvasOrderBlocks && !hasCanvasMarketStructure && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled) {
+    if ((!sessionsEnabled || cachedIctComputedSessions.length === 0) && !hasCanvasFvgs && !hasCanvasOrderBlocks && !hasCanvasMarketStructure && !candleOhlcEnabled && !candleNumbersEnabled && !customCandleWidthEnabled && !cortexIndicatorEnabled && !failLinesEnabled && !accountsRiskEnabled && !hypernovaVisualsEnabled) {
       lastRenderedCandleOhlcHitBoxes = [];
       clearIctPriceScaleBadges();
+      removeHypernovaOverlayWidgets();
       ctx.restore();
       return;
     }
@@ -13973,6 +14960,28 @@
       if (visiblePriceRange && visiblePriceRange.to !== visiblePriceRange.from) {
         const usableH = Math.max(1, cssHeight - psTopMargin - psBottomMargin);
         return psTopMargin + usableH - ((price - visiblePriceRange.from) / (visiblePriceRange.to - visiblePriceRange.from)) * usableH;
+      }
+      return null;
+    };
+
+    const hypernovaYToPrice = (yPx) => {
+      try {
+        if (internalPs && typeof internalPs.coordinateToPrice === 'function') {
+          const p = internalPs.coordinateToPrice(yPx, firstValue);
+          if (typeof p === 'number' && isFinite(p) && p > 0) return p;
+        }
+      } catch (e) {}
+      try {
+        if (psApi && typeof psApi.coordinateToPrice === 'function') {
+          const p = psApi.coordinateToPrice(yPx);
+          if (typeof p === 'number' && isFinite(p) && p > 0) return p;
+        }
+      } catch (e) {}
+      if (visiblePriceRange && visiblePriceRange.to !== visiblePriceRange.from) {
+        const usableH = Math.max(1, cssHeight - psTopMargin - psBottomMargin);
+        const ratio = (psTopMargin + usableH - yPx) / usableH;
+        const p = visiblePriceRange.from + ratio * (visiblePriceRange.to - visiblePriceRange.from);
+        if (Number.isFinite(p) && p > 0) return p;
       }
       return null;
     };
@@ -14863,6 +15872,12 @@
           ctx.restore();
         }
       }
+    }
+
+    if (hypernovaVisualsEnabled) {
+      renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, extracted.model, priceToY, hypernovaYToPrice, cssWidth, cssHeight);
+    } else {
+      removeHypernovaOverlayWidgets();
     }
 
     ctx.restore();
@@ -16152,6 +17167,7 @@
             } catch (e) {}
           }
           clearIctPriceScaleBadges();
+          removeHypernovaOverlayWidgets();
         } else {
           scheduleIctSessionsRender(false);
         }
@@ -16229,7 +17245,8 @@
         currentSettings.candleOhlc.clickCandleToToggle !== false ||
         toggledCandleOhlcSet.size > 0 ||
         (currentSettings.cortexIndicator && currentSettings.cortexIndicator.enabled) ||
-        (currentSettings.orderBlocks && currentSettings.orderBlocks.enabled))
+        (currentSettings.orderBlocks && currentSettings.orderBlocks.enabled) ||
+        (isHypernovaMainWorldHost() && getHypernovaVisualsConfig().enabled))
     ) {
       setupIctSessionIndicators();
     }

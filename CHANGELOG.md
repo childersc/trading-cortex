@@ -1,6 +1,22 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.139`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.140`) are documented in this file.
+
+---
+
+## [v1.1.140] — 2026-11-22
+
+### ✨ Hypernova Chart Visuals & Interactive Trade Controls (On by Default + Individual Toggles)
+- **Interactive 2-Row Position Entry Box (`LONG` / `SHORT`) on Hypernova Charts**:
+  - Displays a sleek dark floating card locked to your entry line showing **`LONG`** / **`SHORT`**, position size, live PnL (`+$XX.XX` / `-$XX.XX`), and **`×`** close button on row 1, plus **`BE`** (Breakeven), **`TP`** (grab & drag vertically), **`SL`** (grab & drag vertically), and your formatted entry price on row 2.
+  - Clicking **`BE`** snaps your Stop Loss directly to your entry price (`$0.00`) and syncs it to Hypernova's TP/SL controls.
+  - Grabbing & dragging **`TP`** or **`SL`** vertically drags a live line directly on the chart and submits the updated target to Hypernova on release.
+- **Green Take Profit & Red Stop Loss Visual Boxes**:
+  - Renders a styled **green Take Profit box** and **red Stop Loss box** right on each line showing both the **projected dollar PnL (`+$XX.XX` / `-$XX.XX`)** and the **exact line price**, with direct vertical re-drag support, a `×` clear button, and automatic anti-overlap shifting when Stop Loss sits on Breakeven.
+- **Fully Customizable "Current Price" Line**:
+  - Draws a customizable live price line across the chart with label text defaulting to **`"Current Price"`** (plus optional live price readout), configurable line color, solid/dashed/dotted style, thickness (`1px–4px`), opacity (`15%–100%`), and left/center/right label alignment.
+- **Hypernova Settings Toggles (All ON by Default)**:
+  - Added a dedicated **"Hypernova Chart Visuals & Trade Controls"** section inside **Perp Firms → Hypernova** (plus a 1-click **"Hypernova Chart Visuals..."** shortcut in the Cortex dropdown menu on Hypernova) with individual toggle switches for the entire suite, Position Entry Box, Green TP / Red SL Boxes, and Custom Current Price Line — all enabled by default with live instant chart preview.
 
 ---
 
