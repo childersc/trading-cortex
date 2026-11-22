@@ -1,6 +1,13 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.134`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.135`) are documented in this file.
+
+---
+
+## [v1.1.135] — 2026-11-21
+
+### ✨ Complete Floating, Draggable Cortex Pill Package (Top-Middle of Viewport)
+- Ensures the full floating, draggable **Cortex** pill implementation (`.vest-studio-pill-floating` + 6-dot drag grip CSS in `template-bar.css`, top-middle viewport alignment, smooth drag with `5px` click threshold, per-host saved position `studioPillPosByHost`, double-click grip to re-center, and bottom minimized dock decoupling in `content-isolated.js`) is packaged cleanly on `dev`.
 
 ---
 

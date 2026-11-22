@@ -4625,19 +4625,14 @@
       bar.setAttribute('aria-label', 'Trading Cortex minimized windows dock');
     }
 
-    const pillInTvToolbar = Boolean(
-      studioPillEl &&
-      studioPillEl.isConnected &&
-      studioPillEl.classList.contains('vest-studio-pill-tv-toolbar')
-    );
     const minimizedCount = typeof getActiveMinimizedWindowOrder === 'function'
       ? getActiveMinimizedWindowOrder().length
       : 0;
     const chartBottomMount = findChartBottomDockMountPoint();
 
-    // Primary mode on any chart page: Cortex pill lives in TradingView's top toolbar,
-    // and minimized windows dock right below the chart viewport's iframe (hidden when 0 minimized!)
-    if (chartBottomMount && chartBottomMount.parent && chartBottomMount.afterEl && pillInTvToolbar) {
+    // Primary mode on any chart page: Cortex pill floats freely (draggable, default top-middle),
+    // and minimized windows dock right below the chart viewport (hidden when 0 minimized!)
+    if (chartBottomMount && chartBottomMount.parent && chartBottomMount.afterEl) {
       clearLegacyTopBarLayoutOffsets();
 
       if (bar.parentElement !== chartBottomMount.parent || bar.previousSibling !== chartBottomMount.afterEl) {
@@ -4691,8 +4686,13 @@
       return bar;
     }
 
-    // Fallback (before TradingView toolbar mounts or on non-chart pages like Portfolio / Markets)
+    // Fallback (on non-chart pages like Portfolio / Markets): hide completely when 0 minimized windows
     bar.classList.remove('vest-cortex-bottom-dock');
+    if (minimizedCount === 0) {
+      clearLegacyTopBarLayoutOffsets();
+      bar.style.display = 'none';
+      return bar;
+    }
     bar.style.display = 'flex';
 
     if (isHypernovaHost()) {
@@ -5355,206 +5355,98 @@
     return findCustomChartHeaderBarAnchor();
   }
 
-  function dockStudioPillNextToMarketSelector(pillArg) {
+  let isDraggingStudioPill = false;
+  let studioPillJustDragged = false;
+  let studioPillResizeHooked = false;
+
+  function getStudioPillHostKey() {
+    try {
+      const host = String(window.location.hostname || '').toLowerCase().replace(/^www\./, '');
+      const parts = host.split('.').filter(Boolean);
+      return parts.length >= 2 ? parts.slice(-2).join('.') : (host || 'default');
+    } catch (e) {
+      return 'default';
+    }
+  }
+
+  function applyFloatingStudioPillPosition(pillArg) {
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
-    if (!pill) return false;
+    if (!pill || !pill.isConnected || isDraggingStudioPill) return;
+    const pillW = pill.offsetWidth || pill.getBoundingClientRect().width || 160;
+    const pillH = pill.offsetHeight || pill.getBoundingClientRect().height || 28;
+    const winW = Math.max(320, window.innerWidth || 1280);
+    const winH = Math.max(240, window.innerHeight || 720);
+    const maxLeft = Math.max(8, winW - pillW - 8);
+    const maxTop = Math.max(6, winH - pillH - 8);
 
-    // 1. Primary placement: inside TradingView's top chart toolbar immediately after the "Indicators" group with left & right separators
-    const tvAnchor = findTradingViewIndicatorsAnchor();
-    if (tvAnchor && tvAnchor.parent && (tvAnchor.afterEl || tvAnchor.appendToParent) && tvAnchor.doc) {
-      const targetDoc = tvAnchor.doc;
-      ensureCortexPillStylesInDoc(targetDoc);
+    const hostKey = getStudioPillHostKey();
+    const savedMap = settings && settings.studioPillPosByHost && typeof settings.studioPillPosByHost === 'object'
+      ? settings.studioPillPosByHost
+      : null;
+    const saved = savedMap && savedMap[hostKey];
 
-      // Remove any stale empty toolbar slot left in another document (e.g. top doc before iframe loaded)
-      try {
-        if (targetDoc !== document) {
-          const staleTopSlot = document.getElementById('vest-tv-cortex-toolbar-slot');
-          if (staleTopSlot) staleTopSlot.remove();
-        }
-        document.querySelectorAll('iframe').forEach(ifr => {
-          try {
-            if (ifr.contentDocument && ifr.contentDocument !== targetDoc) {
-              const staleSlot = ifr.contentDocument.getElementById('vest-tv-cortex-toolbar-slot');
-              if (staleSlot) staleSlot.remove();
-            }
-          } catch (e) {}
-        });
-      } catch (e) {}
-
-      let slot = targetDoc.getElementById('vest-tv-cortex-toolbar-slot');
-      if (!slot) {
-        slot = targetDoc.createElement('div');
-        slot.id = 'vest-tv-cortex-toolbar-slot';
-        const leftSep = targetDoc.createElement('span');
-        leftSep.className = 'vest-tv-cortex-sep';
-        leftSep.setAttribute('aria-hidden', 'true');
-        const rightSep = targetDoc.createElement('span');
-        rightSep.className = 'vest-tv-cortex-sep';
-        rightSep.setAttribute('aria-hidden', 'true');
-        slot.appendChild(leftSep);
-        slot.appendChild(rightSep);
-      }
-      if (tvAnchor.groupClassName && slot.className !== tvAnchor.groupClassName) {
-        slot.className = tvAnchor.groupClassName;
-      } else if (!tvAnchor.groupClassName && slot.className) {
-        slot.className = '';
-      }
-      if (tvAnchor.groupOrder) {
-        slot.style.order = tvAnchor.groupOrder;
-      } else {
-        slot.style.order = '';
-      }
-      slot.style.setProperty('display', 'inline-flex', 'important');
-      slot.style.setProperty('align-items', 'center', 'important');
-      slot.style.setProperty('visibility', 'visible', 'important');
-      slot.style.setProperty('opacity', '1', 'important');
-      slot.style.setProperty('overflow', 'visible', 'important');
-      slot.style.setProperty('position', 'relative', 'important');
-      slot.style.setProperty('z-index', '9999', 'important');
-      slot.style.setProperty('flex', '0 0 auto', 'important');
-      if (tvAnchor.afterEl) {
-        if (slot.parentElement !== tvAnchor.parent || slot.previousSibling !== tvAnchor.afterEl) {
-          tvAnchor.parent.insertBefore(slot, tvAnchor.afterEl.nextSibling);
-        }
-      } else if (slot.parentElement !== tvAnchor.parent) {
-        tvAnchor.parent.appendChild(slot);
-      }
-      pill.classList.remove('vest-studio-pill-floating-fallback');
-      pill.classList.add('vest-studio-pill-tv-toolbar');
-      const seps = slot.querySelectorAll('.vest-tv-cortex-sep');
-      const rightSep = seps.length >= 2 ? seps[1] : null;
-      if (pill.parentElement !== slot) {
-        try {
-          if (pill.ownerDocument !== targetDoc && typeof targetDoc.adoptNode === 'function') {
-            targetDoc.adoptNode(pill);
-          }
-        } catch (e) {}
-        if (rightSep) slot.insertBefore(pill, rightSep);
-        else slot.appendChild(pill);
-      }
-
-      // Live visibility self-check:
-      // 1. Inside targetDoc: if a sibling in toolbarRow covers our slot, hop right after it.
-      // 2. In the TOP document: if a third-party position:fixed/absolute overlay (like TradeUnison)
-      //    floats in document.body right over Indicators.right, measure its full right edge and
-      //    offset slot via margin-left so | CORTEX | sits cleanly right next to it on the exact same bar!
-      try {
-        slot.style.setProperty('margin-left', '4px', 'important');
-        if (typeof targetDoc.elementFromPoint === 'function') {
-          for (let hop = 0; hop < 4; hop++) {
-            const sr = slot.getBoundingClientRect();
-            const pr = pill.getBoundingClientRect();
-            if (pr.width < 20 || pr.height < 12) break;
-            const probeXs = [pr.left + 12, pr.left + pr.width / 2, pr.right - 12];
-            const probeY = pr.top + pr.height / 2;
-            let hit = null;
-            for (let p = 0; p < probeXs.length; p++) {
-              const cand = targetDoc.elementFromPoint(probeXs[p], probeY);
-              if (cand && cand !== slot && !slot.contains(cand)) {
-                hit = cand;
-                break;
-              }
-            }
-            if (!hit) break;
-            let covSib = hit;
-            while (covSib && covSib.parentElement && covSib.parentElement !== tvAnchor.parent) {
-              covSib = covSib.parentElement;
-            }
-            if (covSib && covSib.parentElement === tvAnchor.parent && covSib !== slot) {
-              tvAnchor.parent.insertBefore(slot, covSib.nextSibling);
-              continue;
-            }
-            // Otherwise, hit is an out-of-flow overlay inside targetDoc (e.g. TradeUnison mounted in iframe body/header):
-            // walk up to the full overlay bar and offset slot via margin-left past its right edge!
-            let overlayEl = hit;
-            let up = 0;
-            const docW = (targetDoc.defaultView && targetDoc.defaultView.innerWidth) || 1200;
-            while (overlayEl.parentElement && overlayEl.parentElement !== targetDoc.body && up < 8) {
-              const parentR = overlayEl.parentElement.getBoundingClientRect();
-              if (parentR.height > 0 && parentR.height <= 64 && parentR.width < docW * 0.75 && !overlayEl.parentElement.contains(slot)) {
-                overlayEl = overlayEl.parentElement;
-                up++;
-              } else {
-                break;
-              }
-            }
-            const ovRect = overlayEl.getBoundingClientRect();
-            if (ovRect.height > 0 && ovRect.height <= 64 && ovRect.right > sr.left - 2) {
-              const curMargin = parseFloat(slot.style.marginLeft) || 4;
-              const delta = Math.ceil(ovRect.right - sr.left + 8);
-              const nextMargin = curMargin + delta;
-              if (nextMargin <= Math.max(600, docW * 0.65)) {
-                slot.style.setProperty('margin-left', `${nextMargin}px`, 'important');
-                continue;
-              }
-            }
-            break;
-          }
-        }
-
-        if (tvAnchor.iframe && typeof document.elementFromPoint === 'function') {
-          const ifrRect = tvAnchor.iframe.getBoundingClientRect();
-          for (let pass = 0; pass < 3; pass++) {
-            const sr = slot.getBoundingClientRect();
-            if (sr.width < 20 || sr.height < 12) break;
-            const naturalLeftScreen = ifrRect.left + sr.left;
-            const centerYScreen = ifrRect.top + sr.top + sr.height / 2;
-            const probeXs = [
-              naturalLeftScreen + 12,
-              naturalLeftScreen + sr.width / 2,
-              naturalLeftScreen + sr.width - 12
-            ];
-            let maxOverlayRight = 0;
-            for (let p = 0; p < probeXs.length; p++) {
-              const px = probeXs[p];
-              if (px < 0 || px > window.innerWidth || centerYScreen < 0 || centerYScreen > window.innerHeight) continue;
-              const topHit = document.elementFromPoint(px, centerYScreen);
-              if (!topHit || topHit === tvAnchor.iframe || topHit === document.body || topHit === document.documentElement) continue;
-              if (topHit.contains(tvAnchor.iframe)) continue;
-              // Walk up to the full floating toolbar overlay bar (height <= 64px, width < 75% of viewport)
-              let overlayEl = topHit;
-              let up = 0;
-              while (overlayEl.parentElement && overlayEl.parentElement !== document.body && up < 8) {
-                const pr = overlayEl.parentElement.getBoundingClientRect();
-                if (pr.height > 0 && pr.height <= 64 && pr.width < window.innerWidth * 0.75 && !overlayEl.parentElement.contains(tvAnchor.iframe)) {
-                  overlayEl = overlayEl.parentElement;
-                  up++;
-                } else {
-                  break;
-                }
-              }
-              const ovRect = overlayEl.getBoundingClientRect();
-              if (ovRect.height > 0 && ovRect.height <= 64 && ovRect.right > maxOverlayRight) {
-                maxOverlayRight = ovRect.right;
-              }
-            }
-            if (maxOverlayRight > naturalLeftScreen - 2) {
-              const curMargin = parseFloat(slot.style.marginLeft) || 4;
-              const delta = Math.ceil(maxOverlayRight - naturalLeftScreen + 8);
-              const nextMargin = curMargin + delta;
-              if (nextMargin <= Math.max(600, ifrRect.width * 0.65)) {
-                slot.style.setProperty('margin-left', `${nextMargin}px`, 'important');
-                continue;
-              }
-            }
-            break;
-          }
-        }
-      } catch (e) {}
-
-      studioPillHostIframe = tvAnchor.iframe || null;
-      ensureCortexTopBar();
-      if (typeof repositionAllMinimizedBoxes === 'function') repositionAllMinimizedBoxes();
-      return true;
+    let targetLeft;
+    let targetTop;
+    if (saved && typeof saved.left === 'number' && isFinite(saved.left) && typeof saved.top === 'number' && isFinite(saved.top)) {
+      targetLeft = Math.min(Math.max(8, Math.round(saved.left)), maxLeft);
+      targetTop = Math.min(Math.max(6, Math.round(saved.top)), maxTop);
+    } else {
+      // Default: aligned top-middle of the viewport
+      targetLeft = Math.min(Math.max(8, Math.round((winW - pillW) / 2)), maxLeft);
+      targetTop = 10;
     }
 
-    // 2. Fallback (non-chart pages like Portfolio / Markets): dock inside Cortex top bar
+    pill.style.left = `${targetLeft}px`;
+    pill.style.top = `${targetTop}px`;
+    pill.style.right = 'auto';
+    pill.style.bottom = 'auto';
+    pill.style.transform = 'none';
+
+    if (studioMenuOpen) {
+      updateStudioDropdownPosition(pill);
+    }
+  }
+
+  function dockStudioPillNextToMarketSelector(pillArg) {
+    const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
+    if (!pill || !document.body) return false;
+
+    // Clean up any legacy toolbar slots in document or chart iframes
+    try {
+      const staleTopSlot = document.getElementById('vest-tv-cortex-toolbar-slot');
+      if (staleTopSlot) staleTopSlot.remove();
+      document.querySelectorAll('iframe').forEach(ifr => {
+        try {
+          if (ifr.contentDocument) {
+            const staleSlot = ifr.contentDocument.getElementById('vest-tv-cortex-toolbar-slot');
+            if (staleSlot) staleSlot.remove();
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
+
     studioPillHostIframe = null;
     pill.classList.remove('vest-studio-pill-tv-toolbar');
-    const bar = ensureCortexTopBar();
-    if (!bar) return false;
     pill.classList.remove('vest-studio-pill-floating-fallback');
-    if (pill.parentElement !== bar) bar.appendChild(pill);
+    pill.classList.add('vest-studio-pill-floating');
+
+    if (pill.ownerDocument !== document && typeof document.adoptNode === 'function') {
+      try { document.adoptNode(pill); } catch (e) {}
+    }
+    if (pill.parentElement !== document.body) {
+      document.body.appendChild(pill);
+    }
+
+    if (!studioPillResizeHooked) {
+      studioPillResizeHooked = true;
+      window.addEventListener('resize', () => {
+        applyFloatingStudioPillPosition(studioPillEl);
+      }, { passive: true });
+    }
+
+    applyFloatingStudioPillPosition(pill);
+    ensureCortexTopBar();
+    if (typeof repositionAllMinimizedBoxes === 'function') repositionAllMinimizedBoxes();
     return true;
   }
 
@@ -5762,7 +5654,17 @@
     const channelClass = isDev ? 'dev-channel' : 'prod-channel';
 
     pill.innerHTML = `
-      <button type="button" class="vest-studio-pill-trigger ${channelClass} ${studioMenuOpen ? 'open' : ''} ${updateClass}" id="vest-studio-pill-btn" title="${pillTitle}">
+      <button type="button" class="vest-studio-pill-trigger ${channelClass} ${studioMenuOpen ? 'open' : ''} ${updateClass}" id="vest-studio-pill-btn" title="${pillTitle} · Drag to move · Double-click grip to re-center">
+        <span class="vest-studio-pill-grip" title="Drag to move · Double-click to re-center top-middle" aria-hidden="true">
+          <svg viewBox="0 0 10 16" width="8" height="13" fill="currentColor">
+            <circle cx="2.5" cy="3" r="1.25"></circle>
+            <circle cx="7.5" cy="3" r="1.25"></circle>
+            <circle cx="2.5" cy="8" r="1.25"></circle>
+            <circle cx="7.5" cy="8" r="1.25"></circle>
+            <circle cx="2.5" cy="13" r="1.25"></circle>
+            <circle cx="7.5" cy="13" r="1.25"></circle>
+          </svg>
+        </span>
         <div class="vest-studio-pill-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -6020,8 +5922,93 @@
     const triggerBtn = pill.querySelector('#vest-studio-pill-btn');
 
     if (triggerBtn && menuEl) {
+      triggerBtn.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startRect = pill.getBoundingClientRect();
+        const originLeft = startRect.left;
+        const originTop = startRect.top;
+        let moved = false;
+
+        const onPointerMove = (mv) => {
+          const dx = mv.clientX - startX;
+          const dy = mv.clientY - startY;
+          if (!moved && Math.hypot(dx, dy) < 5) return;
+          if (!moved) {
+            moved = true;
+            isDraggingStudioPill = true;
+            studioPillJustDragged = true;
+            pill.classList.add('dragging');
+          }
+          const pillW = pill.offsetWidth || startRect.width || 160;
+          const pillH = pill.offsetHeight || startRect.height || 28;
+          const maxLeft = Math.max(8, (window.innerWidth || 1280) - pillW - 8);
+          const maxTop = Math.max(6, (window.innerHeight || 720) - pillH - 8);
+          const nextLeft = Math.min(Math.max(8, Math.round(originLeft + dx)), maxLeft);
+          const nextTop = Math.min(Math.max(6, Math.round(originTop + dy)), maxTop);
+          pill.style.left = `${nextLeft}px`;
+          pill.style.top = `${nextTop}px`;
+          pill.style.right = 'auto';
+          pill.style.bottom = 'auto';
+          pill.style.transform = 'none';
+          if (studioMenuOpen) {
+            updateStudioDropdownPosition(pill);
+          }
+        };
+
+        const onPointerUp = () => {
+          window.removeEventListener('pointermove', onPointerMove, true);
+          window.removeEventListener('pointerup', onPointerUp, true);
+          window.removeEventListener('pointercancel', onPointerUp, true);
+          if (moved) {
+            isDraggingStudioPill = false;
+            pill.classList.remove('dragging');
+            const finalRect = pill.getBoundingClientRect();
+            const hostKey = getStudioPillHostKey();
+            const prevMap = (settings && settings.studioPillPosByHost && typeof settings.studioPillPosByHost === 'object')
+              ? settings.studioPillPosByHost
+              : {};
+            settings.studioPillPosByHost = {
+              ...prevMap,
+              [hostKey]: {
+                left: Math.round(finalRect.left),
+                top: Math.round(finalRect.top)
+              }
+            };
+            queueSettingsSave({ studioPillPosByHost: settings.studioPillPosByHost });
+            setTimeout(() => { studioPillJustDragged = false; }, 120);
+          }
+        };
+
+        window.addEventListener('pointermove', onPointerMove, true);
+        window.addEventListener('pointerup', onPointerUp, true);
+        window.addEventListener('pointercancel', onPointerUp, true);
+      });
+
+      const gripEl = triggerBtn.querySelector('.vest-studio-pill-grip');
+      if (gripEl) {
+        gripEl.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const hostKey = getStudioPillHostKey();
+          if (settings && settings.studioPillPosByHost && typeof settings.studioPillPosByHost === 'object') {
+            const nextMap = { ...settings.studioPillPosByHost };
+            delete nextMap[hostKey];
+            settings.studioPillPosByHost = nextMap;
+            queueSettingsSave({ studioPillPosByHost: settings.studioPillPosByHost });
+          }
+          applyFloatingStudioPillPosition(pill);
+          showToast('Cortex pill centered at top-middle');
+        });
+      }
+
       triggerBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (studioPillJustDragged) {
+          studioPillJustDragged = false;
+          return;
+        }
         studioMenuOpen = !studioMenuOpen;
         triggerBtn.classList.toggle('open', studioMenuOpen);
         if (studioMenuOpen) {

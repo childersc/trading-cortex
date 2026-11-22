@@ -1,3 +1,7 @@
+Trading Cortex v1.1.135 — Floating, Draggable Cortex Pill (Top-Middle of Viewport)
+
+- **Floating, Draggable Cortex Pill (`v1.1.135`)**: The **Cortex** pill now floats cleanly at the **top-middle of the viewport** (`top: 10px`) across Vest, My Funded Perps, Hypernova, and Kalshi — drag anywhere to move (saved per exchange), or double-click the 6-dot grip on the left to snap back to top-middle.
+
 Trading Cortex v1.1.134 — Floating, Draggable Cortex Pill (Top-Middle of Viewport)
 
 - **Floating, Draggable Cortex Pill (`v1.1.134`)**: Moved the **Cortex** pill to a clean floating, draggable pill aligned **top-middle of the viewport** by default — works identically across Vest, My Funded Perps, Hypernova, and Kalshi with zero toolbar overlap. Drag anywhere to reposition (saved per exchange), or double-click the left drag grip to snap back to top-middle.

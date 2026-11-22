@@ -1592,11 +1592,89 @@ body.vest-cortex-top-bar-active {
   box-sizing: border-box;
 }
 
+#vest-studio-header-pill.vest-studio-pill-floating {
+  position: fixed !important;
+  margin: 0 !important;
+  z-index: 2147483640 !important;
+  touch-action: none;
+  cursor: grab;
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating.dragging,
+#vest-studio-header-pill.vest-studio-pill-floating.dragging .vest-studio-pill-trigger,
+#vest-studio-header-pill.vest-studio-pill-floating.dragging .vest-studio-pill-grip {
+  cursor: grabbing !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating .vest-studio-pill-trigger {
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 0 10px 0 6px !important;
+  gap: 6px !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.55),
+    0 0 12px rgba(56, 189, 248, 0.22),
+    inset 0 1px 0 rgba(186, 230, 253, 0.16);
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating.dragging .vest-studio-pill-trigger {
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.72),
+    0 0 18px rgba(56, 189, 248, 0.42),
+    inset 0 1px 0 rgba(186, 230, 253, 0.25);
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating .vest-studio-pill-icon {
+  width: 17px !important;
+  height: 17px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating .vest-studio-pill-icon svg {
+  width: 11px !important;
+  height: 11px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating .vest-studio-pill-text {
+  flex-direction: row !important;
+  align-items: baseline !important;
+  gap: 5px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating .vest-studio-pill-title {
+  font-size: 11px !important;
+  line-height: 1 !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-floating .vest-studio-pill-sub {
+  font-size: 9.5px !important;
+  line-height: 1 !important;
+  opacity: 0.85;
+}
+
+.vest-studio-pill-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 18px;
+  color: rgba(148, 163, 184, 0.55);
+  cursor: grab;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.vest-studio-pill-trigger:hover .vest-studio-pill-grip {
+  color: rgba(226, 232, 240, 0.85);
+}
+
 /* Fallback if market bar hasn't finished mounting yet */
 #vest-studio-header-pill.vest-studio-pill-floating-fallback {
   position: fixed;
-  top: 52px;
-  left: 16px;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .vest-studio-pill-trigger {
