@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.131`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.132`) are documented in this file.
+
+---
+
+## [v1.1.132] — 2026-11-21
+
+### 🎯 Top-Document Overlay Clearance (`TradeUnison`) on Both Vest & My Funded Perps
+- **Root cause**: `TradeUnison` floats as a `position: fixed` / `absolute` overlay in the **top document** directly over the TradingView iframe toolbar starting at `Indicators.right` — covering `#vest-tv-cortex-toolbar-slot` on both **Vest** and **My Funded Perps** without being visible to `iframe.contentDocument.elementFromPoint()`.
+- **Fix (`dockStudioPillNextToMarketSelector`)**:
+  - Restored My Funded Perps to mount `| CORTEX |` on TradingView's `Indicators` toolbar row (the exact same bar as `TradeUnison`), keeping the minimized windows dock below the chart.
+  - Added a top-document `document.elementFromPoint()` occlusion check across `slot`'s screen coordinates: whenever a floating third-party overlay (such as `TradeUnison`) sits over `Indicators.right`, Cortex automatically offsets `margin-left` past the overlay's full right edge (`ovRect.right + 8px`) so `| CORTEX |` sits visibly right next to it on the exact same bar — and sits immediately after `Indicators` when no overlay is present.
 
 ---
 

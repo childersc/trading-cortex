@@ -5205,17 +5205,6 @@
   }
 
   function findTradingViewIndicatorsAnchor() {
-    // On My Funded Perps, TradingView's native top toolbar inside the iframe is hidden/obscured and
-    // the exchange renders its own visible chart header bar ([NVDA 5m] [+] ... [Alerts] [Price Chart])
-    // directly above the chart iframe — mount | CORTEX | in that visible bar first!
-    try {
-      const host = String(window.location.hostname || '').toLowerCase();
-      if (host.includes('myfundedperpetuals') || host.includes('myfundedperps')) {
-        const mfpBarAnchor = findCustomChartHeaderBarAnchor();
-        if (mfpBarAnchor) return mfpBarAnchor;
-      }
-    } catch (e) {}
-
     const docsToSearch = [{ doc: document, iframe: null }];
     try {
       document.querySelectorAll('iframe').forEach(ifr => {
@@ -5394,9 +5383,13 @@
         else slot.appendChild(pill);
       }
 
-      // Live visibility self-check: if a sibling in toolbarRow (e.g. another extension's pill)
-      // visually covers our slot at its center point, hop right after that covering sibling so we stay 100% visible!
+      // Live visibility self-check:
+      // 1. Inside targetDoc: if a sibling in toolbarRow covers our slot, hop right after it.
+      // 2. In the TOP document: if a third-party position:fixed/absolute overlay (like TradeUnison)
+      //    floats in document.body right over Indicators.right, measure its full right edge and
+      //    offset slot via margin-left so | CORTEX | sits cleanly right next to it on the exact same bar!
       try {
+        slot.style.setProperty('margin-left', '4px', 'important');
         if (typeof targetDoc.elementFromPoint === 'function') {
           for (let hop = 0; hop < 3; hop++) {
             const pr = pill.getBoundingClientRect();
@@ -5412,6 +5405,55 @@
             } else {
               break;
             }
+          }
+        }
+
+        if (tvAnchor.iframe && typeof document.elementFromPoint === 'function') {
+          const ifrRect = tvAnchor.iframe.getBoundingClientRect();
+          for (let pass = 0; pass < 3; pass++) {
+            const sr = slot.getBoundingClientRect();
+            if (sr.width < 20 || sr.height < 12) break;
+            const naturalLeftScreen = ifrRect.left + sr.left;
+            const centerYScreen = ifrRect.top + sr.top + sr.height / 2;
+            const probeXs = [
+              naturalLeftScreen + 12,
+              naturalLeftScreen + sr.width / 2,
+              naturalLeftScreen + sr.width - 12
+            ];
+            let maxOverlayRight = 0;
+            for (let p = 0; p < probeXs.length; p++) {
+              const px = probeXs[p];
+              if (px < 0 || px > window.innerWidth || centerYScreen < 0 || centerYScreen > window.innerHeight) continue;
+              const topHit = document.elementFromPoint(px, centerYScreen);
+              if (!topHit || topHit === tvAnchor.iframe || topHit === document.body || topHit === document.documentElement) continue;
+              if (topHit.contains(tvAnchor.iframe)) continue;
+              // Walk up to the full floating toolbar overlay bar (height <= 64px, width < 75% of viewport)
+              let overlayEl = topHit;
+              let up = 0;
+              while (overlayEl.parentElement && overlayEl.parentElement !== document.body && up < 8) {
+                const pr = overlayEl.parentElement.getBoundingClientRect();
+                if (pr.height > 0 && pr.height <= 64 && pr.width < window.innerWidth * 0.75 && !overlayEl.parentElement.contains(tvAnchor.iframe)) {
+                  overlayEl = overlayEl.parentElement;
+                  up++;
+                } else {
+                  break;
+                }
+              }
+              const ovRect = overlayEl.getBoundingClientRect();
+              if (ovRect.height > 0 && ovRect.height <= 64 && ovRect.right > maxOverlayRight) {
+                maxOverlayRight = ovRect.right;
+              }
+            }
+            if (maxOverlayRight > naturalLeftScreen - 2) {
+              const curMargin = parseFloat(slot.style.marginLeft) || 4;
+              const delta = Math.ceil(maxOverlayRight - naturalLeftScreen + 8);
+              const nextMargin = curMargin + delta;
+              if (nextMargin <= Math.max(600, ifrRect.width * 0.65)) {
+                slot.style.setProperty('margin-left', `${nextMargin}px`, 'important');
+                continue;
+              }
+            }
+            break;
           }
         }
       } catch (e) {}

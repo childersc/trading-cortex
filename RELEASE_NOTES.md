@@ -1,3 +1,7 @@
+Trading Cortex v1.1.132 — Top-Document Overlay Clearance (TradeUnison) on Vest & My Funded Perps
+
+- **Exact Same Bar as `Indicators` & `TradeUnison` (`v1.1.132`)**: Mounts `| CORTEX |` on TradingView's `Indicators` toolbar row on both **Vest** and **My Funded Perps**, and automatically detects floating top-document overlays (like `TradeUnison`) via `document.elementFromPoint()` to slide cleanly right past them with zero overlap (while sitting immediately after `Indicators` when no overlay is present).
+
 Trading Cortex v1.1.131 — Visible My Funded Perps Chart Header Pill & Vest Toolbar Visibility Fix
 
 - **My Funded Perps Visible Chart Header Pill (`v1.1.131`)**: Mounts `| CORTEX |` directly in My Funded Perps's visible chart header bar (`[NVDA 5m] [+] | CORTEX | ... [Alerts] [Price Chart]`) instead of the hidden TradingView iframe toolbar, while keeping minimized windows docked below the chart.
