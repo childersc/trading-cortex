@@ -1688,6 +1688,8 @@
     };
   }
 
+  const CHART_VISUALS_SUPPORTED_FIRM_IDS = ['hypernova', 'myfundedperpetuals', 'kalshipro'];
+
   const DEFAULT_HYPERNOVA_VISUALS = {
     enabled: true,
     positionOverlayEnabled: true,
@@ -1752,7 +1754,8 @@
       restoreSelectedAccount: false,
       managePositionsPanel: true,
       defaultLeverage: "5x",
-      notes: "Top-bar anchored below primary navbar and above ticker row"
+      notes: "Top-bar anchored below primary navbar and above ticker row",
+      chartVisuals: { ...DEFAULT_HYPERNOVA_VISUALS }
     },
     {
       id: "vestmarkets",
@@ -1790,7 +1793,8 @@
       restoreSelectedAccount: false,
       managePositionsPanel: true,
       defaultLeverage: "24x",
-      notes: "Kalshi Pro prediction markets & perpetuals terminal"
+      notes: "Kalshi Pro prediction markets & perpetuals terminal",
+      chartVisuals: { ...DEFAULT_HYPERNOVA_VISUALS }
     },
     {
       id: "hypernova",
@@ -1810,6 +1814,7 @@
       managePositionsPanel: true,
       defaultLeverage: "10x",
       notes: "Hypernova perpetuals trading terminal (app.hypernova.xyz)",
+      chartVisuals: { ...DEFAULT_HYPERNOVA_VISUALS },
       hypernovaVisuals: { ...DEFAULT_HYPERNOVA_VISUALS }
     }
   ];
@@ -1827,6 +1832,10 @@
 
     for (const def of DEFAULT_PERP_FIRMS) {
       const existing = existingById.get(def.id) || {};
+      const supportsVisuals = CHART_VISUALS_SUPPORTED_FIRM_IDS.includes(def.id);
+      const normalizedVisuals = supportsVisuals
+        ? normalizeHypernovaVisualsConfig(existing.chartVisuals || existing.hypernovaVisuals || def.chartVisuals || def.hypernovaVisuals)
+        : null;
       result.push({
         id: def.id,
         name: String(existing.name || def.name).trim(),
@@ -1847,7 +1856,8 @@
         managePositionsPanel: existing.managePositionsPanel !== false,
         defaultLeverage: String(existing.defaultLeverage || def.defaultLeverage || '10x'),
         notes: String(existing.notes || def.notes || ''),
-        ...(def.id === 'hypernova' ? { hypernovaVisuals: normalizeHypernovaVisualsConfig(existing.hypernovaVisuals || def.hypernovaVisuals) } : {})
+        ...(supportsVisuals ? { chartVisuals: normalizedVisuals } : {}),
+        ...(def.id === 'hypernova' ? { hypernovaVisuals: { ...normalizedVisuals } } : {})
       });
       seenIds.add(def.id);
     }
@@ -3532,7 +3542,7 @@
       if (settingsLoaded) {
         notifyMainWorldConfig();
       }
-      if (isTopWindow && isHypernovaHost() && typeof syncHypernovaPositionsToMainWorld === 'function') {
+      if (isTopWindow && isChartVisualsHost() && typeof syncHypernovaPositionsToMainWorld === 'function') {
         syncHypernovaPositionsToMainWorld(true);
       }
       postToMainWorlds({ type: 'VEST_TV_QUERY_DRAWING_TOOLBAR_STATE' });
@@ -3611,15 +3621,15 @@
     } else if (type === 'VEST_TV_FAIL_PRICES_UPDATE') {
       // Price stream is consumed by the MAIN-world chart canvas renderer.
     } else if (type === 'VEST_TV_HYPERNOVA_SET_TP_SL') {
-      if (isTopWindow && isHypernovaHost()) {
+      if (isTopWindow && isChartVisualsHost()) {
         executeHypernovaTpSlAction(event.data.payload || {});
       }
     } else if (type === 'VEST_TV_HYPERNOVA_CLEAR_TP_SL') {
-      if (isTopWindow && isHypernovaHost()) {
+      if (isTopWindow && isChartVisualsHost()) {
         executeHypernovaClearTpSlAction(event.data.payload || {});
       }
     } else if (type === 'VEST_TV_HYPERNOVA_CLOSE_POSITION') {
-      if (isTopWindow && isHypernovaHost()) {
+      if (isTopWindow && isChartVisualsHost()) {
         executeHypernovaClosePositionAction(event.data.payload || {});
       }
     } else if (type === 'VEST_TV_TEMPLATE_CREATED_FROM_SHAPE') {
@@ -4457,8 +4467,31 @@
     }
   }
 
+  function getChartVisualsHostFirmId() {
+    try {
+      const host = String((window.location && window.location.hostname) || '').toLowerCase();
+      if (host.includes('hypernova')) return 'hypernova';
+      if (host.includes('myfundedperpetuals') || host.includes('myfundedperps')) return 'myfundedperpetuals';
+      if (host.includes('kalshi')) return 'kalshipro';
+    } catch (e) {}
+    return null;
+  }
+
+  function isChartVisualsHost() {
+    return Boolean(getChartVisualsHostFirmId());
+  }
+
+  function getChartVisualsHostDisplayName() {
+    const id = getChartVisualsHostFirmId();
+    if (id === 'hypernova') return 'Hypernova';
+    if (id === 'myfundedperpetuals') return 'My Funded Perps';
+    if (id === 'kalshipro') return 'Kalshi Pro';
+    return 'Exchange';
+  }
+
   // -------------------------------------------------------------
-  // Hypernova Live Positions Scraper & TP/SL/BE/Close Executors
+  // Multi-Venue Live Positions Scraper & TP/SL/BE/Close Executors
+  // (Hypernova, My Funded Perpetuals, Kalshi Pro)
   // -------------------------------------------------------------
   let lastHypernovaPositionsSig = '';
   let hypernovaPositionsTimer = null;
@@ -4489,19 +4522,31 @@
     return m ? m[1].length : 0;
   }
 
-  function formatHypernovaOrderPrice(price, decimalsHint = null) {
+  function formatHypernovaOrderPrice(price, decimalsHint = null, firmIdOverride = null) {
     const p = Number(price);
     if (!Number.isFinite(p) || p <= 0) return '';
-    // Hypernova (Hyperliquid-style perp engine) uses 5 significant figures (capped at 6 decimals).
-    // If we know the exact decimal places from the position row's entry/mark price, respect it within 5-sig-fig bounds!
-    const intDigits = p >= 1 ? Math.floor(Math.log10(p)) + 1 : 0;
-    const maxSigFigDecimals = p >= 1 ? Math.max(0, 5 - intDigits) : 6;
-    let decimals = maxSigFigDecimals;
-    if (Number.isInteger(decimalsHint) && decimalsHint >= 0) {
-      decimals = Math.min(decimalsHint, maxSigFigDecimals);
+    const firmId = firmIdOverride || (typeof getChartVisualsHostFirmId === 'function' ? getChartVisualsHostFirmId() : 'hypernova') || 'hypernova';
+    if (firmId === 'hypernova') {
+      // Hypernova (Hyperliquid-style perp engine) uses 5 significant figures (capped at 6 decimals).
+      const intDigits = p >= 1 ? Math.floor(Math.log10(p)) + 1 : 0;
+      const maxSigFigDecimals = p >= 1 ? Math.max(0, 5 - intDigits) : 6;
+      let decimals = maxSigFigDecimals;
+      if (Number.isInteger(decimalsHint) && decimalsHint >= 0) {
+        decimals = Math.min(decimalsHint, maxSigFigDecimals);
+      }
+      if (decimals === 0) return String(Math.round(p));
+      return p.toFixed(decimals);
     }
-    if (decimals === 0) return String(Math.round(p));
-    return p.toFixed(decimals);
+    // My Funded Perpetuals & Kalshi Pro: respect exact displayed row precision when available, else clean magnitude precision
+    if (Number.isInteger(decimalsHint) && decimalsHint >= 0) {
+      const d = Math.min(6, decimalsHint);
+      return d === 0 ? String(Math.round(p)) : p.toFixed(d);
+    }
+    if (p >= 1000) return p.toFixed(2);
+    if (p >= 10) return p.toFixed(2);
+    if (p >= 1) return p.toFixed(3);
+    if (p >= 0.01) return p.toFixed(4);
+    return p.toFixed(6);
   }
 
   function setReactNativeInputValue(input, nextValue) {
@@ -4647,26 +4692,28 @@
   }
 
   function scrapeHypernovaOpenPositions() {
-    if (!isTopWindow || !isHypernovaHost()) return [];
+    if (!isTopWindow || !isChartVisualsHost()) return [];
     const positions = [];
     try {
       const found = findHypernovaPositionsTableAndRows();
       if (!found || !found.rows.length) return positions;
       const { headers, rows } = found;
-      const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument/.test(h)));
-      const idxSize = headers.findIndex(h => /\bsize\b|\bqty\b|\bquantity\b|\bamount\b/.test(h));
+      const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument|ticker/.test(h)));
+      const idxSide = headers.findIndex(h => /\bside\b|\bdirection\b/.test(h));
+      const idxSize = headers.findIndex(h => /\bsize\b|\bqty\b|\bquantity\b|\bamount\b|\bcontracts?\b/.test(h));
       const idxValue = headers.findIndex(h => /\bvalue\b|\bnotional\b|\bposition\b/.test(h));
       const idxEntry = headers.findIndex(h => /entry|open price|avg/.test(h));
-      const idxMark = headers.findIndex(h => /mark|mid|oracle|index|last/.test(h));
-      const idxPnl = headers.findIndex(h => /pnl|u\.?pnl|profit/.test(h) && !/realized|\brpnl\b/.test(h));
+      const idxMark = headers.findIndex(h => /mark|mid|oracle|index|last|current/.test(h));
+      const idxPnl = headers.findIndex(h => (/pnl|u\.?pnl|profit|total\s*trade/.test(h)) && !/realized|\brpnl\b/.test(h));
       const idxTpSl = headers.findIndex(h => /tp\s*\/?\s*sl|take\s*profit|stop\s*loss/.test(h));
 
       for (const row of rows) {
+        if (row.querySelector('[data-slot="empty"]')) continue;
         const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
         if (cells.length < 3) continue;
         const cellTexts = cells.map(c => (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim());
         const rowText = cellTexts.join(' ');
-        if (/no\s+(open\s+)?positions/i.test(rowText)) continue;
+        if (/no\s+(open\s+)?positions|sign\s+in\s+to\s+see/i.test(rowText)) continue;
 
         // Exact Hypernova data-testid cells when present
         const symTextEl = row.querySelector('[data-testid="symbol-text"]');
@@ -4680,10 +4727,11 @@
         const rawSymStr = symTextEl
           ? (symTextEl.innerText || symTextEl.textContent || '').trim()
           : (cellTexts[idxSym] || cellTexts[0] || '');
-        const symMatch = rawSymStr.match(/([A-Z0-9]{2,12}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
+        const symMatch = rawSymStr.match(/([A-Z0-9]{2,14}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
         const symbol = symMatch ? normalizeHypernovaBaseSymbol(symMatch[1]) : '';
         if (!symbol) continue;
 
+        const sideText = idxSide >= 0 ? (cellTexts[idxSide] || '') : '';
         const entryText = entryTd ? (entryTd.innerText || entryTd.textContent || '').trim() : (idxEntry >= 0 ? cellTexts[idxEntry] : '');
         const markText = markTd ? (markTd.innerText || markTd.textContent || '').trim() : (idxMark >= 0 ? cellTexts[idxMark] : '');
         const sizeText = sizeTd ? (sizeTd.innerText || sizeTd.textContent || '').trim() : (idxSize >= 0 ? cellTexts[idxSize] : '');
@@ -4691,11 +4739,11 @@
         const pnlText = pnlTd ? (pnlTd.innerText || pnlTd.textContent || '').trim() : (idxPnl >= 0 ? cellTexts[idxPnl] : '');
         const tpSlText = tpSlEl ? (tpSlEl.innerText || tpSlEl.textContent || '').trim() : (idxTpSl >= 0 ? cellTexts[idxTpSl] : '');
 
-        // Detect side: Hypernova sets `trade-positions-row-short` / `trade-positions-row-long` on <tr>!
+        // Detect side across Hypernova (`row-short`), MFP (`Side` column), and Kalshi (`Yes`/`No`/`Long`/`Short`)
         const rowCls = String(row.className || '').toLowerCase();
         let side = null;
-        if (rowCls.includes('row-short') || /\bshort\b/i.test(rawSymStr) || /\bshort\b/i.test(rowText)) side = 'short';
-        else if (rowCls.includes('row-long') || /\blong\b/i.test(rawSymStr) || /\blong\b/i.test(rowText)) side = 'long';
+        if (rowCls.includes('row-short') || /\b(short|sell|no)\b/i.test(sideText) || /\bshort\b/i.test(rawSymStr) || /\bshort\b/i.test(rowText)) side = 'short';
+        else if (rowCls.includes('row-long') || /\b(long|buy|yes)\b/i.test(sideText) || /\blong\b/i.test(rawSymStr) || /\blong\b/i.test(rowText)) side = 'long';
 
         const entryPrice = Math.abs(parseHypernovaNumber(entryText));
         if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
@@ -4708,8 +4756,9 @@
           side = rawSizeNum < 0 ? 'short' : 'long';
         }
         if (!side) {
-          const coloredEl = cells[idxSym]?.querySelector('[class*="red"], [class*="rose"], [class*="short"], [class*="sell"], [class*="danger"]');
-          const greenEl = cells[idxSym]?.querySelector('[class*="green"], [class*="emerald"], [class*="long"], [class*="buy"]');
+          const checkCell = (idxSide >= 0 && cells[idxSide]) || cells[idxSym];
+          const coloredEl = checkCell?.querySelector('[class*="red"], [class*="rose"], [class*="short"], [class*="sell"], [class*="danger"], [class*="destructive"]');
+          const greenEl = checkCell?.querySelector('[class*="green"], [class*="emerald"], [class*="long"], [class*="buy"], [class*="success"]');
           if (coloredEl && !greenEl) side = 'short';
           else side = 'long';
         }
@@ -4728,11 +4777,12 @@
         }
 
         let unrealizedPnl = parseHypernovaNumber(pnlText);
-        if (Number.isFinite(unrealizedPnl) && pnlTd) {
-          const negTone = pnlTd.querySelector('[data-tone="negative"], .trade-positions-pnl-negative');
-          const posTone = pnlTd.querySelector('[data-tone="positive"], .trade-positions-pnl-positive');
-          if (negTone && unrealizedPnl > 0) unrealizedPnl = -Math.abs(unrealizedPnl);
-          else if (posTone && unrealizedPnl < 0) unrealizedPnl = Math.abs(unrealizedPnl);
+        const pnlCellEl = pnlTd || (idxPnl >= 0 ? cells[idxPnl] : null);
+        if (Number.isFinite(unrealizedPnl) && pnlCellEl) {
+          const negTone = pnlCellEl.querySelector('[data-tone="negative"], .trade-positions-pnl-negative, [class*="red"], [class*="rose"], [class*="destructive"]');
+          const posTone = pnlCellEl.querySelector('[data-tone="positive"], .trade-positions-pnl-positive, [class*="green"], [class*="emerald"], [class*="success"]');
+          if (negTone && !posTone && unrealizedPnl > 0) unrealizedPnl = -Math.abs(unrealizedPnl);
+          else if (posTone && !negTone && unrealizedPnl < 0) unrealizedPnl = Math.abs(unrealizedPnl);
         }
 
         let tpPrice = null;
@@ -4767,7 +4817,7 @@
   }
 
   function syncHypernovaPositionsToMainWorld(force = false) {
-    if (!isTopWindow || !isHypernovaHost()) return;
+    if (!isTopWindow || !isChartVisualsHost()) return;
     const positions = scrapeHypernovaOpenPositions();
     const sig = JSON.stringify(positions);
     if (!force && sig === lastHypernovaPositionsSig) return;
@@ -4783,38 +4833,50 @@
     const found = findHypernovaPositionsTableAndRows();
     if (!found || !found.rows.length) return null;
     const { headers, rows } = found;
-    const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument/.test(h)));
+    const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument|ticker/.test(h)));
+    const idxEntry = headers.findIndex(h => /entry|open price|avg/.test(h));
+    const idxMark = headers.findIndex(h => /mark|mid|oracle|index|last|current/.test(h));
     const idxTpSl = headers.findIndex(h => /tp\s*\/?\s*sl|take\s*profit|stop\s*loss/.test(h));
     for (const row of rows) {
+      if (row.querySelector('[data-slot="empty"]')) continue;
       const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
+      if (cells.length < 3) continue;
       const symTextEl = row.querySelector('[data-testid="symbol-text"]');
       const symText = symTextEl
         ? (symTextEl.innerText || symTextEl.textContent || '').trim()
         : (cells[idxSym] ? (cells[idxSym].innerText || cells[idxSym].textContent) : (row.innerText || '')).trim();
-      const m = symText.match(/([A-Z0-9]{2,12}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
+      const m = symText.match(/([A-Z0-9]{2,14}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
       const rowSym = m ? normalizeHypernovaBaseSymbol(m[1]) : '';
       if (!targetSym || rowSym === targetSym) {
-        const entryTd = row.querySelector('td[data-testid$="-entry"]');
-        const markTd = row.querySelector('td[data-testid$="-mark"]');
+        const entryTd = row.querySelector('td[data-testid$="-entry"]') || (idxEntry >= 0 ? cells[idxEntry] : null);
+        const markTd = row.querySelector('td[data-testid$="-mark"]') || (idxMark >= 0 ? cells[idxMark] : null);
         const entryText = entryTd ? (entryTd.innerText || entryTd.textContent || '') : '';
         const markText = markTd ? (markTd.innerText || markTd.textContent || '') : '';
         const priceDecimals = (entryText || markText)
           ? Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText))
           : null;
-        // Exact Hypernova clickable trigger is `<span class="trade-positions-tpsl-cell" data-testid="position-tpsl">`
+        // Exact Hypernova clickable trigger is `<span class="trade-positions-tpsl-cell" data-testid="position-tpsl">`;
+        // on My Funded Perps & Kalshi Pro, also match explicit TP/SL buttons or edit/pencil action buttons in the row
         // (NEVER click an <svg> child directly because SVGElement lacks `.click()`!)
+        const rowButtons = Array.from(row.querySelectorAll('button, [role="button"]'));
         const tpSlTrigger =
           row.querySelector('[data-testid="position-tpsl"]') ||
           row.querySelector('.trade-positions-tpsl-cell') ||
           (idxTpSl >= 0 && cells[idxTpSl]
             ? (cells[idxTpSl].querySelector('button, [role="button"], span') || cells[idxTpSl])
-            : null);
+            : null) ||
+          rowButtons.find(b => {
+            const t = `${b.innerText || b.textContent || ''} ${b.getAttribute('aria-label') || ''} ${b.getAttribute('title') || ''}`;
+            return /tp\s*\/?\s*sl|take\s*profit|stop\s*loss|edit.*tp|set\s*tp/i.test(t);
+          }) ||
+          rowButtons.find(b => Boolean(b.querySelector('svg.lucide-pencil, svg.lucide-pen, svg.lucide-edit, svg[class*="pencil" i], svg[class*="edit" i]'))) ||
+          null;
         const closeTrigger =
           row.querySelector('[data-testid="close-position-menu-trigger"]') ||
-          Array.from(row.querySelectorAll('button, [role="button"]')).find(b => {
+          rowButtons.find(b => {
             const t = (b.innerText || b.textContent || '').trim();
             const aria = (b.getAttribute('aria-label') || b.getAttribute('title') || '').trim();
-            return /^(market|close|market\s+close|×|x)$/i.test(t) || /close/i.test(aria);
+            return /^(market|close|market\s+close|exit|×|x)$/i.test(t) || /close|exit/i.test(aria);
           }) ||
           null;
         return { row, cells, headers, idxTpSl, tpSlTrigger, closeTrigger, priceDecimals };
@@ -4830,14 +4892,14 @@
       const r = exact.getBoundingClientRect();
       if (st !== 'closed' && r.width > 120 && r.height > 80) return exact;
     }
-    return Array.from(document.querySelectorAll('[role="dialog"], [class*="tpsl-modal" i], [class*="modal" i]')).find(d => {
+    return Array.from(document.querySelectorAll('[role="dialog"], [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="sheet-content"], [class*="tpsl-modal" i], [class*="modal" i]')).find(d => {
       if (d.id && d.id.startsWith('vest-')) return false;
       if (d.getAttribute('data-state') === 'closed') return false;
       const r = d.getBoundingClientRect();
-      if (r.width <= 180 || r.height <= 100) return false;
+      if (r.width <= 160 || r.height <= 90) return false;
       return Boolean(
-        d.querySelector('[data-testid="tpsl-tp-price-input"], [data-testid="tpsl-sl-price-input"], [data-testid="tpsl-confirm"]') ||
-        /tp\s*\/\s*sl/i.test(d.innerText || '')
+        d.querySelector('[data-testid="tpsl-tp-price-input"], [data-testid="tpsl-sl-price-input"], [data-testid="tpsl-confirm"], #take-profit-price, #stop-loss-price') ||
+        /tp\s*\/\s*sl|take\s*profit|stop\s*loss/i.test(d.innerText || '')
       );
     }) || null;
   }
@@ -4845,19 +4907,23 @@
   function findTpSlInputInRoot(root, kind) {
     if (!root) return null;
     const wantTp = kind === 'tp';
-    // Fast-path: Hypernova's exact `data-testid` price inputs inside `[data-testid="tpsl"]`
-    const exact = root.querySelector(wantTp ? '[data-testid="tpsl-tp-price-input"]' : '[data-testid="tpsl-sl-price-input"]');
+    // Fast-path: Hypernova exact `data-testid` inputs & My Funded Perps exact `#take-profit-price` / `#stop-loss-price` IDs
+    const exact = root.querySelector(
+      wantTp
+        ? '[data-testid="tpsl-tp-price-input"], #take-profit-price'
+        : '[data-testid="tpsl-sl-price-input"], #stop-loss-price'
+    );
     if (exact && !exact.disabled) return exact;
 
     const matchRe = wantTp ? /take\s*profit|\btp\b/i : /stop\s*loss|\bsl\b/i;
-    const excludeRe = wantTp ? /stop\s*loss|\bsl\b|gain|percent|%/i : /take\s*profit|\btp\b|loss|percent|%/i;
+    const excludeRe = wantTp ? /stop\s*loss|\bsl\b|gain|percent|roe|%/i : /take\s*profit|\btp\b|loss\s*%|gain|percent|roe|%/i;
     const inputs = Array.from(root.querySelectorAll('input[type="text"], input[type="number"], input:not([type])')).filter(inp => {
       const r = inp.getBoundingClientRect();
       return r.width > 20 && r.height > 12 && !inp.disabled;
     });
     for (const inp of inputs) {
       const attrs = `${inp.placeholder || ''} ${inp.name || ''} ${inp.id || ''} ${inp.getAttribute('aria-label') || ''} ${inp.getAttribute('data-testid') || ''}`;
-      if (matchRe.test(attrs) && !excludeRe.test(attrs)) return inp;
+      if (matchRe.test(attrs) && !excludeRe.test(attrs) && !/loss$/i.test(inp.id || '')) return inp;
       let parent = inp.parentElement;
       for (let up = 0; up < 3 && parent && parent !== root; up++) {
         const txt = (parent.innerText || parent.textContent || '').replace(/\s+/g, ' ').trim();
@@ -4885,6 +4951,7 @@
   async function submitHypernovaTpSlModalValue({ symbol, kind, valueStr, isBe = false, isClear = false, pnlStr = '' }) {
     if (hypernovaTpSlActionInFlight) return;
     hypernovaTpSlActionInFlight = true;
+    const venueLabel = getChartVisualsHostDisplayName();
     const notifyResult = (ok, extra = {}) => {
       postToMainWorlds({
         type: 'VEST_TV_HYPERNOVA_TP_SL_RESULT',
@@ -4900,7 +4967,7 @@
       let dialog = findHypernovaTpSlDialog();
       if (!dialog) {
         if (!rowInfo || !rowInfo.tpSlTrigger) {
-          showToast(`Could not locate open ${symbol || ''} position row on Hypernova`);
+          showToast(`Could not locate open ${symbol || ''} position TP/SL button on ${venueLabel}`);
           notifyResult(false, { reason: 'position_row_not_found' });
           return;
         }
@@ -4909,35 +4976,37 @@
       }
 
       if (!dialog) {
-        showToast(`Could not open Hypernova TP/SL dialog for ${symbol || 'position'}`);
+        showToast(`Could not open ${venueLabel} TP/SL dialog for ${symbol || 'position'}`);
         notifyResult(false, { reason: 'dialog_not_opened' });
         return;
       }
 
       const input = await waitForHypernovaCondition(() => findTpSlInputInRoot(dialog, kind), 1000, 40);
       if (!input) {
-        showToast(`Could not find ${kind.toUpperCase()} price input in Hypernova dialog`);
+        showToast(`Could not find ${kind.toUpperCase()} price input in ${venueLabel} dialog`);
         notifyResult(false, { reason: 'input_not_found' });
         return;
       }
 
       setReactNativeInputValue(input, formatted);
 
-      // Wait for React state & validation to enable `[data-testid="tpsl-confirm"]`
+      // Wait for React state & validation to enable the modal Confirm/Submit button
       const confirmBtn = await waitForHypernovaCondition(() => {
         const btn = dialog.querySelector('[data-testid="tpsl-confirm"]') ||
-          Array.from(dialog.querySelectorAll('button')).find(b => /^(confirm|save|update|apply|set|submit)/i.test((b.innerText || b.textContent || '').trim()));
+          Array.from(dialog.querySelectorAll('button')).find(b => /^(confirm|save|update|apply|set|submit|place)/i.test((b.innerText || b.textContent || '').trim()));
         return btn && !btn.disabled ? btn : null;
       }, 700, 40);
 
       if (!confirmBtn) {
         const errTxt = extractHypernovaDialogErrorText(dialog);
-        const cancelBtn = dialog.querySelector('[data-testid="tpsl-cancel"]') || dialog.querySelector('.dialog-close-btn');
+        const cancelBtn = dialog.querySelector('[data-testid="tpsl-cancel"]') ||
+          dialog.querySelector('.dialog-close-btn') ||
+          Array.from(dialog.querySelectorAll('button')).find(b => /^cancel$/i.test((b.innerText || b.textContent || '').trim()));
         if (cancelBtn) dispatchHypernovaClick(cancelBtn);
         showToast(
           errTxt
-            ? `Hypernova ${kind.toUpperCase()} rejected: ${errTxt}`
-            : `Hypernova rejected ${kind.toUpperCase()} at $${formatted} (must be on valid side of Mark Price)`
+            ? `${venueLabel} ${kind.toUpperCase()} rejected: ${errTxt}`
+            : `${venueLabel} rejected ${kind.toUpperCase()} at $${formatted} (must be on valid side of Mark Price)`
         );
         notifyResult(false, { reason: 'confirm_disabled', error: errTxt });
         return;
@@ -4945,7 +5014,7 @@
 
       dispatchHypernovaClick(confirmBtn);
 
-      // Wait for Hypernova to submit the order & close the dialog
+      // Wait for the exchange to submit the order & close the dialog
       const closed = await waitForHypernovaCondition(() => {
         const openDialog = findHypernovaTpSlDialog();
         return !openDialog;
@@ -4955,20 +5024,20 @@
         const errTxt = extractHypernovaDialogErrorText(dialog);
         showToast(
           errTxt
-            ? `Hypernova ${kind.toUpperCase()} error: ${errTxt}`
-            : `Hypernova TP/SL modal stayed open — verify order in dialog`
+            ? `${venueLabel} ${kind.toUpperCase()} error: ${errTxt}`
+            : `${venueLabel} TP/SL modal stayed open — verify order in dialog`
         );
         notifyResult(false, { reason: 'dialog_stayed_open', error: errTxt });
         return;
       }
 
       if (isClear) {
-        showToast(`Cleared Hypernova ${kind.toUpperCase()} order`);
+        showToast(`Cleared ${venueLabel} ${kind.toUpperCase()} order`);
       } else {
         showToast(
           isBe
-            ? `Hypernova Breakeven SL submitted ($${formatted})`
-            : `Hypernova ${kind.toUpperCase()} submitted at $${formatted}${pnlStr}`
+            ? `${venueLabel} Breakeven SL submitted ($${formatted})`
+            : `${venueLabel} ${kind.toUpperCase()} submitted at $${formatted}${pnlStr}`
         );
       }
 
@@ -5001,30 +5070,30 @@
 
   async function executeHypernovaClosePositionAction(payload) {
     const symbol = payload.symbol || '';
+    const venueLabel = getChartVisualsHostDisplayName();
     await ensureHypernovaPositionsTabActive();
     const rowInfo = findHypernovaPositionRowBySymbol(symbol);
     if (rowInfo && rowInfo.closeTrigger) {
       dispatchHypernovaClick(rowInfo.closeTrigger);
-      // Hypernova's `close-position-menu-trigger` is a Radix dropdown menu; wait briefly for its Market Close item
+      // Support Radix/Base UI Close dropdown menus (e.g. Hypernova's `close-position-menu-trigger`) -> Market Close
       const marketItem = await waitForHypernovaCondition(() => {
         const items = Array.from(document.querySelectorAll('[role="menuitem"], [data-slot="dropdown-menu-item"]'));
         return items.find(it => /market/i.test((it.innerText || it.textContent || '').trim())) || null;
       }, 600, 40);
       if (marketItem) {
         dispatchHypernovaClick(marketItem);
-        // If Hypernova shows a Close confirmation dialog, leave it visible or click confirm if unambiguous
-        showToast(`Triggered Market Close for ${symbol || 'active trade'}`);
+        showToast(`Triggered ${venueLabel} Market Close for ${symbol || 'active trade'}`);
       } else {
-        showToast(`Opened Close menu for ${symbol || 'active trade'}`);
+        showToast(`Triggered ${venueLabel} Close for ${symbol || 'active trade'}`);
       }
       setTimeout(() => syncHypernovaPositionsToMainWorld(true), 600);
       setTimeout(() => syncHypernovaPositionsToMainWorld(true), 1500);
       return;
     }
-    showToast(`Use Hypernova's Close button to exit ${symbol || 'position'}`);
+    showToast(`Use ${venueLabel}'s Close button to exit ${symbol || 'position'}`);
   }
 
-  if (isTopWindow && isHypernovaHost() && !hypernovaPositionsTimer) {
+  if (isTopWindow && isChartVisualsHost() && !hypernovaPositionsTimer) {
     hypernovaPositionsTimer = setInterval(() => {
       if (!isExtensionValid()) {
         clearInterval(hypernovaPositionsTimer);
@@ -6531,7 +6600,7 @@
           </div>
           <span class="vest-sdm-badge-pill ${latestDrawingToolbarVisible !== false ? 'on' : ''}" id="vest-sdm-drawing-toolbar-badge">${latestDrawingToolbarVisible !== false ? 'VISIBLE' : 'HIDDEN'}</span>
         </div>
-        ${isHypernovaHost() ? `
+        ${isChartVisualsHost() ? `
         <div class="vest-sdm-menu-item" id="vest-sdm-open-hypernova-visuals-btn" style="padding: 8px 10px; background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(15,23,42,0.55)); border: 1px solid rgba(56,189,248,0.35);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
@@ -6539,9 +6608,9 @@
               <path d="M2 17l10 5 10-5"></path>
               <path d="M2 12l10 5 10-5"></path>
             </svg>
-            <span style="font-weight:700; color:#e0f2fe;">Hypernova Chart Visuals...</span>
+            <span style="font-weight:700; color:#e0f2fe;">${escapeHtml(getChartVisualsHostDisplayName())} Chart Visuals...</span>
           </div>
-          <span class="vest-sdm-badge-pill ${(getActivePerpFirm()?.hypernovaVisuals?.enabled !== false) ? 'on' : ''}">${(getActivePerpFirm()?.hypernovaVisuals?.enabled !== false) ? 'ON' : 'OFF'}</span>
+          <span class="vest-sdm-badge-pill ${((getActivePerpFirm()?.chartVisuals || getActivePerpFirm()?.hypernovaVisuals)?.enabled !== false) ? 'on' : ''}">${((getActivePerpFirm()?.chartVisuals || getActivePerpFirm()?.hypernovaVisuals)?.enabled !== false) ? 'ON' : 'OFF'}</span>
         </div>
         ` : ''}
         <div class="vest-sdm-menu-item" id="vest-sdm-open-perpfirms-btn">
@@ -7310,20 +7379,22 @@
         const marginPx = firm.barMarginBottom ?? 8;
         const headerPx = firm.headerHeightPx ?? 48;
         const lev = firm.defaultLeverage || '10x';
-        const hnVis = firm.id === 'hypernova' ? normalizeHypernovaVisualsConfig(firm.hypernovaVisuals) : null;
+        const supportsChartVisuals = CHART_VISUALS_SUPPORTED_FIRM_IDS.includes(firm.id);
+        const hnVis = supportsChartVisuals ? normalizeHypernovaVisualsConfig(firm.chartVisuals || firm.hypernovaVisuals) : null;
+        const venueVisualsName = firm.name || 'Exchange';
         const hypernovaVisualsHtml = hnVis ? `
-            <!-- Hypernova Chart Visuals & Trade Controls -->
+            <!-- Chart Visuals & Trade Controls (${escapeHtml(venueVisualsName)}) -->
             <div class="vest-ed-section" style="padding:14px 16px; background:linear-gradient(145deg, rgba(14,165,233,0.08), rgba(15,23,42,0.55)); border:1px solid rgba(56,189,248,0.28); border-radius:10px; margin-bottom:12px;">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
                 <div>
                   <div style="font-size:11.5px; font-weight:800; color:#38bdf8; text-transform:uppercase; letter-spacing:0.65px;">
-                    Hypernova Chart Visuals &amp; Trade Controls
+                    ${escapeHtml(venueVisualsName)} Chart Visuals &amp; Trade Controls
                   </div>
                   <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
-                    Upgrades Hypernova's chart with a Long/Short position pill (BE / draggable TP / draggable SL / Close), green TP &amp; red SL dollar/price boxes, and a styled Current Price line.
+                    Upgrades ${escapeHtml(venueVisualsName)}'s chart with a Long/Short position pill (BE / draggable TP / draggable SL / Close), green TP &amp; red SL dollar/price boxes, and a styled Current Price line.
                   </div>
                 </div>
-                <label class="vest-tvs-switch" title="Master toggle for all Hypernova chart visuals">
+                <label class="vest-tvs-switch" title="Master toggle for all ${escapeHtml(venueVisualsName)} chart visuals">
                   <input type="checkbox" id="vest-pf-hn-enabled" ${hnVis.enabled ? 'checked' : ''} />
                   <span class="vest-tvs-switch-slider"></span>
                 </label>
@@ -7363,7 +7434,7 @@
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <div style="max-width:80%;">
                       <div style="font-size:12px; font-weight:600; color:#f8fafc;">Style Existing "Current Price" Line &amp; Label</div>
-                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Styles Hypernova's existing native current price line directly (color, style, thickness, opacity) and adds a customizable label.</div>
+                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Styles ${escapeHtml(venueVisualsName)}'s existing native current price line directly (color, style, thickness, opacity) and adds a customizable label.</div>
                     </div>
                     <label class="vest-tvs-switch">
                       <input type="checkbox" id="vest-pf-hn-price-line" ${hnVis.currentPriceLineEnabled ? 'checked' : ''} />
@@ -10034,10 +10105,10 @@
       if (enableTimeframesEl) firm.enableTimeframeFavorites = Boolean(enableTimeframesEl.checked);
       if (notesEl) firm.notes = notesEl.value.trim();
 
-      if (firm.id === 'hypernova') {
+      if (CHART_VISUALS_SUPPORTED_FIRM_IDS.includes(firm.id)) {
         const hnEn = overlay.querySelector('#vest-pf-hn-enabled');
         if (hnEn) {
-          const prevHn = normalizeHypernovaVisualsConfig(firm.hypernovaVisuals);
+          const prevHn = normalizeHypernovaVisualsConfig(firm.chartVisuals || firm.hypernovaVisuals);
           const hnPos = overlay.querySelector('#vest-pf-hn-pos-overlay');
           const hnTpSl = overlay.querySelector('#vest-pf-hn-tpsl-boxes');
           const hnBoxesFont = overlay.querySelector('#vest-pf-hn-boxes-font-size');
@@ -10051,7 +10122,7 @@
           const hnAlign = overlay.querySelector('#vest-pf-hn-price-align');
           const hnShowLabel = overlay.querySelector('#vest-pf-hn-price-show-label');
           const hnShowPrice = overlay.querySelector('#vest-pf-hn-price-show-price');
-          firm.hypernovaVisuals = normalizeHypernovaVisualsConfig({
+          const nextVisuals = normalizeHypernovaVisualsConfig({
             ...prevHn,
             enabled: Boolean(hnEn.checked),
             positionOverlayEnabled: hnPos ? Boolean(hnPos.checked) : prevHn.positionOverlayEnabled,
@@ -10068,6 +10139,10 @@
             currentPriceShowLabel: hnShowLabel ? Boolean(hnShowLabel.checked) : prevHn.currentPriceShowLabel,
             currentPriceShowPrice: hnShowPrice ? Boolean(hnShowPrice.checked) : prevHn.currentPriceShowPrice
           });
+          firm.chartVisuals = nextVisuals;
+          if (firm.id === 'hypernova') {
+            firm.hypernovaVisuals = { ...nextVisuals };
+          }
         }
       }
     }

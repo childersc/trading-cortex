@@ -1,3 +1,8 @@
+Trading Cortex v1.1.143 — Rolled Out Interactive Chart Visuals & Trade Controls to My Funded Perpetuals & Kalshi Pro
+
+- **Full Rollout to My Funded Perps & Kalshi Pro (`v1.1.143`)**: The 2-row **`LONG`/`SHORT` Position Entry Box** (`BE` / draggable `TP` / draggable `SL` / `×`), **Green TP & Red SL Dollar + Price Boxes**, direct native **"Current Price" Line styling + label**, and **live font size sliders** are now active (ON by default) across **My Funded Perpetuals**, **Kalshi Pro**, and **Hypernova**, with independent per-firm toggles in **Perp Firm Settings** and a quick **`<Venue> Chart Visuals...`** shortcut in the Cortex dropdown menu.
+- **Multi-Venue Table & TP/SL Modal Wiring (`v1.1.143`)**: Added My Funded Perps Base UI table/dialog selectors (`table[data-slot="table"]`, `Side` column, `#take-profit-price`, `#stop-loss-price`, `[data-slot="dialog-content"]`) and Kalshi Pro contract/side support alongside Hypernova's exact `data-testid` order submission.
+
 Trading Cortex v1.1.142 — Live Hypernova TP / SL / Breakeven & Close Order Submission
 
 - **Real Hypernova TP/SL & Breakeven Submission (`v1.1.142`)**: Fixed dragging **SL**, dragging **TP**, clicking **BE**, and clearing TP/SL so they now open Hypernova's exact `[data-testid="position-tpsl"]` modal, populate `tpsl-sl-price-input` / `tpsl-tp-price-input` with Hypernova's 5-sig-fig tick precision and React `_valueTracker` sync, click `tpsl-confirm`, and verify submission — automatically reverting the chart line with a toast if Hypernova rejects an invalid price (e.g. SL on the wrong side of Mark Price).

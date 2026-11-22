@@ -185,13 +185,38 @@ function extractBlock(src, startMarker, endMarker) {
   );
   assert.strictEqual(fmtCtx.getHypernovaDecimalPlaces('$62.632'), 3);
   assert.strictEqual(fmtCtx.getHypernovaDecimalPlaces('$60,648'), 0);
-  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37, 0), '60648');
-  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37), '60648');
-  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(62.6324, 3), '62.632');
-  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(3124.56, 1), '3124.6');
-  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(184.256, 2), '184.26');
-  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(0.084216, 5), '0.08422');
-  console.log('✓ Hypernova settings toggles, exact data-testid TP/SL modal submission, 5-sig-fig tick formatting & DOM bridge verified in content-isolated.js');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37, 0, 'hypernova'), '60648');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37, null, 'hypernova'), '60648');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(62.6324, 3, 'hypernova'), '62.632');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(3124.56, 1, 'hypernova'), '3124.6');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(184.256, 2, 'hypernova'), '184.26');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(0.084216, 5, 'hypernova'), '0.08422');
+  // My Funded Perps & Kalshi Pro respect exact displayed row precision
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37, 2, 'myfundedperpetuals'), '60648.37');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(0.642, 2, 'kalshipro'), '0.64');
+
+  // Verify rollout to Hypernova, My Funded Perpetuals, and Kalshi Pro (with Vest Markets excluded)
+  assert.strictEqual(isolatedSrc.includes("const CHART_VISUALS_SUPPORTED_FIRM_IDS = ['hypernova', 'myfundedperpetuals', 'kalshipro'];"), true);
+  assert.strictEqual(isolatedSrc.includes('#take-profit-price'), true);
+  assert.strictEqual(isolatedSrc.includes('#stop-loss-price'), true);
+  assert.strictEqual(isolatedSrc.includes('isChartVisualsHost()'), true);
+
+  // Test getChartVisualsMainWorldFirmId across all 4 venues
+  const hostFnBlock = extractBlock(
+    mainSrc,
+    'function getChartVisualsMainWorldFirmId()',
+    'function isHypernovaMainWorldHost()'
+  );
+  const runHostCheck = (hostname) => {
+    const c = { window: { top: { location: { hostname } }, location: { hostname, href: `https://${hostname}/trade` } } };
+    vm.runInNewContext(`${hostFnBlock}\nthis.res = getChartVisualsMainWorldFirmId();`, c);
+    return c.res;
+  };
+  assert.strictEqual(runHostCheck('app.hypernova.xyz'), 'hypernova');
+  assert.strictEqual(runHostCheck('myfundedperpetuals.com'), 'myfundedperpetuals');
+  assert.strictEqual(runHostCheck('pro.kalshi.com'), 'kalshipro');
+  assert.strictEqual(runHostCheck('next.vestmarkets.com'), null, 'Vest Markets should remain excluded');
+  console.log('✓ Multi-venue Chart Visuals rollout (Hypernova, My Funded Perps, Kalshi Pro), exact data-testid/Base UI TP/SL submission & tick formatting verified');
 }
 
 // 4. Test native TradingView Current Price line styling helpers (modifies existing native line, no duplicate)

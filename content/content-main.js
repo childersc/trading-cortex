@@ -7625,20 +7625,30 @@
   let originalHypernovaNativePriceLine = null;
   let lastAppliedHypernovaPriceLineSig = '';
 
+  function getChartVisualsMainWorldFirmId() {
+    const checkStr = (s) => {
+      const low = String(s || '').toLowerCase();
+      if (!low) return null;
+      if (low.includes('hypernova')) return 'hypernova';
+      if (low.includes('myfundedperpetuals') || low.includes('myfundedperps')) return 'myfundedperpetuals';
+      if (low.includes('kalshi')) return 'kalshipro';
+      return null;
+    };
+    try {
+      const topMatch = checkStr(window.top && window.top.location && window.top.location.hostname);
+      if (topMatch) return topMatch;
+    } catch (e) {}
+    try {
+      const selfHostMatch = checkStr(window.location && window.location.hostname);
+      if (selfHostMatch) return selfHostMatch;
+      const selfHrefMatch = checkStr(window.location && window.location.href);
+      if (selfHrefMatch) return selfHrefMatch;
+    } catch (e) {}
+    return null;
+  }
+
   function isHypernovaMainWorldHost() {
-    try {
-      const topHost = window.top && window.top.location && window.top.location.hostname
-        ? String(window.top.location.hostname).toLowerCase()
-        : '';
-      if (topHost.includes('hypernova')) return true;
-    } catch (e) {}
-    try {
-      const selfHost = window.location && window.location.hostname
-        ? String(window.location.hostname).toLowerCase()
-        : '';
-      if (selfHost.includes('hypernova')) return true;
-    } catch (e) {}
-    return false;
+    return Boolean(getChartVisualsMainWorldFirmId());
   }
 
   function getHypernovaVisualsConfig() {
@@ -7658,14 +7668,20 @@
       currentPriceShowPrice: true,
       currentPriceLabelAlign: 'right'
     };
-    const firms = currentSettings && Array.isArray(currentSettings.perpFirms) ? currentSettings.perpFirms : [];
-    const hnFirm = firms.find(f => f && f.id === 'hypernova');
-    if (hnFirm && hnFirm.enabled === false) {
+    const firmId = getChartVisualsMainWorldFirmId();
+    if (!firmId) {
       return { ...defaults, enabled: false };
     }
-    const raw = (hnFirm && hnFirm.hypernovaVisuals && typeof hnFirm.hypernovaVisuals === 'object')
-      ? hnFirm.hypernovaVisuals
-      : {};
+    const firms = currentSettings && Array.isArray(currentSettings.perpFirms) ? currentSettings.perpFirms : [];
+    const matchedFirm = firms.find(f => f && f.id === firmId);
+    if (matchedFirm && matchedFirm.enabled === false) {
+      return { ...defaults, enabled: false };
+    }
+    const raw = (matchedFirm && matchedFirm.chartVisuals && typeof matchedFirm.chartVisuals === 'object')
+      ? matchedFirm.chartVisuals
+      : ((matchedFirm && matchedFirm.hypernovaVisuals && typeof matchedFirm.hypernovaVisuals === 'object')
+        ? matchedFirm.hypernovaVisuals
+        : {});
     const style = ['solid', 'dashed', 'dotted'].includes(raw.currentPriceStyle) ? raw.currentPriceStyle : defaults.currentPriceStyle;
     const align = ['left', 'center', 'right'].includes(raw.currentPriceLabelAlign) ? raw.currentPriceLabelAlign : defaults.currentPriceLabelAlign;
     const rawColor = typeof raw.currentPriceColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(raw.currentPriceColor.trim())
@@ -8104,10 +8120,18 @@
             nativeCloseFn
           };
         } else if (isOrdSource) {
+          const nativeCancelFn = () => {
+            try {
+              if (typeof src.callCancelCallback === 'function') { src.callCancelCallback(); return true; }
+              if (src._cancelCallback && typeof src._cancelCallback === 'function') { src._cancelCallback(); return true; }
+              if (src._onCancel && typeof src._onCancel === 'function') { src._onCancel(); return true; }
+            } catch (e) {}
+            return false;
+          };
           if (/\btp\b|take\s*profit/i.test(lower)) {
-            result.tpLine = { price, src };
+            result.tpLine = { price, src, nativeCancelFn };
           } else if (/\bsl\b|stop\s*loss|stop/i.test(lower)) {
-            result.slLine = { price, src };
+            result.slLine = { price, src, nativeCancelFn };
           }
         }
       }
@@ -8184,7 +8208,9 @@
       unrealizedPnl,
       tpPrice: Number.isFinite(Number(tpPrice)) && Number(tpPrice) > 0 ? Number(tpPrice) : null,
       slPrice: Number.isFinite(Number(slPrice)) && Number(slPrice) > 0 ? Number(slPrice) : null,
-      nativeCloseFn: nativeLines.position ? nativeLines.position.nativeCloseFn : null
+      nativeCloseFn: nativeLines.position ? nativeLines.position.nativeCloseFn : null,
+      tpNativeCancelFn: nativeLines.tpLine ? nativeLines.tpLine.nativeCancelFn : null,
+      slNativeCancelFn: nativeLines.slLine ? nativeLines.slLine.nativeCancelFn : null
     };
   }
 
@@ -8824,12 +8850,16 @@
             entryPrice: pos.entryPrice,
             ...(isTp ? { tpPrice: null, tpSetAt: Date.now() } : { slPrice: null, slSetAt: Date.now() })
           };
-          try {
-            window.top.postMessage({
-              type: 'VEST_TV_HYPERNOVA_CLEAR_TP_SL',
-              payload: { symbol: pos.symbol, type: kind }
-            }, '*');
-          } catch (err) {}
+          const nativeCancel = isTp ? pos.tpNativeCancelFn : pos.slNativeCancelFn;
+          const cancelledNative = typeof nativeCancel === 'function' ? nativeCancel() : false;
+          if (!cancelledNative) {
+            try {
+              window.top.postMessage({
+                type: 'VEST_TV_HYPERNOVA_CLEAR_TP_SL',
+                payload: { symbol: pos.symbol, type: kind }
+              }, '*');
+            } catch (err) {}
+          }
           scheduleIctSessionsRender(false);
         };
       }

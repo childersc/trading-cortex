@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.142`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.143`) are documented in this file.
+
+---
+
+## [v1.1.143] — 2026-11-22
+
+### 🌐 Rolled Out Interactive Chart Visuals & Trade Controls to My Funded Perpetuals & Kalshi Pro
+- **Per-Firm Rollout (`Hypernova`, `My Funded Perpetuals`, `Kalshi Pro`)**:
+  - Enabled the full Chart Visuals & Trade Controls suite (**ON by default**, with independent per-firm toggles and styling) across **My Funded Perpetuals** (`myfundedperpetuals.com`) and **Kalshi Pro** (`pro.kalshi.com` / `kalshi.com`) alongside **Hypernova** (`app.hypernova.xyz`), while keeping Vest Markets untouched.
+  - Each supported firm now has its own **Chart Visuals & Trade Controls** panel inside **Perp Firm Settings** plus a 1-click **`<Venue> Chart Visuals...`** shortcut inside the Cortex dropdown menu.
+  - Includes the 2-row **`LONG`/`SHORT` Position Entry Box** (`BE` / draggable `TP` / draggable `SL` / `×` close + qty, PnL, entry price), glowing **Green TP & Red SL Dollar + Price Boxes**, direct styling of TradingView's **existing native Current Price line** with customizable **`"Current Price"` label**, and live **font size sliders** for both the label and trade boxes.
+- **Multi-Venue Positions Scraper & Order Submission (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Extended position scraping to parse My Funded Perpetuals's Base UI table (`table[data-slot="table"]`, dedicated `Side` column, `Total trade` PnL column, `[data-slot="empty"]` filtering) and Kalshi Pro (`Contract`/`Ticker`, `Yes`/`No` or `Long`/`Short` sides), alongside Hypernova's exact `data-testid` rows.
+  - Extended TP/SL modal detection and input matching to support Base UI dialogs/popovers/sheets (`[data-slot="dialog-content"]`, `[data-slot="popover-content"]`), MFP input IDs (`#take-profit-price`, `#stop-loss-price`), row edit/pencil action buttons, venue-specific price tick precision, and native TradingView TP/SL order-line cancel callbacks.
 
 ---
 
