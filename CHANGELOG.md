@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.135`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.136`) are documented in this file.
+
+---
+
+## [v1.1.136] — 2026-11-21
+
+### 📊 Fixed Blown-Up Candles & Locked Price Scale When Switching Timeframes
+- **Root cause (`content/content-main.js`)**:
+  1. `applyViewportStateToChart()` replayed historical `setVisibleRange({ from, to })` timestamps and locked `setAutoScale(false)` + stale `setVisiblePriceRange()` when switching timeframes — squeezing a narrow lower-timeframe timestamp window & price range onto higher timeframes (e.g. `5m` → `1h`), blowing candles up into giant bars shooting off the top and bottom of the chart.
+  2. Pending `chartSettingsCaptureDebounceTimer` saves from the *previous* timeframe could fire right after `activeChart.resolution()` flipped, polluting the new timeframe's saved viewport with the old timeframe's scale.
+  3. Delayed restore timers (`100ms` / `480ms` / `750ms`) were not cancelled when the user scrolled, dragged, or resized.
+- **Fix**:
+  - Removed stale `setVisibleRange()` and locked `setVisiblePriceRange()` replays from `applyViewportStateToChart()`; restores only sane clamped `barSpacing` (`4–24px`) and `rightOffset` (`2–25`) while keeping Auto-Scale (`setAutoScale(true)`) active across timeframe switches so candles always frame cleanly.
+  - Cancels pending viewport saves immediately on interval switch with a `1400ms` cross-timeframe contamination guard (`intervalSwitchSaveBlockUntil`).
+  - Added `viewportRestoreGeneration` cancellation in `markLocalChartInteraction()` so touching, scrolling, or resizing the chart instantly aborts any pending restore pass.
 
 ---
 

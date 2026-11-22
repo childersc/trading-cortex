@@ -1,3 +1,7 @@
+Trading Cortex v1.1.136 — Fixed Blown-Up Candles & Clipped Price Scale on Timeframe Switch
+
+- **Clean Timeframe Switching (`v1.1.136`)**: Stopped replaying stale `setVisibleRange` timestamps and locked `priceRange` across timeframe switches (which blew `1h` candles up into giant bars shooting off top/bottom of the chart), cancelled cross-timeframe save pollution during interval switches, enforced Auto-Scale on timeframe switch, and aborted delayed restore timers the instant you interact with or resize the chart.
+
 Trading Cortex v1.1.135 — Floating, Draggable Cortex Pill (Top-Middle of Viewport)
 
 - **Floating, Draggable Cortex Pill (`v1.1.135`)**: The **Cortex** pill now floats cleanly at the **top-middle of the viewport** (`top: 10px`) across Vest, My Funded Perps, Hypernova, and Kalshi — drag anywhere to move (saved per exchange), or double-click the 6-dot grip on the left to snap back to top-middle.

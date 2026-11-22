@@ -6379,8 +6379,11 @@
   let chartMemoryTabId = '';
   let chartMemoryTabFocused = false;
   let lastLocalChartInteractionAt = 0;
+  let viewportRestoreGeneration = 0;
+  let intervalSwitchSaveBlockUntil = 0;
   function markLocalChartInteraction() {
     lastLocalChartInteractionAt = Date.now();
+    viewportRestoreGeneration++;
   }
   function getCurrentChartHostKey() {
     try {
@@ -6516,6 +6519,7 @@
 
   function scheduleSaveCurrentChartSettings(delayMs = 280) {
     if (isRestoringChartSettings || isResettingChartView) return;
+    if (Date.now() < intervalSwitchSaveBlockUntil) return;
     if (currentSettings.rememberLastChartSettings === false) return;
     if (!chartMemoryTabFocused && !hasLiveWindowFocus()) return;
     if (chartSettingsCaptureDebounceTimer) {
@@ -6717,57 +6721,48 @@
     return Object.keys(viewport).length > 0 ? viewport : null;
   }
 
-  function applyViewportStateToChart(viewport) {
+  function applyViewportStateToChart(viewport, options = {}) {
     if (!viewport || !activeChart) return;
+    const expectedGen = typeof options.generation === 'number' ? options.generation : viewportRestoreGeneration;
+    const forceAutoScale = options.forceAutoScale === true;
 
     const model = getInternalChartModel();
     const tsApi = typeof activeChart.getTimeScale === 'function' ? activeChart.getTimeScale() : null;
     const internalTs = model && typeof model.timeScale === 'function' ? model.timeScale() : null;
 
-    // 1. Restore Horizontal Position & Zoom (Visible Range + Bar Spacing + Right Offset)
+    // 1. Restore ONLY sane horizontal zoom (barSpacing) & live-edge rightOffset.
+    // NEVER replay historical setVisibleRange({ from, to }) timestamps across sessions/timeframes —
+    // squeezing a narrow or stale timestamp window onto a higher timeframe (e.g. 5m -> 1h) blows
+    // candles up into giant bars and breaks the time axis!
     const applyHorizontal = () => {
+      if (viewportRestoreGeneration !== expectedGen) return;
       try {
-        if (
-          viewport.visibleRange &&
-          typeof viewport.visibleRange.from === 'number' &&
-          typeof viewport.visibleRange.to === 'number' &&
-          typeof activeChart.setVisibleRange === 'function'
-        ) {
-          Promise.resolve(
-            activeChart.setVisibleRange({
-              from: viewport.visibleRange.from,
-              to: viewport.visibleRange.to
-            })
-          ).catch(() => {});
+        if (typeof viewport.barSpacing === 'number' && isFinite(viewport.barSpacing) && viewport.barSpacing >= 2 && viewport.barSpacing <= 40) {
+          const clampedSpacing = Math.max(4, Math.min(24, viewport.barSpacing));
+          if (tsApi && typeof tsApi.setBarSpacing === 'function') {
+            tsApi.setBarSpacing(clampedSpacing);
+          } else if (internalTs && typeof internalTs.setBarSpacing === 'function') {
+            internalTs.setBarSpacing(clampedSpacing);
+          }
         }
       } catch (e) {}
 
-      // Fine-tune exact barSpacing (zoom level) and rightOffset (left/right pan offset from latest bar)
-      setTimeout(() => {
-        try {
-          if (typeof viewport.barSpacing === 'number' && viewport.barSpacing > 0) {
-            if (tsApi && typeof tsApi.setBarSpacing === 'function') {
-              tsApi.setBarSpacing(viewport.barSpacing);
-            } else if (internalTs && typeof internalTs.setBarSpacing === 'function') {
-              internalTs.setBarSpacing(viewport.barSpacing);
-            }
+      try {
+        if (typeof viewport.rightOffset === 'number' && isFinite(viewport.rightOffset) && viewport.rightOffset >= -2 && viewport.rightOffset <= 30) {
+          const clampedOffset = Math.max(2, Math.min(25, viewport.rightOffset));
+          if (tsApi && typeof tsApi.setRightOffset === 'function') {
+            tsApi.setRightOffset(clampedOffset);
+          } else if (internalTs && typeof internalTs.setRightOffset === 'function') {
+            internalTs.setRightOffset(clampedOffset);
           }
-        } catch (e) {}
-
-        try {
-          if (typeof viewport.rightOffset === 'number' && isFinite(viewport.rightOffset)) {
-            if (tsApi && typeof tsApi.setRightOffset === 'function') {
-              tsApi.setRightOffset(viewport.rightOffset);
-            } else if (internalTs && typeof internalTs.setRightOffset === 'function') {
-              internalTs.setRightOffset(viewport.rightOffset);
-            }
-          }
-        } catch (e) {}
-      }, 80);
+        }
+      } catch (e) {}
     };
 
-    // 2. Restore Vertical Price Scale Position & Zoom (Up/Down pan & vertical zoom)
+    // 2. Restore Vertical Price Scale mode — NEVER force a stale locked priceRange on timeframe switch
+    // (which locks the Y-axis to a narrow lower-TF range and makes HTF candles shoot off top & bottom!).
     const applyVertical = () => {
+      if (viewportRestoreGeneration !== expectedGen) return;
       const psApi = getPrimaryPriceScaleApi();
       if (psApi) {
         try {
@@ -6783,25 +6778,26 @@
         } catch (e) {}
 
         try {
-          if (viewport.isAutoScale === false && viewport.priceRange) {
+          if (forceAutoScale || viewport.isAutoScale !== false) {
             if (typeof psApi.setAutoScale === 'function') {
-              psApi.setAutoScale(false);
+              psApi.setAutoScale(true);
             }
-            if (typeof psApi.setVisiblePriceRange === 'function') {
-              psApi.setVisiblePriceRange({
-                from: viewport.priceRange.from,
-                to: viewport.priceRange.to
-              });
-            }
-          } else if (viewport.isAutoScale === true && typeof psApi.setAutoScale === 'function') {
-            psApi.setAutoScale(true);
+          }
+        } catch (e) {}
+      }
+      if (model && (forceAutoScale || viewport.isAutoScale !== false)) {
+        try {
+          const ms = typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+          const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+          if (internalPs && typeof internalPs.setAutoScale === 'function') {
+            internalPs.setAutoScale(true);
           }
         } catch (e) {}
       }
     };
 
     applyHorizontal();
-    setTimeout(applyVertical, 120);
+    setTimeout(applyVertical, 100);
   }
 
   function collectTvChartLocalStorage() {
@@ -6855,39 +6851,49 @@
     lastHandledIntervalKey = chartKey;
     lastHandledIntervalTime = now;
 
+    // Immediately cancel any pending save from the PREVIOUS timeframe so 5m's scale/zoom
+    // can never get written under the NEW timeframe's key (e.g. 1h) while bars are still streaming!
+    if (chartSettingsCaptureDebounceTimer) {
+      clearTimeout(chartSettingsCaptureDebounceTimer);
+      chartSettingsCaptureDebounceTimer = null;
+    }
+    intervalSwitchSaveBlockUntil = now + 1400;
+
     log(`Chart interval changed to ${resolution} for ${symbol} (${chartKey})`);
+
+    // Always enable autoScale on timeframe switch so higher/lower timeframe candles frame cleanly
+    // instead of getting clipped off the top & bottom by a stale locked price range!
+    try {
+      const psApi = getPrimaryPriceScaleApi();
+      if (psApi && typeof psApi.setAutoScale === 'function') {
+        psApi.setAutoScale(true);
+      }
+      const model = getInternalChartModel();
+      const ms = model && typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+      const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+      if (internalPs && typeof internalPs.setAutoScale === 'function') {
+        internalPs.setAutoScale(true);
+      }
+    } catch (e) {}
 
     // Pull last known focused chart settings for this specific symbol + resolution
     const saved = currentSettings && currentSettings.lastChartSettings;
     const savedState = (saved && saved.viewportsByChart && saved.viewportsByChart[chartKey])
       || (lastKnownChartConfigs.has(chartKey) ? lastKnownChartConfigs.get(chartKey) : null);
 
+    const switchGen = viewportRestoreGeneration;
     if (savedState && (savedState.viewport || savedState.barSpacing)) {
       const vp = savedState.viewport || savedState;
-      log(`Restoring last known focused chart settings for ${chartKey}:`, vp);
+      log(`Restoring sanitized zoom/offset for ${chartKey}:`, vp);
       isRestoringChartSettings = true;
       chartViewportAppliedAt.set(chartKey, Number(savedState.updatedAt) || now);
 
       setTimeout(() => {
-        applyViewportStateToChart(vp);
-      }, 100);
-
-      setTimeout(() => {
-        applyViewportStateToChart(vp);
+        if (viewportRestoreGeneration === switchGen) {
+          applyViewportStateToChart(vp, { generation: switchGen, forceAutoScale: true });
+        }
         isRestoringChartSettings = false;
-        // This chart has adopted the last known settings for this resolution.
-        // If focused, it becomes the author for this timeframe.
-        if (chartMemoryTabFocused) {
-          scheduleSaveCurrentChartSettings(350);
-        }
-      }, 480);
-    } else {
-      // First time viewing this interval or no prior saved viewport
-      setTimeout(() => {
-        if (chartMemoryTabFocused) {
-          scheduleSaveCurrentChartSettings(300);
-        }
-      }, 500);
+      }, 160);
     }
   }
 
@@ -6991,6 +6997,7 @@
 
   function saveCurrentChartSettings(allowBlurred = false) {
     if (isRestoringChartSettings) return;
+    if (Date.now() < intervalSwitchSaveBlockUntil) return;
     if (currentSettings.rememberLastChartSettings === false) return;
     if (!allowBlurred && !chartMemoryTabFocused && !hasLiveWindowFocus()) return;
 
@@ -7219,13 +7226,12 @@
       if (targetViewport) {
         const context = getActiveChartMemoryContext();
         if (context) chartViewportAppliedAt.set(context.key, Number(savedChartState.updatedAt) || 0);
+        const restoreGen = viewportRestoreGeneration;
         setTimeout(() => {
+          if (viewportRestoreGeneration !== restoreGen) return;
           log('Restoring chart viewport position & zoom for', context && context.key, targetViewport);
-          applyViewportStateToChart(targetViewport);
+          applyViewportStateToChart(targetViewport, { generation: restoreGen, forceAutoScale: true });
         }, 180);
-        setTimeout(() => {
-          applyViewportStateToChart(targetViewport);
-        }, 750);
       }
     } catch (err) {
       log('Error restoring last chart settings:', err);
