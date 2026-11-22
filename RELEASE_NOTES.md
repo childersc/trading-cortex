@@ -1,3 +1,11 @@
+Trading Cortex v1.1.139 — Permanently Fixed Chart Self-Resizing / Scale Snap-Back
+
+- **Fixed All 4 Self-Resizing Root Causes (`v1.1.139`)**:
+  1. Stopped the 1.5s maintenance loop from falsely triggering `handleInstrumentOrChartSwitch` when TradingView's `activeChart()` returns a new wrapper object (which was slamming `setAutoScale(true)` every 1.5s).
+  2. Fixed `getLiveInstrument()` reading the live ticking price (`"59,501.4"`) from My Funded Perps's tab title as a symbol switch on every price tick.
+  3. Restricted `setAutoScale(true)` to genuine symbol switches (`BTC` → `ETH`) only, ignoring formatting aliases (`BTC` vs `BTC-USD`).
+  4. Stopped hijacking TradingView's internal `model.resetScroll()` and `resetPriceScale` calls.
+
 Trading Cortex v1.1.138 — Instant Drop Settling for Draggable Cortex Pill
 
 - **Zero Snap-Back Flash on Drop (`v1.1.138`)**: Commits and persists the pill's dropped coordinates immediately before releasing the drag state and shields against stale in-flight storage echoes for 3 seconds so releasing the **Cortex** pill stays locked right where you drop it.

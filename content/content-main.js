@@ -7501,7 +7501,7 @@
         activeChart.__trading_cortex_exec_hooked = true;
         const origExec = activeChart.executeActionById.bind(activeChart);
         activeChart.executeActionById = function(actionId, ...args) {
-          if (actionId === 'chartReset' || actionId === 'resetPriceScale' || actionId === 'timeScaleReset') {
+          if (actionId === 'chartReset') {
             cortexDebugLog(`executeActionById('${actionId}') intercepted`);
             const res = origExec(actionId, ...args);
             handleResetChartViewTrigger(`executeActionById_${actionId}`);
@@ -7512,22 +7512,9 @@
       }
     } catch (e) {}
 
-    try {
-      const model = getInternalChartModel();
-      if (model && typeof model.resetScroll === 'function' && !model.__trading_cortex_reset_hooked) {
-        model.__trading_cortex_reset_hooked = true;
-        const origResetScroll = model.resetScroll.bind(model);
-        model.resetScroll = function(...args) {
-          if (isResettingChartView || isRestoringChartSettings) {
-            return origResetScroll(...args);
-          }
-          cortexDebugLog('model.resetScroll() intercepted');
-          const res = origResetScroll(...args);
-          handleResetChartViewTrigger('model_resetScroll');
-          return res;
-        };
-      }
-    } catch (e) {}
+    // NOTE: Do NOT intercept internal model.resetScroll() calls — TradingView invokes
+    // model.resetScroll() internally during layout/resize operations, and hijacking it
+    // replays applyLastKnownChartConfiguration() and snaps user zoom/resize back!
   }
 
   // ICT Session Indicators ("Killzones") Canvas Overlay Engine
@@ -14987,29 +14974,36 @@
     lastPriceAxisBadgesHtml = '';
     ictSessionsNeedsFullRecompute = true;
 
-    // 3. Ensure the new symbol's price scale is in autoScale mode if the user hasn't explicitly locked this symbol/interval's price range
-    try {
-      const currentSym = getCurrentChartSymbolKey();
-      const currentRes = typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : '';
-      const chartKey = currentSym && currentRes ? `${String(currentSym).toUpperCase()}|${String(currentRes).toUpperCase()}` : null;
-      const saved = currentSettings && currentSettings.lastChartSettings;
-      const hasExplicitLockedRange = Boolean(
-        (chartKey && saved && saved.viewportsByChart && saved.viewportsByChart[chartKey] && saved.viewportsByChart[chartKey].isAutoScale === false) ||
-        (currentSym && saved && saved.viewportsBySymbol && saved.viewportsBySymbol[currentSym] && saved.viewportsBySymbol[currentSym].isAutoScale === false)
-      );
-      if (!hasExplicitLockedRange) {
-        const psApi = getPrimaryPriceScaleApi();
-        if (psApi && typeof psApi.setAutoScale === 'function') {
-          psApi.setAutoScale(true);
+    // 3. ONLY reset vertical price scale to autoScale on an ACTUAL symbol switch (e.g. BTC -> ETH)
+    // so the new asset doesn't inherit the previous asset's price range.
+    // NEVER force setAutoScale(true) on active_chart_replaced / chart_api_replaced / interval_changed!
+    const isGenuineSymbolChange =
+      reason === 'onSymbolChanged' ||
+      String(reason || '').startsWith('instrument_poll:');
+    if (isGenuineSymbolChange) {
+      try {
+        const currentSym = getCurrentChartSymbolKey();
+        const currentRes = typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : '';
+        const chartKey = currentSym && currentRes ? `${String(currentSym).toUpperCase()}|${String(currentRes).toUpperCase()}` : null;
+        const saved = currentSettings && currentSettings.lastChartSettings;
+        const hasExplicitLockedRange = Boolean(
+          (chartKey && saved && saved.viewportsByChart && saved.viewportsByChart[chartKey] && saved.viewportsByChart[chartKey].isAutoScale === false) ||
+          (currentSym && saved && saved.viewportsBySymbol && saved.viewportsBySymbol[currentSym] && saved.viewportsBySymbol[currentSym].isAutoScale === false)
+        );
+        if (!hasExplicitLockedRange) {
+          const psApi = getPrimaryPriceScaleApi();
+          if (psApi && typeof psApi.setAutoScale === 'function') {
+            psApi.setAutoScale(true);
+          }
+          const model = findChartModelForSessions();
+          const ms = model ? findMainSeriesFromModel(model) : null;
+          const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+          if (internalPs && typeof internalPs.setAutoScale === 'function') {
+            internalPs.setAutoScale(true);
+          }
         }
-        const model = findChartModelForSessions();
-        const ms = model ? findMainSeriesFromModel(model) : null;
-        const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
-        if (internalPs && typeof internalPs.setAutoScale === 'function') {
-          internalPs.setAutoScale(true);
-        }
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
 
     // 4. Re-bind listeners on any newly mounted iframe, activeChart, model, series, or priceScale
     setupContextMenuHandler();
@@ -15355,6 +15349,7 @@
     } catch (e) {}
 
     // 2. Query top-level DOM or market selector header
+    const isPriceLikeText = (str) => /^[+\-$€£¥]?\s*\d[\d,.\s]*%?$/.test(String(str || '').trim());
     try {
       const doc = window.top === window ? document : (window.top ? window.top.document : document);
       // Look for market header button / dropdown text
@@ -15363,22 +15358,38 @@
       );
       if (marketSelector) {
         const txt = (marketSelector.innerText || marketSelector.textContent || '').trim().split('\n')[0].trim();
-        if (txt && txt.length < 25 && !txt.includes('Order')) return txt;
+        if (txt && txt.length < 25 && !txt.includes('Order') && !isPriceLikeText(txt)) return txt;
       }
 
       // Look for ticker elements or standard heading
       const tickerEl = doc.querySelector('h1, h2, [class*="ticker"], [class*="Ticker"]');
       if (tickerEl) {
         const tText = (tickerEl.innerText || tickerEl.textContent || '').trim().split('\n')[0].trim();
-        if (tText && (tText.includes('-USD') || tText.includes('-PERP') || tText.includes('BTC') || tText.includes('ETH') || tText.includes('NQ') || tText.includes('ES'))) {
+        if (tText && !isPriceLikeText(tText) && (tText.includes('-USD') || tText.includes('-PERP') || tText.includes('BTC') || tText.includes('ETH') || tText.includes('NQ') || tText.includes('ES'))) {
           return tText;
         }
       }
 
-      // Fallback: Check document.title e.g. "BTC-USD | Vest Markets"
+      // Fallback: Check URL path (e.g. /trade/BTC or /trade/NVDA-USD-PERP) before title
+      try {
+        const topPath = (window.top && window.top.location && window.top.location.pathname) || window.location.pathname || '';
+        const mPath = topPath.match(/\/trade\/([A-Za-z0-9._-]{2,24})/i);
+        if (mPath && mPath[1] && !isPriceLikeText(mPath[1])) {
+          return mPath[1].toUpperCase();
+        }
+      } catch (e) {}
+
+      // Fallback: Check document.title e.g. "59,501.4 | BTC Perpetual Futures | MyFundedPerps"
+      // Strictly skip numeric price segments so ticking prices NEVER trigger false instrument switches!
       if (doc.title && doc.title.includes('|')) {
-        const titlePart = doc.title.split('|')[0].trim();
-        if (titlePart && titlePart.length < 20) return titlePart;
+        const parts = doc.title.split('|').map(p => p.trim()).filter(Boolean);
+        for (const part of parts) {
+          if (isPriceLikeText(part)) continue;
+          const symMatch = part.match(/^([A-Z0-9]{2,12}(?:[-/_][A-Z0-9]{2,8})?)/i);
+          if (symMatch && symMatch[1] && !isPriceLikeText(symMatch[1]) && !/^(vest|myfunded|hypernova|kalshi|trade|perp)/i.test(symMatch[1])) {
+            return symMatch[1].toUpperCase();
+          }
+        }
       }
     } catch (e) {}
 
@@ -15438,13 +15449,22 @@
 
     const timestamp = new Date().toTimeString().split(' ')[0] + '.' + String(Date.now() % 1000).padStart(3, '0');
 
-    // Detect Instrument Change
+    // Detect Instrument Change (ignore formatting aliases of the same asset like BTC vs BTC-USD)
     if (currentInst && currentInst !== lastTrackedInstrument) {
       const prevInst = lastTrackedInstrument;
       lastTrackedInstrument = currentInst;
 
+      const normBaseAsset = (raw) => String(raw || '')
+        .toUpperCase()
+        .replace(/^.*:/, '')
+        .replace(/[-/_]?(PERP|USD|USDT|USDC)$/i, '')
+        .replace(/[-/_]?(PERP|USD|USDT|USDC)$/i, '')
+        .replace(/[^A-Z0-9]/g, '');
+      const prevBase = normBaseAsset(prevInst);
+      const currBase = normBaseAsset(currentInst);
+
       log(`[INSTRUMENT CHANGED] from "${prevInst}" to "${currentInst}"`);
-      if (prevInst) {
+      if (prevInst && prevBase && currBase && prevBase !== currBase) {
         handleInstrumentOrChartSwitch(`instrument_poll:${prevInst}->${currentInst}`);
       } else {
         scheduleIctSessionsRender(true);
@@ -16180,8 +16200,20 @@
         } else if (activeChartApi && typeof activeChartApi.activeChart === 'function') {
           const liveAc = activeChartApi.activeChart();
           if (liveAc && liveAc !== activeChart) {
+            // TradingView's activeChart() often returns a fresh API wrapper around the SAME underlying
+            // chart widget/model on every call! Compare underlying widget/model identity before treating
+            // it as a replaced chart — otherwise we falsely fire handleInstrumentOrChartSwitch every 1.5s!
+            const prevWidget = activeChart && (activeChart._chartWidget || activeChart._model || null);
+            const nextWidget = liveAc._chartWidget || liveAc._model || null;
+            const prevSym = (activeChart && typeof activeChart.symbol === 'function') ? String(activeChart.symbol() || '') : '';
+            const nextSym = (typeof liveAc.symbol === 'function') ? String(liveAc.symbol() || '') : '';
             activeChart = liveAc;
-            handleInstrumentOrChartSwitch('active_chart_replaced');
+            const isActuallyNewChart =
+              (prevWidget && nextWidget && prevWidget !== nextWidget) ||
+              (prevSym && nextSym && prevSym !== nextSym);
+            if (isActuallyNewChart) {
+              handleInstrumentOrChartSwitch('active_chart_replaced');
+            }
           }
         }
       } catch (e) {}

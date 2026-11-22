@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.138`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.139`) are documented in this file.
+
+---
+
+## [v1.1.139] — 2026-11-21
+
+### 🛠️ Fixed Chart Auto-Resizing / Snapping Back Every 1.5s & On Every Price Tick
+- **Root causes identified via full scale/zoom audit of `content/content-main.js`**:
+  1. **`activeChartApi.activeChart() !== activeChart` every 1.5 seconds**: TradingView's `activeChart()` returns a fresh API wrapper object on every call, causing our 1500ms maintenance interval to falsely fire `handleInstrumentOrChartSwitch('active_chart_replaced')` every 1.5 seconds — which repeatedly called `psApi.setAutoScale(true)` and `internalPs.setAutoScale(true)`, snapping your manual chart resize right back!
+  2. **Ticking price in `document.title` treated as an instrument switch on My Funded Perps**: `getLiveInstrument()` fell back to `doc.title.split('|')[0]` — which on My Funded Perps is the live ticking price (`"59,501.4 | BTC Perpetual Futures | MyFundedPerps"`), firing `handleInstrumentOrChartSwitch()` and `setAutoScale(true)` on every price tick!
+  3. **Internal `model.resetScroll()` & `resetPriceScale` hijacking**: Stopped intercepting TradingView's internal `model.resetScroll()` and `resetPriceScale`/`timeScaleReset` calls so they no longer replay `applyLastKnownChartConfiguration()` (4x passes overwriting `barSpacing`, `rightOffset`, and `autoScale`).
+- **Fixes**:
+  - Compares underlying chart widget/model & symbol identity in the 1.5s maintenance poll instead of wrapper object identity.
+  - Rejects numeric/price strings in `getLiveInstrument()`, reads `/trade/<SYMBOL>` from the URL path first, scans non-price `doc.title` segments, and normalizes base assets (`BTC` vs `BTC-USD`) so formatting aliases never trigger false switches.
+  - Only resets `autoScale` in `handleInstrumentOrChartSwitch()` on a genuine symbol switch (e.g., `BTC` → `ETH`), never on wrapper refreshes or same-symbol ticks.
 
 ---
 
