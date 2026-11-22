@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.132`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.133`) are documented in this file.
+
+---
+
+## [v1.1.133] — 2026-11-21
+
+### 📐 Fixed Chart Snapping Back on Resize + Same-Iframe Overlay Clearance
+- **Stopped `ensureCortexTopBar()` from overwriting `react-resizable-panels` splitter sizing**: Removed the per-second `chartBottomMount.afterEl.style.flex = '1 1 auto'` overwrite on managed/resizable containers and prevented `findChartBottomDockMountPoint()` from walking past `[data-panel]` or mounting inside `[data-panel-group]` splitter groups (which caused dragged chart heights to snap back to default every 1 second).
+- **Fixed recursive `model.resetScroll()` interceptor & iframe focus tracking (`content/content-main.js`)**: Guarded `model.resetScroll` against re-entering `handleResetChartViewTrigger` during resets/restores, armed the 15s local interaction shield on top-window resize/pointer drags, and checked `hasLiveWindowFocus()` when saving chart viewport adjustments so newly mounted iframes immediately persist your custom zoom/scale.
+- **Same-iframe overlay clearance (`dockStudioPillNextToMarketSelector`)**: Extended `targetDoc.elementFromPoint()` to offset `margin-left` past floating `position: fixed`/`absolute` overlays (like `TradeUnison`) even when those overlays are injected inside the chart `<iframe>` rather than the top document.
 
 ---
 

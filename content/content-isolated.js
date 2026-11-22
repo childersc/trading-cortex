@@ -4519,11 +4519,40 @@
       // Walk up wrapper divs (up to 7 levels) until targetEl is IN-FLOW (never position:absolute/fixed,
       // which would cause a relative bottom dock sibling to stack at y=0 covering the top of the chart!)
       // and lives inside a flex-column (or vertical block) container.
+      // CRITICAL: Never walk past a resizable panel ([data-panel]) or mount into a splitter group
+      // ([data-panel-group] / sibling [role="separator"]), otherwise the splitter snaps the chart back!
+      const isResizablePanelEl = (el) => {
+        if (!el || typeof el.hasAttribute !== 'function') return false;
+        return (
+          el.hasAttribute('data-panel') ||
+          el.hasAttribute('data-panel-id') ||
+          el.hasAttribute('data-panel-size')
+        );
+      };
+      const isResizableGroupEl = (el) => {
+        if (!el || typeof el.hasAttribute !== 'function') return false;
+        if (el.hasAttribute('data-panel-group') || el.hasAttribute('data-panel-group-id')) return true;
+        try {
+          return Array.from(el.children || []).some(c =>
+            c && typeof c.hasAttribute === 'function' && (
+              c.hasAttribute('data-panel-resize-handle-id') ||
+              c.hasAttribute('data-resize-handle') ||
+              c.getAttribute('role') === 'separator'
+            )
+          );
+        } catch (e) {
+          return false;
+        }
+      };
+
       let targetEl = chartEl;
       let depth = 0;
       let fallbackInFlow = null;
       while (targetEl.parentElement && targetEl.parentElement !== document.body && depth < 7) {
         const parent = targetEl.parentElement;
+        if (isResizablePanelEl(targetEl) || isResizableGroupEl(parent)) {
+          break;
+        }
         const tStyle = window.getComputedStyle(targetEl);
         const pStyle = window.getComputedStyle(parent);
         const isOutOfFlow = tStyle && (tStyle.position === 'absolute' || tStyle.position === 'fixed');
@@ -4553,10 +4582,13 @@
         depth++;
       }
       if (fallbackInFlow) return fallbackInFlow;
-      if (targetEl.parentElement && targetEl.parentElement !== document.body) {
+      if (targetEl.parentElement && targetEl.parentElement !== document.body && !isResizableGroupEl(targetEl.parentElement)) {
         return { parent: targetEl.parentElement, afterEl: targetEl, chartEl };
       }
-      return { parent: chartEl.parentElement, afterEl: chartEl, chartEl };
+      if (chartEl.parentElement && !isResizableGroupEl(chartEl.parentElement)) {
+        return { parent: chartEl.parentElement, afterEl: chartEl, chartEl };
+      }
+      return null;
     } catch (e) {}
     return null;
   }
@@ -4632,8 +4664,26 @@
             chartBottomMount.parent.style.display = 'flex';
             chartBottomMount.parent.style.flexDirection = 'column';
           }
-          chartBottomMount.afterEl.style.flex = '1 1 auto';
-          chartBottomMount.afterEl.style.minHeight = '0px';
+          // NEVER overwrite style.flex on site containers / react-resizable-panels ([data-panel]),
+          // which snaps the user's dragged chart splitter back to default! Only size raw unstyled iframes.
+          const afterEl = chartBottomMount.afterEl;
+          const isManagedPanel = Boolean(
+            afterEl.hasAttribute('data-panel') ||
+            afterEl.hasAttribute('data-panel-id') ||
+            afterEl.hasAttribute('data-panel-size') ||
+            afterEl.style.flex ||
+            afterEl.style.flexGrow ||
+            afterEl.style.height
+          );
+          if (!isManagedPanel && afterEl.tagName === 'IFRAME') {
+            afterEl.style.flex = '1 1 0%';
+            afterEl.style.minHeight = '0px';
+          } else if (!isManagedPanel) {
+            const aStyle = window.getComputedStyle(afterEl);
+            if (aStyle && aStyle.minHeight === 'auto') {
+              afterEl.style.minHeight = '0px';
+            }
+          }
         } catch (e) {}
       } else {
         bar.style.display = 'none';
@@ -5391,20 +5441,54 @@
       try {
         slot.style.setProperty('margin-left', '4px', 'important');
         if (typeof targetDoc.elementFromPoint === 'function') {
-          for (let hop = 0; hop < 3; hop++) {
+          for (let hop = 0; hop < 4; hop++) {
+            const sr = slot.getBoundingClientRect();
             const pr = pill.getBoundingClientRect();
             if (pr.width < 20 || pr.height < 12) break;
-            const hit = targetDoc.elementFromPoint(pr.left + pr.width / 2, pr.top + pr.height / 2);
-            if (!hit || slot.contains(hit) || hit === slot) break;
+            const probeXs = [pr.left + 12, pr.left + pr.width / 2, pr.right - 12];
+            const probeY = pr.top + pr.height / 2;
+            let hit = null;
+            for (let p = 0; p < probeXs.length; p++) {
+              const cand = targetDoc.elementFromPoint(probeXs[p], probeY);
+              if (cand && cand !== slot && !slot.contains(cand)) {
+                hit = cand;
+                break;
+              }
+            }
+            if (!hit) break;
             let covSib = hit;
             while (covSib && covSib.parentElement && covSib.parentElement !== tvAnchor.parent) {
               covSib = covSib.parentElement;
             }
             if (covSib && covSib.parentElement === tvAnchor.parent && covSib !== slot) {
               tvAnchor.parent.insertBefore(slot, covSib.nextSibling);
-            } else {
-              break;
+              continue;
             }
+            // Otherwise, hit is an out-of-flow overlay inside targetDoc (e.g. TradeUnison mounted in iframe body/header):
+            // walk up to the full overlay bar and offset slot via margin-left past its right edge!
+            let overlayEl = hit;
+            let up = 0;
+            const docW = (targetDoc.defaultView && targetDoc.defaultView.innerWidth) || 1200;
+            while (overlayEl.parentElement && overlayEl.parentElement !== targetDoc.body && up < 8) {
+              const parentR = overlayEl.parentElement.getBoundingClientRect();
+              if (parentR.height > 0 && parentR.height <= 64 && parentR.width < docW * 0.75 && !overlayEl.parentElement.contains(slot)) {
+                overlayEl = overlayEl.parentElement;
+                up++;
+              } else {
+                break;
+              }
+            }
+            const ovRect = overlayEl.getBoundingClientRect();
+            if (ovRect.height > 0 && ovRect.height <= 64 && ovRect.right > sr.left - 2) {
+              const curMargin = parseFloat(slot.style.marginLeft) || 4;
+              const delta = Math.ceil(ovRect.right - sr.left + 8);
+              const nextMargin = curMargin + delta;
+              if (nextMargin <= Math.max(600, docW * 0.65)) {
+                slot.style.setProperty('margin-left', `${nextMargin}px`, 'important');
+                continue;
+              }
+            }
+            break;
           }
         }
 

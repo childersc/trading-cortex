@@ -1,3 +1,8 @@
+Trading Cortex v1.1.133 — Fixed Chart Resize Snap-Back & Same-Iframe Overlay Clearance
+
+- **Fixed Chart Resize Snap-Back (`v1.1.133`)**: Stopped the 1-second bottom-dock heartbeat from overwriting `style.flex` on `react-resizable-panels` (`[data-panel]`) splitters, kept the bottom dock strictly inside the chart panel, fixed recursive `model.resetScroll()` re-triggering, and checked live top-window focus so newly mounted iframes immediately save your zoom/scale adjustments.
+- **Same-Iframe Overlay Clearance (`v1.1.133`)**: Extended Cortex pill occlusion clearance to handle overlays mounted either in the top document OR inside the TradingView chart iframe.
+
 Trading Cortex v1.1.132 — Top-Document Overlay Clearance (TradeUnison) on Vest & My Funded Perps
 
 - **Exact Same Bar as `Indicators` & `TradeUnison` (`v1.1.132`)**: Mounts `| CORTEX |` on TradingView's `Indicators` toolbar row on both **Vest** and **My Funded Perps**, and automatically detects floating top-document overlays (like `TradeUnison`) via `document.elementFromPoint()` to slide cleanly right past them with zero overlap (while sitting immediately after `Indicators` when no overlay is present).

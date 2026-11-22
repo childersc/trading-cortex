@@ -6408,6 +6408,11 @@
   }
   try {
     window.addEventListener('resize', markLocalChartInteraction, { capture: true, passive: true });
+    if (window.top && window.top !== window) {
+      window.top.addEventListener('resize', markLocalChartInteraction, { capture: true, passive: true });
+      window.top.addEventListener('pointerdown', markLocalChartInteraction, { capture: true, passive: true });
+      window.top.addEventListener('pointerup', markLocalChartInteraction, { capture: true, passive: true });
+    }
   } catch (e) {}
   try {
     chartMemoryTabId = window.__TRADING_CORTEX_CHART_MEMORY_TAB_ID__ ||
@@ -6512,7 +6517,7 @@
   function scheduleSaveCurrentChartSettings(delayMs = 280) {
     if (isRestoringChartSettings || isResettingChartView) return;
     if (currentSettings.rememberLastChartSettings === false) return;
-    if (!chartMemoryTabFocused) return;
+    if (!chartMemoryTabFocused && !hasLiveWindowFocus()) return;
     if (chartSettingsCaptureDebounceTimer) {
       clearTimeout(chartSettingsCaptureDebounceTimer);
     }
@@ -6987,7 +6992,7 @@
   function saveCurrentChartSettings(allowBlurred = false) {
     if (isRestoringChartSettings) return;
     if (currentSettings.rememberLastChartSettings === false) return;
-    if (!allowBlurred && !chartMemoryTabFocused) return;
+    if (!allowBlurred && !chartMemoryTabFocused && !hasLiveWindowFocus()) return;
 
     const prev = currentSettings.lastChartSettings || {};
     let resolution = prev.resolution || null;
@@ -7507,6 +7512,9 @@
         model.__trading_cortex_reset_hooked = true;
         const origResetScroll = model.resetScroll.bind(model);
         model.resetScroll = function(...args) {
+          if (isResettingChartView || isRestoringChartSettings) {
+            return origResetScroll(...args);
+          }
           cortexDebugLog('model.resetScroll() intercepted');
           const res = origResetScroll(...args);
           handleResetChartViewTrigger('model_resetScroll');
