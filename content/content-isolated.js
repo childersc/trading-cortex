@@ -11257,7 +11257,12 @@ if (activeTab === 'diagnostics') {
     let startX = barRect.left + 16;
 
     const studioPill = document.getElementById('vest-studio-header-pill') || document.getElementById('vest-studio-pill-btn');
-    if (studioPill && studioPill.isConnected && !studioPill.classList.contains('vest-studio-pill-tv-toolbar')) {
+    if (
+      studioPill &&
+      studioPill.isConnected &&
+      !studioPill.classList.contains('vest-studio-pill-tv-toolbar') &&
+      !studioPill.classList.contains('vest-studio-pill-floating')
+    ) {
       const r = studioPill.getBoundingClientRect();
       if (r.right > startX) startX = r.right;
     }

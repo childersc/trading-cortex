@@ -1,3 +1,7 @@
+Trading Cortex v1.1.134 — Floating, Draggable Cortex Pill (Top-Middle of Viewport)
+
+- **Floating, Draggable Cortex Pill (`v1.1.134`)**: Moved the **Cortex** pill to a clean floating, draggable pill aligned **top-middle of the viewport** by default — works identically across Vest, My Funded Perps, Hypernova, and Kalshi with zero toolbar overlap. Drag anywhere to reposition (saved per exchange), or double-click the left drag grip to snap back to top-middle.
+
 Trading Cortex v1.1.133 — Fixed Chart Resize Snap-Back & Same-Iframe Overlay Clearance
 
 - **Fixed Chart Resize Snap-Back (`v1.1.133`)**: Stopped the 1-second bottom-dock heartbeat from overwriting `style.flex` on `react-resizable-panels` (`[data-panel]`) splitters, kept the bottom dock strictly inside the chart panel, fixed recursive `model.resetScroll()` re-triggering, and checked live top-window focus so newly mounted iframes immediately save your zoom/scale adjustments.

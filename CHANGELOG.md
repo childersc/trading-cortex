@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.133`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.134`) are documented in this file.
+
+---
+
+## [v1.1.134] — 2026-11-21
+
+### ✨ Floating, Draggable Cortex Pill (Aligned Top-Middle of Viewport)
+- Converted the **Cortex** pill (`#vest-studio-header-pill`) into a sleek **floating, draggable pill** mounted directly on `document.body` (`position: fixed`, `z-index: 2147483640`) so it stays 100% visible on every exchange (Vest, My Funded Perps, Hypernova, Kalshi) with zero toolbar conflicts or third-party overlay occlusion (`TradeUnison`, `TV`/`Vela`).
+- **Top-Middle Default Alignment**: Automatically centers horizontally at the top-middle of the viewport (`top: 10px`) and stays centered on window resize until dragged.
+- **Smooth Drag + Per-Venue Memory + Double-Click Re-Center**: Includes a subtle 6-dot drag grip (`⋮⋮`), `5px` click-vs-drag threshold (clicking still opens the Cortex menu cleanly), per-exchange saved position (`settings.studioPillPosByHost`), viewport clamping on resize, and double-clicking the drag grip snaps it right back to top-middle.
+- **Bottom Minimized Windows Dock Preserved**: Minimized windows continue docking cleanly at the exact bottom of the chart viewport (hiding completely when 0 windows are minimized).
 
 ---
 
