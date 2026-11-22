@@ -7603,6 +7603,8 @@
   let activeHypernovaDrag = null; // { kind: 'tp' | 'sl', symbol, side, entryPrice, sizeQty, previewPrice }
   let latestHypernovaYToPriceFn = null;
   let latestHypernovaPaneRect = null;
+  let originalHypernovaNativePriceLine = null;
+  let lastAppliedHypernovaPriceLineSig = '';
 
   function isHypernovaMainWorldHost() {
     try {
@@ -7625,12 +7627,14 @@
       enabled: true,
       positionOverlayEnabled: true,
       tpSlBoxesEnabled: true,
+      tradeBoxesFontSize: 11,
       currentPriceLineEnabled: true,
       currentPriceColor: '#38bdf8',
       currentPriceStyle: 'dashed',
       currentPriceWidth: 1.5,
       currentPriceOpacity: 85,
       currentPriceText: 'Current Price',
+      currentPriceFontSize: 11,
       currentPriceShowLabel: true,
       currentPriceShowPrice: true,
       currentPriceLabelAlign: 'right'
@@ -7650,20 +7654,275 @@
       : defaults.currentPriceColor;
     const w = Number(raw.currentPriceWidth);
     const op = Number(raw.currentPriceOpacity);
+    const priceFont = Number(raw.currentPriceFontSize);
+    const boxesFont = Number(raw.tradeBoxesFontSize);
     return {
       enabled: raw.enabled !== false,
       positionOverlayEnabled: raw.positionOverlayEnabled !== false,
       tpSlBoxesEnabled: raw.tpSlBoxesEnabled !== false,
+      tradeBoxesFontSize: Number.isFinite(boxesFont) ? Math.max(8, Math.min(18, Math.round(boxesFont))) : defaults.tradeBoxesFontSize,
       currentPriceLineEnabled: raw.currentPriceLineEnabled !== false,
       currentPriceColor: rawColor,
       currentPriceStyle: style,
       currentPriceWidth: Number.isFinite(w) ? Math.max(1, Math.min(4, w)) : defaults.currentPriceWidth,
       currentPriceOpacity: Number.isFinite(op) ? Math.max(15, Math.min(100, op)) : defaults.currentPriceOpacity,
       currentPriceText: typeof raw.currentPriceText === 'string' ? raw.currentPriceText : defaults.currentPriceText,
+      currentPriceFontSize: Number.isFinite(priceFont) ? Math.max(8, Math.min(22, Math.round(priceFont))) : defaults.currentPriceFontSize,
       currentPriceShowLabel: raw.currentPriceShowLabel !== false,
       currentPriceShowPrice: raw.currentPriceShowPrice !== false,
       currentPriceLabelAlign: align
     };
+  }
+
+  function hypernovaHexToRgba(hex, opacityPct) {
+    const clean = String(hex || '#38bdf8').replace('#', '').trim();
+    const full = clean.length === 3
+      ? clean.split('').map(c => c + c).join('')
+      : clean.padEnd(6, '0').slice(0, 6);
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    const a = Math.max(0.15, Math.min(1, (Number(opacityPct) || 85) / 100));
+    if (![r, g, b].every(Number.isFinite)) return String(hex || '#38bdf8');
+    if (a >= 0.995) return `#${full}`;
+    return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
+  }
+
+  function hypernovaStyleToTvLineStyle(style) {
+    if (style === 'solid') return 0;
+    if (style === 'dotted') return 1;
+    return 2; // dashed
+  }
+
+  function applyHypernovaStyleToPriceLineRenderer(rendererObj, rgbaColor, width, tvLineStyle) {
+    if (!rendererObj || typeof rendererObj !== 'object') return false;
+    let patched = false;
+    const patchData = (data) => {
+      if (!data || typeof data !== 'object') return false;
+      const looksLikeLineData =
+        ('y' in data) &&
+        (('linestyle' in data) || ('lineStyle' in data) || ('linewidth' in data) || ('lineWidth' in data));
+      if (!looksLikeLineData) return false;
+      if ('color' in data) data.color = rgbaColor;
+      if ('linewidth' in data) data.linewidth = width;
+      else if ('lineWidth' in data) data.lineWidth = width;
+      if ('linestyle' in data) data.linestyle = tvLineStyle;
+      else if ('lineStyle' in data) data.lineStyle = tvLineStyle;
+      return true;
+    };
+    if (patchData(rendererObj._data)) patched = true;
+    if (Array.isArray(rendererObj._renderers)) {
+      for (const sub of rendererObj._renderers) {
+        if (sub && patchData(sub._data)) patched = true;
+      }
+    }
+    return patched;
+  }
+
+  function findNativeSeriesPriceLinePaneViews(mainSeries, currentPriceY) {
+    const matched = [];
+    if (!mainSeries) return matched;
+    const seen = new Set();
+    const addUnique = (v) => {
+      if (v && typeof v === 'object' && !seen.has(v)) {
+        seen.add(v);
+        matched.push(v);
+      }
+    };
+    if (mainSeries._priceLineView) {
+      addUnique(mainSeries._priceLineView);
+    }
+    try {
+      const pvs = typeof mainSeries.paneViews === 'function'
+        ? mainSeries.paneViews()
+        : (Array.isArray(mainSeries._paneViews) ? mainSeries._paneViews : []);
+      if (Array.isArray(pvs)) {
+        for (const pv of pvs) {
+          if (!pv || seen.has(pv)) continue;
+          const ctor = String((pv.constructor && pv.constructor.name) || '');
+          if (/highlow|avg|prepost|prev|previous|countdown|animation/i.test(ctor)) continue;
+          if (/priceline/i.test(ctor)) {
+            addUnique(pv);
+            continue;
+          }
+          // Fallback for minified TradingView builds where constructor names are mangled:
+          // identify the horizontal line pane view whose line Y sits on the live current price!
+          const candidates = [];
+          if (pv._lineRendererData) candidates.push(pv._lineRendererData);
+          if (pv._renderer && pv._renderer._data) candidates.push(pv._renderer._data);
+          if (pv._lineRenderer && pv._lineRenderer._data) candidates.push(pv._lineRenderer._data);
+          if (candidates.length === 0 && typeof pv.renderer === 'function') {
+            try {
+              const probed = pv.renderer();
+              if (probed && probed._data) candidates.push(probed._data);
+              if (probed && Array.isArray(probed._renderers)) {
+                for (const sub of probed._renderers) {
+                  if (sub && sub._data) candidates.push(sub._data);
+                }
+              }
+            } catch (err) {}
+          }
+          const matchesLivePrice = candidates.some(d =>
+            d &&
+            typeof d === 'object' &&
+            typeof d.y === 'number' &&
+            (('linestyle' in d) || ('lineStyle' in d) || ('linewidth' in d) || ('lineWidth' in d)) &&
+            Number.isFinite(currentPriceY) &&
+            Math.abs(d.y - currentPriceY) <= 4
+          );
+          if (matchesLivePrice) {
+            addUnique(pv);
+          }
+        }
+      }
+    } catch (e) {}
+    return matched;
+  }
+
+  function hookNativeSeriesPriceLinePaneView(view) {
+    if (!view || view.__cortexHnPriceLineWrapped || typeof view.renderer !== 'function') return;
+    const origRenderer = view.renderer.bind(view);
+    view.__cortexHnPriceLineWrapped = true;
+    view.renderer = function (...args) {
+      const r = origRenderer(...args);
+      try {
+        if (isHypernovaMainWorldHost()) {
+          const cfg = getHypernovaVisualsConfig();
+          if (cfg.enabled && cfg.currentPriceLineEnabled) {
+            const rgba = hypernovaHexToRgba(cfg.currentPriceColor, cfg.currentPriceOpacity);
+            const tvStyle = hypernovaStyleToTvLineStyle(cfg.currentPriceStyle);
+            const width = cfg.currentPriceWidth;
+            if (view._lineRendererData && typeof view._lineRendererData === 'object') {
+              view._lineRendererData.color = rgba;
+              if ('linewidth' in view._lineRendererData) view._lineRendererData.linewidth = width;
+              else if ('lineWidth' in view._lineRendererData) view._lineRendererData.lineWidth = width;
+              if ('linestyle' in view._lineRendererData) view._lineRendererData.linestyle = tvStyle;
+              else if ('lineStyle' in view._lineRendererData) view._lineRendererData.lineStyle = tvStyle;
+            }
+            applyHypernovaStyleToPriceLineRenderer(r, rgba, width, tvStyle);
+          }
+        }
+      } catch (e) {}
+      return r;
+    };
+  }
+
+  function restoreHypernovaNativeCurrentPriceLine(model, mainSeries) {
+    if (!lastAppliedHypernovaPriceLineSig) return;
+    lastAppliedHypernovaPriceLineSig = '';
+    try {
+      const series = mainSeries || (model && typeof model.mainSeries === 'function' ? model.mainSeries() : null);
+      const orig = originalHypernovaNativePriceLine || {
+        showPriceLine: true,
+        priceLineColor: '',
+        priceLineWidth: 1,
+        priceLineStyle: null
+      };
+      if (series && typeof series.properties === 'function') {
+        const ch = series.properties() && series.properties().childs ? series.properties().childs() : null;
+        if (ch) {
+          if (ch.showPriceLine && typeof ch.showPriceLine.setValue === 'function') ch.showPriceLine.setValue(orig.showPriceLine);
+          if (ch.priceLineColor && typeof ch.priceLineColor.setValue === 'function') ch.priceLineColor.setValue(orig.priceLineColor);
+          if (ch.priceLineWidth && typeof ch.priceLineWidth.setValue === 'function') ch.priceLineWidth.setValue(orig.priceLineWidth);
+          if (orig.priceLineStyle !== null && ch.priceLineStyle && typeof ch.priceLineStyle.setValue === 'function') {
+            ch.priceLineStyle.setValue(orig.priceLineStyle);
+          }
+        }
+      }
+      const overrides = {
+        'mainSeriesProperties.showPriceLine': orig.showPriceLine,
+        'mainSeriesProperties.priceLineColor': orig.priceLineColor,
+        'mainSeriesProperties.priceLineWidth': orig.priceLineWidth
+      };
+      if (orig.priceLineStyle !== null) overrides['mainSeriesProperties.priceLineStyle'] = orig.priceLineStyle;
+      if (activeWidget && typeof activeWidget.applyOverrides === 'function') {
+        try { activeWidget.applyOverrides(overrides); } catch (e) {}
+      } else if (activeChartApi && typeof activeChartApi.applyOverrides === 'function') {
+        try { activeChartApi.applyOverrides(overrides); } catch (e) {}
+      }
+      if (model) {
+        if (typeof model.updateAllViews === 'function') model.updateAllViews();
+        if (typeof model.lightUpdate === 'function') model.lightUpdate();
+      }
+    } catch (e) {}
+  }
+
+  function syncHypernovaNativeCurrentPriceLine(model, mainSeries, hnCfg, currentPriceY) {
+    const series = mainSeries || (model && typeof model.mainSeries === 'function' ? model.mainSeries() : null);
+    if (!hnCfg || !hnCfg.enabled || !hnCfg.currentPriceLineEnabled) {
+      restoreHypernovaNativeCurrentPriceLine(model, series);
+      return;
+    }
+    if (!series) return;
+
+    const rgbaColor = hypernovaHexToRgba(hnCfg.currentPriceColor, hnCfg.currentPriceOpacity);
+    const tvLineStyle = hypernovaStyleToTvLineStyle(hnCfg.currentPriceStyle);
+    const lineWidth = hnCfg.currentPriceWidth;
+
+    // Hook TradingView's native SeriesPriceLinePaneView so solid/dashed/dotted, width, and color apply directly to the existing line
+    const priceLineViews = findNativeSeriesPriceLinePaneViews(series, currentPriceY);
+    priceLineViews.forEach(hookNativeSeriesPriceLinePaneView);
+
+    const sig = `${rgbaColor}|${tvLineStyle}|${lineWidth}|${priceLineViews.length}`;
+    let propDrifted = false;
+    try {
+      if (typeof series.properties === 'function') {
+        const ch = series.properties() && series.properties().childs ? series.properties().childs() : null;
+        if (ch) {
+          if (!originalHypernovaNativePriceLine) {
+            originalHypernovaNativePriceLine = {
+              showPriceLine: ch.showPriceLine && typeof ch.showPriceLine.value === 'function' ? ch.showPriceLine.value() : true,
+              priceLineColor: ch.priceLineColor && typeof ch.priceLineColor.value === 'function' ? ch.priceLineColor.value() : '',
+              priceLineWidth: ch.priceLineWidth && typeof ch.priceLineWidth.value === 'function' ? ch.priceLineWidth.value() : 1,
+              priceLineStyle: ch.priceLineStyle && typeof ch.priceLineStyle.value === 'function' ? ch.priceLineStyle.value() : null
+            };
+          }
+          if (ch.priceLineColor && typeof ch.priceLineColor.value === 'function' && ch.priceLineColor.value() !== rgbaColor) {
+            propDrifted = true;
+          }
+          if (ch.showPriceLine && typeof ch.showPriceLine.value === 'function' && ch.showPriceLine.value() !== true) {
+            propDrifted = true;
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (sig === lastAppliedHypernovaPriceLineSig && !propDrifted) return;
+    lastAppliedHypernovaPriceLineSig = sig;
+
+    try {
+      if (typeof series.properties === 'function') {
+        const ch = series.properties() && series.properties().childs ? series.properties().childs() : null;
+        if (ch) {
+          if (ch.showPriceLine && typeof ch.showPriceLine.setValue === 'function') ch.showPriceLine.setValue(true);
+          if (ch.priceLineColor && typeof ch.priceLineColor.setValue === 'function') ch.priceLineColor.setValue(rgbaColor);
+          if (ch.priceLineWidth && typeof ch.priceLineWidth.setValue === 'function') ch.priceLineWidth.setValue(lineWidth);
+          if (ch.priceLineStyle && typeof ch.priceLineStyle.setValue === 'function') ch.priceLineStyle.setValue(tvLineStyle);
+        }
+      }
+      const overrides = {
+        'mainSeriesProperties.showPriceLine': true,
+        'mainSeriesProperties.priceLineColor': rgbaColor,
+        'mainSeriesProperties.priceLineWidth': lineWidth,
+        'mainSeriesProperties.priceLineStyle': tvLineStyle
+      };
+      if (activeWidget && typeof activeWidget.applyOverrides === 'function') {
+        try { activeWidget.applyOverrides(overrides); } catch (e) {}
+      } else if (activeChartApi && typeof activeChartApi.applyOverrides === 'function') {
+        try { activeChartApi.applyOverrides(overrides); } catch (e) {}
+      } else if (activeChart && typeof activeChart.applyOverrides === 'function') {
+        try { activeChart.applyOverrides(overrides); } catch (e) {}
+      }
+      priceLineViews.forEach(pv => {
+        try {
+          if (typeof pv.update === 'function') pv.update();
+        } catch (e) {}
+      });
+      if (model) {
+        if (typeof model.updateAllViews === 'function') model.updateAllViews();
+        if (typeof model.lightUpdate === 'function') model.lightUpdate();
+      }
+    } catch (e) {}
   }
 
   function normalizeHypernovaMainSymbol(raw) {
@@ -7911,12 +8170,12 @@
           z-index: 16 !important;
           display: inline-flex !important;
           align-items: center !important;
-          gap: 5px !important;
-          height: 26px !important;
-          padding: 0 7px !important;
+          gap: calc(5px * var(--hn-scale, 1)) !important;
+          height: calc(26px * var(--hn-scale, 1)) !important;
+          padding: 0 calc(7px * var(--hn-scale, 1)) !important;
           border-radius: 7px !important;
           font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
-          font-size: 11px !important;
+          font-size: var(--hn-fs, 11px) !important;
           font-weight: 700 !important;
           line-height: 1 !important;
           color: #f8fafc !important;
@@ -7932,10 +8191,10 @@
           flex-direction: column !important;
           align-items: stretch !important;
           justify-content: center !important;
-          gap: 4px !important;
+          gap: calc(4px * var(--hn-scale, 1)) !important;
           height: auto !important;
-          min-width: 184px !important;
-          padding: 5px 7px !important;
+          min-width: calc(184px * var(--hn-scale, 1)) !important;
+          padding: calc(5px * var(--hn-scale, 1)) calc(7px * var(--hn-scale, 1)) !important;
           background: linear-gradient(180deg, rgba(16, 21, 34, 0.96), rgba(10, 14, 24, 0.97)) !important;
           border: 1px solid rgba(148, 163, 184, 0.35) !important;
           box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6) !important;
@@ -7953,7 +8212,7 @@
           display: flex !important;
           align-items: center !important;
           justify-content: space-between !important;
-          gap: 7px !important;
+          gap: calc(7px * var(--hn-scale, 1)) !important;
           width: 100% !important;
         }
         .vest-hn-entry-top-left,
@@ -7961,12 +8220,12 @@
         .vest-hn-btn-group {
           display: inline-flex !important;
           align-items: center !important;
-          gap: 5px !important;
+          gap: calc(5px * var(--hn-scale, 1)) !important;
         }
         .vest-hn-side-badge {
           padding: 0 !important;
           border-radius: 3px !important;
-          font-size: 10.5px !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.96) !important;
           font-weight: 800 !important;
           letter-spacing: 0.05em !important;
           text-transform: uppercase !important;
@@ -7977,13 +8236,13 @@
         .vest-hn-side-badge.is-short { color: #fb7185 !important; }
         .vest-hn-qty-val {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: 10px !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.91) !important;
           font-weight: 600 !important;
           color: #cbd5e1 !important;
         }
         .vest-hn-pnl-val {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: 11px !important;
+          font-size: var(--hn-fs, 11px) !important;
           font-weight: 800 !important;
           padding: 0 2px !important;
         }
@@ -7992,7 +8251,7 @@
         .vest-hn-pnl-val.flat { color: #cbd5e1 !important; }
         .vest-hn-entry-price {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: 10.5px !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.96) !important;
           font-weight: 700 !important;
           color: #e2e8f0 !important;
           letter-spacing: 0.01em !important;
@@ -8001,10 +8260,10 @@
           display: inline-flex !important;
           align-items: center !important;
           justify-content: center !important;
-          height: 17px !important;
-          padding: 0 5px !important;
+          height: calc(17px * var(--hn-scale, 1)) !important;
+          padding: 0 calc(5px * var(--hn-scale, 1)) !important;
           border-radius: 4px !important;
-          font-size: 9.5px !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.87) !important;
           font-weight: 800 !important;
           letter-spacing: 0.03em !important;
           cursor: pointer !important;
@@ -8031,13 +8290,13 @@
           cursor: ns-resize !important;
         }
         .vest-hn-ctrl-btn.close-btn {
-          width: 17px !important;
-          height: 17px !important;
+          width: calc(17px * var(--hn-scale, 1)) !important;
+          height: calc(17px * var(--hn-scale, 1)) !important;
           padding: 0 !important;
           background: rgba(148, 163, 184, 0.14) !important;
           border-color: rgba(148, 163, 184, 0.3) !important;
           color: #cbd5e1 !important;
-          font-size: 11.5px !important;
+          font-size: calc(var(--hn-fs, 11px) * 1.05) !important;
         }
         .vest-hn-ctrl-btn.close-btn:hover {
           background: rgba(239, 68, 68, 0.35) !important;
@@ -8046,8 +8305,8 @@
         }
         .vest-hn-tpsl-box {
           cursor: ns-resize !important;
-          padding: 0 6px 0 7px !important;
-          gap: 6px !important;
+          padding: 0 calc(6px * var(--hn-scale, 1)) 0 calc(7px * var(--hn-scale, 1)) !important;
+          gap: calc(6px * var(--hn-scale, 1)) !important;
           transition: box-shadow 0.12s ease !important;
         }
         .vest-hn-tpsl-box.is-dragging {
@@ -8066,9 +8325,9 @@
           color: #fef2f2 !important;
         }
         .vest-hn-tpsl-tag {
-          padding: 2px 5px !important;
+          padding: calc(2px * var(--hn-scale, 1)) calc(5px * var(--hn-scale, 1)) !important;
           border-radius: 4px !important;
-          font-size: 9.5px !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.88) !important;
           font-weight: 800 !important;
           letter-spacing: 0.05em !important;
         }
@@ -8082,7 +8341,7 @@
         }
         .vest-hn-tpsl-usd {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: 11.5px !important;
+          font-size: calc(var(--hn-fs, 11px) * 1.04) !important;
           font-weight: 800 !important;
         }
         .vest-hn-tp-box .vest-hn-tpsl-usd { color: #34d399 !important; }
@@ -8093,7 +8352,7 @@
         }
         .vest-hn-tpsl-price {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: 11px !important;
+          font-size: var(--hn-fs, 11px) !important;
           font-weight: 700 !important;
           color: #f8fafc !important;
         }
@@ -8101,14 +8360,14 @@
           display: inline-flex !important;
           align-items: center !important;
           justify-content: center !important;
-          width: 17px !important;
-          height: 17px !important;
+          width: calc(17px * var(--hn-scale, 1)) !important;
+          height: calc(17px * var(--hn-scale, 1)) !important;
           margin-left: 2px !important;
           border-radius: 4px !important;
           border: none !important;
           background: rgba(255, 255, 255, 0.1) !important;
           color: #e2e8f0 !important;
-          font-size: 12px !important;
+          font-size: calc(var(--hn-fs, 11px) * 1.08) !important;
           line-height: 1 !important;
           cursor: pointer !important;
           padding: 0 !important;
@@ -8216,13 +8475,14 @@
     scheduleIctSessionsRender(false);
   }
 
-  function renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, model, priceToY, yToPrice, cssWidth, cssHeight) {
+  function renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, model, mainSeries, priceToY, yToPrice, cssWidth, cssHeight) {
     if (!isHypernovaMainWorldHost()) {
       removeHypernovaOverlayWidgets();
       return;
     }
     const hnCfg = getHypernovaVisualsConfig();
     if (!hnCfg.enabled) {
+      restoreHypernovaNativeCurrentPriceLine(model, mainSeries);
       removeHypernovaOverlayWidgets();
       return;
     }
@@ -8238,67 +8498,62 @@
     const ownerDoc = (ictSessionsCanvas && ictSessionsCanvas.ownerDocument) || document;
     ensureHypernovaVisualStyles(ownerDoc);
 
-    // 1. Custom Styled "Current Price" Line & Label
-    if (hnCfg.currentPriceLineEnabled && Number.isFinite(latestChartMarketPrice) && latestChartMarketPrice > 0) {
-      const curY = priceToY(latestChartMarketPrice);
-      if (curY !== null && Number.isFinite(curY) && curY >= -4 && curY <= cssHeight + 4) {
-        const clampedY = Math.max(2, Math.min(cssHeight - 2, curY));
-        const dashPattern = hnCfg.currentPriceStyle === 'solid'
-          ? []
-          : (hnCfg.currentPriceStyle === 'dotted' ? [2, 4] : [7, 5]);
+    // 1. Style Hypernova's EXISTING native Current Price line directly (no duplicate line drawn over it!)
+    //    and render only the customizable "Current Price" label pill along the line when enabled.
+    const liveCurY = Number.isFinite(latestChartMarketPrice) && latestChartMarketPrice > 0
+      ? priceToY(latestChartMarketPrice)
+      : null;
+    syncHypernovaNativeCurrentPriceLine(model, mainSeries, hnCfg, liveCurY);
+
+    if (hnCfg.currentPriceLineEnabled && hnCfg.currentPriceShowLabel && liveCurY !== null && Number.isFinite(liveCurY) && liveCurY >= -4 && liveCurY <= cssHeight + 4) {
+      const clampedY = Math.max(2, Math.min(cssHeight - 2, liveCurY));
+      const baseText = (hnCfg.currentPriceText || '').trim();
+      const priceStr = `$${formatHypernovaDisplayPrice(latestChartMarketPrice)}`;
+      const labelStr = baseText
+        ? (hnCfg.currentPriceShowPrice ? `${baseText} · ${priceStr}` : baseText)
+        : (hnCfg.currentPriceShowPrice ? priceStr : '');
+      if (labelStr) {
+        const labelFontSize = Math.max(8, Math.min(22, Number(hnCfg.currentPriceFontSize) || 11));
+        const dotRadius = Math.max(2.5, Math.min(5, labelFontSize * 0.27));
+        const dotSpace = Math.round(dotRadius * 2 + 6);
+        const padX = Math.max(6, Math.round(labelFontSize * 0.72));
+        const pillH = Math.round(labelFontSize + 9);
+
         ctx.save();
-        ctx.strokeStyle = hnCfg.currentPriceColor;
-        ctx.globalAlpha = Math.max(0.15, Math.min(1, hnCfg.currentPriceOpacity / 100));
-        ctx.lineWidth = hnCfg.currentPriceWidth;
-        ctx.setLineDash(dashPattern);
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.96;
+        ctx.font = `700 ${labelFontSize}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
+        const textW = ctx.measureText(labelStr).width;
+        const pillW = textW + dotSpace + padX * 2;
+        let pillX = cssWidth - pillW - 10;
+        if (hnCfg.currentPriceLabelAlign === 'left') pillX = 10;
+        else if (hnCfg.currentPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
+        pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
+        const pillY = Math.max(4, Math.min(cssHeight - pillH - 4, clampedY - pillH / 2));
+
         ctx.beginPath();
-        ctx.moveTo(0, clampedY);
-        ctx.lineTo(cssWidth, clampedY);
+        ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(5, Math.round(pillH * 0.28)));
+        ctx.fillStyle = 'rgba(11, 17, 32, 0.94)';
+        ctx.fill();
+        ctx.strokeStyle = hnCfg.currentPriceColor;
+        ctx.lineWidth = 1.25;
         ctx.stroke();
 
-        if (hnCfg.currentPriceShowLabel) {
-          const baseText = (hnCfg.currentPriceText || '').trim();
-          const priceStr = `$${formatHypernovaDisplayPrice(latestChartMarketPrice)}`;
-          const labelStr = baseText
-            ? (hnCfg.currentPriceShowPrice ? `${baseText} · ${priceStr}` : baseText)
-            : (hnCfg.currentPriceShowPrice ? priceStr : '');
-          if (labelStr) {
-            ctx.setLineDash([]);
-            ctx.globalAlpha = 0.96;
-            ctx.font = '700 10.5px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
-            const textW = ctx.measureText(labelStr).width;
-            const dotSpace = 12;
-            const padX = 8;
-            const pillH = 20;
-            const pillW = textW + dotSpace + padX * 2;
-            let pillX = cssWidth - pillW - 10;
-            if (hnCfg.currentPriceLabelAlign === 'left') pillX = 10;
-            else if (hnCfg.currentPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
-            pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
-            const pillY = Math.max(4, Math.min(cssHeight - pillH - 4, clampedY - pillH / 2));
+        // Glowing live dot
+        ctx.beginPath();
+        ctx.arc(pillX + padX + dotRadius, pillY + pillH / 2, dotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = hnCfg.currentPriceColor;
+        ctx.fill();
 
-            ctx.beginPath();
-            ctx.roundRect(pillX, pillY, pillW, pillH, 6);
-            ctx.fillStyle = 'rgba(11, 17, 32, 0.92)';
-            ctx.fill();
-            ctx.strokeStyle = hnCfg.currentPriceColor;
-            ctx.lineWidth = 1.25;
-            ctx.stroke();
-
-            // Glowing live dot
-            ctx.beginPath();
-            ctx.arc(pillX + padX + 3, pillY + pillH / 2, 3, 0, Math.PI * 2);
-            ctx.fillStyle = hnCfg.currentPriceColor;
-            ctx.fill();
-
-            ctx.fillStyle = '#f8fafc';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(labelStr, pillX + padX + dotSpace, pillY + pillH / 2 + 0.5);
-          }
-        }
+        ctx.fillStyle = '#f8fafc';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(labelStr, pillX + padX + dotSpace, pillY + pillH / 2 + 0.5);
         ctx.restore();
       }
     }
+
+    const boxesFontSize = Math.max(8, Math.min(18, Number(hnCfg.tradeBoxesFontSize) || 11));
+    const boxesScale = Math.max(0.7, Math.min(1.65, boxesFontSize / 11));
 
     // 2. Resolve Active Position + Live Drag Preview for TP & SL
     const pos = resolveActiveHypernovaPosition(symbolKey, model, latestChartMarketPrice);
@@ -8369,6 +8624,8 @@
         }
 
         const isShort = pos.side === 'short';
+        entryBox.style.setProperty('--hn-fs', `${boxesFontSize}px`);
+        entryBox.style.setProperty('--hn-scale', boxesScale.toFixed(3));
         entryBox.classList.toggle('is-long', !isShort);
         entryBox.classList.toggle('is-short', isShort);
         const sideBadge = entryBox.querySelector('.vest-hn-side-badge');
@@ -8516,6 +8773,8 @@
       const priceEl = box.querySelector('.vest-hn-tpsl-price');
       if (priceEl) priceEl.textContent = priceText;
 
+      box.style.setProperty('--hn-fs', `${boxesFontSize}px`);
+      box.style.setProperty('--hn-scale', boxesScale.toFixed(3));
       box.classList.toggle('is-dragging', isDraggingThis);
       box.onpointerdown = (ev) => {
         if (ev.target && ev.target.closest && ev.target.closest('.vest-hn-tpsl-clear')) {
@@ -8545,8 +8804,9 @@
         };
       }
 
-      const boxH = 26;
-      const boxW = box.offsetWidth || 168;
+      const boxH = box.offsetHeight || Math.round(26 * boxesScale);
+      const boxW = box.offsetWidth || Math.round(168 * boxesScale);
+      const entryBoxH = (hypernovaOverlayEls.entry && hypernovaOverlayEls.entry.offsetHeight) || Math.round(44 * boxesScale);
       // Anti-overlap: if this TP/SL sits right on top of the Entry box (e.g., SL moved to Breakeven!),
       // offset horizontally to the left of the Entry box so BOTH remain 100% readable & clickable!
       let rightEdgeOffset = 14;
@@ -8554,9 +8814,9 @@
         hypernovaOverlayEls.entry &&
         hypernovaOverlayEls.entry.isConnected &&
         entryY !== null &&
-        Math.abs(clampedY - Math.max(24, Math.min(cssHeight - 24, entryY))) < 40
+        Math.abs(clampedY - Math.max(24, Math.min(cssHeight - 24, entryY))) < Math.max(36, Math.round((entryBoxH + boxH) * 0.58))
       ) {
-        rightEdgeOffset = (hypernovaOverlayEls.entry.offsetWidth || 196) + 22;
+        rightEdgeOffset = (hypernovaOverlayEls.entry.offsetWidth || Math.round(196 * boxesScale)) + 22;
       }
       const leftPx = Math.max(8, cssWidth - boxW - rightEdgeOffset);
       const topPx = Math.max(4, Math.min(cssHeight - boxH - 4, clampedY - boxH / 2));
@@ -14540,7 +14800,15 @@
     const hypernovaVisualsEnabled = isHypernovaMainWorldHost() && getHypernovaVisualsConfig().enabled;
     if (!failLinesEnabled) removeFailPriceLineButtons();
     if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
-    if (!hypernovaVisualsEnabled) removeHypernovaOverlayWidgets();
+    if (!hypernovaVisualsEnabled) {
+      removeHypernovaOverlayWidgets();
+      if (isHypernovaMainWorldHost() && lastAppliedHypernovaPriceLineSig) {
+        try {
+          const ex = extractSeriesBarsFromModel();
+          restoreHypernovaNativeCurrentPriceLine(ex && ex.model, ex && ex.mainSeries);
+        } catch (e) {}
+      }
+    }
     const sessionsEnabled = Boolean(config && config.enabled && isIntradayChartResolution());
     const autoFvgEnabled = Boolean(fvgConfig && fvgConfig.enabled);
     const candleNumbersEnabled = Boolean(candleOhlcConfig && candleOhlcConfig.showCandleNumbers);
@@ -15875,8 +16143,9 @@
     }
 
     if (hypernovaVisualsEnabled) {
-      renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, extracted.model, priceToY, hypernovaYToPrice, cssWidth, cssHeight);
+      renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, extracted.model, mainSeries, priceToY, hypernovaYToPrice, cssWidth, cssHeight);
     } else {
+      restoreHypernovaNativeCurrentPriceLine(extracted.model, mainSeries);
       removeHypernovaOverlayWidgets();
     }
 

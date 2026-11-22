@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.140`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.141`) are documented in this file.
+
+---
+
+## [v1.1.141] — 2026-11-22
+
+### 🎯 Style Hypernova's Existing Native Current Price Line Directly + Font Size Sliders
+- **Modified TradingView's Existing Native Price Line (Zero Duplicate Lines)**:
+  - Removed the secondary canvas line that overlapped Hypernova's native current price line.
+  - Instead directly styles TradingView's existing native `mainSeriesProperties` (`showPriceLine`, `priceLineColor` with opacity, `priceLineWidth`, `priceLineStyle`) and hooks TradingView's native `SeriesPriceLinePaneView` renderer so your chosen **color, opacity, thickness, and solid/dashed/dotted style** apply directly to the single native price line at full native refresh rate, and cleanly restores the original native line when toggled OFF.
+  - Renders only the crisp customizable `"Current Price"` label pill cleanly along that native line (when Show Label is enabled).
+- **Configurable Font Sizing**:
+  - Added **Label Font Size** slider (`8px–22px`, default `11px`) for the `"Current Price"` pill label (auto-scales pill height, padding, and live dot).
+  - Added **Trade & TP/SL Box Font Size** slider (`8px–18px`, default `11px`) that proportionally scales the 2-row Position Entry Box (`LONG`/`SHORT`, Qty, PnL, `BE`/`TP`/`SL`/`×`, Entry Price) and the Green TP / Red SL boxes in real time via CSS custom properties.
 
 ---
 

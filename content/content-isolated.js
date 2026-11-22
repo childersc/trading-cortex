@@ -1692,12 +1692,14 @@
     enabled: true,
     positionOverlayEnabled: true,
     tpSlBoxesEnabled: true,
+    tradeBoxesFontSize: 11,
     currentPriceLineEnabled: true,
     currentPriceColor: '#38bdf8',
     currentPriceStyle: 'dashed',
     currentPriceWidth: 1.5,
     currentPriceOpacity: 85,
     currentPriceText: 'Current Price',
+    currentPriceFontSize: 11,
     currentPriceShowLabel: true,
     currentPriceShowPrice: true,
     currentPriceLabelAlign: 'right'
@@ -1712,16 +1714,20 @@
       : DEFAULT_HYPERNOVA_VISUALS.currentPriceColor;
     const widthNum = Number(src.currentPriceWidth);
     const opNum = Number(src.currentPriceOpacity);
+    const priceFontNum = Number(src.currentPriceFontSize);
+    const boxesFontNum = Number(src.tradeBoxesFontSize);
     return {
       enabled: src.enabled !== false,
       positionOverlayEnabled: src.positionOverlayEnabled !== false,
       tpSlBoxesEnabled: src.tpSlBoxesEnabled !== false,
+      tradeBoxesFontSize: Number.isFinite(boxesFontNum) ? Math.max(8, Math.min(18, Math.round(boxesFontNum))) : DEFAULT_HYPERNOVA_VISUALS.tradeBoxesFontSize,
       currentPriceLineEnabled: src.currentPriceLineEnabled !== false,
       currentPriceColor: rawColor,
       currentPriceStyle: style,
       currentPriceWidth: Number.isFinite(widthNum) ? Math.max(1, Math.min(4, Math.round(widthNum * 2) / 2)) : DEFAULT_HYPERNOVA_VISUALS.currentPriceWidth,
       currentPriceOpacity: Number.isFinite(opNum) ? Math.max(15, Math.min(100, Math.round(opNum))) : DEFAULT_HYPERNOVA_VISUALS.currentPriceOpacity,
       currentPriceText: typeof src.currentPriceText === 'string' ? src.currentPriceText.slice(0, 48) : DEFAULT_HYPERNOVA_VISUALS.currentPriceText,
+      currentPriceFontSize: Number.isFinite(priceFontNum) ? Math.max(8, Math.min(22, Math.round(priceFontNum))) : DEFAULT_HYPERNOVA_VISUALS.currentPriceFontSize,
       currentPriceShowLabel: src.currentPriceShowLabel !== false,
       currentPriceShowPrice: src.currentPriceShowPrice !== false,
       currentPriceLabelAlign: align
@@ -7091,11 +7097,18 @@
                   </label>
                 </div>
 
+                <div style="padding:8px 10px; border-radius:8px; background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.06);">
+                  <div class="vest-ed-field" style="margin:0;">
+                    <label class="vest-ed-label">Trade &amp; TP/SL Box Font Size: <span id="vest-pf-hn-boxes-font-size-val" style="color:#38bdf8; font-weight:700;">${hnVis.tradeBoxesFontSize}px</span></label>
+                    <input type="range" class="vest-ed-range" id="vest-pf-hn-boxes-font-size" min="8" max="18" step="1" value="${hnVis.tradeBoxesFontSize}" />
+                  </div>
+                </div>
+
                 <div style="padding:10px 12px; border-radius:8px; background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.06);">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <div style="max-width:80%;">
-                      <div style="font-size:12px; font-weight:600; color:#f8fafc;">Custom "Current Price" Line &amp; Label</div>
-                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Draws a fully customizable live price line across the chart with custom label text.</div>
+                      <div style="font-size:12px; font-weight:600; color:#f8fafc;">Style Existing "Current Price" Line &amp; Label</div>
+                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Styles Hypernova's existing native current price line directly (color, style, thickness, opacity) and adds a customizable label.</div>
                     </div>
                     <label class="vest-tvs-switch">
                       <input type="checkbox" id="vest-pf-hn-price-line" ${hnVis.currentPriceLineEnabled ? 'checked' : ''} />
@@ -7139,13 +7152,18 @@
                         <input type="text" class="vest-ed-input" id="vest-pf-hn-price-text" value="${escapeHtml(hnVis.currentPriceText)}" placeholder="Current Price" maxlength="48" />
                       </div>
                       <div class="vest-ed-field">
-                        <label class="vest-ed-label">Label Position</label>
-                        <select class="vest-ed-select" id="vest-pf-hn-price-align">
-                          <option value="left" ${hnVis.currentPriceLabelAlign === 'left' ? 'selected' : ''}>Left</option>
-                          <option value="center" ${hnVis.currentPriceLabelAlign === 'center' ? 'selected' : ''}>Center</option>
-                          <option value="right" ${hnVis.currentPriceLabelAlign === 'right' ? 'selected' : ''}>Right (Near Price Axis)</option>
-                        </select>
+                        <label class="vest-ed-label">Label Font Size: <span id="vest-pf-hn-price-font-size-val" style="color:#38bdf8; font-weight:700;">${hnVis.currentPriceFontSize}px</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-price-font-size" min="8" max="22" step="1" value="${hnVis.currentPriceFontSize}" />
                       </div>
+                    </div>
+
+                    <div class="vest-ed-field" style="margin-bottom:8px;">
+                      <label class="vest-ed-label">Label Position</label>
+                      <select class="vest-ed-select" id="vest-pf-hn-price-align">
+                        <option value="left" ${hnVis.currentPriceLabelAlign === 'left' ? 'selected' : ''}>Left</option>
+                        <option value="center" ${hnVis.currentPriceLabelAlign === 'center' ? 'selected' : ''}>Center</option>
+                        <option value="right" ${hnVis.currentPriceLabelAlign === 'right' ? 'selected' : ''}>Right (Near Price Axis)</option>
+                      </select>
                     </div>
 
                     <div class="vest-ed-grid-2">
@@ -9767,12 +9785,14 @@
           const prevHn = normalizeHypernovaVisualsConfig(firm.hypernovaVisuals);
           const hnPos = overlay.querySelector('#vest-pf-hn-pos-overlay');
           const hnTpSl = overlay.querySelector('#vest-pf-hn-tpsl-boxes');
+          const hnBoxesFont = overlay.querySelector('#vest-pf-hn-boxes-font-size');
           const hnPriceLine = overlay.querySelector('#vest-pf-hn-price-line');
           const hnColor = overlay.querySelector('#vest-pf-hn-price-color');
           const hnStyle = overlay.querySelector('#vest-pf-hn-price-style');
           const hnWidth = overlay.querySelector('#vest-pf-hn-price-width');
           const hnOpacity = overlay.querySelector('#vest-pf-hn-price-opacity');
           const hnText = overlay.querySelector('#vest-pf-hn-price-text');
+          const hnPriceFont = overlay.querySelector('#vest-pf-hn-price-font-size');
           const hnAlign = overlay.querySelector('#vest-pf-hn-price-align');
           const hnShowLabel = overlay.querySelector('#vest-pf-hn-price-show-label');
           const hnShowPrice = overlay.querySelector('#vest-pf-hn-price-show-price');
@@ -9781,12 +9801,14 @@
             enabled: Boolean(hnEn.checked),
             positionOverlayEnabled: hnPos ? Boolean(hnPos.checked) : prevHn.positionOverlayEnabled,
             tpSlBoxesEnabled: hnTpSl ? Boolean(hnTpSl.checked) : prevHn.tpSlBoxesEnabled,
+            tradeBoxesFontSize: hnBoxesFont ? Number(hnBoxesFont.value) : prevHn.tradeBoxesFontSize,
             currentPriceLineEnabled: hnPriceLine ? Boolean(hnPriceLine.checked) : prevHn.currentPriceLineEnabled,
             currentPriceColor: hnColor ? hnColor.value : prevHn.currentPriceColor,
             currentPriceStyle: hnStyle ? hnStyle.value : prevHn.currentPriceStyle,
             currentPriceWidth: hnWidth ? Number(hnWidth.value) : prevHn.currentPriceWidth,
             currentPriceOpacity: hnOpacity ? Number(hnOpacity.value) : prevHn.currentPriceOpacity,
             currentPriceText: hnText ? hnText.value : prevHn.currentPriceText,
+            currentPriceFontSize: hnPriceFont ? Number(hnPriceFont.value) : prevHn.currentPriceFontSize,
             currentPriceLabelAlign: hnAlign ? hnAlign.value : prevHn.currentPriceLabelAlign,
             currentPriceShowLabel: hnShowLabel ? Boolean(hnShowLabel.checked) : prevHn.currentPriceShowLabel,
             currentPriceShowPrice: hnShowPrice ? Boolean(hnShowPrice.checked) : prevHn.currentPriceShowPrice
@@ -11626,6 +11648,22 @@
           if (hnOpacityRange && hnOpacityVal) {
             hnOpacityRange.addEventListener('input', () => {
               hnOpacityVal.textContent = `${hnOpacityRange.value}%`;
+            });
+          }
+
+          const hnPriceFontRange = detailCard.querySelector('#vest-pf-hn-price-font-size');
+          const hnPriceFontVal = detailCard.querySelector('#vest-pf-hn-price-font-size-val');
+          if (hnPriceFontRange && hnPriceFontVal) {
+            hnPriceFontRange.addEventListener('input', () => {
+              hnPriceFontVal.textContent = `${hnPriceFontRange.value}px`;
+            });
+          }
+
+          const hnBoxesFontRange = detailCard.querySelector('#vest-pf-hn-boxes-font-size');
+          const hnBoxesFontVal = detailCard.querySelector('#vest-pf-hn-boxes-font-size-val');
+          if (hnBoxesFontRange && hnBoxesFontVal) {
+            hnBoxesFontRange.addEventListener('input', () => {
+              hnBoxesFontVal.textContent = `${hnBoxesFontRange.value}px`;
             });
           }
 

@@ -29,13 +29,15 @@ function extractBlock(src, startMarker, endMarker) {
     ctx
   );
 
-  // Defaults must all be ON by default with "Current Price" label text
+  // Defaults must all be ON by default with "Current Price" label text and 11px font sizes
   const def = ctx.normalizeHypernovaVisualsConfig();
   assert.strictEqual(def.enabled, true, 'Hypernova visuals master toggle must default to ON');
   assert.strictEqual(def.positionOverlayEnabled, true, 'Position Entry box toggle must default to ON');
   assert.strictEqual(def.tpSlBoxesEnabled, true, 'Green TP / Red SL boxes toggle must default to ON');
+  assert.strictEqual(def.tradeBoxesFontSize, 11, 'Default Trade & TP/SL box font size must be 11');
   assert.strictEqual(def.currentPriceLineEnabled, true, 'Custom Current Price line toggle must default to ON');
   assert.strictEqual(def.currentPriceText, 'Current Price', 'Default Current Price label text must be "Current Price"');
+  assert.strictEqual(def.currentPriceFontSize, 11, 'Default Current Price label font size must be 11');
   assert.strictEqual(def.currentPriceShowLabel, true);
   assert.strictEqual(def.currentPriceShowPrice, true);
 
@@ -44,12 +46,14 @@ function extractBlock(src, startMarker, endMarker) {
     enabled: false,
     positionOverlayEnabled: false,
     tpSlBoxesEnabled: true,
+    tradeBoxesFontSize: 30,
     currentPriceLineEnabled: false,
     currentPriceColor: '#ff00aa',
     currentPriceStyle: 'dotted',
     currentPriceWidth: 99,
     currentPriceOpacity: 5,
     currentPriceText: 'Live Mark',
+    currentPriceFontSize: 4,
     currentPriceShowLabel: false,
     currentPriceShowPrice: false,
     currentPriceLabelAlign: 'left'
@@ -57,12 +61,14 @@ function extractBlock(src, startMarker, endMarker) {
   assert.strictEqual(custom.enabled, false);
   assert.strictEqual(custom.positionOverlayEnabled, false);
   assert.strictEqual(custom.tpSlBoxesEnabled, true);
+  assert.strictEqual(custom.tradeBoxesFontSize, 18, 'Trade boxes font size should clamp to max 18');
   assert.strictEqual(custom.currentPriceLineEnabled, false);
   assert.strictEqual(custom.currentPriceColor, '#ff00aa');
   assert.strictEqual(custom.currentPriceStyle, 'dotted');
   assert.strictEqual(custom.currentPriceWidth, 4, 'Line width should clamp to max 4');
   assert.strictEqual(custom.currentPriceOpacity, 15, 'Line opacity should clamp to min 15');
   assert.strictEqual(custom.currentPriceText, 'Live Mark');
+  assert.strictEqual(custom.currentPriceFontSize, 8, 'Current Price label font size should clamp to min 8');
   assert.strictEqual(custom.currentPriceShowLabel, false);
   assert.strictEqual(custom.currentPriceShowPrice, false);
   assert.strictEqual(custom.currentPriceLabelAlign, 'left');
@@ -133,12 +139,14 @@ function extractBlock(src, startMarker, endMarker) {
     'id="vest-pf-hn-enabled"',
     'id="vest-pf-hn-pos-overlay"',
     'id="vest-pf-hn-tpsl-boxes"',
+    'id="vest-pf-hn-boxes-font-size"',
     'id="vest-pf-hn-price-line"',
     'id="vest-pf-hn-price-color"',
     'id="vest-pf-hn-price-style"',
     'id="vest-pf-hn-price-width"',
     'id="vest-pf-hn-price-opacity"',
     'id="vest-pf-hn-price-text"',
+    'id="vest-pf-hn-price-font-size"',
     'id="vest-pf-hn-price-align"',
     'id="vest-pf-hn-price-show-label"',
     'id="vest-pf-hn-price-show-price"',
@@ -151,10 +159,41 @@ function extractBlock(src, startMarker, endMarker) {
   for (const token of requiredIsolatedTokens) {
     assert.strictEqual(isolatedSrc.includes(token), true, `content-isolated.js missing required Hypernova token: ${token}`);
   }
-  console.log('✓ Hypernova settings toggles, Current Price styling controls & DOM bridge verified in content-isolated.js');
+  console.log('✓ Hypernova settings toggles, font size sliders, Current Price styling controls & DOM bridge verified in content-isolated.js');
 }
 
-// 4. Structural checks: 2-row Long/Short entry box (BE/TP/SL/X), Green TP / Red SL boxes & render hookup in content-main.js
+// 4. Test native TradingView Current Price line styling helpers (modifies existing native line, no duplicate)
+{
+  const nativeBlock = extractBlock(
+    mainSrc,
+    'function hypernovaHexToRgba(hex, opacityPct)',
+    'function findNativeSeriesPriceLinePaneViews('
+  );
+  const ctx = {};
+  vm.runInNewContext(
+    `${nativeBlock}
+     this.hypernovaHexToRgba = hypernovaHexToRgba;
+     this.hypernovaStyleToTvLineStyle = hypernovaStyleToTvLineStyle;
+     this.applyHypernovaStyleToPriceLineRenderer = applyHypernovaStyleToPriceLineRenderer;`,
+    ctx
+  );
+
+  assert.strictEqual(ctx.hypernovaHexToRgba('#38bdf8', 100), '#38bdf8');
+  assert.strictEqual(ctx.hypernovaHexToRgba('#38bdf8', 50), 'rgba(56, 189, 248, 0.50)');
+  assert.strictEqual(ctx.hypernovaStyleToTvLineStyle('solid'), 0);
+  assert.strictEqual(ctx.hypernovaStyleToTvLineStyle('dotted'), 1);
+  assert.strictEqual(ctx.hypernovaStyleToTvLineStyle('dashed'), 2);
+
+  const mockRenderer = { _data: { y: 240, color: '#22c55e', linewidth: 1, linestyle: 1 } };
+  const ok = ctx.applyHypernovaStyleToPriceLineRenderer(mockRenderer, 'rgba(56, 189, 248, 0.85)', 2.5, 0);
+  assert.strictEqual(ok, true);
+  assert.strictEqual(mockRenderer._data.color, 'rgba(56, 189, 248, 0.85)');
+  assert.strictEqual(mockRenderer._data.linewidth, 2.5);
+  assert.strictEqual(mockRenderer._data.linestyle, 0);
+  console.log('✓ Native TradingView Current Price line styling helpers verified');
+}
+
+// 5. Structural checks: 2-row Long/Short entry box (BE/TP/SL/X), Green TP / Red SL boxes, native price line styling & font scaling in content-main.js
 {
   const requiredMainTokens = [
     'vest-hn-position-box',
@@ -170,15 +209,26 @@ function extractBlock(src, startMarker, endMarker) {
     'vest-hn-ctrl-btn close-btn',
     'vest-hn-tp-box',
     'vest-hn-sl-box',
+    'syncHypernovaNativeCurrentPriceLine(model, mainSeries, hnCfg, liveCurY)',
+    'restoreHypernovaNativeCurrentPriceLine',
+    '--hn-fs',
+    '--hn-scale',
     'startHypernovaTpSlDrag',
-    'renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, extracted.model, priceToY, hypernovaYToPrice, cssWidth, cssHeight)',
+    'renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, extracted.model, mainSeries, priceToY, hypernovaYToPrice, cssWidth, cssHeight)',
     'removeHypernovaOverlayWidgets();',
     "case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE':"
   ];
   for (const token of requiredMainTokens) {
     assert.strictEqual(mainSrc.includes(token), true, `content-main.js missing required Hypernova token: ${token}`);
   }
-  console.log('✓ 2-row Long/Short BE/TP/SL/X box, Green TP / Red SL boxes & render loop hookup verified in content-main.js');
+  // Ensure renderHypernovaChartVisuals does NOT draw a duplicate horizontal line over TradingView's native current price line
+  const renderFnBlock = extractBlock(
+    mainSrc,
+    'function renderHypernovaChartVisuals(',
+    '// 2. Resolve Active Position'
+  );
+  assert.strictEqual(renderFnBlock.includes('ctx.lineTo(cssWidth'), false, 'renderHypernovaChartVisuals must modify the existing native price line instead of drawing a duplicate canvas line over it');
+  console.log('✓ 2-row Long/Short BE/TP/SL/X box, Green TP / Red SL boxes, native price line modifier & font scaling verified in content-main.js');
 }
 
 console.log('All Hypernova Chart Visuals tests passed!');

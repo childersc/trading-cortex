@@ -1,3 +1,8 @@
+Trading Cortex v1.1.141 — Style Existing Hypernova Current Price Line Directly + Font Size Sliders
+
+- **No More Duplicate Current Price Line (`v1.1.141`)**: Directly modifies Hypernova's existing native TradingView current price line (`priceLineColor`, `priceLineWidth`, `priceLineStyle`, and native `SeriesPriceLinePaneView` renderer) instead of drawing a second line on top of it, and cleanly restores the native line when toggled off.
+- **Adjustable Font Sizing (`v1.1.141`)**: Added live **Label Font Size (`8px–22px`)** for the `"Current Price"` label pill and **Trade & TP/SL Box Font Size (`8px–18px`)** for the Position Entry Box and Green TP / Red SL boxes inside **Perp Firms → Hypernova**.
+
 Trading Cortex v1.1.140 — Hypernova Chart Visuals: Interactive LONG/SHORT BE/TP/SL Box, Green TP & Red SL Boxes, and Customizable Current Price Line
 
 - **Interactive 2-Row Position Entry Box (`LONG` / `SHORT`) (`v1.1.140`)**: On Hypernova, open trades now display a crisp 2-row floating box on your entry line with **`LONG`/`SHORT`**, size, live PnL, **`×`** close button, entry price, and 3 action buttons: **`BE`** (move SL to breakeven), **`TP`** (grab & drag vertically to set Take Profit), and **`SL`** (grab & drag vertically to set Stop Loss).
