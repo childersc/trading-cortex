@@ -1,3 +1,7 @@
+Trading Cortex v1.1.137 — Silky Fast-Drag for Floating Cortex Pill Over Chart Iframes
+
+- **Smooth Fast-Drag (`v1.1.137`)**: Added `setPointerCapture()`, a transparent full-screen iframe drag shield, and a mid-drag re-render guard so dragging the floating **Cortex** pill rapidly across TradingView chart iframes never drops or loses the drag.
+
 Trading Cortex v1.1.136 — Fixed Blown-Up Candles & Clipped Price Scale on Timeframe Switch
 
 - **Clean Timeframe Switching (`v1.1.136`)**: Stopped replaying stale `setVisibleRange` timestamps and locked `priceRange` across timeframe switches (which blew `1h` candles up into giant bars shooting off top/bottom of the chart), cancelled cross-timeframe save pollution during interval switches, enforced Auto-Scale on timeframe switch, and aborted delayed restore timers the instant you interact with or resize the chart.

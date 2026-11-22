@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.136`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.137`) are documented in this file.
+
+---
+
+## [v1.1.137] — 2026-11-21
+
+### 🖱️ Silky Fast-Drag Across TradingView Iframes (`setPointerCapture` + Drag Shield)
+- **Root cause**: When dragging the floating Cortex pill fast enough for the pointer to cross over TradingView's chart `<iframe>`, the iframe swallowed `pointermove`/`pointerup` events from the top window (and background `renderStudioHeaderPill()` updates could also replace the button mid-drag).
+- **Fix (`content/content-isolated.js`)**:
+  - Uses `triggerBtn.setPointerCapture(pointerId)` plus a temporary transparent full-screen drag shield (`#vest-studio-pill-drag-shield`, `z-index: 2147483639`) while dragging so TradingView iframes can never steal pointer events at any speed.
+  - Skips `renderStudioHeaderPill()` DOM rebuilds while `isDraggingStudioPill` is active, and cleanly releases the drag shield on `pointerup` / `pointercancel` / `blur`.
 
 ---
 

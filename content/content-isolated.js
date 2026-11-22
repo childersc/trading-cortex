@@ -5627,6 +5627,7 @@
 
   function renderStudioHeaderPill() {
     if (!isExtensionValid()) return;
+    if (isDraggingStudioPill) return;
     try {
       // Remove old bottom-left pill if present
       const oldBottomPill = document.getElementById('vest-panel-toggle-pill');
@@ -5924,12 +5925,31 @@
     if (triggerBtn && menuEl) {
       triggerBtn.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
+        const pointerId = e.pointerId;
         const startX = e.clientX;
         const startY = e.clientY;
         const startRect = pill.getBoundingClientRect();
         const originLeft = startRect.left;
         const originTop = startRect.top;
         let moved = false;
+        let dragShieldEl = null;
+
+        const removeDragShield = () => {
+          if (dragShieldEl && dragShieldEl.parentElement) {
+            dragShieldEl.remove();
+          }
+          dragShieldEl = null;
+        };
+
+        const ensureDragShield = () => {
+          if (dragShieldEl || !document.body) return;
+          const existing = document.getElementById('vest-studio-pill-drag-shield');
+          if (existing) existing.remove();
+          dragShieldEl = document.createElement('div');
+          dragShieldEl.id = 'vest-studio-pill-drag-shield';
+          dragShieldEl.style.cssText = 'position:fixed;inset:0;z-index:2147483639;cursor:grabbing;background:transparent;user-select:none;';
+          document.body.appendChild(dragShieldEl);
+        };
 
         const onPointerMove = (mv) => {
           const dx = mv.clientX - startX;
@@ -5940,6 +5960,12 @@
             isDraggingStudioPill = true;
             studioPillJustDragged = true;
             pill.classList.add('dragging');
+            ensureDragShield();
+            try {
+              if (typeof triggerBtn.setPointerCapture === 'function' && pointerId !== undefined) {
+                triggerBtn.setPointerCapture(pointerId);
+              }
+            } catch (err) {}
           }
           const pillW = pill.offsetWidth || startRect.width || 160;
           const pillH = pill.offsetHeight || startRect.height || 28;
@@ -5961,6 +5987,13 @@
           window.removeEventListener('pointermove', onPointerMove, true);
           window.removeEventListener('pointerup', onPointerUp, true);
           window.removeEventListener('pointercancel', onPointerUp, true);
+          window.removeEventListener('blur', onPointerUp, true);
+          try {
+            if (typeof triggerBtn.releasePointerCapture === 'function' && pointerId !== undefined) {
+              triggerBtn.releasePointerCapture(pointerId);
+            }
+          } catch (err) {}
+          removeDragShield();
           if (moved) {
             isDraggingStudioPill = false;
             pill.classList.remove('dragging');
@@ -5984,6 +6017,7 @@
         window.addEventListener('pointermove', onPointerMove, true);
         window.addEventListener('pointerup', onPointerUp, true);
         window.addEventListener('pointercancel', onPointerUp, true);
+        window.addEventListener('blur', onPointerUp, true);
       });
 
       const gripEl = triggerBtn.querySelector('.vest-studio-pill-grip');
