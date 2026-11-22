@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.141`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.142`) are documented in this file.
+
+---
+
+## [v1.1.142] — 2026-11-22
+
+### 🚀 Live Hypernova TP / SL / Breakeven & Close Submission (Exact DOM Wiring)
+- **Root Causes Found via Live Hypernova DOM Inspection**:
+  1. Hypernova's TP/SL trigger in the Positions table is a `<span data-testid="position-tpsl">` wrapping a pencil `<svg>`; our previous selector matched the child `<svg>` (which has no `.click()` method), so Hypernova's TP/SL modal never opened.
+  2. Hypernova encodes Long/Short directly on the table row class (`tr.trade-positions-row-short` / `trade-positions-row-long`) and uses exact `data-testid` attributes on every modal input (`tpsl-tp-price-input`, `tpsl-sl-price-input`) and button (`tpsl-confirm`, `tpsl-cancel`), plus Radix dropdown triggers (`close-position-menu-trigger`) that require `PointerEvent('pointerdown')`.
+  3. Hypernova validates order prices using 5 significant figures (e.g., integer ticks for BTC `$60,648`, 3 decimals for HYPE `$62.632`).
+- **Fixes (`content/content-isolated.js` & `content/content-main.js`)**:
+  - Automatically ensures the `Positions` tab is active, locates the exact `tr[data-testid^="positions-row-"]` by `[data-testid="symbol-text"]`, clicks `[data-testid="position-tpsl"]` with full pointer/mouse events, waits for `[role="dialog"][data-testid="tpsl"]`, fills `tpsl-tp-price-input` / `tpsl-sl-price-input` using 5-sig-fig / row-precision formatting + React `_valueTracker` reset, waits for `[data-testid="tpsl-confirm"]` to become enabled, submits, and confirms dialog closure.
+  - Wired `×` clear on TP/SL boxes to submit cleared values and wired `×` close on the entry box to trigger Hypernova's Radix `close-position-menu-trigger` → Market Close.
+  - Added `VEST_TV_HYPERNOVA_TP_SL_RESULT` feedback so rejected/invalid prices (e.g., SL placed on wrong side of Mark Price) show Hypernova's error and cleanly revert the optimistic chart line, while confirmed orders lock straight to Hypernova's live Positions row.
 
 ---
 

@@ -4483,26 +4483,52 @@
     return Number.isFinite(val) ? Math.abs(val) * rawSign : NaN;
   }
 
-  function formatHypernovaOrderPrice(price) {
+  function getHypernovaDecimalPlaces(text) {
+    const cleaned = String(text || '').replace(/,/g, '');
+    const m = cleaned.match(/\d+\.(\d+)/);
+    return m ? m[1].length : 0;
+  }
+
+  function formatHypernovaOrderPrice(price, decimalsHint = null) {
     const p = Number(price);
     if (!Number.isFinite(p) || p <= 0) return '';
-    if (p >= 1000) return p.toFixed(2);
-    if (p >= 10) return p.toFixed(3);
-    if (p >= 1) return p.toFixed(4);
-    if (p >= 0.01) return p.toFixed(5);
-    return p.toFixed(6);
+    // Hypernova (Hyperliquid-style perp engine) uses 5 significant figures (capped at 6 decimals).
+    // If we know the exact decimal places from the position row's entry/mark price, respect it within 5-sig-fig bounds!
+    const intDigits = p >= 1 ? Math.floor(Math.log10(p)) + 1 : 0;
+    const maxSigFigDecimals = p >= 1 ? Math.max(0, 5 - intDigits) : 6;
+    let decimals = maxSigFigDecimals;
+    if (Number.isInteger(decimalsHint) && decimalsHint >= 0) {
+      decimals = Math.min(decimalsHint, maxSigFigDecimals);
+    }
+    if (decimals === 0) return String(Math.round(p));
+    return p.toFixed(decimals);
   }
 
   function setReactNativeInputValue(input, nextValue) {
     if (!input) return false;
     try {
+      input.focus();
       const valStr = String(nextValue ?? '');
       const proto = Object.getPrototypeOf(input);
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set ||
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      // Reset React's internal _valueTracker so controlled React inputs always fire onChange
+      const tracker = input._valueTracker;
+      if (tracker && typeof tracker.setValue === 'function') {
+        tracker.setValue(valStr === '' ? '__cortex_prev__' : '');
+      }
       if (setter) setter.call(input, valStr);
       else input.value = valStr;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      try {
+        input.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          data: valStr,
+          inputType: valStr === '' ? 'deleteContentBackward' : 'insertText'
+        }));
+      } catch (e) {
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       input.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     } catch (e) {
@@ -4510,7 +4536,92 @@
     }
   }
 
+  function dispatchHypernovaClick(el) {
+    if (!el) return false;
+    try {
+      if (typeof el.focus === 'function') {
+        try { el.focus({ preventScroll: true }); } catch (e) {}
+      }
+      const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+      const clientX = rect.left + rect.width / 2;
+      const clientY = rect.top + rect.height / 2;
+      try {
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, buttons: 1, clientX, clientY, pointerType: 'mouse', isPrimary: true }));
+      } catch (e) {}
+      try {
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, buttons: 1, clientX, clientY }));
+      } catch (e) {}
+      try {
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, button: 0, buttons: 0, clientX, clientY, pointerType: 'mouse', isPrimary: true }));
+      } catch (e) {}
+      try {
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, buttons: 0, clientX, clientY }));
+      } catch (e) {}
+      if (typeof el.click === 'function') {
+        el.click();
+      } else {
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, clientX, clientY }));
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function waitForHypernovaCondition(fn, timeoutMs = 1500, intervalMs = 40) {
+    return new Promise((resolve) => {
+      const immediate = (() => { try { return fn(); } catch (e) { return null; } })();
+      if (immediate) {
+        resolve(immediate);
+        return;
+      }
+      const started = Date.now();
+      const timer = setInterval(() => {
+        let res = null;
+        try { res = fn(); } catch (e) {}
+        if (res) {
+          clearInterval(timer);
+          resolve(res);
+          return;
+        }
+        if (Date.now() - started >= timeoutMs) {
+          clearInterval(timer);
+          resolve(null);
+        }
+      }, intervalMs);
+    });
+  }
+
+  async function ensureHypernovaPositionsTabActive() {
+    if (document.querySelector('tr[data-testid^="positions-row-"]')) return true;
+    const tabs = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"], .trade-tabs-list [role="tab"]'));
+    const posTab = tabs.find(t => /^positions\b/i.test((t.innerText || t.textContent || '').trim()));
+    if (posTab && posTab.getAttribute('aria-selected') !== 'true') {
+      dispatchHypernovaClick(posTab);
+      await waitForHypernovaCondition(() =>
+        document.querySelector('tr[data-testid^="positions-row-"]') || findHypernovaPositionsTableAndRows(),
+        500,
+        40
+      );
+    }
+    return true;
+  }
+
   function findHypernovaPositionsTableAndRows() {
+    // Fast-path: Hypernova's exact native positions rows (`tr[data-testid^="positions-row-"]`)
+    const nativeRows = Array.from(document.querySelectorAll('tr[data-testid^="positions-row-"]')).filter(r => {
+      const rr = r.getBoundingClientRect();
+      return rr.width > 0 && rr.height > 0;
+    });
+    if (nativeRows.length > 0) {
+      const table = nativeRows[0].closest('table, [role="table"]') || nativeRows[0].parentElement;
+      const headerEls = table
+        ? Array.from(table.querySelectorAll('thead th, thead [role="columnheader"]'))
+        : [];
+      const headers = headerEls.map(h => (h.innerText || h.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase());
+      return { table, headers, rows: nativeRows, isNativeHypernova: true };
+    }
+
     const tables = Array.from(document.querySelectorAll('table, [role="table"]'));
     for (const table of tables) {
       const rect = table.getBoundingClientRect();
@@ -4530,7 +4641,7 @@
         const rr = r.getBoundingClientRect();
         return rr.width > 0 && rr.height > 0 && !r.querySelector('th');
       });
-      return { table, headers, rows: bodyRows };
+      return { table, headers, rows: bodyRows, isNativeHypernova: false };
     }
     return null;
   }
@@ -4547,7 +4658,7 @@
       const idxValue = headers.findIndex(h => /\bvalue\b|\bnotional\b|\bposition\b/.test(h));
       const idxEntry = headers.findIndex(h => /entry|open price|avg/.test(h));
       const idxMark = headers.findIndex(h => /mark|mid|oracle|index|last/.test(h));
-      const idxPnl = headers.findIndex(h => /pnl|u\.?pnl|profit/.test(h) && !/realized/.test(h));
+      const idxPnl = headers.findIndex(h => /pnl|u\.?pnl|profit/.test(h) && !/realized|\brpnl\b/.test(h));
       const idxTpSl = headers.findIndex(h => /tp\s*\/?\s*sl|take\s*profit|stop\s*loss/.test(h));
 
       for (const row of rows) {
@@ -4557,22 +4668,41 @@
         const rowText = cellTexts.join(' ');
         if (/no\s+(open\s+)?positions/i.test(rowText)) continue;
 
-        const symCellText = cellTexts[idxSym] || cellTexts[0] || '';
-        const symMatch = symCellText.match(/([A-Z0-9]{2,12}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
+        // Exact Hypernova data-testid cells when present
+        const symTextEl = row.querySelector('[data-testid="symbol-text"]');
+        const entryTd = row.querySelector('td[data-testid$="-entry"]');
+        const markTd = row.querySelector('td[data-testid$="-mark"]');
+        const sizeTd = row.querySelector('td[data-testid$="-size"]');
+        const valueTd = row.querySelector('td[data-testid$="-value"]');
+        const pnlTd = row.querySelector('td[data-testid$="-pnl"]');
+        const tpSlEl = row.querySelector('[data-testid="position-tpsl"]') || row.querySelector('td[data-testid$="-tpsl"]');
+
+        const rawSymStr = symTextEl
+          ? (symTextEl.innerText || symTextEl.textContent || '').trim()
+          : (cellTexts[idxSym] || cellTexts[0] || '');
+        const symMatch = rawSymStr.match(/([A-Z0-9]{2,12}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
         const symbol = symMatch ? normalizeHypernovaBaseSymbol(symMatch[1]) : '';
         if (!symbol) continue;
 
-        // Detect side: explicit Long/Short text, negative size, or green/red class on side badge
-        let side = null;
-        if (/\bshort\b/i.test(symCellText) || /\bshort\b/i.test(rowText)) side = 'short';
-        else if (/\blong\b/i.test(symCellText) || /\blong\b/i.test(rowText)) side = 'long';
+        const entryText = entryTd ? (entryTd.innerText || entryTd.textContent || '').trim() : (idxEntry >= 0 ? cellTexts[idxEntry] : '');
+        const markText = markTd ? (markTd.innerText || markTd.textContent || '').trim() : (idxMark >= 0 ? cellTexts[idxMark] : '');
+        const sizeText = sizeTd ? (sizeTd.innerText || sizeTd.textContent || '').trim() : (idxSize >= 0 ? cellTexts[idxSize] : '');
+        const valueText = valueTd ? (valueTd.innerText || valueTd.textContent || '').trim() : (idxValue >= 0 ? cellTexts[idxValue] : '');
+        const pnlText = pnlTd ? (pnlTd.innerText || pnlTd.textContent || '').trim() : (idxPnl >= 0 ? cellTexts[idxPnl] : '');
+        const tpSlText = tpSlEl ? (tpSlEl.innerText || tpSlEl.textContent || '').trim() : (idxTpSl >= 0 ? cellTexts[idxTpSl] : '');
 
-        const entryPrice = idxEntry >= 0 ? Math.abs(parseHypernovaNumber(cellTexts[idxEntry])) : NaN;
+        // Detect side: Hypernova sets `trade-positions-row-short` / `trade-positions-row-long` on <tr>!
+        const rowCls = String(row.className || '').toLowerCase();
+        let side = null;
+        if (rowCls.includes('row-short') || /\bshort\b/i.test(rawSymStr) || /\bshort\b/i.test(rowText)) side = 'short';
+        else if (rowCls.includes('row-long') || /\blong\b/i.test(rawSymStr) || /\blong\b/i.test(rowText)) side = 'long';
+
+        const entryPrice = Math.abs(parseHypernovaNumber(entryText));
         if (!Number.isFinite(entryPrice) || entryPrice <= 0) continue;
 
-        const markPrice = idxMark >= 0 ? Math.abs(parseHypernovaNumber(cellTexts[idxMark])) : NaN;
-        const rawSizeNum = idxSize >= 0 ? parseHypernovaNumber(cellTexts[idxSize]) : NaN;
-        const rawValNum = idxValue >= 0 ? Math.abs(parseHypernovaNumber(cellTexts[idxValue])) : NaN;
+        const markPrice = Math.abs(parseHypernovaNumber(markText));
+        const rawSizeNum = parseHypernovaNumber(sizeText);
+        const rawValNum = Math.abs(parseHypernovaNumber(valueText));
 
         if (!side && Number.isFinite(rawSizeNum) && rawSizeNum !== 0) {
           side = rawSizeNum < 0 ? 'short' : 'long';
@@ -4586,7 +4716,7 @@
 
         let sizeQty = Number.isFinite(rawSizeNum) && rawSizeNum !== 0 ? Math.abs(rawSizeNum) : NaN;
         let notionalUsd = Number.isFinite(rawValNum) && rawValNum > 0 ? rawValNum : NaN;
-        if (idxSize >= 0 && /\$/.test(cellTexts[idxSize]) && !Number.isFinite(notionalUsd)) {
+        if (/\$/.test(sizeText) && !Number.isFinite(notionalUsd)) {
           notionalUsd = Math.abs(rawSizeNum);
           sizeQty = notionalUsd / entryPrice;
         }
@@ -4597,11 +4727,17 @@
           notionalUsd = sizeQty * entryPrice;
         }
 
-        const unrealizedPnl = idxPnl >= 0 ? parseHypernovaNumber(cellTexts[idxPnl]) : NaN;
+        let unrealizedPnl = parseHypernovaNumber(pnlText);
+        if (Number.isFinite(unrealizedPnl) && pnlTd) {
+          const negTone = pnlTd.querySelector('[data-tone="negative"], .trade-positions-pnl-negative');
+          const posTone = pnlTd.querySelector('[data-tone="positive"], .trade-positions-pnl-positive');
+          if (negTone && unrealizedPnl > 0) unrealizedPnl = -Math.abs(unrealizedPnl);
+          else if (posTone && unrealizedPnl < 0) unrealizedPnl = Math.abs(unrealizedPnl);
+        }
+
         let tpPrice = null;
         let slPrice = null;
-        if (idxTpSl >= 0 && cellTexts[idxTpSl]) {
-          const tpSlText = cellTexts[idxTpSl];
+        if (tpSlText) {
           const slashParts = tpSlText.split('/');
           if (slashParts.length >= 2) {
             const tpVal = Math.abs(parseHypernovaNumber(slashParts[0]));
@@ -4610,6 +4746,8 @@
             if (Number.isFinite(slVal) && slVal > 0) slPrice = slVal;
           }
         }
+
+        const priceDecimals = Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText));
 
         positions.push({
           symbol,
@@ -4620,7 +4758,8 @@
           notionalUsd: Number.isFinite(notionalUsd) && notionalUsd > 0 ? notionalUsd : null,
           unrealizedPnl: Number.isFinite(unrealizedPnl) ? unrealizedPnl : null,
           tpPrice,
-          slPrice
+          slPrice,
+          priceDecimals
         });
       }
     } catch (e) {}
@@ -4648,27 +4787,76 @@
     const idxTpSl = headers.findIndex(h => /tp\s*\/?\s*sl|take\s*profit|stop\s*loss/.test(h));
     for (const row of rows) {
       const cells = Array.from(row.querySelectorAll('td, [role="cell"]'));
-      const symText = (cells[idxSym] ? (cells[idxSym].innerText || cells[idxSym].textContent) : (row.innerText || '')).trim();
+      const symTextEl = row.querySelector('[data-testid="symbol-text"]');
+      const symText = symTextEl
+        ? (symTextEl.innerText || symTextEl.textContent || '').trim()
+        : (cells[idxSym] ? (cells[idxSym].innerText || cells[idxSym].textContent) : (row.innerText || '')).trim();
       const m = symText.match(/([A-Z0-9]{2,12}(?:[-/_](?:USD|USDT|USDC|PERP))?)/i);
       const rowSym = m ? normalizeHypernovaBaseSymbol(m[1]) : '';
       if (!targetSym || rowSym === targetSym) {
-        return { row, cells, headers, idxTpSl };
+        const entryTd = row.querySelector('td[data-testid$="-entry"]');
+        const markTd = row.querySelector('td[data-testid$="-mark"]');
+        const entryText = entryTd ? (entryTd.innerText || entryTd.textContent || '') : '';
+        const markText = markTd ? (markTd.innerText || markTd.textContent || '') : '';
+        const priceDecimals = (entryText || markText)
+          ? Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText))
+          : null;
+        // Exact Hypernova clickable trigger is `<span class="trade-positions-tpsl-cell" data-testid="position-tpsl">`
+        // (NEVER click an <svg> child directly because SVGElement lacks `.click()`!)
+        const tpSlTrigger =
+          row.querySelector('[data-testid="position-tpsl"]') ||
+          row.querySelector('.trade-positions-tpsl-cell') ||
+          (idxTpSl >= 0 && cells[idxTpSl]
+            ? (cells[idxTpSl].querySelector('button, [role="button"], span') || cells[idxTpSl])
+            : null);
+        const closeTrigger =
+          row.querySelector('[data-testid="close-position-menu-trigger"]') ||
+          Array.from(row.querySelectorAll('button, [role="button"]')).find(b => {
+            const t = (b.innerText || b.textContent || '').trim();
+            const aria = (b.getAttribute('aria-label') || b.getAttribute('title') || '').trim();
+            return /^(market|close|market\s+close|×|x)$/i.test(t) || /close/i.test(aria);
+          }) ||
+          null;
+        return { row, cells, headers, idxTpSl, tpSlTrigger, closeTrigger, priceDecimals };
       }
     }
     return null;
   }
 
+  function findHypernovaTpSlDialog() {
+    const exact = document.querySelector('[role="dialog"][data-testid="tpsl"]');
+    if (exact) {
+      const st = exact.getAttribute('data-state');
+      const r = exact.getBoundingClientRect();
+      if (st !== 'closed' && r.width > 120 && r.height > 80) return exact;
+    }
+    return Array.from(document.querySelectorAll('[role="dialog"], [class*="tpsl-modal" i], [class*="modal" i]')).find(d => {
+      if (d.id && d.id.startsWith('vest-')) return false;
+      if (d.getAttribute('data-state') === 'closed') return false;
+      const r = d.getBoundingClientRect();
+      if (r.width <= 180 || r.height <= 100) return false;
+      return Boolean(
+        d.querySelector('[data-testid="tpsl-tp-price-input"], [data-testid="tpsl-sl-price-input"], [data-testid="tpsl-confirm"]') ||
+        /tp\s*\/\s*sl/i.test(d.innerText || '')
+      );
+    }) || null;
+  }
+
   function findTpSlInputInRoot(root, kind) {
     if (!root) return null;
     const wantTp = kind === 'tp';
+    // Fast-path: Hypernova's exact `data-testid` price inputs inside `[data-testid="tpsl"]`
+    const exact = root.querySelector(wantTp ? '[data-testid="tpsl-tp-price-input"]' : '[data-testid="tpsl-sl-price-input"]');
+    if (exact && !exact.disabled) return exact;
+
     const matchRe = wantTp ? /take\s*profit|\btp\b/i : /stop\s*loss|\bsl\b/i;
-    const excludeRe = wantTp ? /stop\s*loss|\bsl\b/i : /take\s*profit|\btp\b/i;
+    const excludeRe = wantTp ? /stop\s*loss|\bsl\b|gain|percent|%/i : /take\s*profit|\btp\b|loss|percent|%/i;
     const inputs = Array.from(root.querySelectorAll('input[type="text"], input[type="number"], input:not([type])')).filter(inp => {
       const r = inp.getBoundingClientRect();
       return r.width > 20 && r.height > 12 && !inp.disabled;
     });
     for (const inp of inputs) {
-      const attrs = `${inp.placeholder || ''} ${inp.name || ''} ${inp.id || ''} ${inp.getAttribute('aria-label') || ''}`;
+      const attrs = `${inp.placeholder || ''} ${inp.name || ''} ${inp.id || ''} ${inp.getAttribute('aria-label') || ''} ${inp.getAttribute('data-testid') || ''}`;
       if (matchRe.test(attrs) && !excludeRe.test(attrs)) return inp;
       let parent = inp.parentElement;
       for (let up = 0; up < 3 && parent && parent !== root; up++) {
@@ -4680,91 +4868,158 @@
     return null;
   }
 
+  function extractHypernovaDialogErrorText(dialog) {
+    if (!dialog) return '';
+    try {
+      const errEls = Array.from(dialog.querySelectorAll('[role="alert"], [class*="error" i], [class*="warning" i], [data-testid*="error" i]'));
+      for (const el of errEls) {
+        const txt = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (txt && txt.length <= 160) return txt;
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  let hypernovaTpSlActionInFlight = false;
+
+  async function submitHypernovaTpSlModalValue({ symbol, kind, valueStr, isBe = false, isClear = false, pnlStr = '' }) {
+    if (hypernovaTpSlActionInFlight) return;
+    hypernovaTpSlActionInFlight = true;
+    const notifyResult = (ok, extra = {}) => {
+      postToMainWorlds({
+        type: 'VEST_TV_HYPERNOVA_TP_SL_RESULT',
+        payload: { ok, symbol, type: kind, ...extra }
+      });
+    };
+
+    try {
+      await ensureHypernovaPositionsTabActive();
+      const rowInfo = findHypernovaPositionRowBySymbol(symbol);
+      const formatted = isClear ? '' : (typeof valueStr === 'string' ? valueStr : formatHypernovaOrderPrice(valueStr, rowInfo ? rowInfo.priceDecimals : null));
+
+      let dialog = findHypernovaTpSlDialog();
+      if (!dialog) {
+        if (!rowInfo || !rowInfo.tpSlTrigger) {
+          showToast(`Could not locate open ${symbol || ''} position row on Hypernova`);
+          notifyResult(false, { reason: 'position_row_not_found' });
+          return;
+        }
+        dispatchHypernovaClick(rowInfo.tpSlTrigger);
+        dialog = await waitForHypernovaCondition(() => findHypernovaTpSlDialog(), 1800, 40);
+      }
+
+      if (!dialog) {
+        showToast(`Could not open Hypernova TP/SL dialog for ${symbol || 'position'}`);
+        notifyResult(false, { reason: 'dialog_not_opened' });
+        return;
+      }
+
+      const input = await waitForHypernovaCondition(() => findTpSlInputInRoot(dialog, kind), 1000, 40);
+      if (!input) {
+        showToast(`Could not find ${kind.toUpperCase()} price input in Hypernova dialog`);
+        notifyResult(false, { reason: 'input_not_found' });
+        return;
+      }
+
+      setReactNativeInputValue(input, formatted);
+
+      // Wait for React state & validation to enable `[data-testid="tpsl-confirm"]`
+      const confirmBtn = await waitForHypernovaCondition(() => {
+        const btn = dialog.querySelector('[data-testid="tpsl-confirm"]') ||
+          Array.from(dialog.querySelectorAll('button')).find(b => /^(confirm|save|update|apply|set|submit)/i.test((b.innerText || b.textContent || '').trim()));
+        return btn && !btn.disabled ? btn : null;
+      }, 700, 40);
+
+      if (!confirmBtn) {
+        const errTxt = extractHypernovaDialogErrorText(dialog);
+        const cancelBtn = dialog.querySelector('[data-testid="tpsl-cancel"]') || dialog.querySelector('.dialog-close-btn');
+        if (cancelBtn) dispatchHypernovaClick(cancelBtn);
+        showToast(
+          errTxt
+            ? `Hypernova ${kind.toUpperCase()} rejected: ${errTxt}`
+            : `Hypernova rejected ${kind.toUpperCase()} at $${formatted} (must be on valid side of Mark Price)`
+        );
+        notifyResult(false, { reason: 'confirm_disabled', error: errTxt });
+        return;
+      }
+
+      dispatchHypernovaClick(confirmBtn);
+
+      // Wait for Hypernova to submit the order & close the dialog
+      const closed = await waitForHypernovaCondition(() => {
+        const openDialog = findHypernovaTpSlDialog();
+        return !openDialog;
+      }, 3500, 60);
+
+      if (!closed) {
+        const errTxt = extractHypernovaDialogErrorText(dialog);
+        showToast(
+          errTxt
+            ? `Hypernova ${kind.toUpperCase()} error: ${errTxt}`
+            : `Hypernova TP/SL modal stayed open — verify order in dialog`
+        );
+        notifyResult(false, { reason: 'dialog_stayed_open', error: errTxt });
+        return;
+      }
+
+      if (isClear) {
+        showToast(`Cleared Hypernova ${kind.toUpperCase()} order`);
+      } else {
+        showToast(
+          isBe
+            ? `Hypernova Breakeven SL submitted ($${formatted})`
+            : `Hypernova ${kind.toUpperCase()} submitted at $${formatted}${pnlStr}`
+        );
+      }
+
+      notifyResult(true, { price: isClear ? null : Number(formatted) });
+      setTimeout(() => syncHypernovaPositionsToMainWorld(true), 300);
+      setTimeout(() => syncHypernovaPositionsToMainWorld(true), 900);
+      setTimeout(() => syncHypernovaPositionsToMainWorld(true), 2000);
+    } catch (e) {
+      notifyResult(false, { reason: 'exception' });
+    } finally {
+      hypernovaTpSlActionInFlight = false;
+    }
+  }
+
   function executeHypernovaTpSlAction(payload) {
     const kind = payload.type === 'tp' ? 'tp' : 'sl';
     const isBe = payload.type === 'be';
     const price = Number(payload.price);
     const symbol = payload.symbol || '';
     if (!Number.isFinite(price) || price <= 0) return;
-    const formatted = formatHypernovaOrderPrice(price);
     const pnlStr = typeof payload.pnlText === 'string' && payload.pnlText ? ` (${payload.pnlText})` : '';
-
-    const applyInsideDialogOrTicket = (fromModal) => {
-      const dialog = Array.from(document.querySelectorAll('[role="dialog"], [class*="modal" i], [class*="Modal" i]')).find(d => {
-        if (d.id && d.id.startsWith('vest-')) return false;
-        const r = d.getBoundingClientRect();
-        return r.width > 180 && r.height > 100;
-      });
-      const targetRoot = dialog || document;
-      const input = findTpSlInputInRoot(targetRoot, kind);
-      if (input) {
-        setReactNativeInputValue(input, formatted);
-        if (dialog) {
-          const confirmBtn = Array.from(dialog.querySelectorAll('button')).find(b => {
-            const t = (b.innerText || b.textContent || '').trim();
-            return /^(confirm|save|update|apply|set|submit)/i.test(t) && !b.disabled;
-          });
-          if (confirmBtn) {
-            setTimeout(() => { try { confirmBtn.click(); } catch (e) {} }, 60);
-          }
-        }
-        showToast(
-          isBe
-            ? `Hypernova SL set to Breakeven ($${formatted})`
-            : `Hypernova ${kind.toUpperCase()} updated to $${formatted}${pnlStr}`
-        );
-        setTimeout(() => syncHypernovaPositionsToMainWorld(true), 450);
-        return true;
-      }
-      if (!fromModal) {
-        showToast(
-          isBe
-            ? `Breakeven SL placed on chart at $${formatted}`
-            : `${kind.toUpperCase()} placed on chart at $${formatted}${pnlStr}`
-        );
-      }
-      return false;
-    };
-
-    // First check if a TP/SL modal is already open, else try clicking the position row's TP/SL edit trigger
-    const rowInfo = findHypernovaPositionRowBySymbol(symbol);
-    if (rowInfo && rowInfo.idxTpSl >= 0 && rowInfo.cells[rowInfo.idxTpSl]) {
-      const tpSlCell = rowInfo.cells[rowInfo.idxTpSl];
-      const editTrigger = tpSlCell.querySelector('button, [role="button"], svg') || tpSlCell;
-      if (editTrigger && typeof editTrigger.click === 'function') {
-        try { editTrigger.click(); } catch (e) {}
-        setTimeout(() => {
-          if (!applyInsideDialogOrTicket(true)) {
-            applyInsideDialogOrTicket(false);
-          }
-        }, 160);
-        return;
-      }
-    }
-
-    applyInsideDialogOrTicket(false);
+    submitHypernovaTpSlModalValue({ symbol, kind, valueStr: price, isBe, isClear: false, pnlStr });
   }
 
   function executeHypernovaClearTpSlAction(payload) {
     const kind = payload.type === 'tp' ? 'tp' : 'sl';
-    showToast(`Cleared Hypernova ${kind.toUpperCase()} chart line`);
+    const symbol = payload.symbol || '';
+    submitHypernovaTpSlModalValue({ symbol, kind, valueStr: '', isBe: false, isClear: true });
   }
 
-  function executeHypernovaClosePositionAction(payload) {
+  async function executeHypernovaClosePositionAction(payload) {
     const symbol = payload.symbol || '';
+    await ensureHypernovaPositionsTabActive();
     const rowInfo = findHypernovaPositionRowBySymbol(symbol);
-    if (rowInfo && rowInfo.row) {
-      const closeBtn = Array.from(rowInfo.row.querySelectorAll('button, [role="button"]')).find(b => {
-        const t = (b.innerText || b.textContent || '').trim();
-        const aria = (b.getAttribute('aria-label') || b.getAttribute('title') || '').trim();
-        return /^(market|close|market\s+close|×|x)$/i.test(t) || /close/i.test(aria);
-      });
-      if (closeBtn) {
-        try { closeBtn.click(); } catch (e) {}
-        showToast(`Triggered Close Position for ${symbol || 'active trade'}`);
-        setTimeout(() => syncHypernovaPositionsToMainWorld(true), 500);
-        return;
+    if (rowInfo && rowInfo.closeTrigger) {
+      dispatchHypernovaClick(rowInfo.closeTrigger);
+      // Hypernova's `close-position-menu-trigger` is a Radix dropdown menu; wait briefly for its Market Close item
+      const marketItem = await waitForHypernovaCondition(() => {
+        const items = Array.from(document.querySelectorAll('[role="menuitem"], [data-slot="dropdown-menu-item"]'));
+        return items.find(it => /market/i.test((it.innerText || it.textContent || '').trim())) || null;
+      }, 600, 40);
+      if (marketItem) {
+        dispatchHypernovaClick(marketItem);
+        // If Hypernova shows a Close confirmation dialog, leave it visible or click confirm if unambiguous
+        showToast(`Triggered Market Close for ${symbol || 'active trade'}`);
+      } else {
+        showToast(`Opened Close menu for ${symbol || 'active trade'}`);
       }
+      setTimeout(() => syncHypernovaPositionsToMainWorld(true), 600);
+      setTimeout(() => syncHypernovaPositionsToMainWorld(true), 1500);
+      return;
     }
     showToast(`Use Hypernova's Close button to exit ${symbol || 'position'}`);
   }

@@ -1,3 +1,8 @@
+Trading Cortex v1.1.142 — Live Hypernova TP / SL / Breakeven & Close Order Submission
+
+- **Real Hypernova TP/SL & Breakeven Submission (`v1.1.142`)**: Fixed dragging **SL**, dragging **TP**, clicking **BE**, and clearing TP/SL so they now open Hypernova's exact `[data-testid="position-tpsl"]` modal, populate `tpsl-sl-price-input` / `tpsl-tp-price-input` with Hypernova's 5-sig-fig tick precision and React `_valueTracker` sync, click `tpsl-confirm`, and verify submission — automatically reverting the chart line with a toast if Hypernova rejects an invalid price (e.g. SL on the wrong side of Mark Price).
+- **Accurate Hypernova Position Side, PnL & Radix Close Wiring (`v1.1.142`)**: Reads Hypernova's exact `tr.trade-positions-row-short` / `long` row classes, `data-testid` cells (`symbol-text`, `-entry`, `-mark`, `-size`, `-pnl`, `position-tpsl`), and dispatches pointer events for Hypernova's Radix `close-position-menu-trigger`.
+
 Trading Cortex v1.1.141 — Style Existing Hypernova Current Price Line Directly + Font Size Sliders
 
 - **No More Duplicate Current Price Line (`v1.1.141`)**: Directly modifies Hypernova's existing native TradingView current price line (`priceLineColor`, `priceLineWidth`, `priceLineStyle`, and native `SeriesPriceLinePaneView` renderer) instead of drawing a second line on top of it, and cleanly restores the native line when toggled off.

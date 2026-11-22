@@ -154,12 +154,44 @@ function extractBlock(src, startMarker, endMarker) {
     'VEST_TV_HYPERNOVA_POSITIONS_UPDATE',
     'VEST_TV_HYPERNOVA_SET_TP_SL',
     'VEST_TV_HYPERNOVA_CLEAR_TP_SL',
-    'VEST_TV_HYPERNOVA_CLOSE_POSITION'
+    'VEST_TV_HYPERNOVA_CLOSE_POSITION',
+    'VEST_TV_HYPERNOVA_TP_SL_RESULT',
+    'positions-row-',
+    'position-tpsl',
+    'tpsl-tp-price-input',
+    'tpsl-sl-price-input',
+    'tpsl-confirm',
+    'tpsl-cancel',
+    'close-position-menu-trigger',
+    'row-short',
+    '_valueTracker'
   ];
   for (const token of requiredIsolatedTokens) {
     assert.strictEqual(isolatedSrc.includes(token), true, `content-isolated.js missing required Hypernova token: ${token}`);
   }
-  console.log('✓ Hypernova settings toggles, font size sliders, Current Price styling controls & DOM bridge verified in content-isolated.js');
+
+  // Test Hypernova 5-significant-figure order price formatter
+  const fmtBlock = extractBlock(
+    isolatedSrc,
+    'function getHypernovaDecimalPlaces(text)',
+    'function setReactNativeInputValue('
+  );
+  const fmtCtx = {};
+  vm.runInNewContext(
+    `${fmtBlock}
+     this.getHypernovaDecimalPlaces = getHypernovaDecimalPlaces;
+     this.formatHypernovaOrderPrice = formatHypernovaOrderPrice;`,
+    fmtCtx
+  );
+  assert.strictEqual(fmtCtx.getHypernovaDecimalPlaces('$62.632'), 3);
+  assert.strictEqual(fmtCtx.getHypernovaDecimalPlaces('$60,648'), 0);
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37, 0), '60648');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(60648.37), '60648');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(62.6324, 3), '62.632');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(3124.56, 1), '3124.6');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(184.256, 2), '184.26');
+  assert.strictEqual(fmtCtx.formatHypernovaOrderPrice(0.084216, 5), '0.08422');
+  console.log('✓ Hypernova settings toggles, exact data-testid TP/SL modal submission, 5-sig-fig tick formatting & DOM bridge verified in content-isolated.js');
 }
 
 // 4. Test native TradingView Current Price line styling helpers (modifies existing native line, no duplicate)
@@ -216,7 +248,8 @@ function extractBlock(src, startMarker, endMarker) {
     'startHypernovaTpSlDrag',
     'renderHypernovaChartVisuals(ctx, targetCanvas, symbolKey, extracted.model, mainSeries, priceToY, hypernovaYToPrice, cssWidth, cssHeight)',
     'removeHypernovaOverlayWidgets();',
-    "case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE':"
+    "case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE':",
+    "case 'VEST_TV_HYPERNOVA_TP_SL_RESULT':"
   ];
   for (const token of requiredMainTokens) {
     assert.strictEqual(mainSrc.includes(token), true, `content-main.js missing required Hypernova token: ${token}`);

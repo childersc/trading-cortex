@@ -4402,6 +4402,25 @@
         scheduleIctSessionsRender(false);
         break;
       }
+      case 'VEST_TV_HYPERNOVA_TP_SL_RESULT': {
+        const res = payload || {};
+        const normSym = normalizeHypernovaMainSymbol(res.symbol || '');
+        const field = res.type === 'tp' ? 'tpPrice' : 'slPrice';
+        const tsField = res.type === 'tp' ? 'tpSetAt' : 'slSetAt';
+        if (normSym && hypernovaManualTpSlBySymbol[normSym]) {
+          if (res.ok === false) {
+            delete hypernovaManualTpSlBySymbol[normSym][field];
+            delete hypernovaManualTpSlBySymbol[normSym][tsField];
+          } else if (res.ok === true) {
+            hypernovaManualTpSlBySymbol[normSym][field] = (Number.isFinite(Number(res.price)) && Number(res.price) > 0)
+              ? Number(res.price)
+              : null;
+            hypernovaManualTpSlBySymbol[normSym][tsField] = Date.now();
+          }
+        }
+        scheduleIctSessionsRender(false);
+        break;
+      }
       case 'VEST_TV_GLOBAL_DRAWINGS_UPDATE': {
         updateGlobalDrawingsSnapshot(payload && payload.drawings);
         restoreGlobalDrawings();
@@ -8138,6 +8157,16 @@
       delete hypernovaManualTpSlBySymbol[normSym];
     }
     const activeManual = hypernovaManualTpSlBySymbol[normSym] || {};
+    const nowMs = Date.now();
+    // Once Hypernova's live Positions table settles after a submitted TP/SL (~3.5s), defer back to the real DOM row
+    if (activeManual.tpPrice !== undefined && activeManual.tpSetAt && (nowMs - activeManual.tpSetAt > 3500)) {
+      delete activeManual.tpPrice;
+      delete activeManual.tpSetAt;
+    }
+    if (activeManual.slPrice !== undefined && activeManual.slSetAt && (nowMs - activeManual.slSetAt > 3500)) {
+      delete activeManual.slPrice;
+      delete activeManual.slSetAt;
+    }
 
     const tpPrice = activeManual.tpPrice !== undefined
       ? activeManual.tpPrice
@@ -8455,7 +8484,7 @@
         hypernovaManualTpSlBySymbol[sym] = {
           ...prev,
           entryPrice: dragPos.entryPrice,
-          ...(kind === 'tp' ? { tpPrice: finalPrice } : { slPrice: finalPrice })
+          ...(kind === 'tp' ? { tpPrice: finalPrice, tpSetAt: Date.now() } : { slPrice: finalPrice, slSetAt: Date.now() })
         };
         const pnlUsd = computeHypernovaTargetPnlUsd(dragPos, finalPrice);
         const pnlText = pnlUsd !== null ? formatHypernovaDollarAmount(pnlUsd) : '';
@@ -8668,7 +8697,8 @@
             hypernovaManualTpSlBySymbol[pos.symbol] = {
               ...prev,
               entryPrice: pos.entryPrice,
-              slPrice: pos.entryPrice
+              slPrice: pos.entryPrice,
+              slSetAt: Date.now()
             };
             try {
               window.top.postMessage({
@@ -8792,7 +8822,7 @@
           hypernovaManualTpSlBySymbol[pos.symbol] = {
             ...prev,
             entryPrice: pos.entryPrice,
-            ...(isTp ? { tpPrice: null } : { slPrice: null })
+            ...(isTp ? { tpPrice: null, tpSetAt: Date.now() } : { slPrice: null, slSetAt: Date.now() })
           };
           try {
             window.top.postMessage({
