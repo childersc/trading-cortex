@@ -1,6 +1,23 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.146`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.147`) are documented in this file.
+
+---
+
+## [v1.1.147] — 2026-11-25
+
+### ✏️ Fixed Drawing Tool Memory Not Saving & Line/Rectangle Pre-Selected on Refresh
+- **Root Causes Identified (via live TradingView DOM inspection)**:
+  1. **False Active Detection (`isInteractive-GwQQdU8S`)**: `isElementActive()` checked `/active/i` and `[class*="active"]`, which falsely matched TradingView's standard `isInteractive-GwQQdU8S` class on EVERY inactive toolbar button — corrupting `detectedActiveTool` and magnet/toggle detection.
+  2. **Refusing to Save Crosshair (`cursor`)**: `drawing_tool_changed` explicitly ignored `'cursor'` and `saveCurrentSidebarState()` forced `activeTool` back to `prev.activeTool` (e.g. `LineToolTrendLine` / `LineToolRectangle`), leaving a drawing tool permanently stuck in memory even after finishing a drawing.
+  3. **Broken Crosshair Restore + Slot Icon Mismatch**: `restoreSidebarSelections()` armed every tool in `groupTools` via `selectLineTool()` without updating the TradingView React group slot icon, then failed to switch back to Crosshair because TradingView's Cross button has no `data-name="cursor"` (it lives inside `[data-name="linetool-group-cursors"] button[aria-label="Cross"]`).
+  4. **Unrestored Boot Defaults Overwriting Saved Memory + Multi-Frame Collision**: Clicking anywhere on the page after an unsuccessful restore (or duplicate listeners running in both top window and the same-origin chart iframe) overwrote saved `groupTools` with TradingView's defaults and could double-toggle Magnet / Lock / Keep Drawing (`data-name="drawginmode"`).
+- **Fixes (`content/content-main.js`, `content/content-isolated.js`, `background/service-worker.js`)**:
+  - Replaced substring `active` matching with strict token matching (`hasActiveClassToken`) so `isInteractive-*` never registers as active, and unwrapped wrapper controls (`magnet-button`, `hide-all`, `linetool-group-cursors`) to their real clickable `<button>` (plus added TradingView's `drawginmode` / `"Keep drawing"` and `lockAllDrawings` selectors).
+  - Enforced single-frame sidebar ownership (`shouldOwnSidebarInThisFrame`), shared document-level restore locks (`isSidebarRestoreActive`), trusted-event-only sidebar/flyout listeners (never capturing external page buttons like `"Cross"` margin), and boot-default overwrite protection.
+  - Added sequential mismatched-slot restoration with API + React Fiber plus a silent (zero-flash) DOM flyout fallback (`trySelectGroupSlotViaSilentFlyout`), followed by guaranteed Crosshair activation (`activateCursorToolReliably` + double-verification) unless `Keep drawing` (`stayInDrawingMode`) is explicitly ON — and auto-heals legacy stuck `activeTool` entries.
+  - Expanded safe TradingView toolbar storage key preservation (`linetool-group`, `combobox.`, `FavoriteDrawings`, `magnetMode`, etc.) and added timestamp-aware `mergeSidebarState()` across `content-main.js` and `content-isolated.js` (including Settings modal commits).
+  - Added comprehensive unit test suite `tests/sidebar-drawing-tools-memory.test.js` (17/17 suites passing).
 
 ---
 

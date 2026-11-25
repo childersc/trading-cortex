@@ -120,17 +120,29 @@
     }
     return (
       key === 'properties_toolbar.position' ||
+      key.includes('properties_toolbar') ||
       key.includes('ChartDrawingToolbarWidget') ||
+      key.includes('ChartFavoriteDrawingToolbarWidget') ||
       key.includes('drawingToolbar') ||
+      key.includes('drawing_toolbar') ||
+      key.includes('DrawingToolbar') ||
       key.includes('drawingTools') ||
+      key.includes('drawing_tools') ||
+      key.includes('DrawingTools') ||
       key.includes('side_toolbar') ||
       key.includes('sideToolbar') ||
+      key.includes('linetool-group') ||
+      key.includes('LineToolGroup') ||
+      key.includes('linetool.') ||
+      key.includes('linetools.') ||
+      key.includes('combobox.') ||
+      key.includes('drawingFavorites') ||
+      key.includes('favoriteDrawings') ||
+      key.includes('FavoriteDrawings') ||
       key === 'tradingview.IntervalWidget.quicks' ||
       key === 'tradingview.StyleWidget.quicks' ||
       key.startsWith('tradingview.chartproperties') ||
-      key.startsWith('linetool.') ||
-      key.startsWith('combobox.') ||
-      key.startsWith('drawingFavorites')
+      /(?:^|\.)(?:magnet|magnetMode|stayInDrawingMode|lockAllDrawings|drawginmode)(?:\.|$)/i.test(key)
     );
   }
 
@@ -2265,6 +2277,47 @@
     };
   }
 
+  function mergeSidebarState(previous, incoming) {
+    const prev = previous && typeof previous === 'object' ? previous : {};
+    const next = incoming && typeof incoming === 'object' ? incoming : {};
+    const prevUpdatedAt = Number(prev.updatedAt) || 0;
+    const nextUpdatedAt = Number(next.updatedAt) || 0;
+    const prevGroups = (prev.groupTools && typeof prev.groupTools === 'object') ? prev.groupTools : {};
+    const nextGroups = (next.groupTools && typeof next.groupTools === 'object') ? next.groupTools : {};
+    const prevToolbar = sanitizeSidebarToolbarStorage(prev.toolbarStorage);
+    const nextToolbar = sanitizeSidebarToolbarStorage(next.toolbarStorage);
+
+    if (prevUpdatedAt > 0 && nextUpdatedAt > 0 && prevUpdatedAt > nextUpdatedAt) {
+      return {
+        ...next,
+        ...prev,
+        groupTools: {
+          ...nextGroups,
+          ...prevGroups
+        },
+        toolbarStorage: {
+          ...nextToolbar,
+          ...prevToolbar
+        },
+        updatedAt: prevUpdatedAt
+      };
+    }
+
+    return {
+      ...prev,
+      ...next,
+      groupTools: {
+        ...prevGroups,
+        ...nextGroups
+      },
+      toolbarStorage: {
+        ...prevToolbar,
+        ...nextToolbar
+      },
+      updatedAt: Math.max(prevUpdatedAt, nextUpdatedAt)
+    };
+  }
+
   function safeStorageSet(data) {
     // Always mirror both templates and settings synchronously to the Domain Vault and window.localStorage
     // so they are never lost even if the extension is unloaded/removed and re-loaded
@@ -2521,6 +2574,7 @@
         ...settings,
         ...incomingSettings,
         lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings),
+        sidebarState: mergeSidebarState(settings.sidebarState, incomingSettings.sidebarState),
         ...(preserveLocalPillPos ? { studioPillPosByHost: localPillPos } : {})
       };
       hasChanged = true;
@@ -2643,6 +2697,7 @@
             ...settings,
             ...incomingSettings,
             lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings),
+            sidebarState: mergeSidebarState(settings.sidebarState, incomingSettings.sidebarState),
             ...(preserveLocalPillPos ? { studioPillPosByHost: localPillPos } : {})
           };
           settingsChanged = true;
@@ -3807,18 +3862,7 @@
       if (event.data.sidebarState) {
         const incoming = event.data.sidebarState;
         const prev = settings.sidebarState || {};
-        settings.sidebarState = {
-          ...prev,
-          ...incoming,
-          groupTools: {
-            ...(prev.groupTools || {}),
-            ...(incoming.groupTools || {})
-          },
-          toolbarStorage: {
-            ...sanitizeSidebarToolbarStorage(prev.toolbarStorage),
-            ...sanitizeSidebarToolbarStorage(incoming.toolbarStorage)
-          }
-        };
+        settings.sidebarState = mergeSidebarState(prev, incoming);
         // Debounce storage write to avoid hammering Chrome API and invalidating context
         queueSettingsSave({ sidebarState: settings.sidebarState });
       }
@@ -4089,6 +4133,7 @@
         });
         if (!settings.sidebarState) settings.sidebarState = {};
         settings.sidebarState.magnet = nextState;
+        settings.sidebarState.updatedAt = Date.now();
         safeStorageSet({ settings });
         showToast(`Magnet: ${nextState ? 'ON' : 'OFF'}`);
         renderFloatingBar();
@@ -11348,7 +11393,9 @@
       pendingSettingsUpdate = null;
       settings = {
         ...settings,
-        ...draftSettings
+        ...draftSettings,
+        sidebarState: mergeSidebarState(draftSettings.sidebarState, settings.sidebarState),
+        lastChartSettings: mergeLastChartSettings(draftSettings.lastChartSettings, settings.lastChartSettings)
       };
       applyDialogGlassEffect(settings.dialogGlassEffect, settings.dialogGlassOpacity);
       safeStorageSet({ templates, settings });

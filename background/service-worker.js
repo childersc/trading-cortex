@@ -202,17 +202,29 @@ function isSafeTradingViewStorageKey(key) {
   }
   return (
     key === "properties_toolbar.position" ||
+    key.includes("properties_toolbar") ||
     key.includes("ChartDrawingToolbarWidget") ||
+    key.includes("ChartFavoriteDrawingToolbarWidget") ||
     key.includes("drawingToolbar") ||
+    key.includes("drawing_toolbar") ||
+    key.includes("DrawingToolbar") ||
     key.includes("drawingTools") ||
+    key.includes("drawing_tools") ||
+    key.includes("DrawingTools") ||
     key.includes("side_toolbar") ||
     key.includes("sideToolbar") ||
+    key.includes("linetool-group") ||
+    key.includes("LineToolGroup") ||
+    key.includes("linetool.") ||
+    key.includes("linetools.") ||
+    key.includes("combobox.") ||
+    key.includes("drawingFavorites") ||
+    key.includes("favoriteDrawings") ||
+    key.includes("FavoriteDrawings") ||
     key === "tradingview.IntervalWidget.quicks" ||
     key === "tradingview.StyleWidget.quicks" ||
     key.startsWith("tradingview.chartproperties") ||
-    key.startsWith("linetool.") ||
-    key.startsWith("combobox.") ||
-    key.startsWith("drawingFavorites")
+    /(?:^|\.)(?:magnet|magnetMode|stayInDrawingMode|lockAllDrawings|drawginmode)(?:\.|$)/i.test(key)
   );
 }
 
