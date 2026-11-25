@@ -1,3 +1,7 @@
+Trading Cortex v1.1.146 — Immediately Clears Position Entry Box & Stop Loss / Take Profit Lines When Flat
+
+- **Instant Flat Cleanup (`v1.1.146`)**: Fixed the Position Entry Box (`LONG`/`SHORT`) and Stop Loss / Take Profit boxes lingering on the chart after closing a trade on Hypernova, Kalshi Pro, and My Funded Perps. Now detects when the active `Positions` panel unmounts its table to show `"No Open Positions"`, when Hypernova's tab drops its `(1)` count badge, when the order ticket shows `Current Position: FLAT`, or when a live `/positions` API response returns `[]` — immediately wiping all cached positions, manual TP/SL overrides, and chart overlay boxes.
+
 Trading Cortex v1.1.145 — Fixed Cortex Pill, Bars & Docks Appearing Above Exchange Modals
 
 - **Always Stays Behind Exchange Modals (`v1.1.145`)**: Lowered all persistent Trading Cortex overlays (the floating **Cortex** pill, minimized taskbar pills `INSTRUMENT TRADES` / `CORTEX DIAG` / `UPCOMING NEWS`, top/bottom bars, Range/OB/Accounts Risk boxes, and detached Positions panel) from `z-index: 2147483640` into a modal-safe band (`z-index: 10`–`38`) and removed the legacy header `z-index: 1005` override.

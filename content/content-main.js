@@ -4399,6 +4399,16 @@
       case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE': {
         const incoming = payload && Array.isArray(payload.positions) ? payload.positions : [];
         liveHypernovaPositions = incoming;
+        const activeSyms = new Set(incoming.map(p => p && normalizeHypernovaMainSymbol(p.symbol)).filter(Boolean));
+        Object.keys(hypernovaManualTpSlBySymbol).forEach(sym => {
+          if (!activeSyms.has(sym)) {
+            delete hypernovaManualTpSlBySymbol[sym];
+          }
+        });
+        if (incoming.length === 0) {
+          activeHypernovaDrag = null;
+          removeHypernovaOverlayWidgets();
+        }
         scheduleIctSessionsRender(false);
         break;
       }
@@ -8089,7 +8099,7 @@
         const combinedText = `${text} ${qtyText}`.trim();
         const lower = combinedText.toLowerCase();
 
-        if (isPosSource || (!isOrdSource && (/\bpnl\b|\blong\b|\bshort\b/i.test(lower) || /[+-]\s*\$?\d/.test(text)))) {
+        if (isPosSource) {
           let side = null;
           if (/\bshort\b/i.test(lower)) side = 'short';
           else if (/\blong\b/i.test(lower)) side = 'long';
@@ -17569,6 +17579,13 @@
         const openPos = extractOpenPositionsFromApiPayload(data, url);
         if (openPos.length > 0) {
           postToIsolated({ type: 'VEST_TV_API_POSITIONS_CAPTURED', positions: openPos });
+        } else if (
+          /open.?position|active.?position|\/positions(\b|\?|$)/i.test(String(url || '')) &&
+          !/history|closed/i.test(String(url || '')) &&
+          (Array.isArray(data) ||
+            (data && typeof data === 'object' && (Array.isArray(data.positions) || Array.isArray(data.openPositions) || Array.isArray(data.assetPositions) || (data.data && Array.isArray(data.data.positions)))))
+        ) {
+          postToIsolated({ type: 'VEST_TV_API_POSITIONS_CAPTURED', positions: [] });
         }
       }
     };

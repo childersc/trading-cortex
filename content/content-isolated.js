@@ -4872,6 +4872,11 @@
       return { foundTable: true, positions };
     }
 
+    // If the Positions tab IS selected on Kalshi Pro and neither cardList nor tableEl is mounted,
+    // Kalshi Pro is showing its empty state (0 open positions) — treat as authoritative empty!
+    if (posTab && (posTab.getAttribute('aria-selected') === 'true' || posTab.getAttribute('data-state') === 'active')) {
+      return { foundTable: true, positions: [] };
+    }
     return { foundTable: false, positions: [] };
   }
 
@@ -4956,6 +4961,80 @@
     return null;
   }
 
+  function isPositionsTabElementSelected(tab) {
+    if (!tab) return false;
+    if (tab.getAttribute('aria-selected') === 'true') return true;
+    if (tab.getAttribute('data-state') === 'active') return true;
+    if (tab.getAttribute('data-selected') === 'true') return true;
+    const cls = String(tab.className || '').toLowerCase();
+    return /\bactive\b|\bselected\b/.test(cls);
+  }
+
+  function isPositionsEmptyStateVisibleInDom() {
+    try {
+      const panels = Array.from(document.querySelectorAll('[role="tabpanel"], .trade-tabs-panel, [class*="positions" i]'));
+      for (let i = 0; i < panels.length && i < 40; i++) {
+        const p = panels[i];
+        if (!p || (p.id && p.id.startsWith('vest-'))) continue;
+        if (p.hidden || p.getAttribute('data-state') === 'inactive') continue;
+        const r = p.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        const txt = (p.innerText || p.textContent || '').replace(/\s+/g, ' ').trim();
+        if (txt.length <= 320 && /\bno\s+(open|active)?\s*positions\b|opened\s+positions\s+will\s+appear\s+here/i.test(txt)) {
+          return true;
+        }
+      }
+      // Also check standalone empty-state containers (e.g. Hypernova unmounts <table> and shows "No Open Positions")
+      const emptyEls = Array.from(document.querySelectorAll('div, p, span'));
+      for (let i = 0; i < emptyEls.length; i++) {
+        const el = emptyEls[i];
+        if (!el || el.children.length > 2) continue;
+        const t = (el.textContent || '').trim();
+        if (t.length >= 12 && t.length <= 48 && /^no\s+(open|active)?\s*positions$/i.test(t)) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0 && r.top > window.innerHeight * 0.35) {
+            return true;
+          }
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function isCurrentChartOrderTicketFlat() {
+    try {
+      // Hypernova's right-hand order ticket explicitly renders "Current Position" -> "FLAT"
+      const bodyText = document.body ? (document.body.innerText || '') : '';
+      if (/Current\s+Position\s+FLAT\b/i.test(bodyText)) {
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function getCurrentTopChartSymbolForFlatCheck() {
+    try {
+      const triggerLabel = document.querySelector('[data-testid="symbol-toolbar-trigger-label"]');
+      if (triggerLabel) {
+        const sym = extractSymbolFromCellText(triggerLabel.innerText || triggerLabel.textContent || '');
+        if (sym) return sym;
+      }
+      const mfpChart = document.querySelector('[data-chart-market]');
+      if (mfpChart) {
+        const sym = normalizeHypernovaBaseSymbol(mfpChart.getAttribute('data-chart-market') || '');
+        if (sym) return sym;
+      }
+      const titleParts = String(document.title || '').split(/[|·\-]/);
+      for (const part of titleParts) {
+        const p = part.trim();
+        if (!p || /^[\d$,.\s]+$/.test(p) || /hypernova|kalshi|funded/i.test(p)) continue;
+        const sym = extractSymbolFromCellText(p);
+        if (sym) return sym;
+      }
+    } catch (e) {}
+    return '';
+  }
+
   function scrapeVenueOpenPositionsWithMeta() {
     if (!isTopWindow || !isChartVisualsHost()) return { foundTable: false, positions: [] };
     if (getChartVisualsHostFirmId() === 'kalshipro') {
@@ -4964,7 +5043,16 @@
     const positions = [];
     try {
       const found = findHypernovaPositionsTableAndRows();
-      if (!found) return { foundTable: false, positions: [] };
+      if (!found) {
+        // Hypernova unmounts <table> completely when there are 0 open positions and shows "No Open Positions"!
+        // If the Positions tab is selected OR an empty-positions state is visible, report authoritative 0 positions!
+        const posTab = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"], .trade-tabs-list [role="tab"]'))
+          .find(t => /^positions\b/i.test((t.innerText || t.textContent || '').trim()));
+        if ((posTab && isPositionsTabElementSelected(posTab)) || isPositionsEmptyStateVisibleInDom()) {
+          return { foundTable: true, positions: [] };
+        }
+        return { foundTable: false, positions: [] };
+      }
       const { headers, rows } = found;
       const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument|ticker/.test(h)));
       const idxSide = headers.findIndex(h => /\bside\b|\bdirection\b/.test(h));
@@ -5120,8 +5208,18 @@
   function getMergedVenueOpenPositions() {
     const domRes = scrapeVenueOpenPositionsWithMeta();
     if (domRes.foundTable) {
-      // Positions table IS currently mounted — it is authoritative!
-      // Enrich DOM rows with TP/SL from API snapshot if the table didn't show a TP/SL column (e.g. MFP)
+      // Positions panel IS currently visible — it is 100% authoritative!
+      if (domRes.positions.length === 0) {
+        // Explicitly flat (e.g. "No Open Positions"): clear ALL caches so entry/TP/SL boxes disappear immediately!
+        lastKnownDomPositions = [];
+        lastApiCapturedPositions = [];
+        lastApiPositionsCapturedAt = 0;
+        return [];
+      }
+      // Enrich DOM rows with TP/SL from API snapshot if the table didn't show a TP/SL column (e.g. MFP),
+      // and prune any closed symbols out of lastApiCapturedPositions.
+      const openSymSet = new Set(domRes.positions.map(p => p.symbol));
+      lastApiCapturedPositions = lastApiCapturedPositions.filter(p => openSymSet.has(p.symbol));
       const apiBySym = new Map(lastApiCapturedPositions.map(p => [p.symbol, p]));
       const mergedDom = domRes.positions.map(p => {
         const api = apiBySym.get(p.symbol);
@@ -5136,20 +5234,35 @@
       return mergedDom;
     }
     // Positions table is NOT currently visible (e.g. user is viewing `Accounts`, `Open Orders`, or `History` tab).
-    // Check if the `Positions (0)` tab badge explicitly says 0; otherwise preserve API / last known DOM positions!
-    const posTab = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"]'))
+    // Check if the `Positions (0)` tab badge explicitly says 0, OR if an empty state is visible!
+    const posTab = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"], .trade-tabs-list [role="tab"]'))
       .find(t => /^positions\b/i.test((t.innerText || t.textContent || '').trim()));
     if (posTab) {
-      const m = (posTab.innerText || posTab.textContent || '').match(/\bpositions\s*\(?\s*(\d+)\s*\)?/i);
-      if (m && Number(m[1]) === 0) {
+      const tabTxt = (posTab.innerText || posTab.textContent || '').trim();
+      const m = tabTxt.match(/\bpositions\s*\(?\s*(\d+)\s*\)?/i);
+      if ((m && Number(m[1]) === 0) || (getChartVisualsHostFirmId() === 'hypernova' && /^positions$/i.test(tabTxt))) {
+        // On Hypernova, the tab says "Positions (1)" when open and bare "Positions" when 0 open positions!
         lastKnownDomPositions = [];
+        lastApiCapturedPositions = [];
+        lastApiPositionsCapturedAt = 0;
         return [];
       }
     }
-    if (lastApiCapturedPositions.length > 0 && (Date.now() - lastApiPositionsCapturedAt < 120000)) {
-      return lastApiCapturedPositions;
+
+    let fallback = (lastApiCapturedPositions.length > 0 && (Date.now() - lastApiPositionsCapturedAt < 120000))
+      ? lastApiCapturedPositions
+      : lastKnownDomPositions;
+
+    // If the right-hand order ticket explicitly says "Current Position: FLAT", strip the active chart symbol immediately!
+    if (fallback.length > 0 && isCurrentChartOrderTicketFlat()) {
+      const activeSym = getCurrentTopChartSymbolForFlatCheck();
+      if (activeSym) {
+        fallback = fallback.filter(p => p.symbol !== activeSym);
+        lastKnownDomPositions = lastKnownDomPositions.filter(p => p.symbol !== activeSym);
+        lastApiCapturedPositions = lastApiCapturedPositions.filter(p => p.symbol !== activeSym);
+      }
     }
-    return lastKnownDomPositions;
+    return fallback;
   }
 
   function syncHypernovaPositionsToMainWorld(force = false) {
@@ -5157,8 +5270,8 @@
     hypernovaSyncTickCount++;
     const positions = getMergedVenueOpenPositions();
     const sig = JSON.stringify(positions);
-    // Periodically rebroadcast every 4th tick (~3.2s) so newly recreated TradingView iframes on coin switches always hydrate!
-    const periodicRefresh = (hypernovaSyncTickCount % 4 === 0) && positions.length > 0;
+    // Periodically rebroadcast every 4th tick (~3.2s) so newly recreated TradingView iframes always stay in sync (including flat!)
+    const periodicRefresh = (hypernovaSyncTickCount % 4 === 0);
     if (!force && !periodicRefresh && sig === lastHypernovaPositionsSig) return;
     lastHypernovaPositionsSig = sig;
     postToMainWorlds({

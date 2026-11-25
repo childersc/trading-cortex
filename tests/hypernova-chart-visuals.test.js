@@ -211,6 +211,10 @@ function extractBlock(src, startMarker, endMarker) {
   assert.strictEqual(isolatedSrc.includes('#perps-tpsl-tp-price'), true);
   assert.strictEqual(isolatedSrc.includes('#perps-tpsl-sl-price'), true);
   assert.strictEqual(isolatedSrc.includes('VEST_TV_API_POSITIONS_CAPTURED'), true);
+  assert.strictEqual(isolatedSrc.includes('function isPositionsEmptyStateVisibleInDom()'), true);
+  assert.strictEqual(isolatedSrc.includes('function isCurrentChartOrderTicketFlat()'), true);
+  assert.strictEqual(isolatedSrc.includes('lastApiCapturedPositions = [];'), true);
+  assert.strictEqual(mainSrc.includes('if (incoming.length === 0) {') && mainSrc.includes('delete hypernovaManualTpSlBySymbol[sym];'), true);
 
   // Test extractSymbolFromCellText (ignores leverage badges like 5x / 10x and Long/Short labels)
   const symCellBlock = extractBlock(

@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.145`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.146`) are documented in this file.
+
+---
+
+## [v1.1.146] — 2026-11-25
+
+### 🧹 Fixed Stale Position Entry Box & SL/TP Indicators Lingering After Closing a Trade
+- **Root Cause**: When closing all positions on Hypernova (or Kalshi Pro), the exchange unmounts the Positions `<table>` completely and renders an empty-state container (`"No Open Positions"` / `"Opened positions will appear here"`), while Hypernova's tab changes from `"Positions (1)"` to bare `"Positions"` (no `(0)` badge). Because no `<table>` was found, `scrapeVenueOpenPositionsWithMeta()` returned `foundTable: false`, causing `getMergedVenueOpenPositions()` to keep serving cached `lastKnownDomPositions` / `lastApiCapturedPositions` — leaving both the Entry Box (`LONG`/`SHORT`) and SL/TP Box stuck on the chart while flat.
+- **Fixes (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Treats the `Positions` panel as authoritatively empty (`foundTable: true, positions: []`) whenever the `Positions` tab is selected with 0 rows OR an empty-positions state (`"No Open Positions"` / `"Opened positions will appear here"`) is visible in the DOM (on Hypernova, Kalshi Pro, and My Funded Perps).
+  - Immediately clears BOTH `lastKnownDomPositions` and `lastApiCapturedPositions` on empty state (or when Hypernova's `Positions` tab has no count badge, or when Hypernova's order ticket shows `Current Position: FLAT`, or when a live `/positions` API endpoint returns `[]`).
+  - Prunes closed symbols out of `hypernovaManualTpSlBySymbol` and immediately removes all Entry / TP / SL overlay widgets and lines as soon as `VEST_TV_HYPERNOVA_POSITIONS_UPDATE` reports flat, and tightens native TradingView PositionLine matching so regular chart drawings never resurrect phantom positions.
 
 ---
 
