@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.147`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.148`) are documented in this file.
+
+---
+
+## [v1.1.148] — 2026-11-25
+
+### 🛡️ Fixed Browser Instability / CPU & Storage Ping-Pong Loop Introduced in v1.1.147
+- **Root Causes Identified**:
+  1. **Cross-Frame `storage` ↔ `VEST_TV_CONFIG_UPDATE` Infinite Loop**: `content-main.js` echoed `__trading_cortex_isolated_settings__` back into `window.localStorage` on every `VEST_TV_CONFIG_UPDATE`, while `content-isolated.js` ran `window.addEventListener('storage')` and `BroadcastChannel` in BOTH the top window and the same-origin `blob:` TradingView chart iframe. Combined with `v1.1.147`'s new `updatedAt` timestamps and `mergeSidebarState()` object normalization, the top frame and chart iframe bounced `storage` events ↔ `VEST_TV_CONFIG_UPDATE` ↔ `applyLiveSettingsToAllComponents()` back and forth continuously.
+  2. **Re-Triggering `restoreSidebarSelections()` Loop + Layout Thrashing**: `VEST_TV_CONFIG_UPDATE` called `hasSidebarMismatchWithTarget()` (which scanned the entire page DOM with `getBoundingClientRect()` / `getComputedStyle()` on every tick) and re-triggered `restoreSidebarSelections()` whenever `updatedAt` advanced, while `restoreSidebarSelections()` itself posted `VEST_TV_SIDEBAR_STATE_CHANGED` with a fresh `updatedAt: Date.now()` — creating a self-sustaining restore + `chrome.storage.local` + `cortex-db.json` storm.
+  3. **React Fiber Mutation & Noisy `localStorage.setItem` Captures**: `restoreSidebarSelections()` poked TradingView's internal React Fiber hooks/state via `tryUpdateGroupSlotViaReactFiber`, dispatched synthetic `Escape` events to `document.body`, and captured noisy keys like `properties_toolbar.position` / `linetool.*` inside `Storage.prototype.setItem`.
+- **Fixes (`content/content-main.js`, `content/content-isolated.js`)**:
+  - Stopped `content-main.js` from ever writing `__trading_cortex_isolated_settings__` (`content-isolated.js` is the single authoritative writer) and skipped redundant `localStorage.setItem` writes when unchanged.
+  - Gated `window.addEventListener('storage')` and `initCrossTabSyncChannel()` strictly on `isTopWindow`, and added `getSubstantiveSettingsDigest()` / `getSubstantiveSidebarDigest()` deduplication in `handleIncomingLiveSettings()`, `chrome.storage.onChanged`, and `VEST_TV_SIDEBAR_STATE_CHANGED` so self-echoes and timestamp-only ticks never re-render or rebroadcast.
+  - Removed `shouldReapplyNewerSidebar`, removed self-heal `VEST_TV_SIDEBAR_STATE_CHANGED` broadcasts from `restoreSidebarSelections()`, added strict single-flight + once-per-boot guards, removed React Fiber mutation and synthetic `Escape` dispatches during restore, scoped `scanDomSidebarGroupSlots()` strictly to TradingView's drawing toolbar, and narrowed live `Storage.prototype.setItem` capture (`isToolbarHookCaptureKey`) with a 1.2s debounce.
 
 ---
 

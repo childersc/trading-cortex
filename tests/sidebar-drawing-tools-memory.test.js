@@ -456,6 +456,7 @@ function createMockTradingViewEnvironment() {
     this.exports = {
       isSafeTradingViewStorageKey,
       isDrawingToolbarOnlyStorageKey,
+      isToolbarHookCaptureKey,
       mergeSidebarState,
       isCursorTool,
       hasActiveClassToken,
@@ -632,10 +633,17 @@ function createMockTradingViewEnvironment() {
     assert.strictEqual(env.doc.getElementById('vest-cortex-silent-sidebar-restore'), null, 'Silent restore style must be removed');
     assert.strictEqual(env.doc.querySelector('[data-name="menu-inner"]'), null, 'Flyout menu must be closed after restore');
 
-    // Legacy stuck activeTool must have self-healed to 'cursor'
-    assert.strictEqual(env.api.getSettings().sidebarState.activeTool, 'cursor', 'Legacy stuck activeTool must self-heal to cursor');
+    // Legacy stuck activeTool must have self-healed in-memory to 'cursor' WITHOUT posting a storage/IPC feedback loop!
+    assert.strictEqual(env.api.getSettings().sidebarState.activeTool, 'cursor', 'Legacy stuck activeTool must self-heal in-memory to cursor');
+    assert.strictEqual(env.postedMessages.filter(m => m && m.type === 'VEST_TV_SIDEBAR_STATE_CHANGED').length, 0, 'restoreSidebarSelections must NEVER post VEST_TV_SIDEBAR_STATE_CHANGED (prevents infinite config/storage loop!)');
     assert.strictEqual(env.api.getStateFlags().hasCompletedInitialSidebarRestore, true);
     assert.strictEqual(env.api.getStateFlags().initialSidebarRestoreVerified, true);
+
+    // Calling restoreSidebarSelections() a second time after initial restore must be a strict no-op!
+    const callsBeforeSecondRestore = env.selectLineToolCalls.length;
+    env.api.restoreSidebarSelections();
+    await new Promise(r => setTimeout(r, 100));
+    assert.strictEqual(env.selectLineToolCalls.length, callsBeforeSecondRestore, 'restoreSidebarSelections must run at most once per boot');
   }
 
   // 4. Test stayInDrawingMode: true preserves armed drawing tool on refresh
@@ -726,19 +734,34 @@ function createMockTradingViewEnvironment() {
     assert.strictEqual(env.api.isSafeTradingViewStorageKey('tradingview.magnetMode'), true);
     assert.strictEqual(env.api.isDrawingToolbarOnlyStorageKey('tradingview.chartproperties'), false, 'chartproperties must not bleed into sidebar toolbarStorage');
     assert.strictEqual(env.api.isDrawingToolbarOnlyStorageKey('tradingview.IntervalWidget.quicks'), false, 'IntervalWidget must not bleed into sidebar toolbarStorage');
+    assert.strictEqual(env.api.isToolbarHookCaptureKey('properties_toolbar.position'), false, 'Noisy properties_toolbar.position drags must NOT trigger live setItem IPC');
+    assert.strictEqual(env.api.isToolbarHookCaptureKey('linetool.rectangle.color'), false, 'Noisy per-tool style keys must NOT trigger live setItem IPC');
+    assert.strictEqual(env.api.isToolbarHookCaptureKey('tradingview.linetool-group-trend-line'), true, 'Genuine linetool-group keys must be captured');
     assert.strictEqual(env.api.isSafeTradingViewStorageKey('privy:token'), false);
     assert.strictEqual(env.api.isSafeTradingViewStorageKey('wagmi.wallet'), false);
     assert.strictEqual(env.api.isSafeTradingViewStorageKey('tv-drawings-flush:BTC-PERP'), false);
     assert.strictEqual(env.api.isSafeTradingViewStorageKey('user-state-layout-base:abc'), false);
   }
 
-  // 7. Contract checks across content-main.js, content-isolated.js, and service-worker.js
+  // 7. Contract & anti-loop stability checks across content-main.js, content-isolated.js, and service-worker.js
   {
     assert.ok(mainSrc.includes('function shouldOwnSidebarInThisFrame()'), 'content-main.js must enforce single-frame sidebar ownership');
     assert.ok(mainSrc.includes('function isSidebarRestoreActive('), 'content-main.js must use shared doc-level restore lock');
     assert.ok(mainSrc.includes('function hasActiveClassToken('), 'content-main.js must use token-exact active class matching');
     assert.ok(mainSrc.includes('button[data-name="drawginmode"]'), 'content-main.js must recognize TradingView drawginmode button');
+    assert.ok(!mainSrc.includes('shouldReapplyNewerSidebar'), 'content-main.js must NEVER re-trigger restoreSidebarSelections from VEST_TV_CONFIG_UPDATE (loop prevention)');
+    const configUpdateBlock = extractBlock(mainSrc, "case 'VEST_TV_CONFIG_UPDATE':", "case 'VEST_TV_CAPTURE_AND_RESTORE_SIDEBAR':");
+    assert.ok(!configUpdateBlock.includes("localStorage.setItem(\n              '__trading_cortex_isolated_settings__'"), 'content-main.js must NEVER echo __trading_cortex_isolated_settings__ into localStorage');
+    assert.ok(!configUpdateBlock.includes("localStorage.setItem('__trading_cortex_isolated_settings__'"), 'content-main.js must NEVER write __trading_cortex_isolated_settings__');
+    const restoreFnBlock = extractBlock(mainSrc, 'function restoreSidebarSelections()', '// Chart Settings & Viewport Position Memory');
+    assert.ok(!restoreFnBlock.includes('tryUpdateGroupSlotViaReactFiber'), 'restoreSidebarSelections must not mutate React Fibers');
+    assert.ok(!restoreFnBlock.includes('VEST_TV_SIDEBAR_STATE_CHANGED'), 'restoreSidebarSelections must NEVER post VEST_TV_SIDEBAR_STATE_CHANGED');
+    assert.ok(!restoreFnBlock.includes("new KeyboardEvent('keydown'"), 'restoreSidebarSelections must not dispatch synthetic Escape events');
+
     assert.ok(isolatedSrc.includes('function mergeSidebarState('), 'content-isolated.js must define mergeSidebarState');
+    assert.ok(isolatedSrc.includes('function getSubstantiveSettingsDigest('), 'content-isolated.js must deduplicate no-op settings updates');
+    assert.ok(isolatedSrc.includes("if (isTopWindow && typeof window !== 'undefined') {\n    window.addEventListener('storage'"), 'content-isolated.js must gate window storage listener strictly on isTopWindow');
+    assert.ok(isolatedSrc.includes("if (!isTopWindow || typeof window === 'undefined' || typeof window.BroadcastChannel === 'undefined') return;"), 'content-isolated.js must gate BroadcastChannel on isTopWindow');
     assert.ok(isolatedSrc.includes('sidebarState: mergeSidebarState(draftSettings.sidebarState, settings.sidebarState)'), 'Settings modal save must preserve live sidebarState');
     assert.ok(isolatedSrc.includes("key.includes('linetool-group')"), 'content-isolated.js must preserve TradingView linetool-group keys');
     assert.ok(swSrc.includes('key.includes("linetool-group")'), 'service-worker.js must preserve TradingView linetool-group keys');

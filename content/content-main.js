@@ -660,13 +660,23 @@
     return true;
   }
 
+  // Narrower set for live Storage.prototype.setItem capture — avoids firing IPC/storage writes
+  // on noisy per-pixel drags (properties_toolbar.position) or frequent drawing-style reads/writes
+  function isToolbarHookCaptureKey(key) {
+    if (!isDrawingToolbarOnlyStorageKey(key)) return false;
+    if (key.includes('properties_toolbar') || key.includes('linetool.') || key.includes('linetools.')) {
+      return false;
+    }
+    return true;
+  }
+
   // Sidebar drawing tool persistence lifecycle flags (declared above localStorage hook to avoid TDZ)
   let sidebarObserver = null;
   let isRestoringSidebar = false;
+  let sidebarRestoreInProgress = false;
   let hasCompletedInitialSidebarRestore = false;
   let initialSidebarRestoreVerified = false;
   let userInteractedWithSidebar = false;
-  let lastRestoredSidebarUpdatedAt = 0;
   let sidebarRestoreRunGeneration = 0;
 
   // Active cleanup of legacy leaked/corrupted snapshot keys from earlier versions that cause session invalidation on DEX platforms
@@ -823,8 +833,9 @@
             value.length < 16000 &&
             currentSettings.rememberSidebarTools !== false &&
             !isRestoringSidebar &&
+            !sidebarRestoreInProgress &&
             (hasCompletedInitialSidebarRestore || userInteractedWithSidebar) &&
-            isDrawingToolbarOnlyStorageKey(key)
+            isToolbarHookCaptureKey(key)
           ) {
             const prev = currentSettings.sidebarState || {};
             const prevToolbar = prev.toolbarStorage || {};
@@ -839,20 +850,18 @@
                 updatedAt: Date.now()
               };
               const serialized = JSON.stringify(currentSettings.sidebarState);
-              origSetItem.call(window.localStorage, '__trading_cortex_sidebar_state__', serialized);
-              try {
-                if (window.top && window.top !== window && window.top.localStorage) {
-                  origSetItem.call(window.top.localStorage, '__trading_cortex_sidebar_state__', serialized);
-                }
-              } catch (e) {}
+              if (window.localStorage.getItem('__trading_cortex_sidebar_state__') !== serialized) {
+                origSetItem.call(window.localStorage, '__trading_cortex_sidebar_state__', serialized);
+              }
               if (storageHookPostTimer) clearTimeout(storageHookPostTimer);
               storageHookPostTimer = setTimeout(() => {
                 storageHookPostTimer = null;
+                if (isRestoringSidebar || sidebarRestoreInProgress) return;
                 postToIsolated({
                   type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
                   sidebarState: currentSettings.sidebarState
                 });
-              }, 400);
+              }, 1200);
             }
           }
         } catch (e) {}
@@ -4540,19 +4549,18 @@
             lastCortexAutomationContextKey = '';
           }
           try {
-            window.localStorage.setItem(
-              '__trading_cortex_isolated_settings__',
-              JSON.stringify(currentSettings)
-            );
-            window.localStorage.setItem(
-              '__trading_cortex_sidebar_state__',
-              JSON.stringify(currentSettings.sidebarState)
-            );
+            // NOTE: Never write __trading_cortex_isolated_settings__ from content-main.js!
+            // content-isolated.js is the single authoritative writer; echoing it from a same-origin blob: chart iframe
+            // triggers a cross-frame window "storage" event loop back into content-isolated.js.
+            const nextSidebarStr = JSON.stringify(currentSettings.sidebarState);
+            if (window.localStorage.getItem('__trading_cortex_sidebar_state__') !== nextSidebarStr) {
+              window.localStorage.setItem('__trading_cortex_sidebar_state__', nextSidebarStr);
+            }
             if (currentSettings.lastChartSettings && Object.keys(currentSettings.lastChartSettings).length > 0) {
-              window.localStorage.setItem(
-                '__trading_cortex_chart_settings__',
-                JSON.stringify(currentSettings.lastChartSettings)
-              );
+              const nextChartStr = JSON.stringify(currentSettings.lastChartSettings);
+              if (window.localStorage.getItem('__trading_cortex_chart_settings__') !== nextChartStr) {
+                window.localStorage.setItem('__trading_cortex_chart_settings__', nextChartStr);
+              }
             }
           } catch (e) {}
         }
@@ -4572,16 +4580,13 @@
           applyTemplateOverridesIfChanged(activeTpl);
         }
         const isRemembering = currentSettings.rememberSidebarTools !== false;
-        const incomingSidebarUpdatedAt = Number(currentSettings.sidebarState && currentSettings.sidebarState.updatedAt) || 0;
-        const shouldReapplyNewerSidebar = Boolean(
-          hasCompletedInitialSidebarRestore &&
-          !userInteractedWithSidebar &&
-          incomingSidebarUpdatedAt > lastRestoredSidebarUpdatedAt &&
-          hasSidebarMismatchWithTarget(currentSettings.sidebarState)
-        );
+        if (isRemembering && !wasRemembering) {
+          hasCompletedInitialSidebarRestore = false;
+        }
         if (
           isRemembering &&
-          (!hasCompletedInitialSidebarRestore || !wasRemembering || shouldReapplyNewerSidebar)
+          !hasCompletedInitialSidebarRestore &&
+          !sidebarRestoreInProgress
         ) {
           restoreAttempts = 0;
           restoreSidebarSelections();
@@ -5942,6 +5947,7 @@
     for (const doc of docs) {
       try {
         // 1. Primary pass: inspect TradingView's explicit group containers ([data-name="linetool-group-*"])
+        let foundExplicitGroup = false;
         Object.entries(SIDEBAR_GROUP_DOM_NAMES).forEach(([gKey, domName]) => {
           const groupEl = doc.querySelector(`[data-name="${domName}"]`);
           if (!groupEl || !isElementVisible(groupEl)) return;
@@ -5949,32 +5955,28 @@
           if (!primaryBtn || !isElementVisible(primaryBtn)) return;
           const toolId = extractSlotToolIdFromButton(primaryBtn);
           if (!toolId) return;
+          foundExplicitGroup = true;
           detectedGroups[gKey] = toolId;
           if (isElementActive(primaryBtn)) {
             detectedActiveTool = toolId;
           }
         });
 
-        // 2. Fallback pass for non-standard/older TradingView DOM layouts
-        const candidates = doc.querySelectorAll('[data-name], [aria-label], [data-tooltip], [title]');
+        // Fast path: all modern TradingView builds use linetool-group-* containers — never scan the full page DOM!
+        if (foundExplicitGroup) {
+          continue;
+        }
+
+        // 2. Fallback pass strictly scoped inside the drawing toolbar container (never whole document!)
+        const toolbarEl = getDirectDrawingToolbarContainer(doc);
+        if (!toolbarEl) continue;
+
+        const candidates = toolbarEl.querySelectorAll('[data-name], [aria-label], [data-tooltip], [title]');
         candidates.forEach(el => {
-          // Skip items inside floating dropdown menus or settings modals
-          if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"], #vest-studio-settings-dialog, #vest-studio-dropdown-menu')) {
+          if (el.closest('[data-name="menu-inner"], [role="menu"], [class*="menuWrap"], [class*="popup"], [class*="drawer"]')) {
             return;
           }
           if (isFlyoutArrowElement(el)) return;
-
-          // Only consider buttons on the left-hand drawing sidebar
-          const inToolbarContainer = Boolean(el.closest('#drawing-toolbar, [data-name="drawing-toolbar"], [class*="drawingToolbar"], [class*="drawing-toolbar"], [class*="tv-side-toolbar"], [class*="side-toolbar"], [class*="sideToolbar"]'));
-          if (!inToolbarContainer) {
-            const chartHost = el.closest('[class*="chart-container"], [id*="chart"], body');
-            const hostLeft = chartHost ? chartHost.getBoundingClientRect().left : 0;
-            const rect = el.getBoundingClientRect();
-            if (rect.width > 0 && (rect.left - hostLeft) > 120) {
-              return;
-            }
-          }
-
           if (!isElementVisible(el)) return;
 
           const toolId = extractSlotToolIdFromButton(el);
@@ -6260,18 +6262,6 @@
           selected = true;
         } catch (e) {}
       }
-      // If TradingView's active tool API STILL reports a drawing tool after clicking cursor, press Escape on the chart doc
-      const apiToolAfter = getCurrentApiSelectedTool();
-      if (apiToolAfter && !isCursorTool(apiToolAfter)) {
-        try {
-          const doc = cursorBtn.ownerDocument || document;
-          const escTarget = doc.activeElement || doc.body || doc.documentElement;
-          if (escTarget) {
-            escTarget.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
-          }
-          selectToolViaApi(targetCursor);
-        } catch (e) {}
-      }
     }
 
     return selected;
@@ -6383,7 +6373,7 @@
       dispatchFullPointerClick(arrowBtn);
 
       let targetMenuItem = null;
-      for (let attempt = 0; attempt < 6; attempt++) {
+      for (let attempt = 0; attempt < 4; attempt++) {
         await sidebarSleep(30);
         const menu = doc.querySelector('[data-name="menu-inner"]');
         if (!menu) continue;
@@ -6409,15 +6399,10 @@
         await sidebarSleep(35);
       }
 
-      // Guarantee flyout menu is never left open
+      // Guarantee flyout menu is never left open (close via its own toggle arrow — never dispatch synthetic Escape to document.body)
       if (doc.querySelector('[data-name="menu-inner"]')) {
-        try {
-          doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true }));
-        } catch (e) {}
+        try { dispatchFullPointerClick(arrowBtn); } catch (e) {}
         await sidebarSleep(20);
-        if (doc.querySelector('[data-name="menu-inner"]')) {
-          try { dispatchFullPointerClick(arrowBtn); } catch (e) {}
-        }
       }
 
       const { detectedGroups } = scanDomSidebarGroupSlots();
@@ -6846,6 +6831,7 @@
   function restoreSidebarSelections() {
     if (!shouldOwnSidebarInThisFrame()) return;
     if (currentSettings.rememberSidebarTools === false) return;
+    if (sidebarRestoreInProgress || hasCompletedInitialSidebarRestore) return;
     const targetState = currentSettings.sidebarState;
     if (!targetState) return;
 
@@ -6872,8 +6858,9 @@
       return;
     }
 
+    sidebarRestoreInProgress = true;
     const myGeneration = ++sidebarRestoreRunGeneration;
-    setSidebarRestoreActive(true, 8000);
+    setSidebarRestoreActive(true, 6000);
 
     (async () => {
       try {
@@ -6883,7 +6870,9 @@
             Object.entries(targetState.toolbarStorage).forEach(([k, v]) => {
               if (typeof v === 'string' && isDrawingToolbarOnlyStorageKey(k)) {
                 const safeVal = (k.toLowerCase().includes('toolbar') && (k.endsWith('.visible') || k.includes('visibility')) && v === 'false') ? 'true' : v;
-                window.localStorage.setItem(k, safeVal);
+                if (window.localStorage.getItem(k) !== safeVal) {
+                  window.localStorage.setItem(k, safeVal);
+                }
               }
             });
           } catch (e) {}
@@ -6897,19 +6886,18 @@
           if (gKey === 'cursors') return; // Handled cleanly at the end so we finish on cursor!
           const norm = normalizeToolId(rawTool);
           if (!norm || isCursorTool(norm)) return;
-          if (initialScan.detectedGroups[gKey] !== norm) {
+          if (initialScan.detectedGroups[gKey] && initialScan.detectedGroups[gKey] !== norm) {
             mismatchedDrawingSlots.push([gKey, norm]);
           }
         });
 
-        // Sequentially update each mismatched drawing tool group slot:
-        // Tier A: API + React Fiber (zero visual flicker)
-        // Tier B: Silent DOM flyout selection (guaranteed across TradingView builds where localStorage/API don't update slot icons)
+        // Sequentially update each mismatched drawing tool group slot without mutating React Fiber internals:
+        // Tier A: Official TradingView selectLineTool API
+        // Tier B: Silent DOM flyout selection (official TradingView menuitem click)
         for (const [gKey, toolId] of mismatchedDrawingSlots) {
           if (myGeneration !== sidebarRestoreRunGeneration) return;
           selectToolViaApi(toolId);
-          ensureSidebarGroupSlotDisplaysTool(toolId);
-          await sidebarSleep(45);
+          await sidebarSleep(40);
           if (myGeneration !== sidebarRestoreRunGeneration) return;
 
           const checkAfterTierA = scanDomSidebarGroupSlots();
@@ -6923,8 +6911,7 @@
         const preCursorScan = scanDomSidebarGroupSlots();
         if (savedCursorSlot && isCursorTool(savedCursorSlot) && preCursorScan.detectedGroups.cursors && preCursorScan.detectedGroups.cursors !== savedCursorSlot) {
           selectToolViaApi(savedCursorSlot);
-          ensureSidebarGroupSlotDisplaysTool(savedCursorSlot);
-          await sidebarSleep(40);
+          await sidebarSleep(35);
           const afterCursorTierA = scanDomSidebarGroupSlots();
           if (afterCursorTierA.detectedGroups.cursors !== savedCursorSlot) {
             await trySelectGroupSlotViaSilentFlyout('cursors', savedCursorSlot);
@@ -6997,23 +6984,15 @@
           activateCursorToolReliably(desiredFinalTool);
           await sidebarSleep(90);
           if (myGeneration !== sidebarRestoreRunGeneration) return;
-          // Double-check TradingView did not settle on a drawing tool asynchronously
           const cursorBtn = getCrosshairButton();
           const apiNow = getCurrentApiSelectedTool();
           if ((cursorBtn && !isElementActive(cursorBtn)) || (apiNow && !isCursorTool(apiNow))) {
             activateCursorToolReliably(desiredFinalTool);
           }
-          await sidebarSleep(160);
-          if (myGeneration !== sidebarRestoreRunGeneration) return;
-          const cursorBtn2 = getCrosshairButton();
-          const apiNow2 = getCurrentApiSelectedTool();
-          if ((cursorBtn2 && !isElementActive(cursorBtn2)) || (apiNow2 && !isCursorTool(apiNow2))) {
-            activateCursorToolReliably(desiredFinalTool);
-          }
           lastExplicitUserToolId = null;
         } else {
           selectSingleLineTool(desiredFinalTool, false);
-          await sidebarSleep(120);
+          await sidebarSleep(80);
         }
 
         if (myGeneration !== sidebarRestoreRunGeneration) return;
@@ -7028,31 +7007,19 @@
           }
         });
         initialSidebarRestoreVerified = allMatched;
-        lastRestoredSidebarUpdatedAt = Number(targetState.updatedAt) || Date.now();
 
-        // Self-heal legacy persisted states where activeTool was stuck on a Line/Rectangle while stayInDrawingMode was false
+        // Silently normalize legacy stuck activeTool in-memory ONLY (NEVER broadcast IPC/storage writes during restore!)
         if (isCursorTool(desiredFinalTool) && normalizedSavedActive && !isCursorTool(normalizedSavedActive)) {
           currentSettings.sidebarState = {
             ...currentSettings.sidebarState,
-            activeTool: desiredFinalTool,
-            updatedAt: Date.now()
+            activeTool: desiredFinalTool
           };
-          try {
-            const healedJson = JSON.stringify(currentSettings.sidebarState);
-            window.localStorage.setItem('__trading_cortex_sidebar_state__', healedJson);
-            if (window.top && window.top !== window && window.top.localStorage) {
-              window.top.localStorage.setItem('__trading_cortex_sidebar_state__', healedJson);
-            }
-          } catch (e) {}
-          postToIsolated({
-            type: 'VEST_TV_SIDEBAR_STATE_CHANGED',
-            sidebarState: currentSettings.sidebarState
-          });
         }
       } catch (err) {
         log('Error restoring sidebar selections:', err);
       } finally {
         if (myGeneration === sidebarRestoreRunGeneration) {
+          sidebarRestoreInProgress = false;
           setSidebarRestoreActive(false);
           hasCompletedInitialSidebarRestore = true;
         }

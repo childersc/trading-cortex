@@ -7,10 +7,11 @@ console.log('Running Prop Firms Management, Account Restoration & Toolbar Tests.
 // 1. Verify content-main.js has rect defined in scanDomSidebarGroupSlots and sibling loops
 const mainContent = fs.readFileSync(path.join(__dirname, '../content/content-main.js'), 'utf8');
 
-// Assert rect is defined before rect.left - hostLeft in both places
+// Assert rect is defined before rect.left - hostLeft where measured, and scanDomSidebarGroupSlots scopes fallback strictly to toolbarEl
 const rectMatches = mainContent.match(/const rect = el\.getBoundingClientRect\(\);\s*if \(rect\.width > 0 && \(rect\.left - hostLeft\) > 120\)/g);
-assert.strictEqual(rectMatches && rectMatches.length >= 2, true, 'rect must be defined before measuring horizontal offset in scanDomSidebarGroupSlots');
-console.log('✓ rect is properly defined in scanDomSidebarGroupSlots & toolbar candidate scanner');
+assert.strictEqual(rectMatches && rectMatches.length >= 1, true, 'rect must be defined before measuring horizontal offset in toolbar candidate scanner');
+assert.strictEqual(mainContent.includes('const toolbarEl = getDirectDrawingToolbarContainer(doc);'), true, 'scanDomSidebarGroupSlots fallback must scope strictly to toolbarEl');
+console.log('✓ rect is properly defined & scanDomSidebarGroupSlots scoped to drawing toolbar');
 
 // Assert ensureDrawingToolbarVisible handles desynchronized TradingView action states and executes self-healing
 assert.strictEqual(

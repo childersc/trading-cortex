@@ -1,3 +1,8 @@
+Trading Cortex v1.1.148 — Emergency Stability Fix: Eliminated Cross-Frame Storage/Config Feedback Loop & Restored Instant Performance
+
+- **Eliminated Browser Instability / Freeze Loop (`v1.1.148`)**: Fixed a cross-frame `localStorage` `storage` event ↔ `VEST_TV_CONFIG_UPDATE` ↔ `restoreSidebarSelections()` infinite feedback loop introduced in `v1.1.147` between the main trading page and same-origin `blob:` TradingView chart iframes.
+- **Zero-Loop Sync & Safe Single-Pass Sidebar Restore (`v1.1.148`)**: Stopped `content-main.js` from echoing `__trading_cortex_isolated_settings__`, gated `storage` & `BroadcastChannel` listeners to the top window only, deduplicated identical settings/sidebar broadcasts (`getSubstantiveSettingsDigest`), removed React Fiber mutations and synthetic `Escape` dispatches during sidebar restore, locked sidebar restore to a single lightweight pass per page load with zero IPC broadcasts, and eliminated full-DOM layout scans in `scanDomSidebarGroupSlots()`.
+
 Trading Cortex v1.1.147 — Fixed Drawing Tool Memory Not Saving & Stopped Line/Rectangle Pre-Selection on Refresh
 
 - **No More Pre-Selected Line or Rectangle on Refresh (`v1.1.147`)**: Fixed `isElementActive()` falsely matching TradingView's `isInteractive-*` button class as active, fixed `drawing_tool_changed` and `saveCurrentSidebarState()` so finishing a drawing or pressing Escape accurately saves Crosshair (`cursor`), and ensured `restoreSidebarSelections()` always returns TradingView cleanly to **Crosshair** (clicking TradingView's actual `[data-name="linetool-group-cursors"]` Cross button + verifying `selectedLineTool()`) unless **Keep drawing** (`stayInDrawingMode`) is explicitly enabled.

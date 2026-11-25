@@ -2318,6 +2318,31 @@
     };
   }
 
+  function getSubstantiveSidebarDigest(sb) {
+    try {
+      if (!sb || typeof sb !== 'object') return '{}';
+      const { updatedAt, ...rest } = sb;
+      return JSON.stringify(rest);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function getSubstantiveSettingsDigest(st) {
+    try {
+      if (!st || typeof st !== 'object') return '{}';
+      const { _savedAt, sidebarState, ...rest } = st;
+      let cleanSb = null;
+      if (sidebarState && typeof sidebarState === 'object') {
+        const { updatedAt, ...sbRest } = sidebarState;
+        cleanSb = sbRest;
+      }
+      return JSON.stringify({ ...rest, sidebarState: cleanSb });
+    } catch (e) {
+      return '';
+    }
+  }
+
   function safeStorageSet(data) {
     // Always mirror both templates and settings synchronously to the Domain Vault and window.localStorage
     // so they are never lost even if the extension is unloaded/removed and re-loaded
@@ -2518,7 +2543,7 @@
   const tabInstanceId = `cortex_tab_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
   function initCrossTabSyncChannel() {
-    if (typeof window === 'undefined' || typeof window.BroadcastChannel === 'undefined') return;
+    if (!isTopWindow || typeof window === 'undefined' || typeof window.BroadcastChannel === 'undefined') return;
     try {
       if (!cortexCrossTabChannel) {
         cortexCrossTabChannel = new BroadcastChannel(CORTEX_CROSS_TAB_CHANNEL_NAME);
@@ -2560,24 +2585,32 @@
     let hasChanged = false;
 
     if (incomingTemplates && Array.isArray(incomingTemplates)) {
-      templates = sanitizeUserTemplates(incomingTemplates);
-      hasChanged = true;
+      const prevTplJson = JSON.stringify(templates || []);
+      const nextTpls = sanitizeUserTemplates(incomingTemplates);
+      if (JSON.stringify(nextTpls) !== prevTplJson) {
+        templates = nextTpls;
+        hasChanged = true;
+      }
     }
 
     if (incomingSettings && typeof incomingSettings === 'object') {
+      const prevDigest = getSubstantiveSettingsDigest(settings);
       const preserveLocalPillPos = Boolean(
         isDraggingStudioPill ||
         (typeof lastLocalStudioPillPosSavedAt === 'number' && (Date.now() - lastLocalStudioPillPosSavedAt < 3000))
       );
       const localPillPos = settings.studioPillPosByHost;
-      settings = {
+      const nextSettings = {
         ...settings,
         ...incomingSettings,
         lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings),
         sidebarState: mergeSidebarState(settings.sidebarState, incomingSettings.sidebarState),
         ...(preserveLocalPillPos ? { studioPillPosByHost: localPillPos } : {})
       };
-      hasChanged = true;
+      if (getSubstantiveSettingsDigest(nextSettings) !== prevDigest) {
+        settings = nextSettings;
+        hasChanged = true;
+      }
     }
 
     if (hasChanged) {
@@ -2641,8 +2674,8 @@
     }
   }
 
-  // Hook up window storage event for instant multi-window local storage sync
-  if (typeof window !== 'undefined') {
+  // Hook up window storage event for instant multi-window local storage sync (top window ONLY — prevents same-origin chart iframe storage echo loops!)
+  if (isTopWindow && typeof window !== 'undefined') {
     window.addEventListener('storage', (e) => {
       if (!e || !e.key) return;
       if (e.key === '__trading_cortex_isolated_settings__' && e.newValue) {
@@ -2683,24 +2716,32 @@
         let templatesChanged = false;
 
         if (changes.templates && Array.isArray(changes.templates.newValue)) {
-          templates = sanitizeUserTemplates(changes.templates.newValue);
-          templatesChanged = true;
+          const prevTplJson = JSON.stringify(templates || []);
+          const nextTpls = sanitizeUserTemplates(changes.templates.newValue);
+          if (JSON.stringify(nextTpls) !== prevTplJson) {
+            templates = nextTpls;
+            templatesChanged = true;
+          }
         }
         if (changes.settings && changes.settings.newValue) {
+          const prevDigest = getSubstantiveSettingsDigest(settings);
           const incomingSettings = changes.settings.newValue;
           const preserveLocalPillPos = Boolean(
             isDraggingStudioPill ||
             (typeof lastLocalStudioPillPosSavedAt === 'number' && (Date.now() - lastLocalStudioPillPosSavedAt < 3000))
           );
           const localPillPos = settings.studioPillPosByHost;
-          settings = {
+          const nextSettings = {
             ...settings,
             ...incomingSettings,
             lastChartSettings: mergeLastChartSettings(settings.lastChartSettings, incomingSettings.lastChartSettings),
             sidebarState: mergeSidebarState(settings.sidebarState, incomingSettings.sidebarState),
             ...(preserveLocalPillPos ? { studioPillPosByHost: localPillPos } : {})
           };
-          settingsChanged = true;
+          if (getSubstantiveSettingsDigest(nextSettings) !== prevDigest) {
+            settings = nextSettings;
+            settingsChanged = true;
+          }
         }
         if (changes.lastChartSettingsMeta && changes.lastChartSettingsMeta.newValue) {
           lastChartSettingsMeta = changes.lastChartSettingsMeta.newValue;
@@ -2752,7 +2793,7 @@
 
         if (settingsChanged || templatesChanged) {
           applyLiveSettingsToAllComponents();
-        } else {
+        } else if (changes.lastChartSettingsMeta && changes.lastChartSettingsMeta.newValue) {
           notifyMainWorldConfig();
         }
       });
@@ -3862,9 +3903,12 @@
       if (event.data.sidebarState) {
         const incoming = event.data.sidebarState;
         const prev = settings.sidebarState || {};
-        settings.sidebarState = mergeSidebarState(prev, incoming);
-        // Debounce storage write to avoid hammering Chrome API and invalidating context
-        queueSettingsSave({ sidebarState: settings.sidebarState });
+        const mergedSidebar = mergeSidebarState(prev, incoming);
+        if (getSubstantiveSidebarDigest(mergedSidebar) !== getSubstantiveSidebarDigest(prev)) {
+          settings.sidebarState = mergedSidebar;
+          // Debounce storage write to avoid hammering Chrome API and invalidating context
+          queueSettingsSave({ sidebarState: settings.sidebarState });
+        }
       }
     } else if (type === 'VEST_TV_CHART_SETTINGS_CHANGED') {
       if (event.data.lastChartSettings) {
