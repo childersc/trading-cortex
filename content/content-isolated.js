@@ -1716,7 +1716,17 @@
     currentPriceFontSize: 11,
     currentPriceShowLabel: true,
     currentPriceShowPrice: true,
-    currentPriceLabelAlign: 'right'
+    currentPriceLabelAlign: 'right',
+    breachPriceLineEnabled: true,
+    breachPriceColor: '#ef4444',
+    breachPriceStyle: 'dashed',
+    breachPriceWidth: 1.5,
+    breachPriceOpacity: 90,
+    breachPriceText: 'Breach Price',
+    breachPriceFontSize: 11,
+    breachPriceShowLabel: true,
+    breachPriceShowPrice: true,
+    breachPriceLabelAlign: 'right'
   };
 
   function normalizeHypernovaVisualsConfig(raw) {
@@ -1730,6 +1740,16 @@
     const opNum = Number(src.currentPriceOpacity);
     const priceFontNum = Number(src.currentPriceFontSize);
     const boxesFontNum = Number(src.tradeBoxesFontSize);
+
+    const breachStyle = ['solid', 'dashed', 'dotted'].includes(src.breachPriceStyle) ? src.breachPriceStyle : DEFAULT_HYPERNOVA_VISUALS.breachPriceStyle;
+    const breachAlign = ['left', 'center', 'right'].includes(src.breachPriceLabelAlign) ? src.breachPriceLabelAlign : DEFAULT_HYPERNOVA_VISUALS.breachPriceLabelAlign;
+    const rawBreachColor = typeof src.breachPriceColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(src.breachPriceColor.trim())
+      ? src.breachPriceColor.trim()
+      : DEFAULT_HYPERNOVA_VISUALS.breachPriceColor;
+    const breachWidthNum = Number(src.breachPriceWidth);
+    const breachOpNum = Number(src.breachPriceOpacity);
+    const breachFontNum = Number(src.breachPriceFontSize);
+
     return {
       enabled: src.enabled !== false,
       positionOverlayEnabled: src.positionOverlayEnabled !== false,
@@ -1744,7 +1764,17 @@
       currentPriceFontSize: Number.isFinite(priceFontNum) ? Math.max(8, Math.min(22, Math.round(priceFontNum))) : DEFAULT_HYPERNOVA_VISUALS.currentPriceFontSize,
       currentPriceShowLabel: src.currentPriceShowLabel !== false,
       currentPriceShowPrice: src.currentPriceShowPrice !== false,
-      currentPriceLabelAlign: align
+      currentPriceLabelAlign: align,
+      breachPriceLineEnabled: src.breachPriceLineEnabled !== false,
+      breachPriceColor: rawBreachColor,
+      breachPriceStyle: breachStyle,
+      breachPriceWidth: Number.isFinite(breachWidthNum) ? Math.max(1, Math.min(4, Math.round(breachWidthNum * 2) / 2)) : DEFAULT_HYPERNOVA_VISUALS.breachPriceWidth,
+      breachPriceOpacity: Number.isFinite(breachOpNum) ? Math.max(15, Math.min(100, Math.round(breachOpNum))) : DEFAULT_HYPERNOVA_VISUALS.breachPriceOpacity,
+      breachPriceText: typeof src.breachPriceText === 'string' ? src.breachPriceText.slice(0, 48) : DEFAULT_HYPERNOVA_VISUALS.breachPriceText,
+      breachPriceFontSize: Number.isFinite(breachFontNum) ? Math.max(8, Math.min(22, Math.round(breachFontNum))) : DEFAULT_HYPERNOVA_VISUALS.breachPriceFontSize,
+      breachPriceShowLabel: src.breachPriceShowLabel !== false,
+      breachPriceShowPrice: src.breachPriceShowPrice !== false,
+      breachPriceLabelAlign: breachAlign
     };
   }
 
@@ -5149,6 +5179,7 @@
       const idxValue = headers.findIndex(h => /\bvalue\b|\bnotional\b|\bposition\b/.test(h));
       const idxEntry = headers.findIndex(h => /entry|open price|avg/.test(h));
       const idxMark = headers.findIndex(h => /mark|mid|oracle|index|last|current/.test(h));
+      const idxBreach = headers.findIndex(h => /breach|liq\.?\s*price|liquidation/.test(h));
       const idxPnl = headers.findIndex(h => (/pnl|u\.?pnl|profit|total\s*trade/.test(h)) && !/realized|\brpnl\b/.test(h));
       const idxTpSl = headers.findIndex(h => /tp\s*\/?\s*sl|take\s*profit|stop\s*loss/.test(h));
 
@@ -5164,6 +5195,7 @@
         const symTextEl = row.querySelector('[data-testid="symbol-text"]');
         const entryTd = row.querySelector('td[data-testid$="-entry"]');
         const markTd = row.querySelector('td[data-testid$="-mark"]');
+        const breachTd = row.querySelector('td[data-testid$="-breach"]');
         const sizeTd = row.querySelector('td[data-testid$="-size"]');
         const valueTd = row.querySelector('td[data-testid$="-value"]');
         const pnlTd = row.querySelector('td[data-testid$="-pnl"]');
@@ -5178,6 +5210,7 @@
         const sideText = idxSide >= 0 ? (cellTexts[idxSide] || '') : '';
         const entryText = entryTd ? (entryTd.innerText || entryTd.textContent || '').trim() : (idxEntry >= 0 ? cellTexts[idxEntry] : '');
         const markText = markTd ? (markTd.innerText || markTd.textContent || '').trim() : (idxMark >= 0 ? cellTexts[idxMark] : '');
+        const breachText = breachTd ? (breachTd.innerText || breachTd.textContent || '').trim() : (idxBreach >= 0 ? cellTexts[idxBreach] : '');
         const sizeText = sizeTd ? (sizeTd.innerText || sizeTd.textContent || '').trim() : (idxSize >= 0 ? cellTexts[idxSize] : '');
         const valueText = valueTd ? (valueTd.innerText || valueTd.textContent || '').trim() : (idxValue >= 0 ? cellTexts[idxValue] : '');
         const pnlText = pnlTd ? (pnlTd.innerText || pnlTd.textContent || '').trim() : (idxPnl >= 0 ? cellTexts[idxPnl] : '');
@@ -5241,13 +5274,20 @@
           }
         }
 
-        const priceDecimals = Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText));
+        const breachPriceRaw = breachText && !/n\/a|^[-—]+$/i.test(breachText) ? Math.abs(parseHypernovaNumber(breachText)) : NaN;
+        const breachPrice = Number.isFinite(breachPriceRaw) && breachPriceRaw > 0 ? breachPriceRaw : null;
+        const priceDecimals = Math.max(
+          getHypernovaDecimalPlaces(entryText),
+          getHypernovaDecimalPlaces(markText),
+          breachPrice ? getHypernovaDecimalPlaces(breachText) : 0
+        );
 
         positions.push({
           symbol,
           side,
           entryPrice,
           markPrice: Number.isFinite(markPrice) && markPrice > 0 ? markPrice : null,
+          breachPrice,
           sizeQty: Number.isFinite(sizeQty) && sizeQty > 0 ? sizeQty : null,
           notionalUsd: Number.isFinite(notionalUsd) && notionalUsd > 0 ? notionalUsd : null,
           unrealizedPnl: Number.isFinite(unrealizedPnl) ? unrealizedPnl : null,
@@ -5286,6 +5326,7 @@
         unrealizedPnl: Number.isFinite(Number(raw.unrealizedPnl)) ? Number(raw.unrealizedPnl) : null,
         tpPrice: Number.isFinite(Number(raw.tpPrice)) && Number(raw.tpPrice) > 0 ? Number(raw.tpPrice) : null,
         slPrice: Number.isFinite(Number(raw.slPrice)) && Number(raw.slPrice) > 0 ? Number(raw.slPrice) : null,
+        breachPrice: Number.isFinite(Number(raw.breachPrice)) && Number(raw.breachPrice) > 0 ? Number(raw.breachPrice) : null,
         priceDecimals: Number.isInteger(raw.priceDecimals) ? raw.priceDecimals : null
       });
     }
@@ -5316,7 +5357,8 @@
         return {
           ...p,
           tpPrice: p.tpPrice !== null ? p.tpPrice : api.tpPrice,
-          slPrice: p.slPrice !== null ? p.slPrice : api.slPrice
+          slPrice: p.slPrice !== null ? p.slPrice : api.slPrice,
+          breachPrice: p.breachPrice !== null ? p.breachPrice : (api.breachPrice ?? null)
         };
       });
       lastKnownDomPositions = mergedDom;
@@ -5354,18 +5396,83 @@
     return fallback;
   }
 
+  let observedHypernovaBreachEl = null;
+  let hypernovaBreachObserver = null;
+  let hypernovaBreachSyncDebounce = null;
+
+  function findHypernovaOrderTicketBreachEl() {
+    if (getChartVisualsHostFirmId() !== 'hypernova') return null;
+    try {
+      const direct = document.querySelector('[data-testid="order-details-breach-price"]');
+      if (direct) return direct;
+      const rows = document.querySelectorAll('.order-info-row');
+      for (const row of rows) {
+        const label = row.querySelector('.order-info-label');
+        if (label && /^\s*breach\s*price\s*$/i.test(label.textContent || '')) {
+          const valEl = row.querySelector('.order-info-value');
+          if (valEl) return valEl;
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function ensureHypernovaBreachObserver() {
+    if (!isTopWindow || getChartVisualsHostFirmId() !== 'hypernova') return;
+    const el = findHypernovaOrderTicketBreachEl();
+    if (!el || el === observedHypernovaBreachEl) return;
+    try {
+      if (hypernovaBreachObserver) {
+        hypernovaBreachObserver.disconnect();
+      }
+      observedHypernovaBreachEl = el;
+      hypernovaBreachObserver = new MutationObserver(() => {
+        if (hypernovaBreachSyncDebounce) clearTimeout(hypernovaBreachSyncDebounce);
+        hypernovaBreachSyncDebounce = setTimeout(() => {
+          hypernovaBreachSyncDebounce = null;
+          syncHypernovaPositionsToMainWorld(false);
+        }, 40);
+      });
+      hypernovaBreachObserver.observe(el, { characterData: true, childList: true, subtree: true });
+    } catch (e) {}
+  }
+
+  function scrapeHypernovaOrderTicketBreachPrice() {
+    if (getChartVisualsHostFirmId() !== 'hypernova') return null;
+    ensureHypernovaBreachObserver();
+    try {
+      const valEl = findHypernovaOrderTicketBreachEl();
+      if (!valEl) return null;
+      const rawText = (valEl.innerText || valEl.textContent || '').trim();
+      if (!rawText || /n\/a|^[-—]+$/i.test(rawText)) return null;
+      const price = Math.abs(parseHypernovaNumber(rawText));
+      if (!Number.isFinite(price) || price <= 0) return null;
+      const decimals = getHypernovaDecimalPlaces(rawText);
+      const symbol = getCurrentTopChartSymbolForFlatCheck() || '';
+      return {
+        price,
+        rawText,
+        decimals,
+        symbol,
+        source: 'order-ticket'
+      };
+    } catch (e) {}
+    return null;
+  }
+
   function syncHypernovaPositionsToMainWorld(force = false) {
     if (!isTopWindow || !isChartVisualsHost()) return;
     hypernovaSyncTickCount++;
     const positions = getMergedVenueOpenPositions();
-    const sig = JSON.stringify(positions);
+    const orderTicketBreach = scrapeHypernovaOrderTicketBreachPrice();
+    const sig = JSON.stringify({ positions, orderTicketBreach });
     // Periodically rebroadcast every 4th tick (~3.2s) so newly recreated TradingView iframes always stay in sync (including flat!)
     const periodicRefresh = (hypernovaSyncTickCount % 4 === 0);
     if (!force && !periodicRefresh && sig === lastHypernovaPositionsSig) return;
     lastHypernovaPositionsSig = sig;
     postToMainWorlds({
       type: 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE',
-      payload: { positions }
+      payload: { positions, orderTicketBreach }
     });
   }
 
@@ -8180,6 +8287,87 @@
                     </div>
                   </div>
                 </div>
+                ${firm.id === 'hypernova' ? `
+                <div style="padding:10px 12px; border-radius:8px; background:rgba(30,10,16,0.52); border:1px solid rgba(239,68,68,0.28);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div style="max-width:80%;">
+                      <div style="font-size:12px; font-weight:600; color:#fca5a5;">Live "Breach Price" Red Line &amp; Box</div>
+                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Draws a live red line &amp; badge on the chart tracking Hypernova's Breach Price in real time (from both the order ticket preview and open positions).</div>
+                    </div>
+                    <label class="vest-tvs-switch">
+                      <input type="checkbox" id="vest-pf-hn-breach-line" ${hnVis.breachPriceLineEnabled ? 'checked' : ''} />
+                      <span class="vest-tvs-switch-slider"></span>
+                    </label>
+                  </div>
+
+                  <div id="vest-pf-hn-breach-style-grid" style="${hnVis.breachPriceLineEnabled ? '' : 'opacity:0.45; pointer-events:none;'}">
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Color</label>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <input type="color" id="vest-pf-hn-breach-color" value="${escapeHtml(hnVis.breachPriceColor)}" style="width:36px; height:28px; border:1px solid #4c1d24; border-radius:6px; background:#0b0e14; cursor:pointer; padding:2px;" />
+                          <span id="vest-pf-hn-breach-color-val" style="font-size:11px; color:#fca5a5; font-family:monospace;">${escapeHtml(hnVis.breachPriceColor)}</span>
+                        </div>
+                      </div>
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Style</label>
+                        <select class="vest-ed-select" id="vest-pf-hn-breach-style">
+                          <option value="solid" ${hnVis.breachPriceStyle === 'solid' ? 'selected' : ''}>Solid Line</option>
+                          <option value="dashed" ${hnVis.breachPriceStyle === 'dashed' ? 'selected' : ''}>Dashed Line</option>
+                          <option value="dotted" ${hnVis.breachPriceStyle === 'dotted' ? 'selected' : ''}>Dotted Line</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Thickness: <span id="vest-pf-hn-breach-width-val" style="color:#f87171; font-weight:700;">${hnVis.breachPriceWidth}px</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-breach-width" min="1" max="4" step="0.5" value="${hnVis.breachPriceWidth}" />
+                      </div>
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Opacity: <span id="vest-pf-hn-breach-opacity-val" style="color:#f87171; font-weight:700;">${hnVis.breachPriceOpacity}%</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-breach-opacity" min="15" max="100" step="5" value="${hnVis.breachPriceOpacity}" />
+                      </div>
+                    </div>
+
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Label Text</label>
+                        <input type="text" class="vest-ed-input" id="vest-pf-hn-breach-text" value="${escapeHtml(hnVis.breachPriceText)}" placeholder="Breach Price" maxlength="48" />
+                      </div>
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Label &amp; Box Font Size: <span id="vest-pf-hn-breach-font-size-val" style="color:#f87171; font-weight:700;">${hnVis.breachPriceFontSize}px</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-breach-font-size" min="8" max="22" step="1" value="${hnVis.breachPriceFontSize}" />
+                      </div>
+                    </div>
+
+                    <div class="vest-ed-field" style="margin-bottom:8px;">
+                      <label class="vest-ed-label">Label Position</label>
+                      <select class="vest-ed-select" id="vest-pf-hn-breach-align">
+                        <option value="left" ${hnVis.breachPriceLabelAlign === 'left' ? 'selected' : ''}>Left</option>
+                        <option value="center" ${hnVis.breachPriceLabelAlign === 'center' ? 'selected' : ''}>Center</option>
+                        <option value="right" ${hnVis.breachPriceLabelAlign === 'right' ? 'selected' : ''}>Right (Near Price Axis)</option>
+                      </select>
+                    </div>
+
+                    <div class="vest-ed-grid-2">
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <span style="font-size:11.5px; color:#cbd5e1;">Show Label Box</span>
+                        <label class="vest-tvs-switch">
+                          <input type="checkbox" id="vest-pf-hn-breach-show-label" ${hnVis.breachPriceShowLabel ? 'checked' : ''} />
+                          <span class="vest-tvs-switch-slider"></span>
+                        </label>
+                      </div>
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <span style="font-size:11.5px; color:#cbd5e1;">Include Price in Box</span>
+                        <label class="vest-tvs-switch">
+                          <input type="checkbox" id="vest-pf-hn-breach-show-price" ${hnVis.breachPriceShowPrice ? 'checked' : ''} />
+                          <span class="vest-tvs-switch-slider"></span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>` : ''}
               </div>
             </div>
         ` : '';
@@ -10792,6 +10980,16 @@
           const hnAlign = overlay.querySelector('#vest-pf-hn-price-align');
           const hnShowLabel = overlay.querySelector('#vest-pf-hn-price-show-label');
           const hnShowPrice = overlay.querySelector('#vest-pf-hn-price-show-price');
+          const hnBreachLine = overlay.querySelector('#vest-pf-hn-breach-line');
+          const hnBreachColor = overlay.querySelector('#vest-pf-hn-breach-color');
+          const hnBreachStyle = overlay.querySelector('#vest-pf-hn-breach-style');
+          const hnBreachWidth = overlay.querySelector('#vest-pf-hn-breach-width');
+          const hnBreachOpacity = overlay.querySelector('#vest-pf-hn-breach-opacity');
+          const hnBreachText = overlay.querySelector('#vest-pf-hn-breach-text');
+          const hnBreachFont = overlay.querySelector('#vest-pf-hn-breach-font-size');
+          const hnBreachAlign = overlay.querySelector('#vest-pf-hn-breach-align');
+          const hnBreachShowLabel = overlay.querySelector('#vest-pf-hn-breach-show-label');
+          const hnBreachShowPrice = overlay.querySelector('#vest-pf-hn-breach-show-price');
           const nextVisuals = normalizeHypernovaVisualsConfig({
             ...prevHn,
             enabled: Boolean(hnEn.checked),
@@ -10807,7 +11005,17 @@
             currentPriceFontSize: hnPriceFont ? Number(hnPriceFont.value) : prevHn.currentPriceFontSize,
             currentPriceLabelAlign: hnAlign ? hnAlign.value : prevHn.currentPriceLabelAlign,
             currentPriceShowLabel: hnShowLabel ? Boolean(hnShowLabel.checked) : prevHn.currentPriceShowLabel,
-            currentPriceShowPrice: hnShowPrice ? Boolean(hnShowPrice.checked) : prevHn.currentPriceShowPrice
+            currentPriceShowPrice: hnShowPrice ? Boolean(hnShowPrice.checked) : prevHn.currentPriceShowPrice,
+            breachPriceLineEnabled: hnBreachLine ? Boolean(hnBreachLine.checked) : prevHn.breachPriceLineEnabled,
+            breachPriceColor: hnBreachColor ? hnBreachColor.value : prevHn.breachPriceColor,
+            breachPriceStyle: hnBreachStyle ? hnBreachStyle.value : prevHn.breachPriceStyle,
+            breachPriceWidth: hnBreachWidth ? Number(hnBreachWidth.value) : prevHn.breachPriceWidth,
+            breachPriceOpacity: hnBreachOpacity ? Number(hnBreachOpacity.value) : prevHn.breachPriceOpacity,
+            breachPriceText: hnBreachText ? hnBreachText.value : prevHn.breachPriceText,
+            breachPriceFontSize: hnBreachFont ? Number(hnBreachFont.value) : prevHn.breachPriceFontSize,
+            breachPriceLabelAlign: hnBreachAlign ? hnBreachAlign.value : prevHn.breachPriceLabelAlign,
+            breachPriceShowLabel: hnBreachShowLabel ? Boolean(hnBreachShowLabel.checked) : prevHn.breachPriceShowLabel,
+            breachPriceShowPrice: hnBreachShowPrice ? Boolean(hnBreachShowPrice.checked) : prevHn.breachPriceShowPrice
           });
           firm.chartVisuals = nextVisuals;
           if (firm.id === 'hypernova') {
@@ -12666,6 +12874,47 @@
           if (hnBoxesFontRange && hnBoxesFontVal) {
             hnBoxesFontRange.addEventListener('input', () => {
               hnBoxesFontVal.textContent = `${hnBoxesFontRange.value}px`;
+            });
+          }
+
+          const hnBreachToggle = detailCard.querySelector('#vest-pf-hn-breach-line');
+          const hnBreachGrid = detailCard.querySelector('#vest-pf-hn-breach-style-grid');
+          if (hnBreachToggle && hnBreachGrid) {
+            hnBreachToggle.addEventListener('change', () => {
+              hnBreachGrid.style.opacity = hnBreachToggle.checked ? '1' : '0.45';
+              hnBreachGrid.style.pointerEvents = hnBreachToggle.checked ? 'auto' : 'none';
+            });
+          }
+
+          const hnBreachColorInput = detailCard.querySelector('#vest-pf-hn-breach-color');
+          const hnBreachColorVal = detailCard.querySelector('#vest-pf-hn-breach-color-val');
+          if (hnBreachColorInput && hnBreachColorVal) {
+            hnBreachColorInput.addEventListener('input', () => {
+              hnBreachColorVal.textContent = hnBreachColorInput.value;
+            });
+          }
+
+          const hnBreachWidthRange = detailCard.querySelector('#vest-pf-hn-breach-width');
+          const hnBreachWidthVal = detailCard.querySelector('#vest-pf-hn-breach-width-val');
+          if (hnBreachWidthRange && hnBreachWidthVal) {
+            hnBreachWidthRange.addEventListener('input', () => {
+              hnBreachWidthVal.textContent = `${hnBreachWidthRange.value}px`;
+            });
+          }
+
+          const hnBreachOpacityRange = detailCard.querySelector('#vest-pf-hn-breach-opacity');
+          const hnBreachOpacityVal = detailCard.querySelector('#vest-pf-hn-breach-opacity-val');
+          if (hnBreachOpacityRange && hnBreachOpacityVal) {
+            hnBreachOpacityRange.addEventListener('input', () => {
+              hnBreachOpacityVal.textContent = `${hnBreachOpacityRange.value}%`;
+            });
+          }
+
+          const hnBreachFontRange = detailCard.querySelector('#vest-pf-hn-breach-font-size');
+          const hnBreachFontVal = detailCard.querySelector('#vest-pf-hn-breach-font-size-val');
+          if (hnBreachFontRange && hnBreachFontVal) {
+            hnBreachFontRange.addEventListener('input', () => {
+              hnBreachFontVal.textContent = `${hnBreachFontRange.value}px`;
             });
           }
 

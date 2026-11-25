@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.148`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.149`) are documented in this file.
+
+---
+
+## [v1.1.149] — 2026-11-25
+
+### 🚨 Hypernova Live "Breach Price" Red Line & Badge Box
+- **Real-Time Breach Price Tracking (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Tracks Hypernova's live **Breach Price** in real time from BOTH the right-hand Order Ticket (`[data-testid="order-details-breach-price"]` via a lightweight scoped `MutationObserver` as you adjust size, leverage, Limit price, or toggle Long/Short) AND active positions in the Positions table (`td[data-testid$="-breach"]`).
+  - Draws a crisp horizontal red line across the chart pane with a matching red pill badge (`Breach Price · $XX.XXX`) that moves dynamically with Hypernova's Breach Price, automatically avoids colliding with the `"Current Price"` box, and displays a sleek clamped `▲ Above chart` / `▼ Below chart` red indicator pill when the breach price sits outside the currently visible zoom range.
+  - Clears cleanly when flat and when the order ticket shows `N/A`.
+- **Full Hypernova Settings Controls (`Perp Firms → Hypernova`)**:
+  - Added a dedicated **Live "Breach Price" Red Line & Box** section (ON by default) with independent controls and live chart preview: ON/OFF toggle, Line Color picker (default `#ef4444`), Line Style (Solid / Dashed / Dotted), Line Thickness (`1px–4px`), Line Opacity (`15%–100%`), Custom Label Text (default `"Breach Price"`), Label & Box Font Size (`8px–22px`), Label Position (Left / Center / Right), Show Label Box toggle, and Include Price in Box toggle.
 
 ---
 

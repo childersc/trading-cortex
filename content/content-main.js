@@ -4446,6 +4446,9 @@
       case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE': {
         const incoming = payload && Array.isArray(payload.positions) ? payload.positions : [];
         liveHypernovaPositions = incoming;
+        liveHypernovaOrderTicketBreach = (payload && payload.orderTicketBreach && typeof payload.orderTicketBreach === 'object')
+          ? payload.orderTicketBreach
+          : null;
         const activeSyms = new Set(incoming.map(p => p && normalizeHypernovaMainSymbol(p.symbol)).filter(Boolean));
         Object.keys(hypernovaManualTpSlBySymbol).forEach(sym => {
           if (!activeSyms.has(sym)) {
@@ -8252,6 +8255,7 @@
   // Hypernova Enhanced Chart Visuals & Interactive Trade Controls
   // -------------------------------------------------------------
   let liveHypernovaPositions = [];
+  let liveHypernovaOrderTicketBreach = null;
   const hypernovaManualTpSlBySymbol = {};
   const hypernovaOverlayEls = { entry: null, tp: null, sl: null };
   let activeHypernovaDrag = null; // { kind: 'tp' | 'sl', symbol, side, entryPrice, sizeQty, previewPrice }
@@ -8301,7 +8305,17 @@
       currentPriceFontSize: 11,
       currentPriceShowLabel: true,
       currentPriceShowPrice: true,
-      currentPriceLabelAlign: 'right'
+      currentPriceLabelAlign: 'right',
+      breachPriceLineEnabled: true,
+      breachPriceColor: '#ef4444',
+      breachPriceStyle: 'dashed',
+      breachPriceWidth: 1.5,
+      breachPriceOpacity: 90,
+      breachPriceText: 'Breach Price',
+      breachPriceFontSize: 11,
+      breachPriceShowLabel: true,
+      breachPriceShowPrice: true,
+      breachPriceLabelAlign: 'right'
     };
     const firmId = getChartVisualsMainWorldFirmId();
     if (!firmId) {
@@ -8326,6 +8340,16 @@
     const op = Number(raw.currentPriceOpacity);
     const priceFont = Number(raw.currentPriceFontSize);
     const boxesFont = Number(raw.tradeBoxesFontSize);
+
+    const breachStyle = ['solid', 'dashed', 'dotted'].includes(raw.breachPriceStyle) ? raw.breachPriceStyle : defaults.breachPriceStyle;
+    const breachAlign = ['left', 'center', 'right'].includes(raw.breachPriceLabelAlign) ? raw.breachPriceLabelAlign : defaults.breachPriceLabelAlign;
+    const rawBreachColor = typeof raw.breachPriceColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(raw.breachPriceColor.trim())
+      ? raw.breachPriceColor.trim()
+      : defaults.breachPriceColor;
+    const bw = Number(raw.breachPriceWidth);
+    const bop = Number(raw.breachPriceOpacity);
+    const breachFont = Number(raw.breachPriceFontSize);
+
     return {
       enabled: raw.enabled !== false,
       positionOverlayEnabled: raw.positionOverlayEnabled !== false,
@@ -8340,7 +8364,17 @@
       currentPriceFontSize: Number.isFinite(priceFont) ? Math.max(8, Math.min(22, Math.round(priceFont))) : defaults.currentPriceFontSize,
       currentPriceShowLabel: raw.currentPriceShowLabel !== false,
       currentPriceShowPrice: raw.currentPriceShowPrice !== false,
-      currentPriceLabelAlign: align
+      currentPriceLabelAlign: align,
+      breachPriceLineEnabled: raw.breachPriceLineEnabled !== false,
+      breachPriceColor: rawBreachColor,
+      breachPriceStyle: breachStyle,
+      breachPriceWidth: Number.isFinite(bw) ? Math.max(1, Math.min(4, bw)) : defaults.breachPriceWidth,
+      breachPriceOpacity: Number.isFinite(bop) ? Math.max(15, Math.min(100, bop)) : defaults.breachPriceOpacity,
+      breachPriceText: typeof raw.breachPriceText === 'string' ? raw.breachPriceText : defaults.breachPriceText,
+      breachPriceFontSize: Number.isFinite(breachFont) ? Math.max(8, Math.min(22, Math.round(breachFont))) : defaults.breachPriceFontSize,
+      breachPriceShowLabel: raw.breachPriceShowLabel !== false,
+      breachPriceShowPrice: raw.breachPriceShowPrice !== false,
+      breachPriceLabelAlign: breachAlign
     };
   }
 
@@ -8847,10 +8881,46 @@
       unrealizedPnl,
       tpPrice: Number.isFinite(Number(tpPrice)) && Number(tpPrice) > 0 ? Number(tpPrice) : null,
       slPrice: Number.isFinite(Number(slPrice)) && Number(slPrice) > 0 ? Number(slPrice) : null,
+      breachPrice: (domMatch && Number.isFinite(Number(domMatch.breachPrice)) && Number(domMatch.breachPrice) > 0)
+        ? Number(domMatch.breachPrice)
+        : null,
+      priceDecimals: (domMatch && Number.isInteger(domMatch.priceDecimals)) ? domMatch.priceDecimals : null,
       nativeCloseFn: nativeLines.position ? nativeLines.position.nativeCloseFn : null,
       tpNativeCancelFn: nativeLines.tpLine ? nativeLines.tpLine.nativeCancelFn : null,
       slNativeCancelFn: nativeLines.slLine ? nativeLines.slLine.nativeCancelFn : null
     };
+  }
+
+  function resolveActiveHypernovaBreachPrice(symbolKey, activePos) {
+    if (getChartVisualsMainWorldFirmId() !== 'hypernova') return null;
+    const normSym = normalizeHypernovaMainSymbol(symbolKey);
+
+    // 1. Live Order Ticket Breach Price (updates dynamically as user types amount / switches Long vs Short / leverage)
+    if (
+      liveHypernovaOrderTicketBreach &&
+      Number.isFinite(Number(liveHypernovaOrderTicketBreach.price)) &&
+      Number(liveHypernovaOrderTicketBreach.price) > 0
+    ) {
+      const ticketSym = normalizeHypernovaMainSymbol(liveHypernovaOrderTicketBreach.symbol || '');
+      if (!ticketSym || !normSym || ticketSym === normSym) {
+        return {
+          price: Number(liveHypernovaOrderTicketBreach.price),
+          decimals: Number.isInteger(liveHypernovaOrderTicketBreach.decimals) ? liveHypernovaOrderTicketBreach.decimals : null,
+          source: 'order-ticket'
+        };
+      }
+    }
+
+    // 2. Open Position Breach Price from Hypernova's Positions table (`td[data-testid$="-breach"]`)
+    if (activePos && Number.isFinite(Number(activePos.breachPrice)) && Number(activePos.breachPrice) > 0) {
+      return {
+        price: Number(activePos.breachPrice),
+        decimals: Number.isInteger(activePos.priceDecimals) ? activePos.priceDecimals : null,
+        source: 'position'
+      };
+    }
+
+    return null;
   }
 
   function ensureHypernovaVisualStyles(doc) {
@@ -9199,6 +9269,7 @@
       : null;
     syncHypernovaNativeCurrentPriceLine(model, mainSeries, hnCfg, liveCurY);
 
+    let curPillRect = null;
     if (hnCfg.currentPriceLineEnabled && hnCfg.currentPriceShowLabel && liveCurY !== null && Number.isFinite(liveCurY) && liveCurY >= -4 && liveCurY <= cssHeight + 4) {
       const clampedY = Math.max(2, Math.min(cssHeight - 2, liveCurY));
       const baseText = (hnCfg.currentPriceText || '').trim();
@@ -9224,6 +9295,7 @@
         else if (hnCfg.currentPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
         pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
         const pillY = Math.max(4, Math.min(cssHeight - pillH - 4, clampedY - pillH / 2));
+        curPillRect = { x: pillX, y: pillY, w: pillW, h: pillH };
 
         ctx.beginPath();
         ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(5, Math.round(pillH * 0.28)));
@@ -9249,8 +9321,116 @@
     const boxesFontSize = Math.max(8, Math.min(18, Number(hnCfg.tradeBoxesFontSize) || 11));
     const boxesScale = Math.max(0.7, Math.min(1.65, boxesFontSize / 11));
 
-    // 2. Resolve Active Position + Live Drag Preview for TP & SL
+    // Resolve Active Position early so Breach Price can track BOTH Order Ticket preview and Open Position breach price
     const pos = resolveActiveHypernovaPosition(symbolKey, model, latestChartMarketPrice);
+
+    // 1b. Hypernova Live "Breach Price" Red Line & Badge Box (moves dynamically with Order Ticket & Open Position)
+    const breachData = hnCfg.breachPriceLineEnabled ? resolveActiveHypernovaBreachPrice(symbolKey, pos) : null;
+    if (breachData && Number.isFinite(breachData.price) && breachData.price > 0) {
+      const breachY = priceToY(breachData.price);
+      if (breachY !== null && Number.isFinite(breachY)) {
+        const breachColor = hnCfg.breachPriceColor || '#ef4444';
+        const breachPriceFormatted = (Number.isInteger(breachData.decimals) && breachData.decimals >= 0 && breachData.decimals <= 8)
+          ? `$${breachData.price.toFixed(breachData.decimals)}`
+          : `$${formatHypernovaDisplayPrice(breachData.price)}`;
+        const breachBaseText = (hnCfg.breachPriceText || '').trim();
+        const breachLabelBase = breachBaseText
+          ? (hnCfg.breachPriceShowPrice ? `${breachBaseText} · ${breachPriceFormatted}` : breachBaseText)
+          : (hnCfg.breachPriceShowPrice ? breachPriceFormatted : '');
+
+        const isOnScreen = (breachY >= -4 && breachY <= cssHeight + 4);
+        if (isOnScreen) {
+          const clampedBreachY = Math.max(2, Math.min(cssHeight - 2, breachY));
+          ctx.save();
+          ctx.strokeStyle = hypernovaHexToRgba(breachColor, hnCfg.breachPriceOpacity);
+          ctx.lineWidth = Math.max(1, Math.min(4, Number(hnCfg.breachPriceWidth) || 1.5));
+          if (hnCfg.breachPriceStyle === 'dotted') ctx.setLineDash([2, 4]);
+          else if (hnCfg.breachPriceStyle === 'dashed') ctx.setLineDash([7, 5]);
+          else ctx.setLineDash([]);
+          ctx.shadowColor = hypernovaHexToRgba(breachColor, Math.min(60, hnCfg.breachPriceOpacity));
+          ctx.shadowBlur = 4;
+          ctx.beginPath();
+          ctx.moveTo(0, clampedBreachY);
+          ctx.lineTo(cssWidth, clampedBreachY);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        if (hnCfg.breachPriceShowLabel && breachLabelBase) {
+          const isAbove = breachY < -4;
+          const isBelow = breachY > cssHeight + 4;
+          const labelStr = isAbove
+            ? `▲ Above chart · ${breachLabelBase}`
+            : (isBelow ? `▼ Below chart · ${breachLabelBase}` : breachLabelBase);
+          const bFontSize = Math.max(8, Math.min(22, Number(hnCfg.breachPriceFontSize) || 11));
+          const dotRadius = Math.max(2.5, Math.min(5, bFontSize * 0.27));
+          const dotSpace = Math.round(dotRadius * 2 + 6);
+          const padX = Math.max(6, Math.round(bFontSize * 0.72));
+          const pillH = Math.round(bFontSize + 9);
+
+          ctx.save();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.96;
+          ctx.font = `700 ${bFontSize}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
+          const textW = ctx.measureText(labelStr).width;
+          const pillW = textW + dotSpace + padX * 2;
+          let pillX = cssWidth - pillW - 10;
+          if (hnCfg.breachPriceLabelAlign === 'left') pillX = 10;
+          else if (hnCfg.breachPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
+          pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
+
+          let pillY;
+          if (isAbove) {
+            pillY = 8;
+          } else if (isBelow) {
+            pillY = Math.max(4, cssHeight - pillH - 8);
+          } else {
+            pillY = Math.max(4, Math.min(cssHeight - pillH - 4, breachY - pillH / 2));
+          }
+
+          // Smart anti-overlap nudge if Breach Price pill collides with Current Price pill
+          if (curPillRect) {
+            const overlapX = pillX < (curPillRect.x + curPillRect.w + 4) && (pillX + pillW + 4) > curPillRect.x;
+            const overlapY = pillY < (curPillRect.y + curPillRect.h + 3) && (pillY + pillH + 3) > curPillRect.y;
+            if (overlapX && overlapY) {
+              const preferBelow = breachY >= (curPillRect.y + curPillRect.h / 2);
+              const candidateY = preferBelow
+                ? curPillRect.y + curPillRect.h + 4
+                : curPillRect.y - pillH - 4;
+              if (candidateY >= 4 && candidateY + pillH <= cssHeight - 4) {
+                pillY = candidateY;
+              } else {
+                const altY = preferBelow
+                  ? curPillRect.y - pillH - 4
+                  : curPillRect.y + curPillRect.h + 4;
+                pillY = Math.max(4, Math.min(cssHeight - pillH - 4, altY));
+              }
+            }
+          }
+
+          ctx.beginPath();
+          ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(5, Math.round(pillH * 0.28)));
+          ctx.fillStyle = 'rgba(28, 10, 16, 0.94)';
+          ctx.fill();
+          ctx.strokeStyle = breachColor;
+          ctx.lineWidth = 1.35;
+          ctx.stroke();
+
+          // Glowing red indicator dot
+          ctx.beginPath();
+          ctx.arc(pillX + padX + dotRadius, pillY + pillH / 2, dotRadius, 0, Math.PI * 2);
+          ctx.fillStyle = breachColor;
+          ctx.fill();
+
+          ctx.fillStyle = '#fef2f2';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(labelStr, pillX + padX + dotSpace, pillY + pillH / 2 + 0.5);
+          ctx.restore();
+        }
+      }
+    }
+
+    // 2. Active Position Overlay + Live Drag Preview for TP & SL
     if (!pos) {
       removeHypernovaOverlayWidgets();
       return;

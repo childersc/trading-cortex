@@ -352,14 +352,139 @@ function extractBlock(src, startMarker, endMarker) {
   for (const token of requiredMainTokens) {
     assert.strictEqual(mainSrc.includes(token), true, `content-main.js missing required Hypernova token: ${token}`);
   }
-  // Ensure renderHypernovaChartVisuals does NOT draw a duplicate horizontal line over TradingView's native current price line
-  const renderFnBlock = extractBlock(
+  // Ensure Current Price section does NOT draw a duplicate horizontal line over TradingView's native current price line
+  const currentPriceBlock = extractBlock(
     mainSrc,
     'function renderHypernovaChartVisuals(',
-    '// 2. Resolve Active Position'
+    '// 1b. Hypernova Live "Breach Price"'
   );
-  assert.strictEqual(renderFnBlock.includes('ctx.lineTo(cssWidth'), false, 'renderHypernovaChartVisuals must modify the existing native price line instead of drawing a duplicate canvas line over it');
+  assert.strictEqual(currentPriceBlock.includes('ctx.lineTo(cssWidth'), false, 'Current Price section must modify the existing native price line instead of drawing a duplicate canvas line over it');
   console.log('✓ 2-row Long/Short BE/TP/SL/X box, Green TP / Red SL boxes, native price line modifier & font scaling verified in content-main.js');
+}
+
+// 6. Hypernova Live Breach Price Line & Box (settings defaults, clamping, DOM scraping, priority & canvas rendering)
+{
+  const block = extractBlock(
+    isolatedSrc,
+    'const DEFAULT_HYPERNOVA_VISUALS =',
+    'const DEFAULT_PERP_FIRMS ='
+  );
+  const ctx = {};
+  vm.runInNewContext(
+    `${block}\nthis.DEFAULT_HYPERNOVA_VISUALS = DEFAULT_HYPERNOVA_VISUALS;\nthis.normalizeHypernovaVisualsConfig = normalizeHypernovaVisualsConfig;`,
+    ctx
+  );
+
+  const def = ctx.normalizeHypernovaVisualsConfig();
+  assert.strictEqual(def.breachPriceLineEnabled, true, 'Breach Price line must default to ON');
+  assert.strictEqual(def.breachPriceColor, '#ef4444', 'Breach Price line must default to red (#ef4444)');
+  assert.strictEqual(def.breachPriceStyle, 'dashed');
+  assert.strictEqual(def.breachPriceWidth, 1.5);
+  assert.strictEqual(def.breachPriceOpacity, 90);
+  assert.strictEqual(def.breachPriceText, 'Breach Price');
+  assert.strictEqual(def.breachPriceFontSize, 11);
+  assert.strictEqual(def.breachPriceShowLabel, true);
+  assert.strictEqual(def.breachPriceShowPrice, true);
+  assert.strictEqual(def.breachPriceLabelAlign, 'right');
+
+  const clamped = ctx.normalizeHypernovaVisualsConfig({
+    breachPriceLineEnabled: false,
+    breachPriceColor: 'not-a-color',
+    breachPriceStyle: 'dotted',
+    breachPriceWidth: 99,
+    breachPriceOpacity: 5,
+    breachPriceText: 'Account Breach',
+    breachPriceFontSize: 40,
+    breachPriceShowLabel: false,
+    breachPriceShowPrice: false,
+    breachPriceLabelAlign: 'left'
+  });
+  assert.strictEqual(clamped.breachPriceLineEnabled, false);
+  assert.strictEqual(clamped.breachPriceColor, '#ef4444');
+  assert.strictEqual(clamped.breachPriceStyle, 'dotted');
+  assert.strictEqual(clamped.breachPriceWidth, 4);
+  assert.strictEqual(clamped.breachPriceOpacity, 15);
+  assert.strictEqual(clamped.breachPriceText, 'Account Breach');
+  assert.strictEqual(clamped.breachPriceFontSize, 22);
+  assert.strictEqual(clamped.breachPriceShowLabel, false);
+  assert.strictEqual(clamped.breachPriceShowPrice, false);
+  assert.strictEqual(clamped.breachPriceLabelAlign, 'left');
+
+  // Verify Hypernova DOM selectors & Settings UI IDs in content-isolated.js
+  const requiredIsoBreachTokens = [
+    '[data-testid="order-details-breach-price"]',
+    'td[data-testid$="-breach"]',
+    'function ensureHypernovaBreachObserver()',
+    'function scrapeHypernovaOrderTicketBreachPrice()',
+    'id="vest-pf-hn-breach-line"',
+    'id="vest-pf-hn-breach-color"',
+    'id="vest-pf-hn-breach-style"',
+    'id="vest-pf-hn-breach-width"',
+    'id="vest-pf-hn-breach-opacity"',
+    'id="vest-pf-hn-breach-text"',
+    'id="vest-pf-hn-breach-font-size"',
+    'id="vest-pf-hn-breach-align"',
+    'id="vest-pf-hn-breach-show-label"',
+    'id="vest-pf-hn-breach-show-price"'
+  ];
+  for (const token of requiredIsoBreachTokens) {
+    assert.strictEqual(isolatedSrc.includes(token), true, `content-isolated.js missing required Breach Price token: ${token}`);
+  }
+
+  // Verify resolveActiveHypernovaBreachPrice priority logic in VM
+  const resolveBlock = extractBlock(
+    mainSrc,
+    'function resolveActiveHypernovaBreachPrice(',
+    'function ensureHypernovaVisualStyles('
+  );
+  const normSymBlock = extractBlock(
+    mainSrc,
+    'function normalizeHypernovaMainSymbol(',
+    'function extractNativeHypernovaChartLines('
+  );
+  const breachCtx = {
+    firmId: 'hypernova',
+    liveHypernovaOrderTicketBreach: null
+  };
+  vm.runInNewContext(
+    `
+      function getChartVisualsMainWorldFirmId() { return firmId; }
+      ${normSymBlock}
+      ${resolveBlock}
+      this.resolveActiveHypernovaBreachPrice = resolveActiveHypernovaBreachPrice;
+    `,
+    breachCtx
+  );
+
+  // Order ticket live breach price takes priority when symbol matches
+  breachCtx.liveHypernovaOrderTicketBreach = { price: 32.279, decimals: 3, symbol: 'HYPE', source: 'order-ticket' };
+  const fromTicket = breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { breachPrice: 64.478, priceDecimals: 3 });
+  assert.strictEqual(fromTicket.price, 32.279);
+  assert.strictEqual(fromTicket.source, 'order-ticket');
+
+  // Falls back to open position breach price when order ticket is N/A (null) or different symbol
+  breachCtx.liveHypernovaOrderTicketBreach = null;
+  const fromPos = breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { breachPrice: 64.478, priceDecimals: 3 });
+  assert.strictEqual(fromPos.price, 64.478);
+  assert.strictEqual(fromPos.source, 'position');
+
+  // Returns null when flat and order ticket is N/A
+  assert.strictEqual(breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', null), null);
+
+  // Returns null on non-Hypernova venues
+  breachCtx.firmId = 'kalshipro';
+  assert.strictEqual(breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { breachPrice: 64.478, priceDecimals: 3 }), null);
+
+  // Verify canvas rendering block draws red Breach Price line, box, and off-screen Above/Below chart badges
+  const breachRenderBlock = extractBlock(
+    mainSrc,
+    '// 1b. Hypernova Live "Breach Price"',
+    '// 2. Active Position Overlay'
+  );
+  assert.strictEqual(breachRenderBlock.includes('ctx.lineTo(cssWidth, clampedBreachY)'), true, 'Must draw horizontal Breach Price line across chart');
+  assert.strictEqual(breachRenderBlock.includes('▲ Above chart ·'), true, 'Must render clamped Above chart badge when breach price is above viewport');
+  assert.strictEqual(breachRenderBlock.includes('▼ Below chart ·'), true, 'Must render clamped Below chart badge when breach price is below viewport');
+  console.log('✓ Hypernova live Breach Price red line, badge box, off-screen clamp, settings controls & priority verified');
 }
 
 console.log('All Hypernova Chart Visuals tests passed!');

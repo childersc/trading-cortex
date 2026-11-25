@@ -1,3 +1,8 @@
+Trading Cortex v1.1.149 — Hypernova Live "Breach Price" Red Line & Customizable Box
+
+- **Live Red "Breach Price" Line & Badge Box on Hypernova (`v1.1.149`)**: Draws a dynamic red horizontal line and matching pill box (`Breach Price · $XX.XXX`) on Hypernova's chart that moves in real time with both your Order Ticket preview (`[data-testid="order-details-breach-price"]`) as you adjust size/leverage/Long-Short AND your open position's Breach Price (`td[data-testid$="-breach"]`), including a clamped `▲ Above chart` / `▼ Below chart` red badge when zoomed inside the breach level and automatic anti-overlap against the Current Price pill.
+- **Full Hypernova Settings (`v1.1.149`)**: Open **Perp Firms → Hypernova** (or **Hypernova Chart Visuals...** in the Cortex menu) to toggle the Breach Price line on/off and customize its color, line style (solid/dashed/dotted), thickness, opacity, label text, font/box sizing (`8–22px`), alignment, and price display with live preview.
+
 Trading Cortex v1.1.148 — Emergency Stability Fix: Eliminated Cross-Frame Storage/Config Feedback Loop & Restored Instant Performance
 
 - **Eliminated Browser Instability / Freeze Loop (`v1.1.148`)**: Fixed a cross-frame `localStorage` `storage` event ↔ `VEST_TV_CONFIG_UPDATE` ↔ `restoreSidebarSelections()` infinite feedback loop introduced in `v1.1.147` between the main trading page and same-origin `blob:` TradingView chart iframes.
