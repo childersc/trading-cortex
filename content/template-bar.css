@@ -2,7 +2,7 @@
 
 #vest-template-bar-root {
   position: fixed;
-  z-index: 99999;
+  z-index: 20;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   font-size: 12px;
   user-select: none;
@@ -463,7 +463,7 @@
 /* Floating Window Mode for Vest Panels */
 .vest-panel-floating {
   position: fixed !important;
-  z-index: 99990 !important;
+  z-index: 30 !important;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.15) !important;
   border-radius: 8px !important;
   backdrop-filter: blur(12px) !important;
@@ -492,7 +492,7 @@
   position: fixed;
   bottom: 12px;
   right: 12px;
-  z-index: 99998;
+  z-index: 22;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -751,7 +751,7 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 255, 255, 0.3);
-  z-index: 2147483645 !important;
+  z-index: 34 !important;
   display: flex;
   flex-direction: column;
   color: #e2e8f0;
@@ -1447,7 +1447,7 @@ body.vest-popout-body #vest-action-log-box {
   right: 0;
   top: 48px;
   bottom: auto;
-  z-index: 1000;
+  z-index: 15;
   display: flex;
   align-items: center;
   box-sizing: border-box;
@@ -1524,7 +1524,7 @@ body.vest-cortex-top-bar-active {
   display: inline-flex;
   align-items: center;
   margin-right: 8px;
-  z-index: 2147483640;
+  z-index: 25;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   user-select: none;
   flex-shrink: 0;
@@ -1595,7 +1595,7 @@ body.vest-cortex-top-bar-active {
 #vest-studio-header-pill.vest-studio-pill-floating {
   position: fixed !important;
   margin: 0 !important;
-  z-index: 2147483640 !important;
+  z-index: 25 !important;
   touch-action: none;
   cursor: grab;
 }
@@ -3220,7 +3220,7 @@ body.vest-cortex-top-bar-active {
 
 #vest-chart-news-box {
   position: fixed !important;
-  z-index: 2147483635 !important;
+  z-index: 18 !important;
   background: #131722;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -3494,7 +3494,7 @@ body.vest-cortex-top-bar-active {
 
 #vest-chart-trades-box {
   position: fixed !important;
-  z-index: 2147483636 !important;
+  z-index: 19 !important;
   background: #131722;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -3892,7 +3892,7 @@ body.vest-cortex-top-bar-active {
 
 #vest-chart-diagnostics-box {
   position: fixed !important;
-  z-index: 2147483637 !important;
+  z-index: 20 !important;
   background: #0f172a;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -4535,7 +4535,7 @@ body.vest-cortex-top-bar-active {
   margin-left: auto;
   margin-right: 8px;
   padding: 2px 4px;
-  z-index: 100;
+  z-index: 10;
   user-select: none;
   flex-shrink: 0;
 }
@@ -4610,7 +4610,7 @@ body.vest-cortex-top-bar-active {
 /* Detached Floating Mode - 100% Solid Opaque Backdrop (Eliminates Viewport & Chart Bleed-Through) */
 .vest-bottom-panel-detached {
   position: fixed !important;
-  z-index: 2147483640 !important;
+  z-index: 35 !important;
   isolation: isolate !important;
   background: #0b0f19 !important;
   backdrop-filter: none !important;
@@ -4761,7 +4761,7 @@ body.vest-cortex-top-bar-active {
 /* Cortex Toolbar (Top Bar) Minimized Positions Pill */
 #vest-bottom-panel-topbar-pill {
   position: fixed !important;
-  z-index: 99990 !important;
+  z-index: 22 !important;
   display: none;
   align-items: center;
   margin: 0 !important;
@@ -4851,5 +4851,30 @@ body.vest-dialog-glass-mode #vest-chart-diagnostics-box {
   backdrop-filter: blur(14px) !important;
   -webkit-backdrop-filter: blur(14px) !important;
 }
+
+/* ============================================================= */
+/* Site Modal / Dialog Stacking Guard                            */
+/* Ensures persistent Cortex bars, pill & docks ALWAYS sit       */
+/* behind native exchange modals/backdrops (even low z-index)    */
+/* ============================================================= */
+body.vest-site-modal-open #vest-studio-header-pill,
+body.vest-site-modal-open #vest-cortex-top-bar,
+body.vest-site-modal-open #vest-chart-news-box,
+body.vest-site-modal-open #vest-chart-trades-box,
+body.vest-site-modal-open #vest-chart-diagnostics-box,
+body.vest-site-modal-open #vest-chart-range-box,
+body.vest-site-modal-open #vest-chart-ob-stats-box,
+body.vest-site-modal-open #vest-bottom-panel-topbar-pill,
+body.vest-site-modal-open #vest-template-bar-root,
+body.vest-site-modal-open #vest-minimized-dock,
+body.vest-site-modal-open #vest-action-log-box,
+body.vest-site-modal-open #vest-accounts-risk-overlay-canvas,
+body.vest-site-modal-open #vest-accounts-risk-toggle-btn,
+body.vest-site-modal-open .vest-panel-floating,
+body.vest-site-modal-open .vest-bottom-panel-detached,
+body.vest-site-modal-open .vest-bottom-panel-controls {
+  z-index: 1 !important;
+}
+
 
 

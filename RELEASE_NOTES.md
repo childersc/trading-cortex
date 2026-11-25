@@ -1,3 +1,8 @@
+Trading Cortex v1.1.145 — Fixed Cortex Pill, Bars & Docks Appearing Above Exchange Modals
+
+- **Always Stays Behind Exchange Modals (`v1.1.145`)**: Lowered all persistent Trading Cortex overlays (the floating **Cortex** pill, minimized taskbar pills `INSTRUMENT TRADES` / `CORTEX DIAG` / `UPCOMING NEWS`, top/bottom bars, Range/OB/Accounts Risk boxes, and detached Positions panel) from `z-index: 2147483640` into a modal-safe band (`z-index: 10`–`38`) and removed the legacy header `z-index: 1005` override.
+- **Automatic Site-Modal Stacking Guard (`v1.1.145`)**: Added live detection of native exchange modals and full-screen dimmed backdrops (`body.vest-site-modal-open`) that automatically drops all persistent Cortex bars/pills to `z-index: 1` (and closes the Cortex dropdown) whenever an exchange modal opens — while Cortex's own Settings dialog still opens cleanly on top when requested.
+
 Trading Cortex v1.1.144 — Fixed Kalshi Pro Positions/TP-SL Blotter & My Funded Perps Live Position Detection
 
 - **Kalshi Pro Position Entry Box & Live TP/SL Submission (`v1.1.144`)**: Fixed `KX*PERP` chart symbol matching (`KXTSMPERP` → `TSM`, `KXHYPEPERP` → `HYPE`, `KXUSTECH100PERP` → `USTECH100`), added full support for both Kalshi Pro's Card & Desktop Table blotter layouts (`div[data-perps-blotter="true"]`), and wired Kalshi Pro's exact `Edit TP/SL` modal (`#perps-tpsl-tp-price`, `#perps-tpsl-sl-price`, `Delete`, `Confirm`) with an auto-fill guard so Kalshi's suggested +15%/-15% opposite field is never accidentally submitted.

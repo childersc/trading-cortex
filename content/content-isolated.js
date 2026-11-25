@@ -4419,9 +4419,8 @@
       if (hStyle.position === 'static') {
         header.style.setProperty('position', 'relative', 'important');
       }
-      if (hStyle.zIndex === 'auto' || Number(hStyle.zIndex) < 1001) {
-        header.style.setProperty('z-index', '1005', 'important');
-      }
+      // Do NOT force an artificial high z-index (e.g. 1005) on the site header — let the exchange manage
+      // its own header vs modal stacking order cleanly!
     }
 
     let contentEl = null;
@@ -6033,6 +6032,7 @@
             scheduleScanPanels();
           }
         }
+        scheduleSiteModalStackingSync();
       });
 
       try {
@@ -6042,6 +6042,93 @@
 
     document.addEventListener('mousemove', onPanelDragMove);
     document.addEventListener('mouseup', onPanelDragEnd);
+  }
+
+  let siteModalStackSyncTimer = null;
+  let siteModalStackInterval = null;
+
+  function isCortexOwnedElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.id && el.id.startsWith('vest-')) return true;
+    const cls = typeof el.className === 'string' ? el.className : '';
+    if (/\bvest-/.test(cls)) return true;
+    if (el.closest && el.closest('[id^="vest-"], .vest-tvs-overlay, .vest-bottom-panel-detached')) return true;
+    return false;
+  }
+
+  function detectOpenSiteModalOverlay() {
+    if (!isTopWindow || !document.body) return false;
+    try {
+      // 1. Standard semantic dialogs / Radix / Base UI / MUI portals (excluding our own Cortex modals)
+      const dialogCandidates = document.querySelectorAll(
+        '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [data-slot="dialog-content"], [data-slot="dialog-overlay"], [data-radix-dialog-overlay]'
+      );
+      for (let i = 0; i < dialogCandidates.length; i++) {
+        const el = dialogCandidates[i];
+        if (isCortexOwnedElement(el)) continue;
+        if (el.getAttribute('data-state') === 'closed') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 120 || r.height < 80) continue;
+        const cs = window.getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') <= 0.05) continue;
+        return true;
+      }
+
+      // 2. Custom full-screen fixed modal backdrops (e.g. Tailwind `fixed inset-0 bg-black/70` without role="dialog")
+      const vw = window.innerWidth || 0;
+      const vh = window.innerHeight || 0;
+      if (vw > 200 && vh > 200) {
+        const backdropCandidates = document.querySelectorAll(
+          '[class*="inset-0"], [class*="backdrop" i], [class*="modal" i], [class*="overlay" i]'
+        );
+        for (let i = 0; i < backdropCandidates.length && i < 80; i++) {
+          const el = backdropCandidates[i];
+          if (isCortexOwnedElement(el)) continue;
+          if (el === document.body || el.id === '__next' || el.id === 'root' || el.tagName === 'MAIN') continue;
+          if (el.getAttribute('data-state') === 'closed') continue;
+          const cs = window.getComputedStyle(el);
+          if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || cs.pointerEvents === 'none') continue;
+          if (parseFloat(cs.opacity || '1') <= 0.05) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width < vw * 0.85 || r.height < vh * 0.85) continue;
+          const hasBg = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent';
+          const hasBlur = (cs.backdropFilter && cs.backdropFilter !== 'none') || (cs.webkitBackdropFilter && cs.webkitBackdropFilter !== 'none');
+          if (hasBg || hasBlur) return true;
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function syncSiteModalStackingState() {
+    if (!isTopWindow || !document.body) return;
+    const hasSiteModal = detectOpenSiteModalOverlay();
+    const currentlySet = document.body.classList.contains('vest-site-modal-open');
+    if (hasSiteModal !== currentlySet) {
+      document.body.classList.toggle('vest-site-modal-open', hasSiteModal);
+    }
+    if (hasSiteModal && studioMenuOpen && typeof closeStudioDropdown === 'function') {
+      closeStudioDropdown();
+    }
+  }
+
+  function scheduleSiteModalStackingSync() {
+    if (siteModalStackSyncTimer) return;
+    siteModalStackSyncTimer = setTimeout(() => {
+      siteModalStackSyncTimer = null;
+      syncSiteModalStackingState();
+    }, 40);
+  }
+
+  if (isTopWindow && !siteModalStackInterval) {
+    siteModalStackInterval = setInterval(() => {
+      if (!isExtensionValid()) {
+        clearInterval(siteModalStackInterval);
+        siteModalStackInterval = null;
+        return;
+      }
+      syncSiteModalStackingState();
+    }, 350);
   }
 
   /**
@@ -14761,7 +14848,7 @@ if (activeTab === 'diagnostics') {
 
     chartRangeBoxEl.style.display = 'block';
     chartRangeBoxEl.style.position = 'fixed';
-    chartRangeBoxEl.style.zIndex = '10002';
+    chartRangeBoxEl.style.zIndex = '21';
     chartRangeBoxEl.style.width = rd.collapsed ? 'auto' : `${rd.boxWidth}px`;
     chartRangeBoxEl.style.background = `rgba(11, 15, 25, ${(rd.bgOpacity || 90) / 100})`;
     chartRangeBoxEl.style.backdropFilter = 'blur(12px)';
@@ -15112,7 +15199,7 @@ if (activeTab === 'diagnostics') {
 
     chartOrderBlockStatsBoxEl.style.display = 'block';
     chartOrderBlockStatsBoxEl.style.position = 'fixed';
-    chartOrderBlockStatsBoxEl.style.zIndex = '10002';
+    chartOrderBlockStatsBoxEl.style.zIndex = '21';
     chartOrderBlockStatsBoxEl.style.width = ob.statsBoxCollapsed ? 'auto' : `${ob.statsBoxWidth || 290}px`;
     chartOrderBlockStatsBoxEl.style.background = 'rgba(11, 15, 25, 0.92)';
     chartOrderBlockStatsBoxEl.style.backdropFilter = 'blur(12px)';
@@ -17228,13 +17315,13 @@ if (activeTab === 'diagnostics') {
     panel.style.setProperty('left', `${left}px`, 'important');
     panel.style.setProperty('width', `${width}px`, 'important');
     panel.style.setProperty('height', `${height}px`, 'important');
-    panel.style.setProperty('z-index', '2147483640', 'important');
+    panel.style.setProperty('z-index', '35', 'important');
 
     if (!panel.dataset.vestZIndexBound) {
       panel.dataset.vestZIndexBound = 'true';
       panel.addEventListener('mousedown', () => {
         if (panel.classList.contains('vest-bottom-panel-detached')) {
-          panel.style.setProperty('z-index', '2147483645', 'important');
+          panel.style.setProperty('z-index', '38', 'important');
         }
       }, { capture: true });
     }
@@ -17425,7 +17512,7 @@ if (activeTab === 'diagnostics') {
   function onDetachedPanelDragStart(e, panel) {
     if (e.button !== 0) return;
     if (e.target.closest('button')) return;
-    if (panel) panel.style.setProperty('z-index', '2147483645', 'important');
+    if (panel) panel.style.setProperty('z-index', '38', 'important');
     isDraggingDetachedBottomPanel = true;
     detachedDragStartMouse = { x: e.clientX, y: e.clientY };
     const r = panel.getBoundingClientRect();
@@ -17464,7 +17551,7 @@ if (activeTab === 'diagnostics') {
       pill.id = 'vest-bottom-panel-topbar-pill';
       pill.className = 'is-minimized-pill';
       pill.style.position = 'fixed';
-      pill.style.zIndex = '99990';
+      pill.style.zIndex = '22';
       pill.style.display = 'none';
       document.body.appendChild(pill);
 

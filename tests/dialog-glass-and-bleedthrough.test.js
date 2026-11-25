@@ -10,15 +10,15 @@ const cssPath = path.join(__dirname, '..', 'content', 'template-bar.css');
 const isolatedContent = fs.readFileSync(isolatedPath, 'utf8');
 const cssContent = fs.readFileSync(cssPath, 'utf8');
 
-// 1. Verify CSS rules for detached floating window preventing viewport bleed-through
+// 1. Verify CSS rules for detached floating window preventing viewport bleed-through (below native site modals)
 assert.strictEqual(
   cssContent.includes('.vest-bottom-panel-detached {') &&
   cssContent.includes('background: #0b0f19 !important;') &&
   cssContent.includes('backdrop-filter: none !important;') &&
-  cssContent.includes('z-index: 2147483640 !important;') &&
+  cssContent.includes('z-index: 35 !important;') &&
   cssContent.includes('isolation: isolate !important;'),
   true,
-  'Detached positions panel must be 100% solid, fully opaque with backdrop-filter: none, high z-index and isolated stacking context'
+  'Detached positions panel must be 100% solid, fully opaque with backdrop-filter: none, modal-safe z-index 35 and isolated stacking context'
 );
 console.log('✓ Detached floating window solid opaque CSS rules verified');
 
@@ -126,13 +126,27 @@ assert.strictEqual(
 );
 console.log('✓ window.addEventListener unload interception verified');
 
-// 10. Verify z-index lifting on drag & interaction
+// 10. Verify modal-safe z-index lifting on drag & interaction (stays behind native exchange modals z-50+)
 assert.strictEqual(
-  isolatedContent.includes("panel.style.setProperty('z-index', '2147483640', 'important')") &&
-  isolatedContent.includes("panel.style.setProperty('z-index', '2147483645', 'important')"),
+  isolatedContent.includes("panel.style.setProperty('z-index', '35', 'important')") &&
+  isolatedContent.includes("panel.style.setProperty('z-index', '38', 'important')"),
   true,
-  'Detached panel must set initial z-index 2147483640 and lift to 2147483645 on interaction'
+  'Detached panel must set modal-safe initial z-index 35 and lift to 38 on interaction'
 );
-console.log('✓ Detached panel high z-index and active raise verified');
+console.log('✓ Detached panel modal-safe z-index and active raise verified');
+
+// 11. Verify persistent Cortex bars, pill & docks stay strictly behind site modals/backdrops
+assert.strictEqual(
+  cssContent.includes('body.vest-site-modal-open #vest-studio-header-pill') &&
+  cssContent.includes('body.vest-site-modal-open #vest-chart-trades-box') &&
+  cssContent.includes('z-index: 1 !important;') &&
+  isolatedContent.includes('function detectOpenSiteModalOverlay()') &&
+  isolatedContent.includes("document.body.classList.toggle('vest-site-modal-open', hasSiteModal)") &&
+  !cssContent.includes('#vest-studio-header-pill.vest-studio-pill-floating {\n  position: fixed !important;\n  margin: 0 !important;\n  z-index: 2147483640') &&
+  !isolatedContent.includes("header.style.setProperty('z-index', '1005', 'important')"),
+  true,
+  'Persistent Cortex pill, bars, and docks must stay behind site modals and drop to z-index 1 when any site modal opens'
+);
+console.log('✓ Site modal stacking guard (body.vest-site-modal-open & modal-safe persistent z-indexes) verified');
 
 console.log('All Dialog Glass Effect & Viewport Bleed-Through Prevention Tests Passed Successfully!');

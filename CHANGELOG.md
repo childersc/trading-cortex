@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.144`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.145`) are documented in this file.
+
+---
+
+## [v1.1.145] — 2026-11-25
+
+### 🛡️ Fixed Cortex Pill, Bars & Minimized Docks Bleed-Through Above Site Modals
+- **Root Cause**: Persistent Trading Cortex overlays (`#vest-studio-header-pill`, `#vest-chart-trades-box`, `#vest-chart-diagnostics-box`, `#vest-chart-news-box`, `#vest-bottom-panel-topbar-pill`, `#vest-chart-range-box`, `#vest-chart-ob-stats-box`, `#vest-cortex-top-bar`, detached bottom panel, and Accounts Risk canvas) were set to sky-high `z-index` values (`1000`–`2147483640`), causing them to paint brightly ABOVE native exchange modals and dimmed backdrops (e.g., Vest's `"Create Your Custom Account"` modal at `z-50`).
+- **Fixes (`content/template-bar.css`, `content/content-isolated.js`, `content/content-main.js`)**:
+  - Lowered all persistent Cortex bars, floating pill, minimized dock pills, chart boxes, Accounts Risk overlay, and detached panel into a clean below-modal stacking band (`z-index: 10`–`38`) while keeping Cortex's own opened Settings/Editor modals and active dropdown flyout on top.
+  - Removed the legacy `header.style.setProperty('z-index', '1005', 'important')` override so exchange navbars keep their native stacking behind exchange modals.
+  - Added a live **Site Modal Stacking Guard** (`detectOpenSiteModalOverlay` + `body.vest-site-modal-open`) that detects open exchange dialogs or full-screen fixed backdrops (even without `role="dialog"`), auto-closes Cortex's dropdown menu if open, and drops all persistent Cortex overlays to `z-index: 1 !important` so they always sit cleanly behind any exchange modal.
 
 ---
 
