@@ -1,3 +1,7 @@
+Trading Cortex v1.1.150 — Hypernova Breach Price Shown Pre-Trade Only (Hidden Once Position Is Open)
+
+- **Pre-Trade Only Breach Price (`v1.1.150`)**: The live red Breach Price line & badge box on Hypernova now displays only while you are flat and previewing an order in the Order Ticket, and automatically hides whenever a position is open on the chart.
+
 Trading Cortex v1.1.149 — Hypernova Live "Breach Price" Red Line & Customizable Box
 
 - **Live Red "Breach Price" Line & Badge Box on Hypernova (`v1.1.149`)**: Draws a dynamic red horizontal line and matching pill box (`Breach Price · $XX.XXX`) on Hypernova's chart that moves in real time with both your Order Ticket preview (`[data-testid="order-details-breach-price"]`) as you adjust size/leverage/Long-Short AND your open position's Breach Price (`td[data-testid$="-breach"]`), including a clamped `▲ Above chart` / `▼ Below chart` red badge when zoomed inside the breach level and automatic anti-overlap against the Current Price pill.

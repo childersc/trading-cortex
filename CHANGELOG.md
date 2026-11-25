@@ -1,6 +1,15 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.149`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.150`) are documented in this file.
+
+---
+
+## [v1.1.150] — 2026-11-25
+
+### 🎯 Hypernova Breach Price Shown Only While Flat (Hidden When a Position Is Open)
+- **Pre-Trade Only Behavior (`content/content-main.js`, `content/content-isolated.js`)**:
+  - Updated `resolveActiveHypernovaBreachPrice()` so the red Breach Price line & badge box render **only when no position is open yet** (tracking Hypernova's live Order Ticket `[data-testid="order-details-breach-price"]` while sizing/previewing a trade) and automatically hide as soon as a position is open on the chart.
+  - Updated the Hypernova settings description and unit tests (`tests/hypernova-chart-visuals.test.js`) accordingly.
 
 ---
 

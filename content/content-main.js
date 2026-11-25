@@ -8893,9 +8893,12 @@
 
   function resolveActiveHypernovaBreachPrice(symbolKey, activePos) {
     if (getChartVisualsMainWorldFirmId() !== 'hypernova') return null;
+    // Only show Breach Price when NO position is open yet — hide immediately when a position is open!
+    if (activePos) return null;
+
     const normSym = normalizeHypernovaMainSymbol(symbolKey);
 
-    // 1. Live Order Ticket Breach Price (updates dynamically as user types amount / switches Long vs Short / leverage)
+    // Live Order Ticket Breach Price (updates dynamically as user types amount / switches Long vs Short / leverage)
     if (
       liveHypernovaOrderTicketBreach &&
       Number.isFinite(Number(liveHypernovaOrderTicketBreach.price)) &&
@@ -8909,15 +8912,6 @@
           source: 'order-ticket'
         };
       }
-    }
-
-    // 2. Open Position Breach Price from Hypernova's Positions table (`td[data-testid$="-breach"]`)
-    if (activePos && Number.isFinite(Number(activePos.breachPrice)) && Number(activePos.breachPrice) > 0) {
-      return {
-        price: Number(activePos.breachPrice),
-        decimals: Number.isInteger(activePos.priceDecimals) ? activePos.priceDecimals : null,
-        source: 'position'
-      };
     }
 
     return null;

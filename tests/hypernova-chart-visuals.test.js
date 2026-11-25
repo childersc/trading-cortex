@@ -456,24 +456,27 @@ function extractBlock(src, startMarker, endMarker) {
     breachCtx
   );
 
-  // Order ticket live breach price takes priority when symbol matches
+  // Shows Order Ticket live breach price ONLY when NO position is open yet
   breachCtx.liveHypernovaOrderTicketBreach = { price: 32.279, decimals: 3, symbol: 'HYPE', source: 'order-ticket' };
-  const fromTicket = breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { breachPrice: 64.478, priceDecimals: 3 });
-  assert.strictEqual(fromTicket.price, 32.279);
-  assert.strictEqual(fromTicket.source, 'order-ticket');
+  const fromTicketWhenFlat = breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', null);
+  assert.strictEqual(fromTicketWhenFlat.price, 32.279);
+  assert.strictEqual(fromTicketWhenFlat.source, 'order-ticket');
 
-  // Falls back to open position breach price when order ticket is N/A (null) or different symbol
-  breachCtx.liveHypernovaOrderTicketBreach = null;
-  const fromPos = breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { breachPrice: 64.478, priceDecimals: 3 });
-  assert.strictEqual(fromPos.price, 64.478);
-  assert.strictEqual(fromPos.source, 'position');
+  // MUST NOT show Breach Price when a position IS open (even if order ticket or position row has a breach price!)
+  assert.strictEqual(
+    breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { symbol: 'HYPE', side: 'long', entryPrice: 58, breachPrice: 64.478, priceDecimals: 3 }),
+    null,
+    'Breach Price must be hidden whenever a position is already open'
+  );
 
   // Returns null when flat and order ticket is N/A
+  breachCtx.liveHypernovaOrderTicketBreach = null;
   assert.strictEqual(breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', null), null);
 
   // Returns null on non-Hypernova venues
   breachCtx.firmId = 'kalshipro';
-  assert.strictEqual(breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', { breachPrice: 64.478, priceDecimals: 3 }), null);
+  breachCtx.liveHypernovaOrderTicketBreach = { price: 32.279, decimals: 3, symbol: 'HYPE', source: 'order-ticket' };
+  assert.strictEqual(breachCtx.resolveActiveHypernovaBreachPrice('HYPE/USDC', null), null);
 
   // Verify canvas rendering block draws red Breach Price line, box, and off-screen Above/Below chart badges
   const breachRenderBlock = extractBlock(

@@ -8292,7 +8292,7 @@
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                     <div style="max-width:80%;">
                       <div style="font-size:12px; font-weight:600; color:#fca5a5;">Live "Breach Price" Red Line &amp; Box</div>
-                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Draws a live red line &amp; badge on the chart tracking Hypernova's Breach Price in real time (from both the order ticket preview and open positions).</div>
+                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Draws a live red line &amp; badge on the chart tracking Hypernova's Order Ticket Breach Price before entering a trade (automatically hidden once a position is open).</div>
                     </div>
                     <label class="vest-tvs-switch">
                       <input type="checkbox" id="vest-pf-hn-breach-line" ${hnVis.breachPriceLineEnabled ? 'checked' : ''} />
