@@ -1,3 +1,7 @@
+Trading Cortex v1.1.152 — Real-Time Entry Box PnL Synced 1:1 to Live Positions Table
+
+- **Exact Real-Time Entry Box PnL (`v1.1.152`)**: Fixed the Position Entry Box PnL lagging behind or differing from the Positions table on Hypernova, Kalshi Pro, and My Funded Perps. The Entry Box now tracks the live Positions table's exact Mark-Price PnL in real time via a scoped `MutationObserver` (~100ms response) so both numbers match to the exact cent, while projecting live chart price deltas when the Positions tab is hidden.
+
 Trading Cortex v1.1.151 — Right-Click (or Esc) Cancels Stop Loss / Take Profit Drag
 
 - **Cancel TP / SL Drag on Right-Click (`v1.1.151`)**: While dragging a Stop Loss or Take Profit line on Hypernova, My Funded Perps, or Kalshi Pro, right-clicking (or pressing `Esc`) now immediately cancels the drag without setting or modifying the order and suppresses the trailing right-click context menu.

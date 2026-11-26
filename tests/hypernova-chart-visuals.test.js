@@ -623,4 +623,48 @@ function extractBlock(src, startMarker, endMarker) {
   console.log('✓ Right-click, Escape, and pointercancel TP/SL drag cancellation verified');
 }
 
+// 8. Real-time Entry Indicator PnL synchronization with live Positions table
+{
+  const pnlBlock = extractBlock(
+    mainSrc,
+    'function computeLiveHypernovaUnrealizedPnl(',
+    'function resolveActiveHypernovaPosition('
+  );
+  const parseBlock = extractBlock(
+    isolatedSrc,
+    'function parseHypernovaNumber(',
+    'function getHypernovaDecimalPlaces('
+  );
+  const ctx = {};
+  vm.runInNewContext(
+    `${pnlBlock}\n${parseBlock}\nthis.computeLiveHypernovaUnrealizedPnl = computeLiveHypernovaUnrealizedPnl;\nthis.parseHypernovaNumber = parseHypernovaNumber;`,
+    ctx
+  );
+
+  // Exact GOLD screenshot case: Positions table shows $124.07 at Mark $3,568.7 while chart last candle is $3,568.9
+  const liveDomMatch = { symbol: 'GOLD', side: 'short', entryPrice: 3573.1, markPrice: 3568.7, unrealizedPnl: 124.07, source: 'dom' };
+  const pnlFromLiveDom = ctx.computeLiveHypernovaUnrealizedPnl(liveDomMatch, null, 'short', 3573.1, 27.9158, 3568.9);
+  assert.strictEqual(pnlFromLiveDom, 124.07, 'Entry box PnL must match live Positions table PnL ($124.07) to the cent');
+
+  // Negative PnL & Unicode minus parsing
+  assert.strictEqual(ctx.parseHypernovaNumber('$124.07 (1.24%)'), 124.07);
+  assert.strictEqual(ctx.parseHypernovaNumber('-$42.50 (-0.42%)'), -42.5);
+  assert.strictEqual(ctx.parseHypernovaNumber('\u2212$18.25 (-0.18%)'), -18.25);
+
+  // When Positions tab is hidden (source: 'cached'), project live chart price delta from cached Mark Price
+  const cachedMatch = { symbol: 'GOLD', side: 'short', entryPrice: 3573.1, markPrice: 3568.7, unrealizedPnl: 124.07, source: 'cached' };
+  const projectedPnl = ctx.computeLiveHypernovaUnrealizedPnl(cachedMatch, null, 'short', 3573.1, 27.9158, 3567.7);
+  assert.ok(Math.abs(projectedPnl - (124.07 + 27.9158)) < 0.001, 'Cached PnL must project live price delta when Positions tab is hidden');
+
+  // Fallback when no Positions PnL is present yet
+  const fallbackPnl = ctx.computeLiveHypernovaUnrealizedPnl(null, null, 'long', 100, 5, 104);
+  assert.strictEqual(fallbackPnl, 20);
+
+  // Verify live MutationObserver is wired on Positions tbody in content-isolated.js
+  assert.strictEqual(isolatedSrc.includes('function ensureHypernovaPositionsTableObserver()'), true);
+  assert.strictEqual(isolatedSrc.includes("source: 'dom'"), true);
+  assert.strictEqual(isolatedSrc.includes("source: 'cached'"), true);
+  console.log('✓ Real-time Positions table PnL priority, live MutationObserver & cached delta projection verified');
+}
+
 console.log('All Hypernova Chart Visuals tests passed!');

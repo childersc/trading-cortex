@@ -4647,7 +4647,7 @@
   }
 
   function parseHypernovaNumber(text) {
-    const cleaned = String(text || '').replace(/,/g, '');
+    const cleaned = String(text || '').replace(/[\u2212\u2013]/g, '-').replace(/,/g, '');
     const m = cleaned.match(/[+-]?\s*\$?\s*([+-]?\d+(?:\.\d+)?)/);
     if (!m) return NaN;
     const rawSign = cleaned.trim().startsWith('-') || m[0].includes('-') ? -1 : 1;
@@ -5335,9 +5335,56 @@
     syncHypernovaPositionsToMainWorld(true);
   }
 
+  let observedHypernovaPositionsBody = null;
+  let hypernovaPositionsTableObserver = null;
+  let hypernovaPositionsObserverTimer = null;
+
+  function findLivePositionsObserveTarget() {
+    try {
+      if (getChartVisualsHostFirmId() === 'kalshipro') {
+        const blotter = document.querySelector('div[data-perps-blotter="true"]');
+        if (blotter) return blotter;
+      }
+      const found = findHypernovaPositionsTableAndRows();
+      if (found && found.table) {
+        return found.table.querySelector('tbody, [role="rowgroup"]:last-child') || found.table;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function ensureHypernovaPositionsTableObserver() {
+    if (!isTopWindow || !isChartVisualsHost()) return;
+    const target = findLivePositionsObserveTarget();
+    if (!target) {
+      if (hypernovaPositionsTableObserver) {
+        try { hypernovaPositionsTableObserver.disconnect(); } catch (e) {}
+        hypernovaPositionsTableObserver = null;
+      }
+      observedHypernovaPositionsBody = null;
+      return;
+    }
+    if (target === observedHypernovaPositionsBody) return;
+    try {
+      if (hypernovaPositionsTableObserver) {
+        hypernovaPositionsTableObserver.disconnect();
+      }
+      observedHypernovaPositionsBody = target;
+      hypernovaPositionsTableObserver = new MutationObserver(() => {
+        if (hypernovaPositionsObserverTimer) return;
+        hypernovaPositionsObserverTimer = setTimeout(() => {
+          hypernovaPositionsObserverTimer = null;
+          syncHypernovaPositionsToMainWorld(false);
+        }, 100);
+      });
+      hypernovaPositionsTableObserver.observe(target, { characterData: true, childList: true, subtree: true });
+    } catch (e) {}
+  }
+
   function getMergedVenueOpenPositions() {
     const domRes = scrapeVenueOpenPositionsWithMeta();
     if (domRes.foundTable) {
+      ensureHypernovaPositionsTableObserver();
       // Positions panel IS currently visible — it is 100% authoritative!
       if (domRes.positions.length === 0) {
         // Explicitly flat (e.g. "No Open Positions"): clear ALL caches so entry/TP/SL boxes disappear immediately!
@@ -5353,9 +5400,10 @@
       const apiBySym = new Map(lastApiCapturedPositions.map(p => [p.symbol, p]));
       const mergedDom = domRes.positions.map(p => {
         const api = apiBySym.get(p.symbol);
-        if (!api) return p;
+        if (!api) return { ...p, source: 'dom' };
         return {
           ...p,
+          source: 'dom',
           tpPrice: p.tpPrice !== null ? p.tpPrice : api.tpPrice,
           slPrice: p.slPrice !== null ? p.slPrice : api.slPrice,
           breachPrice: p.breachPrice !== null ? p.breachPrice : (api.breachPrice ?? null)
@@ -5364,6 +5412,7 @@
       lastKnownDomPositions = mergedDom;
       return mergedDom;
     }
+    ensureHypernovaPositionsTableObserver();
     // Positions table is NOT currently visible (e.g. user is viewing `Accounts`, `Open Orders`, or `History` tab).
     // Check if the `Positions (0)` tab badge explicitly says 0, OR if an empty state is visible!
     const posTab = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"], .trade-tabs-list [role="tab"]'))
@@ -5393,7 +5442,7 @@
         lastApiCapturedPositions = lastApiCapturedPositions.filter(p => p.symbol !== activeSym);
       }
     }
-    return fallback;
+    return fallback.map(p => ({ ...p, source: 'cached' }));
   }
 
   let observedHypernovaBreachEl = null;

@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.151`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.152`) are documented in this file.
+
+---
+
+## [v1.1.152] — 2026-11-26
+
+### ⚡ Real-Time 1:1 Entry Box PnL Synced Directly to Live Positions Table
+- **Root Cause**:
+  1. `resolveActiveHypernovaPosition()` computed its own PnL from the TradingView candle's Last Trade Price (`(livePrice - entryPrice) * sizeQty`) BEFORE checking the Positions table's live `unrealizedPnl` — causing the Entry Box to disagree with Hypernova's Mark-Price-based `PnL (RoE%)` (e.g., showing `+$117.33` on `GOLD` while the Positions row showed `+$124.07`).
+  2. Positions table updates only synced on an 800ms polling interval instead of reacting immediately to live DOM ticks.
+- **Fixes (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Added a lightweight scoped `MutationObserver` (`ensureHypernovaPositionsTableObserver()`) watching the live Positions `<tbody>` / blotter (`100ms` throttle) so every live PnL & Mark Price tick pushes immediately to the chart Entry Box.
+  - Tagged live Positions rows with `source: 'dom'` and added `computeLiveHypernovaUnrealizedPnl()` so the Entry Indicator Box displays the **exact live Positions table PnL** to the cent whenever the Positions table is visible, and smoothly projects live price deltas from cached Mark Price when viewing another tab (`Open Orders` / `Accounts`).
+  - Added Unicode minus sign (`−`) normalization in `parseHypernovaNumber()` and unit tests in `tests/hypernova-chart-visuals.test.js`.
 
 ---
 

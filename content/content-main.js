@@ -8812,6 +8812,41 @@
     return result;
   }
 
+  function computeLiveHypernovaUnrealizedPnl(domMatch, nativePosition, side, entryPrice, sizeQty, livePrice) {
+    const dir = side === 'short' ? -1 : 1;
+    const hasDomPnl = Boolean(domMatch && domMatch.unrealizedPnl !== null && domMatch.unrealizedPnl !== undefined && Number.isFinite(Number(domMatch.unrealizedPnl)));
+    const domPnl = hasDomPnl ? Number(domMatch.unrealizedPnl) : null;
+    const domIsLive = Boolean(domMatch && domMatch.source === 'dom');
+
+    // 1. Live visible Positions table PnL is ground truth — uses exchange Mark Price & exact full-precision entry!
+    if (domIsLive && domPnl !== null) {
+      return domPnl;
+    }
+
+    // 2. When Positions tab is hidden (cached/API snapshot), project live chart price delta from cached Mark Price
+    //    so PnL keeps ticking live without drifting from the exchange's Mark Price calculation!
+    if (
+      domPnl !== null &&
+      sizeQty &&
+      Number.isFinite(livePrice) && livePrice > 0 &&
+      domMatch && Number.isFinite(Number(domMatch.markPrice)) && Number(domMatch.markPrice) > 0
+    ) {
+      return domPnl + (livePrice - Number(domMatch.markPrice)) * sizeQty * dir;
+    }
+
+    // 3. Fallback when no exchange PnL is available
+    if (sizeQty && Number.isFinite(livePrice) && livePrice > 0 && Number.isFinite(entryPrice) && entryPrice > 0) {
+      return (livePrice - entryPrice) * sizeQty * dir;
+    }
+    if (domPnl !== null) {
+      return domPnl;
+    }
+    if (nativePosition && nativePosition.unrealizedPnl !== null && nativePosition.unrealizedPnl !== undefined && Number.isFinite(Number(nativePosition.unrealizedPnl))) {
+      return Number(nativePosition.unrealizedPnl);
+    }
+    return null;
+  }
+
   function resolveActiveHypernovaPosition(symbolKey, model, livePrice) {
     const normSym = normalizeHypernovaMainSymbol(symbolKey);
     const nativeLines = extractNativeHypernovaChartLines(model);
@@ -8839,14 +8874,14 @@
       ? domMatch.notionalUsd
       : (sizeQty ? sizeQty * entryPrice : null);
 
-    let unrealizedPnl = null;
-    if (sizeQty && Number.isFinite(livePrice) && livePrice > 0) {
-      unrealizedPnl = (livePrice - entryPrice) * sizeQty * (side === 'short' ? -1 : 1);
-    } else if (domMatch && Number.isFinite(domMatch.unrealizedPnl)) {
-      unrealizedPnl = domMatch.unrealizedPnl;
-    } else if (nativeLines.position && Number.isFinite(nativeLines.position.unrealizedPnl)) {
-      unrealizedPnl = nativeLines.position.unrealizedPnl;
-    }
+    const unrealizedPnl = computeLiveHypernovaUnrealizedPnl(
+      domMatch,
+      nativeLines.position,
+      side,
+      entryPrice,
+      sizeQty,
+      livePrice
+    );
 
     // Clear stale manual TP/SL overrides if entryPrice changed meaningfully (new trade)
     const manual = hypernovaManualTpSlBySymbol[normSym];
