@@ -8,7 +8,9 @@ const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'manifest.json'),
 const isolatedSrc = fs.readFileSync(path.join(rootDir, 'content', 'content-isolated.js'), 'utf8');
 const mainSrc = fs.readFileSync(path.join(rootDir, 'content', 'content-main.js'), 'utf8');
 const cssSrc = fs.readFileSync(path.join(rootDir, 'content', 'template-bar.css'), 'utf8');
-const userscriptPath = path.join(rootDir, 'dist', 'trading-cortex.user.js');
+const userscriptPath = path.join(rootDir, 'userscript', 'trading-cortex.user.js');
+const metaPath = path.join(rootDir, 'userscript', 'trading-cortex.meta.js');
+const distUserscriptPath = path.join(rootDir, 'dist', 'trading-cortex.user.js');
 
 function extractBlock(source, startMarker, endMarker) {
   const startIdx = source.indexOf(startMarker);
@@ -505,8 +507,11 @@ function makeElement(tagName, opts = {}) {
 // 3. Verify Generated Safari Mobile / Universal Userscript Bundle
 // ===========================================================================
 {
-  assert.strictEqual(fs.existsSync(userscriptPath), true, `Expected userscript bundle at ${userscriptPath} (run scripts/build-userscript.ps1)`);
+  assert.strictEqual(fs.existsSync(userscriptPath), true, `Expected published userscript at ${userscriptPath} (run scripts/build-userscript.ps1)`);
+  assert.strictEqual(fs.existsSync(metaPath), true, `Expected published meta file at ${metaPath}`);
+  assert.strictEqual(fs.existsSync(distUserscriptPath), true, `Expected dist userscript at ${distUserscriptPath}`);
   const usSrc = fs.readFileSync(userscriptPath, 'utf8');
+  const metaSrc = fs.readFileSync(metaPath, 'utf8');
 
   // Syntax-check entire generated userscript via vm.Script
   new vm.Script(usSrc, { filename: 'trading-cortex.user.js' });
@@ -516,6 +521,8 @@ function makeElement(tagName, opts = {}) {
     '// ==UserScript==',
     '// ==/UserScript==',
     `// @version      ${manifest.version}`,
+    '// @updateURL    https://raw.githubusercontent.com/childersc/trading-cortex/dev/userscript/trading-cortex.meta.js',
+    '// @downloadURL  https://raw.githubusercontent.com/childersc/trading-cortex/dev/userscript/trading-cortex.user.js',
     '// @match        https://*.hypernova.xyz/*',
     '// @match        https://*.vestmarkets.com/*',
     '// @match        https://*.myfundedperpetuals.com/*',
@@ -523,16 +530,20 @@ function makeElement(tagName, opts = {}) {
     '// @exclude      https://trade.vestmarkets.com/*',
     '// @run-at       document-start',
     '// @inject-into  content',
+    '// @grant        GM.getValue',
+    '// @grant        GM.setValue',
+    '// @grant        GM.xmlHttpRequest',
     '// @grant        GM_getValue',
     '// @grant        GM_setValue',
     '// @grant        GM_xmlhttpRequest',
     '// @grant        unsafeWindow'
   ];
   for (const tok of requiredHeaderTokens) {
-    assert.strictEqual(usSrc.includes(tok), true, `dist/trading-cortex.user.js missing header directive: ${tok}`);
+    assert.strictEqual(usSrc.includes(tok), true, `userscript/trading-cortex.user.js missing header directive: ${tok}`);
+    assert.strictEqual(metaSrc.includes(tok), true, `userscript/trading-cortex.meta.js missing header directive: ${tok}`);
   }
 
-  // Test the embedded chrome.* compatibility shim inside a VM sandbox
+  // Test the embedded chrome.* compatibility shim with GM4 async API (Quoid Userscripts on Safari iOS)
   const shimBlock = extractBlock(
     usSrc,
     'function createUserscriptChromeShim() {',
@@ -546,14 +557,16 @@ function makeElement(tagName, opts = {}) {
   const shimCtx = {
     EXT_VERSION: manifest.version,
     EXT_NAME: manifest.name,
-    GM_getValue: (k, def) => (gmStore.has(k) ? gmStore.get(k) : def),
-    GM_setValue: (k, v) => { gmStore.set(k, v); },
-    GM_xmlhttpRequest: (opts) => {
-      xhrCalledUrl = opts.url;
-      opts.onload({
-        status: 200,
-        responseText: JSON.stringify([{ title: 'FOMC Rate Decision', country: 'USD', impact: 'High', date: '2026-11-26T14:00:00-05:00' }])
-      });
+    GM: {
+      getValue: async (k, def) => (gmStore.has(k) ? gmStore.get(k) : def),
+      setValue: async (k, v) => { gmStore.set(k, v); },
+      xmlHttpRequest: (opts) => {
+        xhrCalledUrl = opts.url;
+        return Promise.resolve({
+          status: 200,
+          responseText: JSON.stringify([{ title: 'FOMC Rate Decision', country: 'USD', impact: 'High', date: '2026-11-26T14:00:00-05:00' }])
+        });
+      }
     },
     window: {
       localStorage: {
@@ -586,7 +599,7 @@ function makeElement(tagName, opts = {}) {
   assert.strictEqual(chromeShim.runtime.getManifest().version, manifest.version);
   assert.ok(chromeShim.runtime.getURL('').length > 0, 'chrome.runtime.getURL("") must return non-empty string for isExtensionValid()');
 
-  // Test storage set/get/onChanged deduplication & GM_setValue + localStorage mirroring
+  // Test storage set/get/onChanged deduplication & GM4 async GM.setValue + concurrent write serialization
   let onChangedCalls = 0;
   let lastChange = null;
   chromeShim.storage.onChanged.addListener((changes, area) => {
@@ -595,19 +608,22 @@ function makeElement(tagName, opts = {}) {
   });
 
   (async () => {
-    await chromeShim.storage.local.set({ settings: { theme: 'dark', scale: 1.2 } });
-    assert.strictEqual(onChangedCalls, 1, 'First write must fire chrome.storage.onChanged');
+    await Promise.all([
+      chromeShim.storage.local.set({ settings: { theme: 'dark', scale: 1.2 } }),
+      chromeShim.storage.local.set({ templates: [{ id: 't1', name: 'OB' }] })
+    ]);
+    assert.strictEqual(onChangedCalls, 2, 'Concurrent writes must both serialize cleanly and fire onChanged');
     assert.strictEqual(lastChange.area, 'local');
-    assert.deepStrictEqual(lastChange.changes.settings.newValue, { theme: 'dark', scale: 1.2 });
-    assert.strictEqual(gmStore.size, 1, 'Storage must persist via GM_setValue');
+    assert.strictEqual(gmStore.size, 1, 'Storage must persist via async GM.setValue');
     assert.strictEqual(lsStore.size, 1, 'Storage must also mirror to localStorage');
 
     // Identical write must NOT trigger redundant onChanged (prevents feedback loops!)
     await chromeShim.storage.local.set({ settings: { theme: 'dark', scale: 1.2 } });
-    assert.strictEqual(onChangedCalls, 1, 'Identical write must NOT fire duplicate onChanged');
+    assert.strictEqual(onChangedCalls, 2, 'Identical write must NOT fire duplicate onChanged');
 
-    const loaded = await chromeShim.storage.local.get(['settings']);
+    const loaded = await chromeShim.storage.local.get(['settings', 'templates']);
     assert.deepStrictEqual(loaded.settings, { theme: 'dark', scale: 1.2 });
+    assert.deepStrictEqual(loaded.templates, [{ id: 't1', name: 'OB' }]);
 
     // Tab info message returns stable numeric tabId
     const tab1 = await chromeShim.runtime.sendMessage({ action: 'getCurrentTabInfo' });
@@ -616,7 +632,7 @@ function makeElement(tagName, opts = {}) {
     assert.strictEqual(typeof tab1.tabId, 'number');
     assert.strictEqual(tab1.tabId, tab2.tabId, 'Session tab ID must remain stable within tab');
 
-    // Economic calendar message uses GM_xmlhttpRequest and caches feed
+    // Economic calendar message uses async GM.xmlHttpRequest and caches feed
     const cal = await chromeShim.runtime.sendMessage({ action: 'fetchEconomicCalendar', forceRefresh: true });
     assert.strictEqual(cal.ok, true);
     assert.strictEqual(cal.feed.source, 'ForexFactory');

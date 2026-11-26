@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.154`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.155`) are documented in this file.
+
+---
+
+## [v1.1.155] — 2026-11-26
+
+### 🍎 Native Safari "Userscripts" (Quoid) GM4 Async API & 1-Tap Auto-Update Support
+- **Native Quoid `Userscripts` Compatibility (`scripts/build-userscript.ps1`, `userscript/trading-cortex.user.js`, `userscript/trading-cortex.meta.js`)**:
+  - Added `@grant GM.getValue`, `@grant GM.setValue`, and `@grant GM.xmlHttpRequest` (GM4 Promise API used natively by **Userscripts** on iOS/iPadOS Safari) alongside legacy GM3 `GM_*` grants and `localStorage` fallback, with a serialized async storage queue so concurrent writes never race.
+  - Published `userscript/trading-cortex.user.js` and `userscript/trading-cortex.meta.js` directly in the repository with `@updateURL` and `@downloadURL` headers so **Userscripts** on iOS/iPadOS Safari supports 1-tap URL installation directly from GitHub plus built-in automatic update checks.
+  - Added early `document-start` retry guard if `document.documentElement` isn't yet mounted when WebKit fires `document-start`.
+  - Expanded `tests/mobile-userscript-and-topdock.test.js` with GM4 async `GM.getValue`/`GM.setValue`/`GM.xmlHttpRequest` and `.meta.js` verification.
 
 ---
 

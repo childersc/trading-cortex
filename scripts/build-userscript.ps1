@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$OutDir = ""
+    [string]$OutDir = "",
+    [Parameter(Mandatory = $false)]
+    [string]$Branch = "dev"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +18,10 @@ if ([string]::IsNullOrWhiteSpace($OutDir)) {
 }
 if (!(Test-Path $OutDir)) {
     New-Item -ItemType Directory -Path $OutDir | Out-Null
+}
+$PublishedDir = Join-Path $ProjectRoot "userscript"
+if (!(Test-Path $PublishedDir)) {
+    New-Item -ItemType Directory -Path $PublishedDir | Out-Null
 }
 
 function ConvertTo-JsStringLiteral {
@@ -72,13 +78,18 @@ $MainJsLiteral = ConvertTo-JsStringLiteral $MainSource
 $VersionJsLiteral = ConvertTo-JsStringLiteral $Version
 $NameJsLiteral = ConvertTo-JsStringLiteral $Name
 
-$Header = @"
+$MetaUrl = "https://raw.githubusercontent.com/childersc/trading-cortex/$Branch/userscript/trading-cortex.meta.js"
+$DownloadUrl = "https://raw.githubusercontent.com/childersc/trading-cortex/$Branch/userscript/trading-cortex.user.js"
+
+$MetaBlock = @"
 // ==UserScript==
 // @name         $Name
 // @namespace    https://github.com/childersc/trading-cortex
 // @version      $Version
 // @description  $Description (Safari Mobile & Universal Userscript Edition)
 // @author       Trading Cortex
+// @updateURL    $MetaUrl
+// @downloadURL  $DownloadUrl
 // @match        https://*.vestmarkets.com/*
 // @match        https://vestmarkets.com/*
 // @match        https://*.myfundedperpetuals.com/*
@@ -90,6 +101,9 @@ $Header = @"
 // @exclude      https://trade.vestmarkets.com/*
 // @run-at       document-start
 // @inject-into  content
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.xmlHttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -97,6 +111,10 @@ $Header = @"
 // @connect      nfs.faireconomy.media
 // @connect      cdn-nfs.faireconomy.media
 // ==/UserScript==
+"@
+
+$Header = @"
+$MetaBlock
 
 /*
  * Trading Cortex v$Version - Safari Mobile & Universal Userscript Build
@@ -198,7 +216,17 @@ $RuntimeBootstrap = @'
   }
 
   // Inject content-main.js into the current frame's MAIN world immediately at document-start
-  injectMainWorldIntoDocument(document, PAGE_WINDOW);
+  if (!injectMainWorldIntoDocument(document, PAGE_WINDOW)) {
+    const retryMainInject = () => {
+      if (!injectMainWorldIntoDocument(document, PAGE_WINDOW)) {
+        setTimeout(() => injectMainWorldIntoDocument(document, PAGE_WINDOW), 20);
+      }
+    };
+    setTimeout(retryMainInject, 10);
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', retryMainInject, { once: true });
+    }
+  }
 
   // If this userscript instance is running inside a subframe, only content-main.js belongs here
   if (window.top !== window) return;
@@ -291,7 +319,8 @@ $RuntimeBootstrap = @'
   ensureUserscriptStylesheet();
 
   // -------------------------------------------------------------
-  // Lightweight chrome.* Compatibility Shim for Userscript Managers
+  // Lightweight chrome.* Compatibility Shim (GM4 Async + GM3 + localStorage)
+  // Fully compatible with Quoid Userscripts (iOS/iPadOS Safari), Stay, & Tampermonkey
   // -------------------------------------------------------------
   function createUserscriptChromeShim() {
     const STORAGE_DB_KEY = '__trading_cortex_userscript_db_v1__';
@@ -303,6 +332,7 @@ $RuntimeBootstrap = @'
 
     const storageListeners = new Set();
     const messageListeners = new Set();
+    let storageQueue = Promise.resolve();
 
     function cloneValue(val) {
       if (val === undefined) return undefined;
@@ -313,44 +343,69 @@ $RuntimeBootstrap = @'
       }
     }
 
-    function readRawStoreObject() {
-      let gmRaw = null;
+    function parseStoredPayload(v) {
+      if (typeof v === 'string' && v) {
+        try {
+          const parsed = JSON.parse(v);
+          if (parsed && typeof parsed === 'object') return parsed;
+        } catch (e) {}
+      } else if (v && typeof v === 'object') {
+        return cloneValue(v);
+      }
+      return null;
+    }
+
+    async function readRawStoreObject() {
+      // 1. GM4 async API (Quoid Userscripts on iOS/iPadOS Safari)
+      if (typeof GM !== 'undefined' && GM && typeof GM.getValue === 'function') {
+        try {
+          const v = await GM.getValue(STORAGE_DB_KEY, null);
+          const parsed = parseStoredPayload(v);
+          if (parsed) return parsed;
+        } catch (e) {}
+      }
+      // 2. GM3 API (Tampermonkey / Stay / Violentmonkey)
       if (typeof GM_getValue === 'function') {
         try {
-          const v = GM_getValue(STORAGE_DB_KEY, null);
-          if (typeof v === 'string' && v) gmRaw = v;
-          else if (v && typeof v === 'object' && typeof v.then !== 'function') return cloneValue(v);
+          const raw = GM_getValue(STORAGE_DB_KEY, null);
+          const resolved = (raw && typeof raw.then === 'function') ? await raw : raw;
+          const parsed = parseStoredPayload(resolved);
+          if (parsed) return parsed;
         } catch (e) {}
       }
-      if (gmRaw) {
-        try {
-          const parsed = JSON.parse(gmRaw);
-          if (parsed && typeof parsed === 'object') return parsed;
-        } catch (e) {}
-      }
+      // 3. Domain localStorage fallback
       try {
         const lsRaw = window.localStorage.getItem(STORAGE_DB_KEY);
-        if (lsRaw) {
-          const parsed = JSON.parse(lsRaw);
-          if (parsed && typeof parsed === 'object') return parsed;
-        }
+        const parsed = parseStoredPayload(lsRaw);
+        if (parsed) return parsed;
       } catch (e) {}
       return {};
     }
 
-    function writeRawStoreObject(dbObj) {
+    async function writeRawStoreObject(dbObj) {
       let serialized = '{}';
       try {
         serialized = JSON.stringify(dbObj || {});
       } catch (e) {
         return;
       }
-      if (typeof GM_setValue === 'function') {
-        try { GM_setValue(STORAGE_DB_KEY, serialized); } catch (e) {}
+      if (typeof GM !== 'undefined' && GM && typeof GM.setValue === 'function') {
+        try { await GM.setValue(STORAGE_DB_KEY, serialized); } catch (e) {}
+      } else if (typeof GM_setValue === 'function') {
+        try {
+          const res = GM_setValue(STORAGE_DB_KEY, serialized);
+          if (res && typeof res.then === 'function') await res;
+        } catch (e) {}
       }
       try {
         window.localStorage.setItem(STORAGE_DB_KEY, serialized);
       } catch (e) {}
+    }
+
+    function enqueueStorageOp(opFn) {
+      const next = storageQueue.then(opFn, opFn);
+      storageQueue = next.catch(() => {});
+      return next;
     }
 
     function emitStorageChanges(changes, areaName) {
@@ -366,8 +421,8 @@ $RuntimeBootstrap = @'
     function makeStorageArea(areaName) {
       return {
         get(keys, callback) {
-          const promise = new Promise((resolve) => {
-            const db = readRawStoreObject();
+          return enqueueStorageOp(async () => {
+            const db = await readRawStoreObject();
             const out = {};
             if (keys === null || keys === undefined) {
               Object.keys(db).forEach((k) => { out[k] = cloneValue(db[k]); });
@@ -390,14 +445,13 @@ $RuntimeBootstrap = @'
             if (typeof callback === 'function') {
               try { callback(out); } catch (e) {}
             }
-            resolve(out);
+            return out;
           });
-          return promise;
         },
         set(items, callback) {
-          const promise = new Promise((resolve) => {
+          return enqueueStorageOp(async () => {
             if (items && typeof items === 'object') {
-              const db = readRawStoreObject();
+              const db = await readRawStoreObject();
               const changes = {};
               Object.keys(items).forEach((k) => {
                 const oldVal = Object.prototype.hasOwnProperty.call(db, k) ? db[k] : undefined;
@@ -414,21 +468,19 @@ $RuntimeBootstrap = @'
                 }
               });
               if (Object.keys(changes).length > 0) {
-                writeRawStoreObject(db);
+                await writeRawStoreObject(db);
                 emitStorageChanges(changes, areaName);
               }
             }
             if (typeof callback === 'function') {
               try { callback(); } catch (e) {}
             }
-            resolve();
           });
-          return promise;
         },
         remove(keys, callback) {
-          const promise = new Promise((resolve) => {
+          return enqueueStorageOp(async () => {
             const keyList = Array.isArray(keys) ? keys : [keys];
-            const db = readRawStoreObject();
+            const db = await readRawStoreObject();
             const changes = {};
             for (let i = 0; i < keyList.length; i++) {
               const k = keyList[i];
@@ -438,25 +490,21 @@ $RuntimeBootstrap = @'
               }
             }
             if (Object.keys(changes).length > 0) {
-              writeRawStoreObject(db);
+              await writeRawStoreObject(db);
               emitStorageChanges(changes, areaName);
             }
             if (typeof callback === 'function') {
               try { callback(); } catch (e) {}
             }
-            resolve();
           });
-          return promise;
         },
         clear(callback) {
-          const promise = new Promise((resolve) => {
-            writeRawStoreObject({});
+          return enqueueStorageOp(async () => {
+            await writeRawStoreObject({});
             if (typeof callback === 'function') {
               try { callback(); } catch (e) {}
             }
-            resolve();
           });
-          return promise;
         }
       };
     }
@@ -466,9 +514,20 @@ $RuntimeBootstrap = @'
 
     function gmFetchJson(url) {
       return new Promise((resolve) => {
-        if (typeof GM_xmlhttpRequest === 'function') {
+        let settled = false;
+        const done = (val) => {
+          if (settled) return;
+          settled = true;
+          resolve(val);
+        };
+        const gmXhr =
+          (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function')
+            ? GM.xmlHttpRequest
+            : (typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null);
+
+        if (gmXhr) {
           try {
-            GM_xmlhttpRequest({
+            const req = gmXhr({
               method: 'GET',
               url,
               headers: { Accept: 'application/json' },
@@ -476,25 +535,33 @@ $RuntimeBootstrap = @'
               onload: (res) => {
                 if (res && res.status >= 200 && res.status < 300 && res.responseText) {
                   try {
-                    resolve(JSON.parse(res.responseText));
+                    done(JSON.parse(res.responseText));
                     return;
                   } catch (e) {}
                 }
-                resolve(null);
+                done(null);
               },
-              onerror: () => resolve(null),
-              ontimeout: () => resolve(null)
+              onerror: () => done(null),
+              ontimeout: () => done(null)
             });
+            if (req && typeof req.then === 'function') {
+              req.then((res) => {
+                if (res && res.status >= 200 && res.status < 300 && res.responseText) {
+                  try { done(JSON.parse(res.responseText)); return; } catch (e) {}
+                }
+                done(null);
+              }).catch(() => done(null));
+            }
             return;
           } catch (e) {}
         }
         try {
           fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' })
             .then((r) => (r && r.ok ? r.json() : null))
-            .then((data) => resolve(data))
-            .catch(() => resolve(null));
+            .then((data) => done(data))
+            .catch(() => done(null));
         } catch (e) {
-          resolve(null);
+          done(null);
         }
       });
     }
@@ -642,20 +709,30 @@ $Body = $Body.Replace('__EXEC_SOURCE__', $ExecSource)
 $Body = $Body.Replace('__ISOLATED_SOURCE__', $IsolatedSource)
 
 $FullOutput = ($Header + "`n" + $Body).Replace("`r`n", "`n")
-$OutPath = Join-Path $OutDir "trading-cortex.user.js"
-[System.IO.File]::WriteAllText($OutPath, $FullOutput, (New-Object System.Text.UTF8Encoding($false)))
+$MetaOutput = ($MetaBlock + "`n").Replace("`r`n", "`n")
+
+$DistPath = Join-Path $OutDir "trading-cortex.user.js"
+$PublishedUserPath = Join-Path $PublishedDir "trading-cortex.user.js"
+$PublishedMetaPath = Join-Path $PublishedDir "trading-cortex.meta.js"
+
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($DistPath, $FullOutput, $Utf8NoBom)
+[System.IO.File]::WriteAllText($PublishedUserPath, $FullOutput, $Utf8NoBom)
+[System.IO.File]::WriteAllText($PublishedMetaPath, $MetaOutput, $Utf8NoBom)
 
 # Validate generated userscript JavaScript syntax with Node if available
 $NodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($NodeCmd) {
-    & node -c $OutPath
+    & node -c $PublishedUserPath
     if ($LASTEXITCODE -ne 0) {
         throw "Generated userscript failed JavaScript syntax validation (node -c)!"
     }
 }
 
-$OutInfo = Get-Item $OutPath
+$OutInfo = Get-Item $PublishedUserPath
 Write-Host ">>> Safari Mobile & Universal Userscript built successfully:" -ForegroundColor Green
-Write-Host "    Path:    $($OutInfo.FullName)" -ForegroundColor Cyan
-Write-Host "    Version: v$Version" -ForegroundColor Cyan
-Write-Host "    Size:    $([math]::Round($OutInfo.Length / 1KB, 1)) KB" -ForegroundColor Cyan
+Write-Host "    Published: $($OutInfo.FullName)" -ForegroundColor Cyan
+Write-Host "    Meta:      $PublishedMetaPath" -ForegroundColor Cyan
+Write-Host "    Dist:      $DistPath" -ForegroundColor Cyan
+Write-Host "    Version:   v$Version (branch: $Branch)" -ForegroundColor Cyan
+Write-Host "    Size:      $([math]::Round($OutInfo.Length / 1KB, 1)) KB" -ForegroundColor Cyan

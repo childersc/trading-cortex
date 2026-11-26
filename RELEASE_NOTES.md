@@ -1,3 +1,7 @@
+Trading Cortex v1.1.155 — Native Safari "Userscripts" (Quoid) GM4 API & 1-Tap URL Install / Auto-Updates
+
+- **Quoid `Userscripts` Native Support (`v1.1.155`)**: Added full async GM4 (`GM.getValue`, `GM.setValue`, `GM.xmlHttpRequest`) support with serialized storage writes specifically for Safari's **Userscripts** extension, plus published `userscript/trading-cortex.user.js` and `userscript/trading-cortex.meta.js` with `@updateURL` / `@downloadURL` so you can install with 1 tap in Safari Mobile and receive automatic updates directly in Userscripts.
+
 Trading Cortex v1.1.154 — Safari Mobile Userscript Support & Mobile Docked Top Bar
 
 - **Safari Mobile / Universal Userscript Build (`v1.1.154`)**: Added `scripts/build-userscript.ps1` to bundle Trading Cortex into a single `dist/trading-cortex.user.js` file compatible with iOS/iPadOS Safari (**Userscripts**, **Stay**, **Tampermonkey for Safari**) and Firefox Android, complete with a `chrome.*` storage/news compatibility shim and automatic same-origin `blob:` TradingView iframe injection.
