@@ -490,4 +490,137 @@ function extractBlock(src, startMarker, endMarker) {
   console.log('✓ Hypernova live Breach Price red line, badge box, off-screen clamp, settings controls & priority verified');
 }
 
+// 7. Right-click / Escape / pointercancel cancellation during TP/SL drag
+{
+  const dragBlock = extractBlock(
+    mainSrc,
+    'function startHypernovaTpSlDrag(',
+    'function renderHypernovaChartVisuals('
+  );
+
+  function createDragHarness() {
+    const viewListeners = {};
+    const docListeners = {};
+    const posted = [];
+    let renderCalls = 0;
+
+    const makeEmitter = (map) => ({
+      addEventListener(type, fn) {
+        if (!map[type]) map[type] = [];
+        map[type].push(fn);
+      },
+      removeEventListener(type, fn) {
+        if (!map[type]) return;
+        const idx = map[type].indexOf(fn);
+        if (idx >= 0) map[type].splice(idx, 1);
+      },
+      emit(type, evt) {
+        const list = [...(map[type] || [])];
+        list.forEach(fn => fn(evt));
+      }
+    });
+
+    const view = makeEmitter(viewListeners);
+    const ownerDoc = makeEmitter(docListeners);
+    ownerDoc.defaultView = view;
+
+    const ctx = {
+      window: {
+        top: { postMessage(msg) { posted.push(msg); } }
+      },
+      activeHypernovaDrag: null,
+      latestHypernovaYToPriceFn: (y) => 100 - y * 0.1,
+      latestHypernovaPaneRect: { top: 0, height: 500 },
+      hypernovaManualTpSlBySymbol: {},
+      computeHypernovaTargetPnlUsd: () => -50,
+      formatHypernovaDollarAmount: (v) => `-$${Math.abs(v).toFixed(2)}`,
+      scheduleIctSessionsRender: () => { renderCalls++; },
+      setTimeout,
+      Date
+    };
+    vm.runInNewContext(`${dragBlock}\nthis.startHypernovaTpSlDrag = startHypernovaTpSlDrag;`, ctx);
+    return { ctx, view, ownerDoc, posted, getRenderCalls: () => renderCalls };
+  }
+
+  const pos = { symbol: 'HYPE', side: 'long', entryPrice: 60, sizeQty: 10, notionalUsd: 600, unrealizedPnl: 0 };
+  const makeEvt = (overrides = {}) => {
+    let prevented = false;
+    let stopped = false;
+    return {
+      button: 0,
+      buttons: 1,
+      pointerId: 1,
+      clientY: 200,
+      currentTarget: { setPointerCapture() {}, releasePointerCapture() {} },
+      preventDefault() { prevented = true; },
+      stopPropagation() { stopped = true; },
+      stopImmediatePropagation() { stopped = true; },
+      get prevented() { return prevented; },
+      get stopped() { return stopped; },
+      ...overrides
+    };
+  };
+
+  // 7a. Chorded right-click during drag (W3C Pointer Events: pointermove with buttons===3 / button===2) cancels without submitting AND swallows trailing contextmenu
+  {
+    const h = createDragHarness();
+    h.ctx.startHypernovaTpSlDrag(makeEvt({ button: 0, clientY: 200 }), 'sl', pos, h.ownerDoc);
+    assert.ok(h.ctx.activeHypernovaDrag, 'Drag must start on left pointerdown');
+    h.view.emit('pointermove', makeEvt({ button: -1, buttons: 1, clientY: 250 }));
+    assert.strictEqual(h.ctx.activeHypernovaDrag.previewPrice, 75);
+
+    const rightChordMove = makeEvt({ button: 2, buttons: 3, clientY: 250 });
+    h.view.emit('pointermove', rightChordMove);
+    assert.strictEqual(h.ctx.activeHypernovaDrag, null, 'Chorded right-click must immediately cancel drag');
+    assert.strictEqual(rightChordMove.prevented, true);
+
+    const trailingCm = makeEvt({ button: 2 });
+    h.view.emit('contextmenu', trailingCm);
+    assert.strictEqual(trailingCm.prevented, true, 'Trailing contextmenu after right-click cancel must be suppressed');
+
+    // Releasing left button after cancel must NOT submit SL
+    h.view.emit('pointerup', makeEvt({ button: 0, buttons: 0, clientY: 250 }));
+    assert.strictEqual(h.posted.length, 0, 'Right-click cancelled drag must NEVER post VEST_TV_HYPERNOVA_SET_TP_SL');
+    assert.strictEqual(h.ctx.hypernovaManualTpSlBySymbol.HYPE, undefined, 'Right-click cancelled drag must NOT mutate manual TP/SL cache');
+  }
+
+  // 7b. Right-button mousedown cancels TP drag without submitting
+  {
+    const h = createDragHarness();
+    h.ctx.startHypernovaTpSlDrag(makeEvt({ button: 0, clientY: 150 }), 'tp', pos, h.ownerDoc);
+    h.ownerDoc.emit('mousedown', makeEvt({ button: 2, buttons: 2 }));
+    assert.strictEqual(h.ctx.activeHypernovaDrag, null, 'Right mousedown must cancel TP drag');
+    h.view.emit('pointerup', makeEvt({ button: 0, buttons: 0, clientY: 120 }));
+    assert.strictEqual(h.posted.length, 0, 'Cancelled TP drag must NEVER submit');
+  }
+
+  // 7c. Escape key and pointercancel both cancel without submitting
+  {
+    const h = createDragHarness();
+    h.ctx.startHypernovaTpSlDrag(makeEvt({ button: 0, clientY: 200 }), 'sl', pos, h.ownerDoc);
+    h.view.emit('keydown', makeEvt({ key: 'Escape' }));
+    assert.strictEqual(h.ctx.activeHypernovaDrag, null, 'Escape must cancel drag');
+    assert.strictEqual(h.posted.length, 0);
+
+    h.ctx.startHypernovaTpSlDrag(makeEvt({ button: 0, clientY: 200 }), 'tp', pos, h.ownerDoc);
+    h.view.emit('pointercancel', makeEvt());
+    assert.strictEqual(h.ctx.activeHypernovaDrag, null, 'pointercancel must cancel drag without submitting');
+    assert.strictEqual(h.posted.length, 0);
+  }
+
+  // 7d. Normal left-button drag + release still submits TP/SL properly
+  {
+    const h = createDragHarness();
+    h.ctx.startHypernovaTpSlDrag(makeEvt({ button: 0, clientY: 200 }), 'sl', pos, h.ownerDoc);
+    h.view.emit('pointermove', makeEvt({ button: -1, buttons: 1, clientY: 260 }));
+    h.view.emit('pointerup', makeEvt({ button: 0, buttons: 0, clientY: 260 }));
+    assert.strictEqual(h.ctx.activeHypernovaDrag, null);
+    assert.strictEqual(h.posted.length, 1, 'Normal left-button release must submit VEST_TV_HYPERNOVA_SET_TP_SL');
+    assert.strictEqual(h.posted[0].type, 'VEST_TV_HYPERNOVA_SET_TP_SL');
+    assert.strictEqual(h.posted[0].payload.type, 'sl');
+    assert.strictEqual(h.posted[0].payload.price, 74);
+  }
+  console.log('✓ Right-click, Escape, and pointercancel TP/SL drag cancellation verified');
+}
+
 console.log('All Hypernova Chart Visuals tests passed!');

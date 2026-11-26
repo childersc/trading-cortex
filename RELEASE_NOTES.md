@@ -1,3 +1,7 @@
+Trading Cortex v1.1.151 — Right-Click (or Esc) Cancels Stop Loss / Take Profit Drag
+
+- **Cancel TP / SL Drag on Right-Click (`v1.1.151`)**: While dragging a Stop Loss or Take Profit line on Hypernova, My Funded Perps, or Kalshi Pro, right-clicking (or pressing `Esc`) now immediately cancels the drag without setting or modifying the order and suppresses the trailing right-click context menu.
+
 Trading Cortex v1.1.150 — Hypernova Breach Price Shown Pre-Trade Only (Hidden Once Position Is Open)
 
 - **Pre-Trade Only Breach Price (`v1.1.150`)**: The live red Breach Price line & badge box on Hypernova now displays only while you are flat and previewing an order in the Order Ticket, and automatically hides whenever a position is open on the chart.

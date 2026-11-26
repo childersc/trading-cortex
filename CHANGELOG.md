@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.150`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.151`) are documented in this file.
+
+---
+
+## [v1.1.151] — 2026-11-26
+
+### ❌ Right-Click (or Esc) Cancels TP / SL Drag Without Setting the Order
+- **Right-Click & Escape Drag Cancellation (`content/content-main.js`)**:
+  - Updated `startHypernovaTpSlDrag()` (shared across Hypernova, My Funded Perpetuals, and Kalshi Pro) so right-clicking while dragging a **Stop Loss** or **Take Profit** line immediately cancels the drag instead of submitting the order — handling W3C Pointer Events chorded right-clicks (`pointermove` with `button === 2` / `buttons & 2`), secondary `mousedown`/`pointerdown`, `contextmenu`, `pointercancel`, and `Escape`.
+  - Automatically suppresses the trailing browser/chart right-click context menu on cancel so it doesn't pop up over the chart, restores the chart cleanly to its pre-drag state without mutating `hypernovaManualTpSlBySymbol`, and skips `VEST_TV_HYPERNOVA_SET_TP_SL`.
+  - Added VM unit tests in `tests/hypernova-chart-visuals.test.js` covering chorded right-click, right `mousedown`, `Escape`, `pointercancel`, trailing context-menu suppression, and normal left-release submission.
 
 ---
 

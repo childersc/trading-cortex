@@ -9188,20 +9188,100 @@
       }
     };
 
-    const onMove = (mv) => {
-      mv.stopPropagation();
-      updatePriceFromEvent(mv);
+    const suppressTrailingContextMenu = () => {
+      const swallow = (cm) => {
+        cm.preventDefault();
+        cm.stopPropagation();
+        if (typeof cm.stopImmediatePropagation === 'function') cm.stopImmediatePropagation();
+      };
+      view.addEventListener('contextmenu', swallow, true);
+      if (ownerDoc && ownerDoc !== view) {
+        ownerDoc.addEventListener('contextmenu', swallow, true);
+      }
+      setTimeout(() => {
+        view.removeEventListener('contextmenu', swallow, true);
+        if (ownerDoc && ownerDoc !== view) {
+          ownerDoc.removeEventListener('contextmenu', swallow, true);
+        }
+      }, 450);
     };
 
-    const onUp = (upEv) => {
+    let dragCleanedUp = false;
+    const cleanupListeners = () => {
+      if (dragCleanedUp) return;
+      dragCleanedUp = true;
       view.removeEventListener('pointermove', onMove, true);
       view.removeEventListener('pointerup', onUp, true);
-      view.removeEventListener('pointercancel', onUp, true);
+      view.removeEventListener('pointercancel', onCancel, true);
+      view.removeEventListener('mousedown', onSecondaryDown, true);
+      view.removeEventListener('pointerdown', onSecondaryDown, true);
+      view.removeEventListener('contextmenu', onContextMenu, true);
+      view.removeEventListener('keydown', onKeyDown, true);
+      if (ownerDoc && ownerDoc !== view) {
+        ownerDoc.removeEventListener('mousedown', onSecondaryDown, true);
+        ownerDoc.removeEventListener('contextmenu', onContextMenu, true);
+        ownerDoc.removeEventListener('keydown', onKeyDown, true);
+      }
       try {
         if (captureEl && typeof captureEl.releasePointerCapture === 'function' && pointerId !== undefined) {
           captureEl.releasePointerCapture(pointerId);
         }
       } catch (err) {}
+    };
+
+    const cancelDrag = (ev, fromRightClick = false) => {
+      if (ev) {
+        try {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+        } catch (err) {}
+      }
+      cleanupListeners();
+      if (fromRightClick) {
+        suppressTrailingContextMenu();
+      }
+      if (!activeHypernovaDrag) return;
+      activeHypernovaDrag = null;
+      scheduleIctSessionsRender(false);
+    };
+
+    const onMove = (mv) => {
+      mv.stopPropagation();
+      // In W3C Pointer Events, right-clicking while left mouse is held fires pointermove with button===2 or (buttons & 2)!
+      if (mv.button === 2 || ((mv.buttons & 2) !== 0)) {
+        cancelDrag(mv, true);
+        return;
+      }
+      updatePriceFromEvent(mv);
+    };
+
+    const onSecondaryDown = (ev) => {
+      if (ev.button === 2 || ((ev.buttons & 2) !== 0)) {
+        cancelDrag(ev, true);
+      }
+    };
+
+    const onContextMenu = (cm) => {
+      cancelDrag(cm, true);
+    };
+
+    const onCancel = (pc) => {
+      cancelDrag(pc, false);
+    };
+
+    const onKeyDown = (kd) => {
+      if (kd && kd.key === 'Escape') {
+        cancelDrag(kd, false);
+      }
+    };
+
+    const onUp = (upEv) => {
+      if (upEv && (upEv.button === 2 || ((upEv.buttons & 2) !== 0))) {
+        cancelDrag(upEv, true);
+        return;
+      }
+      cleanupListeners();
       if (!activeHypernovaDrag) return;
       updatePriceFromEvent(upEv);
       const finalPrice = activeHypernovaDrag.previewPrice;
@@ -9229,7 +9309,16 @@
 
     view.addEventListener('pointermove', onMove, true);
     view.addEventListener('pointerup', onUp, true);
-    view.addEventListener('pointercancel', onUp, true);
+    view.addEventListener('pointercancel', onCancel, true);
+    view.addEventListener('mousedown', onSecondaryDown, true);
+    view.addEventListener('pointerdown', onSecondaryDown, true);
+    view.addEventListener('contextmenu', onContextMenu, true);
+    view.addEventListener('keydown', onKeyDown, true);
+    if (ownerDoc && ownerDoc !== view) {
+      ownerDoc.addEventListener('mousedown', onSecondaryDown, true);
+      ownerDoc.addEventListener('contextmenu', onContextMenu, true);
+      ownerDoc.addEventListener('keydown', onKeyDown, true);
+    }
     scheduleIctSessionsRender(false);
   }
 
@@ -9478,8 +9567,8 @@
             <div class="vest-hn-entry-bottom">
               <div class="vest-hn-btn-group">
                 <button type="button" class="vest-hn-ctrl-btn be-btn" title="Move Stop Loss to Breakeven (Entry Price)">BE</button>
-                <button type="button" class="vest-hn-ctrl-btn tp-btn" title="Grab & drag vertically to set Take Profit">TP</button>
-                <button type="button" class="vest-hn-ctrl-btn sl-btn" title="Grab & drag vertically to set Stop Loss">SL</button>
+                <button type="button" class="vest-hn-ctrl-btn tp-btn" title="Grab &amp; drag vertically to set Take Profit (right-click or Esc to cancel)">TP</button>
+                <button type="button" class="vest-hn-ctrl-btn sl-btn" title="Grab &amp; drag vertically to set Stop Loss (right-click or Esc to cancel)">SL</button>
               </div>
               <span class="vest-hn-entry-price"></span>
             </div>
@@ -9613,7 +9702,7 @@
         box = ownerDoc.createElement('div');
         box.id = isTp ? 'vest-hn-tp-box' : 'vest-hn-sl-box';
         box.className = `vest-hn-chart-box vest-hn-tpsl-box ${isTp ? 'vest-hn-tp-box' : 'vest-hn-sl-box'}`;
-        box.title = `Drag vertically to adjust ${isTp ? 'Take Profit' : 'Stop Loss'}`;
+        box.title = `Drag vertically to adjust ${isTp ? 'Take Profit' : 'Stop Loss'} (right-click or Esc to cancel)`;
         box.innerHTML = `
           <span class="vest-hn-tpsl-tag">${isTp ? 'TP' : 'SL'}</span>
           <span class="vest-hn-tpsl-usd"></span>
