@@ -1,3 +1,7 @@
+Trading Cortex v1.1.156 — Fixed White Settings Menu & Dropdown on Mobile Safari
+
+- **Fixed White / Unreadable Mobile Settings Menu (`v1.1.156`)**: Fixed the Settings modal and Cortex dropdown menu appearing white on iOS Safari / mobile by adding native `GM.addStyle` WebExtension-level stylesheet injection + post-hydration `<head>` re-sync in `trading-cortex.user.js`, enforcing high-specificity ID dark backgrounds (`#0d121d` / `#111827` / `#090d16`), `color-scheme: dark`, `-webkit-appearance: none` on iOS buttons/inputs, and disabling `backdrop-filter` / `translate3d` on mobile modals to eliminate WebKit compositor white-box glitches.
+
 Trading Cortex v1.1.155 — Native Safari "Userscripts" (Quoid) GM4 API & 1-Tap URL Install / Auto-Updates
 
 - **Quoid `Userscripts` Native Support (`v1.1.155`)**: Added full async GM4 (`GM.getValue`, `GM.setValue`, `GM.xmlHttpRequest`) support with serialized storage writes specifically for Safari's **Userscripts** extension, plus published `userscript/trading-cortex.user.js` and `userscript/trading-cortex.meta.js` with `@updateURL` / `@downloadURL` so you can install with 1 tap in Safari Mobile and receive automatic updates directly in Userscripts.

@@ -104,9 +104,11 @@ $MetaBlock = @"
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM.xmlHttpRequest
+// @grant        GM.addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
 // @grant        unsafeWindow
 // @connect      nfs.faireconomy.media
 // @connect      cdn-nfs.faireconomy.media
@@ -300,23 +302,50 @@ $RuntimeBootstrap = @'
 
   // -------------------------------------------------------------
   // Stylesheet Injection (content/template-bar.css)
+  // Uses GM.addStyle / GM_addStyle (WebExtension-level CSS in Quoid Userscripts,
+  // immune to CSP & Next.js <head> stripping) PLUS a live <style> kept last in <head>.
   // -------------------------------------------------------------
+  let gmStyleInjected = false;
   function ensureUserscriptStylesheet() {
+    if (!gmStyleInjected) {
+      if (typeof GM !== 'undefined' && GM && typeof GM.addStyle === 'function') {
+        try {
+          gmStyleInjected = true;
+          Promise.resolve(GM.addStyle(STYLESHEET_TEXT)).catch(() => {});
+        } catch (e) {}
+      } else if (typeof GM_addStyle === 'function') {
+        try {
+          gmStyleInjected = true;
+          GM_addStyle(STYLESHEET_TEXT);
+        } catch (e) {}
+      }
+    }
     try {
       let styleEl = document.getElementById('vest-cortex-userscript-css');
       if (!styleEl) {
         styleEl = document.createElement('style');
         styleEl.id = 'vest-cortex-userscript-css';
+        styleEl.setAttribute('type', 'text/css');
+        styleEl.textContent = STYLESHEET_TEXT;
+      } else if (!styleEl.textContent || styleEl.textContent.length < 100) {
         styleEl.textContent = STYLESHEET_TEXT;
       }
       const target = document.head || document.documentElement;
-      if (target && styleEl.parentNode !== target) {
+      if (target && (styleEl.parentNode !== target || target.lastElementChild !== styleEl)) {
         target.appendChild(styleEl);
       }
     } catch (e) {}
   }
 
+  window.__vestEnsureUserscriptStyles__ = ensureUserscriptStylesheet;
+  try { PAGE_WINDOW.__vestEnsureUserscriptStyles__ = ensureUserscriptStylesheet; } catch (e) {}
+
   ensureUserscriptStylesheet();
+  window.addEventListener('load', () => {
+    ensureUserscriptStylesheet();
+    setTimeout(ensureUserscriptStylesheet, 800);
+    setTimeout(ensureUserscriptStylesheet, 2200);
+  }, { once: true });
 
   // -------------------------------------------------------------
   // Lightweight chrome.* Compatibility Shim (GM4 Async + GM3 + localStorage)

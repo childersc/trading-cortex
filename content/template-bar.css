@@ -1881,20 +1881,23 @@ body.vest-cortex-top-bar-active {
 }
 
 /* Dropdown Menu Flyout (Mounted directly on document.body at max z-index) */
-.vest-studio-dropdown-menu {
+.vest-studio-dropdown-menu,
+#vest-studio-dropdown-menu {
   position: fixed !important;
   top: 72px;
   left: 44px;
   width: 272px;
-  background: #131722;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #0d121d !important;
+  background-color: #0d121d !important;
+  border: 1px solid rgba(56, 189, 248, 0.28) !important;
   border-radius: 10px;
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(0, 0, 0, 0.6);
   padding: 4px 0;
   display: none;
   flex-direction: column;
   z-index: 2147483647 !important;
-  color: #e2e8f0;
+  color: #e2e8f0 !important;
+  color-scheme: dark !important;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   font-size: 12px;
   user-select: none;
@@ -5023,13 +5026,199 @@ body.vest-mobile-top-dock-active {
   opacity: 0.9;
 }
 
+/* High-Specificity Dark Theme Armor for Settings, Template Manager & Dropdown (iOS Safari / Light-Theme Safe) */
+#vest-studio-settings-dialog,
+#vest-template-manager-dialog,
+#vest-studio-dropdown-menu,
+#vest-cortex-mobile-dock {
+  color-scheme: dark !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-card,
+#vest-template-manager-dialog .vest-tvs-card {
+  background: #0d121d !important;
+  background-color: #0d121d !important;
+  color: #e2e8f0 !important;
+  color-scheme: dark !important;
+}
+
+body.vest-dialog-glass-mode #vest-studio-settings-dialog .vest-tvs-card,
+body.vest-dialog-glass-mode #vest-template-manager-dialog .vest-tvs-card {
+  background: linear-gradient(145deg, rgba(19, 25, 38, var(--vest-dialog-glass-op, 0.78)) 0%, rgba(13, 18, 29, var(--vest-dialog-glass-op, 0.72)) 100%) !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-header,
+#vest-template-manager-dialog .vest-tvs-header,
+#vest-studio-settings-dialog .vest-tvs-footer,
+#vest-template-manager-dialog .vest-tvs-footer {
+  background-color: #111827 !important;
+  color: #f8fafc !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-body,
+#vest-template-manager-dialog .vest-tvs-body,
+#vest-studio-settings-dialog .vest-tvs-content,
+#vest-template-manager-dialog .vest-tvs-content {
+  background-color: #0d121d !important;
+  color: #e2e8f0 !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-sidebar,
+#vest-template-manager-dialog .vest-tvs-sidebar {
+  background-color: #090d16 !important;
+  color: #e2e8f0 !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-nav-item,
+#vest-template-manager-dialog .vest-tvs-nav-item {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  color: #d1d4dc !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-nav-item.active,
+#vest-template-manager-dialog .vest-tvs-nav-item.active {
+  background-color: rgba(59, 130, 246, 0.24) !important;
+  color: #ffffff !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-close-btn,
+#vest-template-manager-dialog .vest-tvs-close-btn {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #cbd5e1 !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-btn-cancel,
+#vest-template-manager-dialog .vest-tvs-btn-cancel {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: rgba(30, 41, 59, 0.85) !important;
+  background-color: rgba(30, 41, 59, 0.85) !important;
+  color: #f1f5f9 !important;
+  border-color: rgba(148, 163, 184, 0.45) !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-btn-ok,
+#vest-template-manager-dialog .vest-tvs-btn-ok {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #131722 !important;
+}
+
+#vest-studio-settings-dialog select,
+#vest-studio-settings-dialog textarea,
+#vest-studio-settings-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+#vest-template-manager-dialog select,
+#vest-template-manager-dialog textarea,
+#vest-template-manager-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
+  background-color: #131b2c !important;
+  color: #f8fafc !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+  color-scheme: dark !important;
+}
+
+body.vest-mobile-top-dock-active #vest-studio-dropdown-menu,
+body.vest-mobile-top-dock-active .vest-studio-dropdown-menu {
+  width: min(320px, calc(100vw - 16px)) !important;
+  max-width: calc(100vw - 16px) !important;
+  max-height: calc(100dvh - var(--vest-mobile-dock-height, 36px) - 20px) !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  background: #0d121d !important;
+  background-color: #0d121d !important;
+  color: #e2e8f0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.vest-mobile-top-dock-active #vest-studio-settings-dialog.vest-tvs-overlay,
+body.vest-mobile-top-dock-active #vest-template-manager-dialog.vest-tvs-overlay {
+  background: rgba(2, 6, 14, 0.78) !important;
+  background-color: rgba(2, 6, 14, 0.78) !important;
+}
+
+body.vest-mobile-top-dock-active #vest-studio-settings-dialog .vest-tvs-card,
+body.vest-mobile-top-dock-active #vest-template-manager-dialog .vest-tvs-card {
+  width: 96vw !important;
+  max-width: 96vw !important;
+  min-width: 0 !important;
+  height: 88dvh !important;
+  max-height: 92dvh !important;
+  min-height: 280px !important;
+  border-radius: 12px !important;
+  transform: none !important;
+  background: #0d121d !important;
+  background-color: #0d121d !important;
+  color: #e2e8f0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-header {
+  padding: 12px 14px !important;
+  cursor: default !important;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-title {
+  font-size: 16px !important;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-body {
+  flex-direction: column !important;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-sidebar {
+  width: 100% !important;
+  min-width: 0 !important;
+  flex-direction: row !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  border-right: none !important;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14) !important;
+  padding: 8px 10px !important;
+  gap: 6px !important;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-nav-item {
+  width: auto !important;
+  flex-shrink: 0 !important;
+  height: 34px !important;
+  padding: 0 11px !important;
+  font-size: 12.5px !important;
+  gap: 6px !important;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-content {
+  padding: 12px 14px 20px 14px !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.vest-mobile-top-dock-active .vest-tvs-resize-edge,
+body.vest-mobile-top-dock-active .vest-tvs-resize-corner,
+body.vest-mobile-top-dock-active .vest-tvs-resize-handle {
+  display: none !important;
+}
+
 @media (max-width: 900px) {
-  .vest-studio-dropdown-menu {
+  .vest-studio-dropdown-menu,
+  #vest-studio-dropdown-menu {
     width: min(320px, calc(100vw - 16px)) !important;
     max-width: calc(100vw - 16px) !important;
     max-height: calc(100dvh - var(--vest-mobile-dock-height, 36px) - 20px) !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
+    background: #0d121d !important;
+    background-color: #0d121d !important;
+    color: #e2e8f0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
   .vest-sdm-menu-item {
@@ -5037,7 +5226,15 @@ body.vest-mobile-top-dock-active {
     touch-action: manipulation;
   }
 
-  .vest-tvs-card {
+  #vest-studio-settings-dialog.vest-tvs-overlay,
+  #vest-template-manager-dialog.vest-tvs-overlay {
+    background: rgba(2, 6, 14, 0.78) !important;
+    background-color: rgba(2, 6, 14, 0.78) !important;
+  }
+
+  .vest-tvs-card,
+  #vest-studio-settings-dialog .vest-tvs-card,
+  #vest-template-manager-dialog .vest-tvs-card {
     width: 96vw !important;
     max-width: 96vw !important;
     min-width: 0 !important;
@@ -5045,6 +5242,12 @@ body.vest-mobile-top-dock-active {
     max-height: 92dvh !important;
     min-height: 280px !important;
     border-radius: 12px !important;
+    transform: none !important;
+    background: #0d121d !important;
+    background-color: #0d121d !important;
+    color: #e2e8f0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 
   .vest-tvs-header {

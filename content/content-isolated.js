@@ -7563,6 +7563,9 @@
       : '';
 
     menuEl.style.display = studioMenuOpen ? 'flex' : 'none';
+    menuEl.style.backgroundColor = '#0d121d';
+    menuEl.style.color = '#e2e8f0';
+    menuEl.style.colorScheme = 'dark';
     menuEl.innerHTML = `
       <!-- Channel & Version Title Bar -->
       ${channelHeaderHtml}
@@ -7898,6 +7901,9 @@
         studioMenuOpen = !studioMenuOpen;
         triggerBtn.classList.toggle('open', studioMenuOpen);
         if (studioMenuOpen) {
+          if (typeof window.__vestEnsureUserscriptStyles__ === 'function') {
+            window.__vestEnsureUserscriptStyles__();
+          }
           if (menuEl.parentElement !== document.body) {
             document.body.appendChild(menuEl);
           }
@@ -8170,6 +8176,9 @@
   // TradingView-Style Multi-Tab "Settings" Dialog Box
   // -------------------------------------------------------------
   function openStudioSettingsModal(initialTab = 'about', targetIndicatorId = null) {
+    if (typeof window.__vestEnsureUserscriptStyles__ === 'function') {
+      window.__vestEnsureUserscriptStyles__();
+    }
     const existing = document.getElementById('vest-studio-settings-dialog');
     if (existing) existing.remove();
 
@@ -11152,13 +11161,25 @@
         window.speechSynthesis.removeEventListener('voiceschanged', voicesChangedHandler);
         voicesChangedHandler = null;
       }
+      const isMobileModal = typeof isMobileCortexLayout === 'function' && isMobileCortexLayout();
       const cardW = modalSize.width ? `${modalSize.width}px` : '80vw';
       const cardH = modalSize.height ? `${modalSize.height}px` : '80vh';
+      const cardStyle = isMobileModal
+        ? `width: 96vw; height: 88dvh; max-width: 96vw; max-height: 92dvh; min-width: 0; min-height: 280px; background: #0d121d; background-color: #0d121d; color: #e2e8f0; color-scheme: dark; transform: none;`
+        : `width: ${cardW}; height: ${cardH}; max-width: 96vw; max-height: 94vh; min-width: 440px; min-height: 320px; color: #e2e8f0; color-scheme: dark; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);`;
+      overlay.style.colorScheme = 'dark';
+      overlay.style.color = '#e2e8f0';
+      if (isMobileModal) {
+        overlay.style.background = 'rgba(2, 6, 14, 0.78)';
+      }
+      const mobileHdrStyle = isMobileModal ? ' style="background-color:#111827;color:#f8fafc;"' : '';
+      const mobileBodyStyle = isMobileModal ? ' style="background-color:#0d121d;color:#e2e8f0;"' : '';
+      const mobileSidebarStyle = isMobileModal ? ' style="background-color:#090d16;color:#e2e8f0;"' : '';
       overlay.innerHTML = `
-        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="width: ${cardW}; height: ${cardH}; max-width: 96vw; max-height: 94vh; min-width: 440px; min-height: 320px; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
-          <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move">
-            <div class="vest-tvs-title">Settings</div>
-            <button type="button" class="vest-tvs-close-btn" id="vest-tvs-close" title="Close">
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="${cardStyle}">
+          <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move"${mobileHdrStyle}>
+            <div class="vest-tvs-title" style="color:#f8fafc;">Settings</div>
+            <button type="button" class="vest-tvs-close-btn" id="vest-tvs-close" title="Close" style="background:transparent;color:#cbd5e1;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -11166,25 +11187,25 @@
             </button>
           </div>
 
-          <div class="vest-tvs-body">
-            <div class="vest-tvs-sidebar">
+          <div class="vest-tvs-body"${mobileBodyStyle}>
+            <div class="vest-tvs-sidebar"${mobileSidebarStyle}>
               ${NAV_ITEMS.map(item => `
-                <button type="button" class="vest-tvs-nav-item ${item.id === activeTab ? 'active' : ''}" data-tab="${item.id}">
+                <button type="button" class="vest-tvs-nav-item ${item.id === activeTab ? 'active' : ''}" data-tab="${item.id}" style="background-color:${item.id === activeTab ? 'rgba(59,130,246,0.24)' : 'rgba(255,255,255,0.04)'};color:${item.id === activeTab ? '#ffffff' : '#d1d4dc'};">
                   <span class="vest-tvs-nav-icon">${item.icon}</span>
                   <span class="vest-tvs-nav-label">${item.label}</span>
                 </button>
               `).join('')}
             </div>
 
-            <div class="vest-tvs-content" id="vest-tvs-right-pane">
+            <div class="vest-tvs-content" id="vest-tvs-right-pane"${mobileBodyStyle}>
               ${renderRightPaneContent()}
             </div>
           </div>
 
-          <div class="vest-tvs-footer">
+          <div class="vest-tvs-footer"${mobileHdrStyle}>
             <div class="vest-tvs-footer-right">
-              <button type="button" class="vest-tvs-btn-cancel" id="vest-tvs-cancel">Cancel</button>
-              <button type="button" class="vest-tvs-btn-ok" id="vest-tvs-ok">Save Settings</button>
+              <button type="button" class="vest-tvs-btn-cancel" id="vest-tvs-cancel" style="background-color:rgba(30,41,59,0.85);color:#f1f5f9;">Cancel</button>
+              <button type="button" class="vest-tvs-btn-ok" id="vest-tvs-ok" style="background-color:#ffffff;color:#131722;">Save Settings</button>
             </div>
           </div>
           <!-- Multi-Directional Edge & Corner Resize Handles -->
@@ -20484,8 +20505,20 @@ if (activeTab === 'diagnostics') {
 
     function renderManagerDialog() {
       const navItems = getSidebarCategories();
+      const isMobileTm = typeof isMobileCortexLayout === 'function' && isMobileCortexLayout();
+      const tmCardStyle = isMobileTm
+        ? `width: 96vw; height: 88dvh; max-width: 96vw; max-height: 92dvh; min-width: 0; min-height: 280px; background: #0d121d; background-color: #0d121d; color: #e2e8f0; color-scheme: dark; transform: none;`
+        : `width: 80vw; height: 80vh; max-width: 80vw; max-height: 80vh; min-width: min(760px, 94vw); min-height: min(520px, 92vh); color: #e2e8f0; color-scheme: dark; transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);`;
+      if (typeof window.__vestEnsureUserscriptStyles__ === 'function') {
+        window.__vestEnsureUserscriptStyles__();
+      }
+      overlay.style.colorScheme = 'dark';
+      overlay.style.color = '#e2e8f0';
+      if (isMobileTm) {
+        overlay.style.background = 'rgba(2, 6, 14, 0.78)';
+      }
       overlay.innerHTML = `
-        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Template Manager" style="width: 80vw; height: 80vh; max-width: 80vw; max-height: 80vh; min-width: min(760px, 94vw); min-height: min(520px, 92vh); transform: translate3d(${modalOffset.x}px, ${modalOffset.y}px, 0);">
+        <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Template Manager" style="${tmCardStyle}">
           <div class="vest-tvs-header" id="vest-tm-drag-handle" title="Drag to move">
             <div class="vest-tvs-title">Template Manager</div>
             <button type="button" class="vest-tvs-close-btn" id="vest-tm-close" title="Close">

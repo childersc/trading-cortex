@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.155`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.156`) are documented in this file.
+
+---
+
+## [v1.1.156] — 2026-11-26
+
+### 🌑 Fixed White / Unreadable Settings Menu & Dropdown on Mobile Safari
+- **Root Causes**:
+  1. In Safari **Userscripts (Quoid)**, `<style>` tags injected before SPA/Next.js `<head>` hydration could be stripped or overridden by later site stylesheets (and `@grant GM.addStyle` wasn't yet used for WebExtension-level CSS injection).
+  2. `#vest-studio-dropdown-menu` and inner layers of `#vest-studio-settings-dialog` / `#vest-template-manager-dialog` (`.vest-tvs-header`, `.vest-tvs-body`, `.vest-tvs-sidebar`, `.vest-tvs-content`, `.vest-tvs-footer`, `<button>`, `<select>`, `<input>`) lacked high-specificity ID dark backgrounds (`!important`), `color-scheme: dark !important`, and `-webkit-appearance: none !important`, allowing light-mode site CSS, `[role="dialog"]` rules, or iOS Safari native control/compositor defaults (`backdrop-filter` + `translate3d`) to paint the menu white behind light text.
+  3. Mobile modal layout rules only matched `@media (max-width: 900px)`, missing landscape phones & tablets (`<= 1180px`) where `body.vest-mobile-top-dock-active` was active.
+- **Fixes (`scripts/build-userscript.ps1`, `content/template-bar.css`, `content/content-isolated.js`)**:
+  - Added `@grant GM.addStyle` and `@grant GM_addStyle` in `scripts/build-userscript.ps1`, keeping `<style id="vest-cortex-userscript-css">` re-verified as the last child of `<head>` on `load`, post-hydration, and whenever opening the Cortex dropdown or Settings/Template Manager modals (`window.__vestEnsureUserscriptStyles__`).
+  - Locked high-specificity ID dark backgrounds (`#0d121d` / `#111827` / `#090d16` `!important`), light text, `color-scheme: dark !important`, and `-webkit-appearance: none !important` across `#vest-studio-dropdown-menu`, `#vest-studio-settings-dialog`, `#vest-template-manager-dialog`, and all buttons/inputs/selects inside them.
+  - Added solid dark inline fallbacks on mobile modals/dropdowns and disabled `backdrop-filter` + `translate3d` on mobile (`body.vest-mobile-top-dock-active` and `@media (max-width: 900px)`) to prevent iOS Safari GPU compositor white-box glitches.
 
 ---
 

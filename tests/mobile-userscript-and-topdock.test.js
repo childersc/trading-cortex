@@ -486,13 +486,18 @@ function makeElement(tagName, opts = {}) {
   view.emit('pointerup', makeTouchEvt({ pointerId: 11, button: 0, clientY: 220 }));
   assert.strictEqual(posted.length, 0, 'Two-finger cancelled touch drag must never submit order');
 
-  // Verify CSS mobile & touch tokens
+  // Verify CSS mobile & touch tokens + high-specificity dark theme armor (prevents white settings menu on iOS Safari)
   for (const token of [
     'html.vest-mobile-top-dock-active',
     'body.vest-mobile-top-dock-active',
     '#vest-cortex-mobile-dock',
     'env(safe-area-inset-top, 0px)',
     'body.vest-site-modal-open #vest-cortex-mobile-dock',
+    'color-scheme: dark !important;',
+    '#vest-studio-settings-dialog .vest-tvs-card',
+    '#vest-studio-settings-dialog .vest-tvs-content',
+    'body.vest-mobile-top-dock-active #vest-studio-settings-dialog .vest-tvs-card',
+    '-webkit-appearance: none !important;',
     '@media (max-width: 900px)',
     'min-width: 0 !important'
   ]) {
@@ -533,9 +538,11 @@ function makeElement(tagName, opts = {}) {
     '// @grant        GM.getValue',
     '// @grant        GM.setValue',
     '// @grant        GM.xmlHttpRequest',
+    '// @grant        GM.addStyle',
     '// @grant        GM_getValue',
     '// @grant        GM_setValue',
     '// @grant        GM_xmlhttpRequest',
+    '// @grant        GM_addStyle',
     '// @grant        unsafeWindow'
   ];
   for (const tok of requiredHeaderTokens) {
