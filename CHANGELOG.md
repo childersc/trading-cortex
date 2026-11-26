@@ -1,6 +1,17 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.158`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.159`) are documented in this file.
+
+---
+
+## [v1.1.159] — 2026-11-26
+
+### 📱 Compact Mobile Sizing for On-Chart Position, SL/TP & Price Pills
+- **Fixes (`content/content-main.js`, `tests/mobile-userscript-and-topdock.test.js`)**:
+  - **Eliminated Oversized Mobile Chart Boxes**: Added automatic viewport-responsive compact classes (`.is-mobile-compact` for mobile/tablet charts and `.is-mobile-ultra` for narrow portrait phones `<= 440px` chart / `<= 480px` viewport) on `#vest-hn-position-box`, `#vest-hn-tp-box`, and `#vest-hn-sl-box`.
+  - **Sleek Mobile Proportions**: Removed desktop `min-width: 184px` / `min-width: 138px` / `min-height: 58px` constraints on mobile, slimmed down oversized `@media (pointer: coarse)` button bloat (`26–28px` → `15–19px`), tightened padding/gaps/margins (`6px` edge margin vs `14px`), disabled `backdrop-filter` on mobile chart boxes for crisp 60fps iOS rendering, enforced `-webkit-appearance: none` on chart buttons, and clamped mobile font sizes (`8–9.5px` on narrow phones, `8–10.5px` on tablets/landscape) even when synced desktop settings use larger fonts.
+  - **Compact Mobile Price Pills & 3-Line SL/TP Layout**: Scaled Current Price and Breach Price canvas pills down cleanly on mobile, trimmed verbose prefixes on narrow phones (`$3,567.10` instead of `Current Price · $3,567.10`, `Breach · $3,571.30` instead of `Breach Price · $3,571.30`), hid redundant `%` move on ultra-narrow SL/TP Row 3 so the 3-line box stays ~84–96px wide, and tightened anti-overlap offsets (desktop sizing remains 100% untouched).
+  - Added mobile-compact chart box assertions in `tests/mobile-userscript-and-topdock.test.js`.
 
 ---
 

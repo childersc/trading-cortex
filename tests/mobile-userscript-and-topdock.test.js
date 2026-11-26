@@ -508,8 +508,21 @@ function makeElement(tagName, opts = {}) {
     assert.strictEqual(cssSrc.includes(token), true, `template-bar.css missing required mobile token: ${token}`);
   }
   assert.strictEqual(mainSrc.includes('touch-action: none !important;'), true, 'content-main.js must enforce touch-action: none on chart boxes/handles');
-  assert.strictEqual(mainSrc.includes('@media (pointer: coarse)'), true, 'content-main.js must enlarge touch targets on coarse pointers');
-  console.log('✓ Touch TP/SL drag start/cancel and mobile responsive CSS verified');
+  assert.strictEqual(mainSrc.includes('@media (pointer: coarse)'), true, 'content-main.js must include coarse-pointer chart sizing');
+  for (const token of [
+    '.vest-hn-chart-box.is-mobile-compact',
+    '.vest-hn-entry-box.is-mobile-compact',
+    '.vest-hn-entry-box.is-mobile-ultra',
+    '.vest-hn-tpsl-box.is-mobile-compact',
+    '.vest-hn-tpsl-box.is-mobile-ultra',
+    'const isCompactMobileChart =',
+    'const isUltraNarrowChart =',
+    'const mobileFontFactor =',
+    'const mobileFontMax ='
+  ]) {
+    assert.strictEqual(mainSrc.includes(token), true, `content-main.js missing mobile-compact chart box token: ${token}`);
+  }
+  console.log('✓ Touch TP/SL drag start/cancel, mobile-compact chart overlays, and responsive CSS verified');
 }
 
 // ===========================================================================

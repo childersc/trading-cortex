@@ -1,3 +1,7 @@
+Trading Cortex v1.1.159 — Compact Mobile On-Chart Trade Boxes & Price Pills
+
+- **Compact Mobile Position, SL / TP & Price Boxes (`v1.1.159`)**: Scaled down the on-chart Position Entry box, 3-line Stop Loss / Take Profit boxes, and Current Price / Breach Price pills specifically for mobile viewports (leaving desktop 100% untouched). Removes desktop `min-width` bloat and oversized touch-button padding, tightens margins/spacing, clamps mobile font sizes (`8–9.5px` on phones even if desktop uses larger synced fonts), trims verbose pill prefixes on narrow phones (`$3,567.10`, `Breach · $3,571.30`), hides redundant `%` on ultra-narrow SL/TP Row 3, and disables `backdrop-filter` on mobile boxes for crisp iOS Safari rendering.
+
 Trading Cortex v1.1.158 — Truly Overwrote Platform SL/TP/Position Line Code, 3-Line High Box & Configurable Solid Line Style
 
 - **Zero Duplicate Platform SL / TP / Position Boxes (`v1.1.158`)**: Fixed why Hypernova's native `SL 27.7440 +$29.41 ×` box was still appearing beside ours (`createOrderLine()` creates TradingView `LineToolOrder` sources with `src._adapter` and lazy `_setPaneViews`). Trading Cortex now directly overwrites the native `LineToolOrder` adapter & `OrderPaneView` code cleanly (leaving Breach, Pass, and Limit orders untouched, and restoring originals if toggled off).

@@ -9593,6 +9593,8 @@
           letter-spacing: 0.01em !important;
         }
         .vest-hn-ctrl-btn {
+          -webkit-appearance: none !important;
+          appearance: none !important;
           display: inline-flex !important;
           align-items: center !important;
           justify-content: center !important;
@@ -9727,6 +9729,8 @@
           color: #f8fafc !important;
         }
         .vest-hn-tpsl-clear {
+          -webkit-appearance: none !important;
+          appearance: none !important;
           display: inline-flex !important;
           align-items: center !important;
           justify-content: center !important;
@@ -9746,21 +9750,115 @@
           background: rgba(255, 255, 255, 0.24) !important;
           color: #ffffff !important;
         }
+        .vest-hn-chart-box.is-mobile-compact {
+          backdrop-filter: none !important;
+          -webkit-backdrop-filter: none !important;
+          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5) !important;
+        }
+        .vest-hn-entry-box.is-mobile-compact {
+          min-width: 0 !important;
+          padding: 3px 5px !important;
+          gap: 2px !important;
+          border-radius: 5px !important;
+        }
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-entry-top,
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-entry-bottom {
+          gap: 4px !important;
+        }
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-entry-top-left,
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-entry-top-right,
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-btn-group {
+          gap: 3px !important;
+        }
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-ctrl-btn {
+          height: 16px !important;
+          min-height: 16px !important;
+          min-width: 18px !important;
+          padding: 0 4px !important;
+          font-size: 8.5px !important;
+          border-radius: 3px !important;
+        }
+        .vest-hn-entry-box.is-mobile-compact .vest-hn-ctrl-btn.close-btn {
+          width: 15px !important;
+          height: 15px !important;
+          min-width: 15px !important;
+          min-height: 15px !important;
+          padding: 0 !important;
+          font-size: 9.5px !important;
+        }
+        .vest-hn-entry-box.is-mobile-ultra {
+          padding: 2.5px 4px !important;
+          gap: 1.5px !important;
+        }
+        .vest-hn-entry-box.is-mobile-ultra .vest-hn-entry-top,
+        .vest-hn-entry-box.is-mobile-ultra .vest-hn-entry-bottom {
+          gap: 3px !important;
+        }
+        .vest-hn-entry-box.is-mobile-ultra .vest-hn-ctrl-btn {
+          height: 15px !important;
+          min-height: 15px !important;
+          min-width: 16px !important;
+          padding: 0 3px !important;
+          font-size: 8px !important;
+        }
+        .vest-hn-entry-box.is-mobile-ultra .vest-hn-ctrl-btn.close-btn {
+          width: 14px !important;
+          height: 14px !important;
+          min-width: 14px !important;
+          min-height: 14px !important;
+          font-size: 9px !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-compact {
+          min-width: 0 !important;
+          min-height: 0 !important;
+          padding: 3px 5px !important;
+          gap: 1.5px !important;
+          border-radius: 5px !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-compact .vest-hn-tpsl-row-top,
+        .vest-hn-tpsl-box.is-mobile-compact .vest-hn-tpsl-row-mid,
+        .vest-hn-tpsl-box.is-mobile-compact .vest-hn-tpsl-row-bot {
+          gap: 4px !important;
+          line-height: 1.08 !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-compact .vest-hn-tpsl-top-left {
+          gap: 3px !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-compact .vest-hn-tpsl-tag {
+          padding: 1px 3.5px !important;
+          border-radius: 3px !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-compact .vest-hn-tpsl-clear {
+          width: 15px !important;
+          height: 15px !important;
+          min-width: 15px !important;
+          min-height: 15px !important;
+          margin-left: 2px !important;
+          font-size: 9.5px !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-ultra {
+          padding: 2.5px 4.5px !important;
+          gap: 1px !important;
+        }
+        .vest-hn-tpsl-box.is-mobile-ultra .vest-hn-tpsl-clear {
+          width: 14px !important;
+          height: 14px !important;
+          min-width: 14px !important;
+          min-height: 14px !important;
+          font-size: 9px !important;
+        }
         @media (pointer: coarse) {
           .vest-hn-ctrl-btn {
-            min-height: calc(26px * var(--hn-scale, 1)) !important;
-            min-width: calc(28px * var(--hn-scale, 1)) !important;
-            padding: 0 calc(8px * var(--hn-scale, 1)) !important;
+            min-height: calc(19px * var(--hn-scale, 1)) !important;
+            min-width: calc(21px * var(--hn-scale, 1)) !important;
+            padding: 0 calc(5px * var(--hn-scale, 1)) !important;
           }
           .vest-hn-ctrl-btn.close-btn,
           .vest-hn-tpsl-clear {
-            width: calc(24px * var(--hn-scale, 1)) !important;
-            height: calc(24px * var(--hn-scale, 1)) !important;
-            min-width: calc(24px * var(--hn-scale, 1)) !important;
-            min-height: calc(24px * var(--hn-scale, 1)) !important;
-          }
-          .vest-hn-tpsl-box {
-            min-height: calc(30px * var(--hn-scale, 1)) !important;
+            width: calc(18px * var(--hn-scale, 1)) !important;
+            height: calc(18px * var(--hn-scale, 1)) !important;
+            min-width: calc(18px * var(--hn-scale, 1)) !important;
+            min-height: calc(18px * var(--hn-scale, 1)) !important;
           }
         }
       `;
@@ -9992,20 +10090,34 @@
       : null;
     syncHypernovaNativeCurrentPriceLine(model, mainSeries, hnCfg, liveCurY);
 
+    let topWinW = cssWidth;
+    try {
+      if (window.top && Number.isFinite(window.top.innerWidth) && window.top.innerWidth > 0) {
+        topWinW = window.top.innerWidth;
+      }
+    } catch (e) {}
+    const isCoarseChart = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const isCompactMobileChart = Boolean(cssWidth <= 560 || (topWinW <= 900 && cssWidth <= 700) || (isCoarseChart && cssWidth <= 640));
+    const isUltraNarrowChart = Boolean(cssWidth <= 440 || topWinW <= 480);
+    const mobileFontFactor = isUltraNarrowChart ? 0.78 : (isCompactMobileChart ? 0.85 : 1);
+    const mobileFontMax = isUltraNarrowChart ? 9.5 : 10.5;
+
     let curPillRect = null;
     if (hnCfg.currentPriceLineEnabled && hnCfg.currentPriceShowLabel && liveCurY !== null && Number.isFinite(liveCurY) && liveCurY >= -4 && liveCurY <= cssHeight + 4) {
       const clampedY = Math.max(2, Math.min(cssHeight - 2, liveCurY));
       const baseText = (hnCfg.currentPriceText || '').trim();
       const priceStr = `$${formatHypernovaDisplayPrice(latestChartMarketPrice)}`;
-      const labelStr = baseText
-        ? (hnCfg.currentPriceShowPrice ? `${baseText} · ${priceStr}` : baseText)
+      const effectiveCurBase = (isUltraNarrowChart && /^current\s*price$/i.test(baseText) && hnCfg.currentPriceShowPrice) ? '' : baseText;
+      const labelStr = effectiveCurBase
+        ? (hnCfg.currentPriceShowPrice ? `${effectiveCurBase} · ${priceStr}` : effectiveCurBase)
         : (hnCfg.currentPriceShowPrice ? priceStr : '');
       if (labelStr) {
-        const labelFontSize = Math.max(8, Math.min(22, Number(hnCfg.currentPriceFontSize) || 11));
-        const dotRadius = Math.max(2.5, Math.min(5, labelFontSize * 0.27));
-        const dotSpace = Math.round(dotRadius * 2 + 6);
-        const padX = Math.max(6, Math.round(labelFontSize * 0.72));
-        const pillH = Math.round(labelFontSize + 9);
+        const rawCurFont = Math.max(8, Math.min(22, Number(hnCfg.currentPriceFontSize) || 11));
+        const labelFontSize = isCompactMobileChart ? Math.min(mobileFontMax, Math.max(8, Math.round(rawCurFont * mobileFontFactor))) : rawCurFont;
+        const dotRadius = isCompactMobileChart ? 2 : Math.max(2.5, Math.min(5, labelFontSize * 0.27));
+        const dotSpace = Math.round(dotRadius * 2 + (isCompactMobileChart ? 4 : 6));
+        const padX = isCompactMobileChart ? 4 : Math.max(6, Math.round(labelFontSize * 0.72));
+        const pillH = Math.round(labelFontSize + (isCompactMobileChart ? 6 : 9));
 
         ctx.save();
         ctx.setLineDash([]);
@@ -10013,19 +10125,20 @@
         ctx.font = `700 ${labelFontSize}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
         const textW = ctx.measureText(labelStr).width;
         const pillW = textW + dotSpace + padX * 2;
-        let pillX = cssWidth - pillW - 10;
-        if (hnCfg.currentPriceLabelAlign === 'left') pillX = 10;
+        const edgeMargin = isCompactMobileChart ? 6 : 10;
+        let pillX = cssWidth - pillW - edgeMargin;
+        if (hnCfg.currentPriceLabelAlign === 'left') pillX = edgeMargin;
         else if (hnCfg.currentPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
-        pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
+        pillX = Math.max(4, Math.min(cssWidth - pillW - 4, pillX));
         const pillY = Math.max(4, Math.min(cssHeight - pillH - 4, clampedY - pillH / 2));
         curPillRect = { x: pillX, y: pillY, w: pillW, h: pillH };
 
         ctx.beginPath();
-        ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(5, Math.round(pillH * 0.28)));
+        ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(4, Math.round(pillH * 0.28)));
         ctx.fillStyle = 'rgba(11, 17, 32, 0.94)';
         ctx.fill();
         ctx.strokeStyle = hnCfg.currentPriceColor;
-        ctx.lineWidth = 1.25;
+        ctx.lineWidth = isCompactMobileChart ? 1 : 1.25;
         ctx.stroke();
 
         // Glowing live dot
@@ -10041,8 +10154,9 @@
       }
     }
 
-    const boxesFontSize = Math.max(8, Math.min(18, Number(hnCfg.tradeBoxesFontSize) || 11));
-    const boxesScale = Math.max(0.7, Math.min(1.65, boxesFontSize / 11));
+    const rawBoxesFontSize = Math.max(8, Math.min(18, Number(hnCfg.tradeBoxesFontSize) || 11));
+    const boxesFontSize = isCompactMobileChart ? Math.min(mobileFontMax, Math.max(8, Number((rawBoxesFontSize * mobileFontFactor).toFixed(1)))) : rawBoxesFontSize;
+    const boxesScale = Math.max(0.66, Math.min(1.65, boxesFontSize / 11));
 
     // Resolve Active Position early so Breach Price can track pre-trade state AND we can suppress duplicate native TP/SL/Position boxes
     const pos = resolveActiveHypernovaPosition(symbolKey, model, latestChartMarketPrice);
@@ -10083,14 +10197,18 @@
         if (hnCfg.breachPriceShowLabel && breachLabelBase) {
           const isAbove = breachY < -4;
           const isBelow = breachY > cssHeight + 4;
+          const compactBreachBase = (isUltraNarrowChart && /^breach\s*price$/i.test(breachBaseText) && hnCfg.breachPriceShowPrice)
+            ? `Breach · ${breachPriceFormatted}`
+            : breachLabelBase;
           const labelStr = isAbove
-            ? `▲ Above chart · ${breachLabelBase}`
-            : (isBelow ? `▼ Below chart · ${breachLabelBase}` : breachLabelBase);
-          const bFontSize = Math.max(8, Math.min(22, Number(hnCfg.breachPriceFontSize) || 11));
-          const dotRadius = Math.max(2.5, Math.min(5, bFontSize * 0.27));
-          const dotSpace = Math.round(dotRadius * 2 + 6);
-          const padX = Math.max(6, Math.round(bFontSize * 0.72));
-          const pillH = Math.round(bFontSize + 9);
+            ? (isUltraNarrowChart ? `▲ ${compactBreachBase}` : `▲ Above chart · ${compactBreachBase}`)
+            : (isBelow ? (isUltraNarrowChart ? `▼ ${compactBreachBase}` : `▼ Below chart · ${compactBreachBase}`) : compactBreachBase);
+          const rawBFont = Math.max(8, Math.min(22, Number(hnCfg.breachPriceFontSize) || 11));
+          const bFontSize = isCompactMobileChart ? Math.min(mobileFontMax, Math.max(8, Math.round(rawBFont * mobileFontFactor))) : rawBFont;
+          const dotRadius = isCompactMobileChart ? 2 : Math.max(2.5, Math.min(5, bFontSize * 0.27));
+          const dotSpace = Math.round(dotRadius * 2 + (isCompactMobileChart ? 4 : 6));
+          const padX = isCompactMobileChart ? 4 : Math.max(6, Math.round(bFontSize * 0.72));
+          const pillH = Math.round(bFontSize + (isCompactMobileChart ? 6 : 9));
 
           ctx.save();
           ctx.setLineDash([]);
@@ -10098,10 +10216,11 @@
           ctx.font = `700 ${bFontSize}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
           const textW = ctx.measureText(labelStr).width;
           const pillW = textW + dotSpace + padX * 2;
-          let pillX = cssWidth - pillW - 10;
-          if (hnCfg.breachPriceLabelAlign === 'left') pillX = 10;
+          const bEdgeMargin = isCompactMobileChart ? 6 : 10;
+          let pillX = cssWidth - pillW - bEdgeMargin;
+          if (hnCfg.breachPriceLabelAlign === 'left') pillX = bEdgeMargin;
           else if (hnCfg.breachPriceLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
-          pillX = Math.max(6, Math.min(cssWidth - pillW - 6, pillX));
+          pillX = Math.max(4, Math.min(cssWidth - pillW - 4, pillX));
 
           let pillY;
           if (isAbove) {
@@ -10133,11 +10252,11 @@
           }
 
           ctx.beginPath();
-          ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(5, Math.round(pillH * 0.28)));
+          ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(4, Math.round(pillH * 0.28)));
           ctx.fillStyle = 'rgba(28, 10, 16, 0.94)';
           ctx.fill();
           ctx.strokeStyle = breachColor;
-          ctx.lineWidth = 1.35;
+          ctx.lineWidth = isCompactMobileChart ? 1 : 1.35;
           ctx.stroke();
 
           // Glowing red indicator dot
@@ -10224,6 +10343,8 @@
         const isShort = pos.side === 'short';
         entryBox.style.setProperty('--hn-fs', `${boxesFontSize}px`);
         entryBox.style.setProperty('--hn-scale', boxesScale.toFixed(3));
+        entryBox.classList.toggle('is-mobile-compact', isCompactMobileChart);
+        entryBox.classList.toggle('is-mobile-ultra', isUltraNarrowChart);
         entryBox.classList.toggle('is-long', !isShort);
         entryBox.classList.toggle('is-short', isShort);
         const sideBadge = entryBox.querySelector('.vest-hn-side-badge');
@@ -10303,9 +10424,10 @@
           };
         }
 
-        const boxH = entryBox.offsetHeight || 44;
-        const boxW = entryBox.offsetWidth || 196;
-        const leftPx = Math.max(8, cssWidth - boxW - 14);
+        const boxH = entryBox.offsetHeight || (isCompactMobileChart ? 34 : 44);
+        const boxW = entryBox.offsetWidth || (isCompactMobileChart ? 124 : 196);
+        const entryRightEdge = isCompactMobileChart ? 6 : 14;
+        const leftPx = Math.max(4, cssWidth - boxW - entryRightEdge);
         const topPx = Math.max(4, Math.min(cssHeight - boxH - 4, clampedEntryY - boxH / 2));
         entryBox.style.left = `${Math.round(leftPx)}px`;
         entryBox.style.top = `${Math.round(topPx)}px`;
@@ -10409,11 +10531,13 @@
       const pctEl = box.querySelector('.vest-hn-tpsl-pct');
       if (pctEl) {
         pctEl.textContent = pctText;
-        pctEl.style.display = pctText ? '' : 'none';
+        pctEl.style.display = (pctText && !isUltraNarrowChart) ? '' : 'none';
       }
 
       box.style.setProperty('--hn-fs', `${boxesFontSize}px`);
       box.style.setProperty('--hn-scale', boxesScale.toFixed(3));
+      box.classList.toggle('is-mobile-compact', isCompactMobileChart);
+      box.classList.toggle('is-mobile-ultra', isUltraNarrowChart);
       box.classList.toggle('is-dragging', isDraggingThis);
       box.onpointerdown = (ev) => {
         if (ev.target && ev.target.closest && ev.target.closest('.vest-hn-tpsl-clear')) {
@@ -10447,21 +10571,21 @@
         };
       }
 
-      const boxH = box.offsetHeight || Math.round(58 * boxesScale);
-      const boxW = box.offsetWidth || Math.round(142 * boxesScale);
-      const entryBoxH = (hypernovaOverlayEls.entry && hypernovaOverlayEls.entry.offsetHeight) || Math.round(44 * boxesScale);
+      const boxH = box.offsetHeight || (isCompactMobileChart ? Math.round(42 * boxesScale) : Math.round(58 * boxesScale));
+      const boxW = box.offsetWidth || (isCompactMobileChart ? Math.round(92 * boxesScale) : Math.round(142 * boxesScale));
+      const entryBoxH = (hypernovaOverlayEls.entry && hypernovaOverlayEls.entry.offsetHeight) || (isCompactMobileChart ? 34 : Math.round(44 * boxesScale));
       // Anti-overlap: if this TP/SL sits right on top of the Entry box (e.g., SL moved to Breakeven!),
       // offset horizontally to the left of the Entry box so BOTH remain 100% readable & clickable!
-      let rightEdgeOffset = 14;
+      let rightEdgeOffset = isCompactMobileChart ? 6 : 14;
       if (
         hypernovaOverlayEls.entry &&
         hypernovaOverlayEls.entry.isConnected &&
         entryY !== null &&
-        Math.abs(clampedY - Math.max(24, Math.min(cssHeight - 24, entryY))) < Math.max(36, Math.round((entryBoxH + boxH) * 0.58))
+        Math.abs(clampedY - Math.max(24, Math.min(cssHeight - 24, entryY))) < Math.max(isCompactMobileChart ? 28 : 36, Math.round((entryBoxH + boxH) * 0.56))
       ) {
-        rightEdgeOffset = (hypernovaOverlayEls.entry.offsetWidth || Math.round(196 * boxesScale)) + 22;
+        rightEdgeOffset = (hypernovaOverlayEls.entry.offsetWidth || (isCompactMobileChart ? 124 : Math.round(196 * boxesScale))) + (isCompactMobileChart ? 10 : 22);
       }
-      const leftPx = Math.max(8, cssWidth - boxW - rightEdgeOffset);
+      const leftPx = Math.max(4, cssWidth - boxW - rightEdgeOffset);
       const topPx = Math.max(4, Math.min(cssHeight - boxH - 4, clampedY - boxH / 2));
       box.style.left = `${Math.round(leftPx)}px`;
       box.style.top = `${Math.round(topPx)}px`;
