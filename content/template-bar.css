@@ -4858,6 +4858,7 @@ body.vest-dialog-glass-mode #vest-chart-diagnostics-box {
 /* behind native exchange modals/backdrops (even low z-index)    */
 /* ============================================================= */
 body.vest-site-modal-open #vest-studio-header-pill,
+body.vest-site-modal-open #vest-cortex-mobile-dock,
 body.vest-site-modal-open #vest-cortex-top-bar,
 body.vest-site-modal-open #vest-chart-news-box,
 body.vest-site-modal-open #vest-chart-trades-box,
@@ -4874,6 +4875,223 @@ body.vest-site-modal-open .vest-panel-floating,
 body.vest-site-modal-open .vest-bottom-panel-detached,
 body.vest-site-modal-open .vest-bottom-panel-controls {
   z-index: 1 !important;
+}
+
+/* ============================================================= */
+/* Mobile Docked Top Bar & Responsive Touch Optimizations        */
+/* ============================================================= */
+html.vest-mobile-top-dock-active {
+  scroll-padding-top: var(--vest-mobile-dock-height, 36px) !important;
+}
+
+body.vest-mobile-top-dock-active {
+  padding-top: var(--vest-mobile-dock-height, 36px) !important;
+  box-sizing: border-box !important;
+}
+
+#vest-cortex-mobile-dock {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  min-height: calc(36px + env(safe-area-inset-top, 0px)) !important;
+  padding-top: env(safe-area-inset-top, 0px) !important;
+  z-index: 38 !important;
+  box-sizing: border-box !important;
+  background: linear-gradient(180deg, rgba(10, 14, 23, 0.98), rgba(7, 10, 17, 0.96)) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.38) !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.48) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+#vest-cortex-mobile-dock.dev-channel {
+  border-bottom-color: rgba(239, 68, 68, 0.5) !important;
+}
+
+#vest-cortex-mobile-dock * {
+  box-sizing: border-box;
+}
+
+.vest-mobile-dock-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+}
+
+.vest-mobile-dock-left,
+.vest-mobile-dock-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vest-mobile-dock-venue {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.2px;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vest-mobile-dock-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vest-mobile-dock-icon-btn:active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #f8fafc;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+  z-index: auto !important;
+  cursor: pointer !important;
+  touch-action: manipulation;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-grip {
+  display: none !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-trigger {
+  height: 26px !important;
+  min-height: 26px !important;
+  padding: 0 9px 0 6px !important;
+  gap: 6px !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-icon {
+  width: 17px !important;
+  height: 17px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-icon svg {
+  width: 11px !important;
+  height: 11px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-text {
+  flex-direction: row !important;
+  align-items: baseline !important;
+  gap: 5px !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-title {
+  font-size: 11px !important;
+  line-height: 1 !important;
+}
+
+#vest-studio-header-pill.vest-studio-pill-mobile-docked .vest-studio-pill-sub {
+  font-size: 9.5px !important;
+  line-height: 1 !important;
+  opacity: 0.9;
+}
+
+@media (max-width: 900px) {
+  .vest-studio-dropdown-menu {
+    width: min(320px, calc(100vw - 16px)) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - var(--vest-mobile-dock-height, 36px) - 20px) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .vest-sdm-menu-item {
+    min-height: 38px;
+    touch-action: manipulation;
+  }
+
+  .vest-tvs-card {
+    width: 96vw !important;
+    max-width: 96vw !important;
+    min-width: 0 !important;
+    height: 88dvh !important;
+    max-height: 92dvh !important;
+    min-height: 280px !important;
+    border-radius: 12px !important;
+  }
+
+  .vest-tvs-header {
+    padding: 12px 14px !important;
+    cursor: default !important;
+  }
+
+  .vest-tvs-title {
+    font-size: 16px !important;
+  }
+
+  .vest-tvs-body {
+    flex-direction: column !important;
+  }
+
+  .vest-tvs-sidebar {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    border-right: none !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14) !important;
+    padding: 8px 10px !important;
+    gap: 6px !important;
+  }
+
+  .vest-tvs-nav-item {
+    width: auto !important;
+    flex-shrink: 0 !important;
+    height: 34px !important;
+    padding: 0 11px !important;
+    font-size: 12.5px !important;
+    gap: 6px !important;
+  }
+
+  .vest-tvs-content {
+    padding: 12px 14px 20px 14px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .vest-tvs-resize-edge,
+  .vest-tvs-resize-corner,
+  .vest-tvs-resize-handle {
+    display: none !important;
+  }
 }
 
 

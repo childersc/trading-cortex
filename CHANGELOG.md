@@ -1,6 +1,24 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.153`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.154`) are documented in this file.
+
+---
+
+## [v1.1.154] — 2026-11-26
+
+### 📱 Safari Mobile Userscript Support & Mobile Docked Top Bar (With Clean Page Push-Down)
+- **Safari Mobile & Universal Userscript Build (`scripts/build-userscript.ps1` → `dist/trading-cortex.user.js`)**:
+  - Added an automated single-file userscript bundler targeting **iOS/iPadOS Safari** userscript engines (**Userscripts by Quoid**, **Stay**, **Tampermonkey for Safari**) as well as **Firefox Android** and desktop userscript managers.
+  - Uses `@inject-into content` + `@grant GM_getValue / GM_setValue / GM_xmlhttpRequest / unsafeWindow` alongside a lightweight `chrome.*` compatibility shim (`chrome.runtime`, `chrome.storage.local/sync/onChanged` backed by `GM_*` + `localStorage` fallback, ForexFactory `GM_xmlhttpRequest` news proxy, and stable per-tab IDs).
+  - Includes an automatic **same-origin `blob:` TradingView iframe injector** (with CSP-safe `blob:` `<script>` fallback) so `content-main.js` initializes reliably inside Hypernova, Vest, Kalshi, and MFP chart iframes on iOS Safari without duplicate initialization.
+- **Mobile Docked Top Bar Replacing Hovering Pill (`content/content-isolated.js`, `content/template-bar.css`)**:
+  - Automatically detects mobile/touch viewports (`isMobileCortexLayout()`, including iPhone, Android, and iPadOS) and, on **enabled sites only** (`isActiveFirmEnabledForTopDock()`), replaces the desktop hovering pill with a sleek full-width docked top bar (`#vest-cortex-mobile-dock`, respecting `env(safe-area-inset-top)`) featuring the Cortex menu trigger, venue badge, and 1-tap Settings button.
+  - Cleanly **pushes the site down** (`body.vest-mobile-top-dock-active` padding-top + reversible shifting of top-pinned `position: fixed` / `position: sticky` exchange headers via `syncMobileTopDockLayoutPush()`), and restores all page/header offsets automatically if resized back to desktop or if a firm is disabled.
+  - Desktop hovering pill behavior remains 100% unchanged; modal stacking guard (`body.vest-site-modal-open`) also drops `#vest-cortex-mobile-dock` behind native exchange modals.
+- **Mobile Touch & Responsive Dialog Optimizations (`content/template-bar.css`, `content/content-main.js`)**:
+  - Made `#vest-studio-dropdown-menu` and `#vest-studio-settings-dialog` mobile-responsive (removing the `440px` min-width, switching the settings sidebar into a touch-scrollable horizontal tab bar, and clamping menus cleanly below `#vest-cortex-mobile-dock`).
+  - Added `touch-action: none` and coarse-pointer touch targets on chart Entry/TP/SL drag handles, accepted touch `pointerdown` (`button: 0/-1/undefined`), and added two-finger touch cancel during TP/SL drags.
+  - Added comprehensive unit test suite `tests/mobile-userscript-and-topdock.test.js`.
 
 ---
 

@@ -1,3 +1,8 @@
+Trading Cortex v1.1.154 — Safari Mobile Userscript Support & Mobile Docked Top Bar
+
+- **Safari Mobile / Universal Userscript Build (`v1.1.154`)**: Added `scripts/build-userscript.ps1` to bundle Trading Cortex into a single `dist/trading-cortex.user.js` file compatible with iOS/iPadOS Safari (**Userscripts**, **Stay**, **Tampermonkey for Safari**) and Firefox Android, complete with a `chrome.*` storage/news compatibility shim and automatic same-origin `blob:` TradingView iframe injection.
+- **Docked Mobile Top Bar With Clean Site Push-Down (`v1.1.154`)**: On mobile viewports for enabled sites, Trading Cortex replaces the desktop hovering pill with a sleek docked top bar (`#vest-cortex-mobile-dock`, notch/Dynamic-Island safe) that cleanly pushes the site and top-pinned headers down slightly, includes a 1-tap Settings shortcut, anchors menus below the bar, and makes Settings dialogs and TP/SL touch drags comfortable on phones and tablets (desktop hovering pill stays untouched).
+
 Trading Cortex v1.1.153 — Replaced Existing Native SL / TP & Position Boxes In-Place (Single Clean Box Per Line)
 
 - **No More Duplicate Stop Loss / Take Profit Boxes (`v1.1.153`)**: Instead of drawing a second SL or TP box next to the exchange's existing TradingView OrderLine box, Trading Cortex now cleanly replaces the native SL, TP, and Position canvas boxes in-place (preserving TradingView's right price-axis tags, leaving Breach and regular Limit orders untouched, and instantly restoring native boxes if toggled off in Settings). Settled SL/TP boxes also pull Hypernova's exact sub-tick dollar PnL when not dragging.

@@ -6355,6 +6355,7 @@
             const targetEl = m.target;
             if (
               targetEl.id === 'vest-minimized-dock' ||
+              targetEl.id === 'vest-cortex-mobile-dock' ||
               targetEl.id === 'vest-studio-header-pill' ||
               targetEl.id === 'vest-studio-pill-drag-shield' ||
               targetEl.id === 'vest-panel-toggle-pill' ||
@@ -6366,6 +6367,7 @@
               targetEl.classList.contains('vest-panel-header-bar') ||
               targetEl.classList.contains('vest-minimized-chip') ||
               targetEl.closest('#vest-minimized-dock') ||
+              targetEl.closest('#vest-cortex-mobile-dock') ||
               targetEl.closest('#vest-studio-header-pill') ||
               targetEl.closest('#vest-panel-toggle-pill') ||
               targetEl.closest('#vest-template-bar-root') ||
@@ -6904,10 +6906,237 @@
     return findCustomChartHeaderBarAnchor();
   }
 
+  const CORTEX_MOBILE_DOCK_ID = 'vest-cortex-mobile-dock';
+  const CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT = 36;
   let isDraggingStudioPill = false;
   let studioPillJustDragged = false;
   let studioPillResizeHooked = false;
   let lastLocalStudioPillPosSavedAt = 0;
+  let lastMobileTopDockPushAt = 0;
+  let lastMobileTopDockHeight = 0;
+
+  function isMobileCortexLayout() {
+    try {
+      const winW = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 1280;
+      if (winW <= 900) return true;
+      const isCoarsePointer = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+      const isMobileUa = /iPhone|iPad|iPod|Android|Mobile/i.test(ua);
+      const isIPadOS = typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1;
+      return Boolean((isCoarsePointer || isMobileUa || isIPadOS) && winW <= 1180);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isActiveFirmEnabledForTopDock() {
+    try {
+      const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+      if (activeFirm && activeFirm.enabled === false) return false;
+      return true;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function isMobileTopDockActive() {
+    try {
+      const dock = document.getElementById(CORTEX_MOBILE_DOCK_ID);
+      return Boolean(dock && dock.isConnected);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function restoreMobilePushedSiteElements() {
+    try {
+      const pushed = document.querySelectorAll('[data-vest-mobile-pushed="1"]');
+      for (let i = 0; i < pushed.length; i++) {
+        const el = pushed[i];
+        const origTop = el.getAttribute('data-vest-mobile-orig-top');
+        if (origTop) {
+          el.style.top = origTop;
+        } else {
+          el.style.removeProperty('top');
+        }
+        el.removeAttribute('data-vest-mobile-pushed');
+        el.removeAttribute('data-vest-mobile-orig-top');
+        el.removeAttribute('data-vest-mobile-orig-top-num');
+      }
+    } catch (e) {}
+  }
+
+  function syncMobileTopDockLayoutPush(dockHeightPx, force = false) {
+    if (!document.documentElement || !document.body) return;
+    const dockHeight = Math.max(CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT, Math.round(Number(dockHeightPx) || CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT));
+    const now = Date.now();
+    if (!force && lastMobileTopDockHeight === dockHeight && now - lastMobileTopDockPushAt < 120) {
+      return;
+    }
+    lastMobileTopDockPushAt = now;
+    lastMobileTopDockHeight = dockHeight;
+
+    try {
+      document.documentElement.style.setProperty('--vest-mobile-dock-height', `${dockHeight}px`);
+      document.documentElement.classList.add('vest-mobile-top-dock-active');
+      document.body.classList.add('vest-mobile-top-dock-active');
+
+      const vw = Math.max(240, window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 390);
+      const candidates = document.querySelectorAll(
+        'header, nav, [role="banner"], [role="navigation"], body > div, #__next > div, #root > div, main > header, main > nav'
+      );
+
+      for (let i = 0; i < candidates.length && i < 120; i++) {
+        const el = candidates[i];
+        if (!el || el.nodeType !== 1) continue;
+        if (isCortexOwnedElement(el)) continue;
+        if (el.matches('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) continue;
+        if (el.closest('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) continue;
+
+        const cs = window.getComputedStyle(el);
+        if (!cs || cs.display === 'none' || cs.visibility === 'hidden') continue;
+        if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+
+        // Avoid double-pushing an element that is inside an ancestor we already shifted
+        const pushedAncestor = el.parentElement && el.parentElement.closest('[data-vest-mobile-pushed="1"]');
+        if (pushedAncestor) continue;
+
+        const rect = el.getBoundingClientRect();
+        if (rect.width < vw * 0.45 || rect.height < 20) continue;
+
+        const alreadyPushed = el.getAttribute('data-vest-mobile-pushed') === '1';
+        let origTopNum;
+        if (alreadyPushed) {
+          origTopNum = parseFloat(el.getAttribute('data-vest-mobile-orig-top-num'));
+          if (!Number.isFinite(origTopNum)) origTopNum = 0;
+        } else {
+          const parsedTop = parseFloat(cs.top);
+          origTopNum = Number.isFinite(parsedTop) ? parsedTop : Math.round(rect.top);
+          if (origTopNum > 4 || origTopNum < -4) continue;
+          el.setAttribute('data-vest-mobile-orig-top', el.style.top || '');
+          el.setAttribute('data-vest-mobile-orig-top-num', String(origTopNum));
+          el.setAttribute('data-vest-mobile-pushed', '1');
+        }
+
+        const targetTopStr = `${Math.round(origTopNum + dockHeight)}px`;
+        if (el.style.top !== targetTopStr) {
+          el.style.setProperty('top', targetTopStr, 'important');
+        }
+      }
+    } catch (e) {}
+  }
+
+  function clearMobileTopDock(pillArg) {
+    try {
+      const dock = document.getElementById(CORTEX_MOBILE_DOCK_ID);
+      const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
+      if (pill) {
+        pill.classList.remove('vest-studio-pill-mobile-docked');
+        if (dock && dock.contains(pill) && document.body) {
+          document.body.appendChild(pill);
+        }
+      }
+      if (dock && dock.isConnected) {
+        dock.remove();
+      }
+      if (document.documentElement) {
+        document.documentElement.classList.remove('vest-mobile-top-dock-active');
+        document.documentElement.style.removeProperty('--vest-mobile-dock-height');
+      }
+      if (document.body) {
+        document.body.classList.remove('vest-mobile-top-dock-active');
+      }
+      restoreMobilePushedSiteElements();
+      lastMobileTopDockHeight = 0;
+    } catch (e) {}
+  }
+
+  function ensureMobileTopDock(pillArg) {
+    const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
+    if (!pill || !document.body) return false;
+    if (!isMobileCortexLayout() || !isActiveFirmEnabledForTopDock()) {
+      clearMobileTopDock(pill);
+      return false;
+    }
+
+    let dock = document.getElementById(CORTEX_MOBILE_DOCK_ID);
+    if (!dock) {
+      dock = document.createElement('div');
+      dock.id = CORTEX_MOBILE_DOCK_ID;
+      dock.setAttribute('role', 'banner');
+      dock.setAttribute('aria-label', 'Trading Cortex mobile top bar');
+      dock.innerHTML = `
+        <div class="vest-mobile-dock-inner">
+          <div class="vest-mobile-dock-left"></div>
+          <div class="vest-mobile-dock-right">
+            <span class="vest-mobile-dock-venue" id="vest-mobile-dock-venue"></span>
+            <button type="button" class="vest-mobile-dock-icon-btn" id="vest-mobile-dock-settings-btn" title="Trading Cortex Settings" aria-label="Trading Cortex Settings">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+      const settingsBtn = dock.querySelector('#vest-mobile-dock-settings-btn');
+      if (settingsBtn) {
+        settingsBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeStudioDropdown();
+          if (typeof openStudioSettingsModal === 'function') {
+            openStudioSettingsModal('about');
+          }
+        });
+      }
+    }
+
+    const isDev = latestUpdateChannel === 'dev' || /alpha/i.test(getSafeExtVersion());
+    dock.classList.toggle('dev-channel', isDev);
+
+    const venueEl = dock.querySelector('#vest-mobile-dock-venue');
+    if (venueEl) {
+      const activeFirm = typeof getActivePerpFirm === 'function' ? getActivePerpFirm() : null;
+      const venueLabel = (activeFirm && activeFirm.name) ? activeFirm.name : getStudioPillHostKey();
+      const nextVenueText = window.__TRADING_CORTEX_USERSCRIPT__ ? `${venueLabel} · Mobile` : venueLabel;
+      if (venueEl.textContent !== nextVenueText) {
+        venueEl.textContent = nextVenueText;
+      }
+    }
+
+    if (dock.parentElement !== document.body) {
+      document.body.insertBefore(dock, document.body.firstChild || null);
+    }
+
+    const leftSlot = dock.querySelector('.vest-mobile-dock-left');
+    pill.classList.remove('vest-studio-pill-tv-toolbar');
+    pill.classList.remove('vest-studio-pill-floating-fallback');
+    pill.classList.remove('vest-studio-pill-floating');
+    pill.classList.add('vest-studio-pill-mobile-docked');
+    pill.style.left = '';
+    pill.style.top = '';
+    pill.style.right = '';
+    pill.style.bottom = '';
+    pill.style.transform = '';
+
+    if (pill.ownerDocument !== document && typeof document.adoptNode === 'function') {
+      try { document.adoptNode(pill); } catch (e) {}
+    }
+    if (leftSlot && pill.parentElement !== leftSlot) {
+      leftSlot.appendChild(pill);
+    }
+
+    const measuredH = Math.max(
+      CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT,
+      Math.round((dock.getBoundingClientRect && dock.getBoundingClientRect().height) || dock.offsetHeight || CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT)
+    );
+    syncMobileTopDockLayoutPush(measuredH);
+
+    if (studioMenuOpen) {
+      updateStudioDropdownPosition(pill);
+    }
+    return true;
+  }
 
   function getStudioPillHostKey() {
     try {
@@ -6922,6 +7151,10 @@
   function applyFloatingStudioPillPosition(pillArg) {
     const pill = pillArg || studioPillEl || document.getElementById('vest-studio-header-pill');
     if (!pill || !pill.isConnected || isDraggingStudioPill) return;
+    if (pill.classList.contains('vest-studio-pill-mobile-docked')) {
+      if (studioMenuOpen) updateStudioDropdownPosition(pill);
+      return;
+    }
     const pillW = pill.offsetWidth || pill.getBoundingClientRect().width || 160;
     const pillH = pill.offsetHeight || pill.getBoundingClientRect().height || 28;
     const winW = Math.max(320, window.innerWidth || 1280);
@@ -6976,6 +7209,39 @@
     } catch (e) {}
 
     studioPillHostIframe = null;
+
+    if (!studioPillResizeHooked) {
+      studioPillResizeHooked = true;
+      const handleViewportChange = () => {
+        const currentPill = studioPillEl || document.getElementById('vest-studio-header-pill');
+        if (!currentPill) return;
+        const wantsMobileDock = isMobileCortexLayout() && isActiveFirmEnabledForTopDock();
+        const hasMobileDock = isMobileTopDockActive();
+        if (wantsMobileDock !== hasMobileDock) {
+          dockStudioPillNextToMarketSelector(currentPill);
+        } else if (wantsMobileDock) {
+          const dock = document.getElementById(CORTEX_MOBILE_DOCK_ID);
+          const h = dock ? Math.max(CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT, Math.round(dock.getBoundingClientRect().height || CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT)) : CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT;
+          syncMobileTopDockLayoutPush(h, true);
+          if (studioMenuOpen) updateStudioDropdownPosition(currentPill);
+        } else {
+          applyFloatingStudioPillPosition(currentPill);
+        }
+      };
+      window.addEventListener('resize', handleViewportChange, { passive: true });
+      window.addEventListener('orientationchange', handleViewportChange, { passive: true });
+    }
+
+    // Mobile viewports on enabled sites: dock cleanly at the very top & push site content down
+    if (isMobileCortexLayout() && isActiveFirmEnabledForTopDock()) {
+      ensureMobileTopDock(pill);
+      ensureCortexTopBar();
+      if (typeof repositionAllMinimizedBoxes === 'function') repositionAllMinimizedBoxes();
+      return true;
+    }
+
+    // Desktop or disabled site: ensure mobile dock & page offsets are completely cleared
+    clearMobileTopDock(pill);
     pill.classList.remove('vest-studio-pill-tv-toolbar');
     pill.classList.remove('vest-studio-pill-floating-fallback');
     pill.classList.add('vest-studio-pill-floating');
@@ -6985,13 +7251,6 @@
     }
     if (pill.parentElement !== document.body) {
       document.body.appendChild(pill);
-    }
-
-    if (!studioPillResizeHooked) {
-      studioPillResizeHooked = true;
-      window.addEventListener('resize', () => {
-        applyFloatingStudioPillPosition(studioPillEl);
-      }, { passive: true });
     }
 
     applyFloatingStudioPillPosition(pill);
@@ -7028,6 +7287,7 @@
   let autoUpdatePollTimer = null;
 
   async function triggerQuickUpdateCheck(fastPoll = false) {
+    if (window.__TRADING_CORTEX_USERSCRIPT__) return;
     if (isCheckingForUpdate) return;
     isCheckingForUpdate = true;
 
@@ -7162,6 +7422,22 @@
     const absBottom = rect.bottom + offsetTop;
     const absLeft = rect.left + offsetLeft;
     menuEl.style.position = 'fixed';
+    const mobileDock = document.getElementById(CORTEX_MOBILE_DOCK_ID);
+    const isMobileDocked = Boolean(mobileDock && mobileDock.isConnected && targetPill.classList.contains('vest-studio-pill-mobile-docked'));
+    if (isMobileDocked) {
+      const dockRect = mobileDock.getBoundingClientRect();
+      const top = Math.max(CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT + 4, Math.round(dockRect.bottom + 4));
+      const menuW = menuEl.offsetWidth || Math.min(320, Math.max(240, window.innerWidth - 16));
+      const left = Math.min(Math.max(8, Math.round(absLeft)), Math.max(8, window.innerWidth - menuW - 8));
+      menuEl.style.top = `${top}px`;
+      menuEl.style.left = `${left}px`;
+      menuEl.style.maxHeight = `${Math.max(220, window.innerHeight - top - 12)}px`;
+      menuEl.style.overflowY = 'auto';
+      menuEl.style.zIndex = '2147483647';
+      return;
+    }
+    menuEl.style.maxHeight = '';
+    menuEl.style.overflowY = '';
     const menuHeight = menuEl.offsetHeight || 440;
     const spaceBelow = window.innerHeight - absBottom;
     const spaceAbove = absTop;
@@ -7487,6 +7763,7 @@
 
     if (triggerBtn && menuEl) {
       triggerBtn.addEventListener('pointerdown', (e) => {
+        if (pill.classList.contains('vest-studio-pill-mobile-docked')) return;
         if (e.button !== 0) return;
         const pointerId = e.pointerId;
         const startX = e.clientX;
@@ -13227,7 +13504,11 @@ if (activeTab === 'diagnostics') {
     const barMargin = isTopBarOccupyingTop
       ? ((activeFirm && typeof activeFirm.barMarginBottom === 'number') ? activeFirm.barMarginBottom : CORTEX_BAR_MARGIN_BOTTOM)
       : 0;
-    const top = Math.round(headerBottom + barH + barMargin);
+    const mobileDockEl = document.getElementById(CORTEX_MOBILE_DOCK_ID);
+    const mobileDockBottom = (mobileDockEl && mobileDockEl.isConnected)
+      ? Math.round((mobileDockEl.getBoundingClientRect && mobileDockEl.getBoundingClientRect().bottom) || mobileDockEl.offsetHeight || CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT)
+      : 0;
+    const top = Math.max(mobileDockBottom, Math.round(headerBottom + barH + barMargin));
     const right = Math.max(1, window.innerWidth);
     const bottom = Math.max(top + 50, window.innerHeight);
     return { left, top, right, bottom, width: right - left, height: bottom - top };

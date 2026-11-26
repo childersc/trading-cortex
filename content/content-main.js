@@ -9301,7 +9301,9 @@
           line-height: 1 !important;
           color: #f8fafc !important;
           user-select: none !important;
+          -webkit-user-select: none !important;
           pointer-events: auto !important;
+          touch-action: none !important;
           white-space: nowrap !important;
           box-sizing: border-box !important;
           backdrop-filter: blur(8px) !important;
@@ -9388,6 +9390,8 @@
           font-weight: 800 !important;
           letter-spacing: 0.03em !important;
           cursor: pointer !important;
+          touch-action: none !important;
+          -webkit-tap-highlight-color: transparent !important;
           transition: transform 0.08s ease, filter 0.12s ease !important;
           border: 1px solid transparent !important;
           outline: none !important;
@@ -9497,6 +9501,23 @@
           background: rgba(255, 255, 255, 0.24) !important;
           color: #ffffff !important;
         }
+        @media (pointer: coarse) {
+          .vest-hn-ctrl-btn {
+            min-height: calc(26px * var(--hn-scale, 1)) !important;
+            min-width: calc(28px * var(--hn-scale, 1)) !important;
+            padding: 0 calc(8px * var(--hn-scale, 1)) !important;
+          }
+          .vest-hn-ctrl-btn.close-btn,
+          .vest-hn-tpsl-clear {
+            width: calc(24px * var(--hn-scale, 1)) !important;
+            height: calc(24px * var(--hn-scale, 1)) !important;
+            min-width: calc(24px * var(--hn-scale, 1)) !important;
+            min-height: calc(24px * var(--hn-scale, 1)) !important;
+          }
+          .vest-hn-tpsl-box {
+            min-height: calc(30px * var(--hn-scale, 1)) !important;
+          }
+        }
       `;
       doc.head.appendChild(style);
     } catch (e) {}
@@ -9514,7 +9535,10 @@
   }
 
   function startHypernovaTpSlDrag(e, kind, pos, ownerDoc) {
-    if (e.button !== 0 || !pos || !latestHypernovaYToPriceFn) return;
+    const isPrimaryOrTouch = e && e.pointerType === 'touch'
+      ? (e.button === 0 || e.button === -1 || e.button === undefined)
+      : Boolean(e && e.button === 0);
+    if (!isPrimaryOrTouch || !pos || !latestHypernovaYToPriceFn) return;
     e.stopPropagation();
     e.preventDefault();
     const pointerId = e.pointerId;
@@ -9616,12 +9640,19 @@
         cancelDrag(mv, true);
         return;
       }
+      if (mv.pointerType === 'touch' && pointerId !== undefined && mv.pointerId !== undefined && mv.pointerId !== pointerId) {
+        return;
+      }
       updatePriceFromEvent(mv);
     };
 
     const onSecondaryDown = (ev) => {
       if (ev.button === 2 || ((ev.buttons & 2) !== 0)) {
         cancelDrag(ev, true);
+        return;
+      }
+      if (ev.pointerType === 'touch' && pointerId !== undefined && ev.pointerId !== undefined && ev.pointerId !== pointerId) {
+        cancelDrag(ev, false);
       }
     };
 
