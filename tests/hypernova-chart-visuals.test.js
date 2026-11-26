@@ -854,4 +854,170 @@ function extractBlock(src, startMarker, endMarker) {
   console.log('✓ In-place native LineToolOrder/LineToolPosition overwrite, 3-line box, configurable solid line style & clean toggle restore verified');
 }
 
+// 10. Mobile Hypernova Positions Card Scraping (`positions-mobile-list`) & Native Position Line Live PnL Sync (`PnL: $XX.XX` / `PnL: -$XX.XX`)
+{
+  // 10a. VM test for `scrapeHypernovaMobilePositions()` on both collapsed & expanded mobile cards
+  const helpersBlock = extractBlock(
+    isolatedSrc,
+    'function normalizeHypernovaBaseSymbol(',
+    'function formatHypernovaOrderPrice('
+  );
+  const mobileScrapeBlock = extractBlock(
+    isolatedSrc,
+    'function scrapeHypernovaMobilePositions(',
+    'function scrapeVenueOpenPositionsWithMeta('
+  );
+
+  const makeMockNode = (text, attrs = {}, childrenBySel = {}) => ({
+    innerText: text,
+    textContent: text,
+    className: attrs.className || '',
+    getBoundingClientRect: () => ({ width: 360, height: 56 }),
+    getAttribute: (k) => (k in attrs ? attrs[k] : null),
+    querySelector: (sel) => childrenBySel[sel] || null
+  });
+
+  // Collapsed mobile card (no -entry row mounted yet!): GOLD LONG, Size 13.9842, PnL -$18.18 (-0.36%)
+  const collapsedCard = makeMockNode('', { 'data-side': 'long', 'data-testid': 'positions-mobile-row-abc' }, {
+    '[data-testid="symbol-text"]': makeMockNode('GOLD'),
+    '[data-testid$="-size"]': makeMockNode('Size\n13.9842'),
+    '[data-testid$="-pnl"]': makeMockNode('PnL (RoE%)\n-$18.18 (-0.36%)')
+  });
+  // Expanded mobile card with positive unsigned PnL ($24.50), Entry, Mark, Breach, TP/SL
+  const expandedCard = makeMockNode('', { 'data-side': 'short', 'data-testid': 'positions-mobile-row-def' }, {
+    '[data-testid="symbol-text"]': makeMockNode('ETH'),
+    '[data-testid$="-size"]': makeMockNode('Size\n2.5'),
+    '[data-testid$="-pnl"]': makeMockNode('PnL (RoE%)\n$24.50 (1.12%)'),
+    '[data-testid$="-entry"]': makeMockNode('Entry Price\n$3,100.50', {}, { '.trade-positions-mobile-detail-value': makeMockNode('$3,100.50') }),
+    '[data-testid$="-mark"]': makeMockNode('Mark Price\n$3,090.70', {}, { '.trade-positions-mobile-detail-value': makeMockNode('$3,090.70') }),
+    '[data-testid$="-breach"]': makeMockNode('Breach Price\n$3,155.00', {}, { '.trade-positions-mobile-detail-value': makeMockNode('$3,155.00') }),
+    '[data-testid="position-tpsl"]': makeMockNode('$3,050.00 / $3,120.00')
+  });
+
+  const mobileListEl = makeMockNode('', { 'data-testid': 'positions-mobile-list' });
+  const scrapeCtx = {
+    document: {
+      querySelector: (sel) => (sel.includes('positions-mobile-list') ? mobileListEl : null),
+      querySelectorAll: (sel) => (sel.includes('positions-mobile-row-') ? [collapsedCard, expandedCard] : [])
+    }
+  };
+  vm.runInNewContext(
+    `${helpersBlock}\n${mobileScrapeBlock}\nthis.scrapeHypernovaMobilePositions = scrapeHypernovaMobilePositions;`,
+    scrapeCtx
+  );
+
+  const mobileRes = scrapeCtx.scrapeHypernovaMobilePositions();
+  assert.strictEqual(mobileRes.foundTable, true, 'Mobile positions list must set foundTable: true');
+  assert.strictEqual(mobileRes.positions.length, 2, 'Must scrape both collapsed and expanded mobile cards');
+
+  assert.strictEqual(mobileRes.positions[0].symbol, 'GOLD');
+  assert.strictEqual(mobileRes.positions[0].side, 'long');
+  assert.strictEqual(mobileRes.positions[0].sizeQty, 13.9842);
+  assert.strictEqual(mobileRes.positions[0].unrealizedPnl, -18.18, 'Collapsed mobile card must capture exact live negative PnL');
+  assert.strictEqual(mobileRes.positions[0].entryPrice, null, 'Collapsed card preserves entryPrice: null for native-line fallback');
+
+  assert.strictEqual(mobileRes.positions[1].symbol, 'ETH');
+  assert.strictEqual(mobileRes.positions[1].side, 'short');
+  assert.strictEqual(mobileRes.positions[1].sizeQty, 2.5);
+  assert.strictEqual(mobileRes.positions[1].unrealizedPnl, 24.5, 'Expanded mobile card must capture exact unsigned positive PnL ($24.50)');
+  assert.strictEqual(mobileRes.positions[1].entryPrice, 3100.5);
+  assert.strictEqual(mobileRes.positions[1].markPrice, 3090.7);
+  assert.strictEqual(mobileRes.positions[1].breachPrice, 3155);
+  assert.strictEqual(mobileRes.positions[1].tpPrice, 3050);
+  assert.strictEqual(mobileRes.positions[1].slPrice, 3120);
+
+  // 10b. VM test for Hypernova native Position Line (`PnL: -$18.18`, unsigned `PnL: $24.50`, privacy `PnL: ••••`, & live `setText` repaint trigger)
+  const nativeAndPnlBlock = extractBlock(
+    mainSrc,
+    'const EMPTY_NATIVE_LINE_RENDERER =',
+    'function resolveActiveHypernovaPosition('
+  );
+  let repaintCalls = 0;
+  const pnlSyncCtx = {
+    isHypernovaMainWorldHost: () => true,
+    latestHypernovaYToPriceFn: null,
+    scheduleIctSessionsRender: () => { repaintCalls++; },
+    getHypernovaVisualsConfig: () => ({ enabled: true, tpSlBoxesEnabled: true, positionOverlayEnabled: true, tradeLineStyle: 'solid', tradeLineWidth: 1.5 })
+  };
+  vm.runInNewContext(
+    `${nativeAndPnlBlock}
+     this.extractNativeHypernovaChartLines = extractNativeHypernovaChartLines;
+     this.syncHypernovaNativeTradeLineSuppression = syncHypernovaNativeTradeLineSuppression;
+     this.computeLiveHypernovaUnrealizedPnl = computeLiveHypernovaUnrealizedPnl;`,
+    pnlSyncCtx
+  );
+
+  const makeNativePosLine = (bodyText, lineColor = '#10b981') => {
+    let curText = bodyText;
+    const pv = { renderer: () => ({ draw() {} }) };
+    const src = {
+      toolname: 'LineToolOrder',
+      _paneViews: [pv],
+      points: () => [{ price: 3570.1 }],
+      properties: () => ({ lineStyle: { value: () => 0, setValue() {} }, lineWidth: { value: () => 1, setValue() {} } }),
+      paneViews: () => src._paneViews,
+      _setPaneViews(v) { src._paneViews = v; },
+      adapter: () => src._adapter
+    };
+    src._adapter = {
+      _line: src,
+      _data: { bodyText: curText, quantityText: '' },
+      getPrice: () => 3570.1,
+      getText: () => curText,
+      setText: (next) => { curText = next; src._adapter._data.bodyText = next; return src._adapter; },
+      getQuantity: () => '',
+      getLineColor: () => lineColor,
+      getLineStyle: () => 0,
+      setLineStyle: () => src._adapter,
+      getLineWidth: () => 1,
+      setLineWidth: () => src._adapter,
+      getCancelTooltip: () => 'Close position',
+      setCancelButtonBackgroundColor: () => src._adapter
+    };
+    return src;
+  };
+
+  // Negative PnL on a GREEN LONG position must NOT misread -$18.18 as sizeQty=18.18 or side='short'!
+  const negLongSrc = makeNativePosLine('PnL: -$18.18', '#10b981');
+  const mockModel = { mainSeries: () => ({}), panes: () => [{ dataSources: () => [negLongSrc] }], updateAllViews: () => {}, lightUpdate: () => {} };
+  const extNeg = pnlSyncCtx.extractNativeHypernovaChartLines(mockModel, null);
+  assert.strictEqual(extNeg.positionLines.length, 1);
+  assert.strictEqual(extNeg.position.side, 'long', 'Negative PnL text must NEVER flip a green LONG position to short');
+  assert.strictEqual(extNeg.position.sizeQty, null, 'PnL dollar amount must NEVER be misread as sizeQty');
+  assert.strictEqual(extNeg.position.unrealizedPnl, -18.18);
+  assert.strictEqual(extNeg.position.isExplicitPnlText, true);
+
+  // Live computeLiveHypernovaUnrealizedPnl uses exact -$18.18 from native Position Line even if candle last price differs!
+  assert.strictEqual(
+    pnlSyncCtx.computeLiveHypernovaUnrealizedPnl(null, extNeg.position, 'long', 3570.1, 13.9842, 3571.5),
+    -18.18,
+    'Explicit native Position Line PnL must beat stale/candle math on mobile'
+  );
+
+  // Hook adapter.setText -> updating to unsigned positive "PnL: $24.50" triggers immediate repaint and parses +24.50!
+  pnlSyncCtx.syncHypernovaNativeTradeLineSuppression(mockModel, extNeg, pnlSyncCtx.getHypernovaVisualsConfig());
+  const beforeRepaints = repaintCalls;
+  negLongSrc._adapter.setText('PnL: $24.50');
+  assert.ok(repaintCalls > beforeRepaints, 'adapter.setText PnL tick must schedule immediate overlay repaint');
+  const extPos = pnlSyncCtx.extractNativeHypernovaChartLines(mockModel, null);
+  assert.strictEqual(extPos.position.unrealizedPnl, 24.5, 'Unsigned Hypernova positive "PnL: $24.50" must parse as +24.50');
+  assert.strictEqual(extPos.position.isExplicitPnlText, true);
+  assert.strictEqual(extPos.position.sizeQty, null);
+
+  // Privacy-masked "PnL: ••••" parses as null and falls back cleanly to live mobile DOM card PnL!
+  negLongSrc._adapter.setText('PnL: ••••');
+  const extMasked = pnlSyncCtx.extractNativeHypernovaChartLines(mockModel, null);
+  assert.strictEqual(extMasked.position.unrealizedPnl, null);
+  assert.strictEqual(extMasked.position.isExplicitPnlText, false);
+  assert.strictEqual(
+    pnlSyncCtx.computeLiveHypernovaUnrealizedPnl({ symbol: 'GOLD', side: 'long', unrealizedPnl: -18.18, source: 'dom' }, extMasked.position, 'long', 3570.1, 13.9842, 3571.5),
+    -18.18,
+    'Privacy-masked native line must fall back cleanly to live mobile Positions DOM PnL'
+  );
+
+  // Verify mobile observer target is wired in content-isolated.js
+  assert.strictEqual(isolatedSrc.includes('[data-testid="positions-mobile-list"]'), true);
+  console.log('✓ Mobile positions-mobile-list card scraping, unsigned PnL: $XX.XX parsing, 0ms setText repaint & side/qty isolation verified');
+}
+
 console.log('All Hypernova Chart Visuals tests passed!');

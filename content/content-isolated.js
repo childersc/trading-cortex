@@ -4783,7 +4783,7 @@
   }
 
   async function ensureHypernovaPositionsTabActive() {
-    if (document.querySelector('tr[data-testid^="positions-row-"]')) return true;
+    if (document.querySelector('tr[data-testid^="positions-row-"], [data-testid^="positions-mobile-row-"]')) return true;
     const kalshiBlotter = document.querySelector('div[data-perps-blotter="true"]');
     if (kalshiBlotter) {
       const hasKalshiPos = Boolean(
@@ -4797,7 +4797,7 @@
     if (posTab && posTab.getAttribute('aria-selected') !== 'true') {
       dispatchHypernovaClick(posTab);
       await waitForHypernovaCondition(() =>
-        document.querySelector('tr[data-testid^="positions-row-"]') ||
+        document.querySelector('tr[data-testid^="positions-row-"], [data-testid^="positions-mobile-row-"]') ||
         document.querySelector('div[data-perps-blotter="true"] a.perps-blotter__market-name') ||
         findHypernovaPositionsTableAndRows(),
         550,
@@ -5160,6 +5160,144 @@
     return '';
   }
 
+  function scrapeHypernovaMobilePositions() {
+    try {
+      const mobileList = document.querySelector('[data-testid="positions-mobile-list"], .trade-positions-mobile-list');
+      const rawRows = Array.from(document.querySelectorAll('[data-testid^="positions-mobile-row-"]'));
+      const visibleRows = rawRows.filter(r => {
+        const rr = typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : { width: 1, height: 1 };
+        return rr.width > 0 && rr.height > 0;
+      });
+      const listVisible = Boolean(
+        mobileList &&
+        ((() => {
+          const lr = typeof mobileList.getBoundingClientRect === 'function' ? mobileList.getBoundingClientRect() : { width: 1, height: 1 };
+          return lr.width > 0 && lr.height > 0;
+        })())
+      );
+      if (!listVisible && visibleRows.length === 0) {
+        return { foundTable: false, positions: [] };
+      }
+
+      const positions = [];
+      const readMobileDetailText = (row, suffix) => {
+        const el = row.querySelector(`[data-testid$="${suffix}"]`);
+        if (!el) return '';
+        const valEl = el.querySelector('.trade-positions-mobile-detail-value');
+        if (valEl) return (valEl.innerText || valEl.textContent || '').replace(/\s+/g, ' ').trim();
+        const labelEl = el.querySelector('.trade-positions-mobile-detail-label');
+        const full = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (labelEl) {
+          const lbl = (labelEl.innerText || labelEl.textContent || '').replace(/\s+/g, ' ').trim();
+          if (lbl && full.startsWith(lbl)) return full.slice(lbl.length).trim();
+        }
+        return full;
+      };
+
+      for (const row of visibleRows) {
+        const symTextEl = row.querySelector('[data-testid="symbol-text"]') || row.querySelector('[data-testid$="-coin"]');
+        const rawSymStr = symTextEl
+          ? (symTextEl.innerText || symTextEl.textContent || '').replace(/^market\b/i, '').trim()
+          : '';
+        const symbol = extractSymbolFromCellText(rawSymStr);
+        if (!symbol) continue;
+
+        const dataSide = String(row.getAttribute('data-side') || '').toLowerCase();
+        const rowCls = String(row.className || '').toLowerCase();
+        let side = null;
+        if (dataSide === 'short' || rowCls.includes('row-short')) side = 'short';
+        else if (dataSide === 'long' || rowCls.includes('row-long')) side = 'long';
+
+        const sizeCell = row.querySelector('[data-testid$="-size"]');
+        const sizeText = sizeCell
+          ? (sizeCell.innerText || sizeCell.textContent || '').replace(/^\s*size\b/i, '').trim()
+          : '';
+        const rawSizeNum = parseHypernovaNumber(sizeText);
+        if (!side && Number.isFinite(rawSizeNum) && rawSizeNum !== 0) {
+          side = rawSizeNum < 0 ? 'short' : 'long';
+        }
+        if (!side) side = 'long';
+
+        const pnlCell = row.querySelector('[data-testid$="-pnl"]');
+        const pnlText = pnlCell
+          ? (pnlCell.innerText || pnlCell.textContent || '').replace(/^\s*pnl\s*(\([^)]*\))?/i, '').trim()
+          : '';
+        let unrealizedPnl = parseHypernovaNumber(pnlText);
+        if (Number.isFinite(unrealizedPnl) && pnlCell) {
+          const negTone = pnlCell.querySelector('[data-tone="negative"], .trade-positions-pnl-negative, [class*="red"], [class*="rose"], [class*="destructive"]');
+          const posTone = pnlCell.querySelector('[data-tone="positive"], .trade-positions-pnl-positive, [class*="green"], [class*="emerald"], [class*="success"]');
+          if (negTone && !posTone && unrealizedPnl > 0) unrealizedPnl = -Math.abs(unrealizedPnl);
+          else if (posTone && !negTone && unrealizedPnl < 0) unrealizedPnl = Math.abs(unrealizedPnl);
+        }
+
+        const entryText = readMobileDetailText(row, '-entry');
+        const markText = readMobileDetailText(row, '-mark');
+        const notionalText = readMobileDetailText(row, '-notional');
+        const breachText = readMobileDetailText(row, '-breach');
+        const tpSlEl = row.querySelector('[data-testid="position-tpsl"]') || row.querySelector('[data-testid$="-tpsl"]');
+        const tpSlText = tpSlEl ? (tpSlEl.innerText || tpSlEl.textContent || '').replace(/^\s*tp\s*\/?\s*sl\b/i, '').trim() : '';
+
+        const entryVal = entryText ? Math.abs(parseHypernovaNumber(entryText)) : NaN;
+        const entryPrice = Number.isFinite(entryVal) && entryVal > 0 ? entryVal : null;
+        const markVal = markText ? Math.abs(parseHypernovaNumber(markText)) : NaN;
+        const markPrice = Number.isFinite(markVal) && markVal > 0 ? markVal : null;
+        const rawValNum = notionalText ? Math.abs(parseHypernovaNumber(notionalText)) : NaN;
+
+        let sizeQty = Number.isFinite(rawSizeNum) && rawSizeNum !== 0 ? Math.abs(rawSizeNum) : NaN;
+        let notionalUsd = Number.isFinite(rawValNum) && rawValNum > 0 ? rawValNum : NaN;
+        if (!Number.isFinite(sizeQty) && Number.isFinite(notionalUsd) && entryPrice) {
+          sizeQty = notionalUsd / entryPrice;
+        }
+        if (!Number.isFinite(notionalUsd) && Number.isFinite(sizeQty) && entryPrice) {
+          notionalUsd = sizeQty * entryPrice;
+        }
+
+        let tpPrice = null;
+        let slPrice = null;
+        if (tpSlText && !/view\s+orders/i.test(tpSlText)) {
+          const slashParts = tpSlText.split('/');
+          if (slashParts.length >= 2) {
+            const tpVal = Math.abs(parseHypernovaNumber(slashParts[0]));
+            const slVal = Math.abs(parseHypernovaNumber(slashParts[1]));
+            if (Number.isFinite(tpVal) && tpVal > 0) tpPrice = tpVal;
+            if (Number.isFinite(slVal) && slVal > 0) slPrice = slVal;
+          }
+        }
+
+        const breachPriceRaw = breachText && !/at\s*floor|n\/a|^[-—]+$/i.test(breachText)
+          ? Math.abs(parseHypernovaNumber(breachText))
+          : NaN;
+        const breachPrice = Number.isFinite(breachPriceRaw) && breachPriceRaw > 0 ? breachPriceRaw : null;
+        const priceDecimals = (entryText || markText || breachText)
+          ? Math.max(
+              entryText ? getHypernovaDecimalPlaces(entryText) : 0,
+              markText ? getHypernovaDecimalPlaces(markText) : 0,
+              breachPrice ? getHypernovaDecimalPlaces(breachText) : 0
+            )
+          : null;
+
+        if (!Number.isFinite(unrealizedPnl) && !Number.isFinite(sizeQty) && entryPrice === null) continue;
+
+        positions.push({
+          symbol,
+          side,
+          entryPrice,
+          markPrice,
+          breachPrice,
+          sizeQty: Number.isFinite(sizeQty) && sizeQty > 0 ? sizeQty : null,
+          notionalUsd: Number.isFinite(notionalUsd) && notionalUsd > 0 ? notionalUsd : null,
+          unrealizedPnl: Number.isFinite(unrealizedPnl) ? unrealizedPnl : null,
+          tpPrice,
+          slPrice,
+          priceDecimals,
+          isMobileCard: true
+        });
+      }
+      return { foundTable: true, positions, isMobileList: true };
+    } catch (e) {}
+    return { foundTable: false, positions: [] };
+  }
+
   function scrapeVenueOpenPositionsWithMeta() {
     if (!isTopWindow || !isChartVisualsHost()) return { foundTable: false, positions: [] };
     if (getChartVisualsHostFirmId() === 'kalshipro') {
@@ -5169,6 +5307,11 @@
     try {
       const found = findHypernovaPositionsTableAndRows();
       if (!found) {
+        // Hypernova mobile/compact layout (`<= 1299px`) renders div[data-testid="positions-mobile-list"] cards instead of <table>!
+        const mobileRes = scrapeHypernovaMobilePositions();
+        if (mobileRes.foundTable) {
+          return mobileRes;
+        }
         // Hypernova unmounts <table> completely when there are 0 open positions and shows "No Open Positions"!
         // If the Positions tab is selected OR an empty-positions state is visible, report authoritative 0 positions!
         const posTab = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"], .trade-tabs-list [role="tab"]'))
@@ -5355,6 +5498,11 @@
       if (found && found.table) {
         return found.table.querySelector('tbody, [role="rowgroup"]:last-child') || found.table;
       }
+      const mobileList = document.querySelector('[data-testid="positions-mobile-list"], .trade-positions-mobile-list, [data-testid="quick-trade-positions"]');
+      if (mobileList) {
+        const r = typeof mobileList.getBoundingClientRect === 'function' ? mobileList.getBoundingClientRect() : { width: 1, height: 1 };
+        if (r.width > 0 && r.height > 0) return mobileList;
+      }
     } catch (e) {}
     return null;
   }
@@ -5404,15 +5552,33 @@
       const openSymSet = new Set(domRes.positions.map(p => p.symbol));
       lastApiCapturedPositions = lastApiCapturedPositions.filter(p => openSymSet.has(p.symbol));
       const apiBySym = new Map(lastApiCapturedPositions.map(p => [p.symbol, p]));
+      const prevDomBySym = new Map((lastKnownDomPositions || []).filter(p => p && openSymSet.has(p.symbol)).map(p => [p.symbol, p]));
       const mergedDom = domRes.positions.map(p => {
         const api = apiBySym.get(p.symbol);
-        if (!api) return { ...p, source: 'dom' };
+        const prev = prevDomBySym.get(p.symbol);
+        const entryPrice = p.entryPrice !== null && p.entryPrice !== undefined
+          ? p.entryPrice
+          : ((api && api.entryPrice) || (prev && prev.entryPrice) || null);
+        const markPrice = p.markPrice !== null && p.markPrice !== undefined
+          ? p.markPrice
+          : ((api && api.markPrice) || (prev && prev.markPrice) || null);
+        const notionalUsd = p.notionalUsd !== null && p.notionalUsd !== undefined
+          ? p.notionalUsd
+          : ((api && api.notionalUsd) || (prev && prev.notionalUsd) || (p.sizeQty && entryPrice ? p.sizeQty * entryPrice : null));
+        const priceDecimals = Number.isInteger(p.priceDecimals)
+          ? p.priceDecimals
+          : ((api && Number.isInteger(api.priceDecimals) ? api.priceDecimals : null) ??
+             (prev && Number.isInteger(prev.priceDecimals) ? prev.priceDecimals : null));
         return {
           ...p,
           source: 'dom',
-          tpPrice: p.tpPrice !== null ? p.tpPrice : api.tpPrice,
-          slPrice: p.slPrice !== null ? p.slPrice : api.slPrice,
-          breachPrice: p.breachPrice !== null ? p.breachPrice : (api.breachPrice ?? null)
+          entryPrice,
+          markPrice,
+          notionalUsd,
+          priceDecimals,
+          tpPrice: p.tpPrice !== null ? p.tpPrice : ((api && api.tpPrice) ?? (prev && prev.tpPrice) ?? null),
+          slPrice: p.slPrice !== null ? p.slPrice : ((api && api.slPrice) ?? (prev && prev.slPrice) ?? null),
+          breachPrice: p.breachPrice !== null ? p.breachPrice : ((api && api.breachPrice) ?? (prev && prev.breachPrice) ?? null)
         };
       });
       lastKnownDomPositions = mergedDom;
@@ -5537,7 +5703,58 @@
     }
     const targetSym = normalizeHypernovaBaseSymbol(symbol);
     const found = findHypernovaPositionsTableAndRows();
-    if (!found || !found.rows.length) return null;
+    if (!found || !found.rows.length) {
+      // Fallback: Hypernova mobile positions cards (`[data-testid^="positions-mobile-row-"]`)
+      const mobileRows = Array.from(document.querySelectorAll('[data-testid^="positions-mobile-row-"]')).filter(r => {
+        const rr = typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : { width: 1, height: 1 };
+        return rr.width > 0 && rr.height > 0;
+      });
+      for (const row of mobileRows) {
+        const symTextEl = row.querySelector('[data-testid="symbol-text"]') || row.querySelector('[data-testid$="-coin"]');
+        const symText = symTextEl ? (symTextEl.innerText || symTextEl.textContent || '').replace(/^market\b/i, '').trim() : '';
+        const rowSym = extractSymbolFromCellText(symText);
+        if (!targetSym || rowSym === targetSym) {
+          const entryEl = row.querySelector('[data-testid$="-entry"] .trade-positions-mobile-detail-value') || row.querySelector('[data-testid$="-entry"]');
+          const markEl = row.querySelector('[data-testid$="-mark"] .trade-positions-mobile-detail-value') || row.querySelector('[data-testid$="-mark"]');
+          const entryText = entryEl ? (entryEl.innerText || entryEl.textContent || '') : '';
+          const markText = markEl ? (markEl.innerText || markEl.textContent || '') : '';
+          const priceDecimals = (entryText || markText)
+            ? Math.max(getHypernovaDecimalPlaces(entryText), getHypernovaDecimalPlaces(markText))
+            : null;
+          const rowButtons = Array.from(row.querySelectorAll('button, [role="button"]'));
+          const mobileExpandBtn = row.querySelector('[data-testid^="positions-mobile-toggle-"]') ||
+            row.querySelector('.trade-positions-mobile-chevron-btn') || null;
+          const tpSlTrigger =
+            row.querySelector('[data-testid="position-tpsl"]') ||
+            row.querySelector('.trade-positions-mobile-tpsl-chip') ||
+            rowButtons.find(b => /tp\s*\/?\s*sl|take\s*profit|stop\s*loss/i.test(`${b.innerText || b.textContent || ''} ${b.getAttribute('aria-label') || ''}`)) ||
+            null;
+          const closeTrigger =
+            row.querySelector('[data-testid="close-position-menu-trigger"]') ||
+            rowButtons.find(b => {
+              const t = (b.innerText || b.textContent || '').trim();
+              const aria = (b.getAttribute('aria-label') || b.getAttribute('title') || '').trim();
+              return /^(market|close|market\s+close|exit)$/i.test(t) || /close\s*position/i.test(aria);
+            }) ||
+            null;
+          return {
+            row,
+            cells: [],
+            headers: [],
+            idxTpSl: -1,
+            tpSlTrigger,
+            closeTrigger,
+            mobileExpandBtn,
+            priceDecimals,
+            existingTpPrice: null,
+            existingSlPrice: null,
+            isKalshiPro: false,
+            isMobileCard: true
+          };
+        }
+      }
+      return null;
+    }
     const { headers, rows } = found;
     const idxSym = Math.max(0, headers.findIndex(h => /market|symbol|coin|pair|asset|contract|instrument|ticker/.test(h)));
     const idxEntry = headers.findIndex(h => /entry|open price|avg/.test(h));
@@ -5674,7 +5891,14 @@
 
     try {
       await ensureHypernovaPositionsTabActive();
-      const rowInfo = findHypernovaPositionRowBySymbol(symbol);
+      let rowInfo = findHypernovaPositionRowBySymbol(symbol);
+      if (rowInfo && rowInfo.isMobileCard && !rowInfo.tpSlTrigger && rowInfo.mobileExpandBtn) {
+        dispatchHypernovaClick(rowInfo.mobileExpandBtn);
+        rowInfo = await waitForHypernovaCondition(() => {
+          const next = findHypernovaPositionRowBySymbol(symbol);
+          return next && next.tpSlTrigger ? next : null;
+        }, 650, 40) || rowInfo;
+      }
       const formatted = isClear ? '' : (typeof valueStr === 'string' ? valueStr : formatHypernovaOrderPrice(valueStr, rowInfo ? rowInfo.priceDecimals : null));
 
       let dialog = findHypernovaTpSlDialog();
@@ -5816,7 +6040,14 @@
     const symbol = payload.symbol || '';
     const venueLabel = getChartVisualsHostDisplayName();
     await ensureHypernovaPositionsTabActive();
-    const rowInfo = findHypernovaPositionRowBySymbol(symbol);
+    let rowInfo = findHypernovaPositionRowBySymbol(symbol);
+    if (rowInfo && rowInfo.isMobileCard && !rowInfo.closeTrigger && rowInfo.mobileExpandBtn) {
+      dispatchHypernovaClick(rowInfo.mobileExpandBtn);
+      rowInfo = await waitForHypernovaCondition(() => {
+        const next = findHypernovaPositionRowBySymbol(symbol);
+        return next && next.closeTrigger ? next : null;
+      }, 650, 40) || rowInfo;
+    }
     if (rowInfo && rowInfo.closeTrigger) {
       dispatchHypernovaClick(rowInfo.closeTrigger);
       // Support Radix/Base UI Close dropdown menus (e.g. Hypernova's `close-position-menu-trigger`) -> Market Close

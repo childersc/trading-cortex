@@ -8820,6 +8820,21 @@
             return adapter.__cortexHnOrigSetLineWidth(val);
           };
         }
+        if (typeof adapter.setText === 'function') {
+          adapter.__cortexHnOrigSetText = adapter.setText.bind(adapter);
+          adapter.setText = function (txt) {
+            const nextStr = String(txt ?? '');
+            const prevStr = adapter.__cortexHnLastText;
+            adapter.__cortexHnLastText = nextStr;
+            const res = adapter.__cortexHnOrigSetText(txt);
+            try {
+              if (nextStr !== prevStr && isHypernovaMainWorldHost() && typeof scheduleIctSessionsRender === 'function') {
+                scheduleIctSessionsRender(false);
+              }
+            } catch (e) {}
+            return res;
+          };
+        }
       } catch (e) {}
       changed = true;
     }
@@ -9238,9 +9253,14 @@
         // Never touch Hypernova's native Breach / Pass / Liquidation lines!
         if (/\bbreach\b|\bpass\b|\bliq\b|\bliquidat/i.test(lower)) continue;
 
-        const pnlMatch = combinedText.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '').match(/([+-])\s*\$\s*(\d+(?:\.\d+)?)/) ||
-          text.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '').match(/([+-])\s*\$?\s*(\d+(?:\.\d+)?)/);
+        const normCombined = combinedText.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '');
+        const normText = text.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '');
+        const explicitPnlMatch = normText.match(/\bpnl\s*:?\s*([+-])?\s*\$\s*(\d+(?:\.\d+)?)/i);
+        const pnlMatch = explicitPnlMatch ||
+          normCombined.match(/([+-])\s*\$\s*(\d+(?:\.\d+)?)/) ||
+          normText.match(/([+-])\s*\$?\s*(\d+(?:\.\d+)?)/);
         const parsedPnlUsd = pnlMatch ? parseFloat(pnlMatch[2]) * (pnlMatch[1] === '-' ? -1 : 1) : NaN;
+        const isExplicitPnlText = Boolean(explicitPnlMatch);
 
         const makeNativeCloseFn = () => {
           try {
@@ -9268,6 +9288,7 @@
 
         const looksLikePositionOrderLine = isOrdSource && (
           /close\s*position/i.test(tooltipLower) ||
+          /^\s*pnl\s*:/i.test(text) ||
           (
             knownPosHint &&
             Number.isFinite(Number(knownPosHint.entryPrice)) &&
@@ -9282,7 +9303,10 @@
           let side = null;
           if (/\bshort\b/i.test(lower)) side = 'short';
           else if (/\blong\b/i.test(lower)) side = 'long';
-          const qtyMatch = (qtyText || text).replace(/,/g, '').match(/[+-]?\d+(?:\.\d+)?/);
+          const qtySourceStr = qtyText
+            ? qtyText.replace(/,/g, '')
+            : normText.replace(/\bpnl\s*:?\s*[+-]?\s*\$?\s*\d+(?:\.\d+)?/gi, '').replace(/[+-]?\s*\$\s*\d+(?:\.\d+)?/g, '');
+          const qtyMatch = qtySourceStr.match(/[+-]?\d+(?:\.\d+)?/);
           const qtyNum = qtyMatch ? parseFloat(qtyMatch[0]) : NaN;
           if (!side && Number.isFinite(qtyNum) && qtyNum !== 0) {
             side = qtyNum < 0 ? 'short' : 'long';
@@ -9300,6 +9324,7 @@
             side: side || (knownPosHint && knownPosHint.side) || 'long',
             sizeQty: Number.isFinite(qtyNum) && qtyNum !== 0 ? Math.abs(qtyNum) : null,
             unrealizedPnl: Number.isFinite(parsedPnlUsd) ? parsedPnlUsd : null,
+            isExplicitPnlText,
             src,
             adapter,
             nativeCloseFn: makeNativeCloseFn
@@ -9353,13 +9378,33 @@
     const hasDomPnl = Boolean(domMatch && domMatch.unrealizedPnl !== null && domMatch.unrealizedPnl !== undefined && Number.isFinite(Number(domMatch.unrealizedPnl)));
     const domPnl = hasDomPnl ? Number(domMatch.unrealizedPnl) : null;
     const domIsLive = Boolean(domMatch && domMatch.source === 'dom');
+    const hasNativePnl = Boolean(
+      nativePosition &&
+      nativePosition.unrealizedPnl !== null &&
+      nativePosition.unrealizedPnl !== undefined &&
+      Number.isFinite(Number(nativePosition.unrealizedPnl))
+    );
+    const nativePnl = hasNativePnl ? Number(nativePosition.unrealizedPnl) : null;
 
-    // 1. Live visible Positions table PnL is ground truth — uses exchange Mark Price & exact full-precision entry!
+    // 1. Hypernova's native Position OrderLine (`PnL: $XX.XX` / `PnL: -$XX.XX`) receives exact real-time
+    //    Mark-Price unrealizedPnl synchronously on every WebSocket tick from the exchange's Zustand store
+    //    (0ms delay, identical to the Positions panel — even on mobile when cards are collapsed or hidden!).
+    if (hasNativePnl && nativePosition.isExplicitPnlText) {
+      return nativePnl;
+    }
+
+    // 2. Live visible Positions panel PnL (Desktop `<table>` OR Mobile `positions-mobile-list` cards)
+    //    is ground truth — uses exchange Mark Price & exact full-precision entry!
     if (domIsLive && domPnl !== null) {
       return domPnl;
     }
 
-    // 2. When Positions tab is hidden (cached/API snapshot), project live chart price delta from cached Mark Price
+    // 3. Any other native exchange Position line PnL beats stale/candle math
+    if (hasNativePnl) {
+      return nativePnl;
+    }
+
+    // 4. When Positions tab is hidden (cached/API snapshot), project live chart price delta from cached Mark Price
     //    so PnL keeps ticking live without drifting from the exchange's Mark Price calculation!
     if (
       domPnl !== null &&
@@ -9370,15 +9415,12 @@
       return domPnl + (livePrice - Number(domMatch.markPrice)) * sizeQty * dir;
     }
 
-    // 3. Fallback when no exchange PnL is available
+    // 5. Fallback when no exchange PnL is available
     if (sizeQty && Number.isFinite(livePrice) && livePrice > 0 && Number.isFinite(entryPrice) && entryPrice > 0) {
       return (livePrice - entryPrice) * sizeQty * dir;
     }
     if (domPnl !== null) {
       return domPnl;
-    }
-    if (nativePosition && nativePosition.unrealizedPnl !== null && nativePosition.unrealizedPnl !== undefined && Number.isFinite(Number(nativePosition.unrealizedPnl))) {
-      return Number(nativePosition.unrealizedPnl);
     }
     return null;
   }

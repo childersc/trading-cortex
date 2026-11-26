@@ -1,3 +1,7 @@
+Trading Cortex v1.1.160 — Fixed Mobile Entry Box PnL Mismatch (Exact Real-Time Sync With Mobile Positions Panel)
+
+- **Exact Mobile Positions Panel PnL Sync (`v1.1.160`)**: Fixed the mobile chart Entry Box PnL not matching Hypernova's mobile Positions panel. Added native support + live `MutationObserver` for Hypernova's mobile position cards (`positions-mobile-list` / `positions-mobile-row-*` used below `1300px`, both collapsed and expanded), fixed parsing of Hypernova's native Position Line `"PnL: $XX.XX"` / `"PnL: -$XX.XX"` text (stopping negative PnL from being misread as size/side and handling unsigned positive values), hooked `adapter.setText` for 0ms real-time repaints on every WebSocket tick, and added auto-expand support when submitting BE / TP / SL / Close from mobile cards.
+
 Trading Cortex v1.1.159 — Compact Mobile On-Chart Trade Boxes & Price Pills
 
 - **Compact Mobile Position, SL / TP & Price Boxes (`v1.1.159`)**: Scaled down the on-chart Position Entry box, 3-line Stop Loss / Take Profit boxes, and Current Price / Breach Price pills specifically for mobile viewports (leaving desktop 100% untouched). Removes desktop `min-width` bloat and oversized touch-button padding, tightens margins/spacing, clamps mobile font sizes (`8–9.5px` on phones even if desktop uses larger synced fonts), trims verbose pill prefixes on narrow phones (`$3,567.10`, `Breach · $3,571.30`), hides redundant `%` on ultra-narrow SL/TP Row 3, and disables `backdrop-filter` on mobile boxes for crisp iOS Safari rendering.

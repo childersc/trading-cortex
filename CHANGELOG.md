@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.159`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.160`) are documented in this file.
+
+---
+
+## [v1.1.160] — 2026-11-26
+
+### 🎯 Fixed Mobile PnL Mismatch Against Mobile Positions Panel (0ms Exact Sync)
+- **Root Causes (Verified Directly in Hypernova's Live Mobile DOM & `trade-page` / `usd` Bundles)**:
+  1. Below `1300px` (`<= 1299px`), Hypernova switches from its desktop `<table>` to a mobile card list (`div[data-testid="positions-mobile-list"]` / `div[data-testid^="positions-mobile-row-"]`), so our table-only scraper & `MutationObserver` missed the mobile Positions panel completely.
+  2. Hypernova's native Position Entry `LineToolOrder` formats positive PnL without a `+` sign (`"PnL: $24.50"`, negative `"PnL: -$18.18"`) with `quantityText === ""`. Because our previous regex required `[+-]` and fell back to parsing `qty` from `text`, positive native PnL wasn't parsed AND negative `"PnL: -$18.18"` could be misread as `sizeQty = 18.18` / `side = 'short'` and fed into candle-price fallback math instead of live Mark-Price PnL.
+- **Fixes (`content/content-isolated.js`, `content/content-main.js`)**:
+  - **Mobile Positions Card Scraper & Live Observer**: Added `scrapeHypernovaMobilePositions()` for `[data-testid="positions-mobile-list"]` & `[data-testid^="positions-mobile-row-"]` (supporting both collapsed cards showing Market/Size/PnL and expanded detail drawers showing Entry/Mark/Notional/Breach/TP-SL), wired the live `MutationObserver` onto `[data-testid="positions-mobile-list"]`, and added mobile card auto-expand support for BE / TP / SL / Close actions.
+  - **0ms Real-Time Native Position Line PnL Sync**: Updated `extractNativeHypernovaChartLines()` to parse Hypernova's unsigned positive `"PnL: $XX.XX"` and negative `"PnL: -$XX.XX"` cleanly (never mistaking dollar PnL for position qty or side, and skipping privacy-masked `"PnL: ••••"`), hooked `adapter.setText` in `overwriteNativeHypernovaTradeLineAdapter()` to repaint immediately on every WebSocket tick, and prioritized explicit native Position Line PnL & live mobile/desktop Positions DOM PnL ahead of candle-price fallback math in `computeLiveHypernovaUnrealizedPnl()`.
+  - Added VM unit tests for mobile card scraping, unsigned/negative/masked native PnL parsing, `setText` repaint trigger, and side/qty isolation in `tests/hypernova-chart-visuals.test.js`.
 
 ---
 
