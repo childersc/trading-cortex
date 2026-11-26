@@ -90,7 +90,7 @@ function extractBlock(src, startMarker, endMarker) {
   const fnBlock = extractBlock(
     mainSrc,
     'function normalizeHypernovaMainSymbol(raw)',
-    'function extractNativeHypernovaChartLines(model)'
+    'const EMPTY_NATIVE_LINE_RENDERER ='
   );
   const ctx = { latestChartMarketPrice: 60000 };
   vm.runInNewContext(
@@ -665,6 +665,91 @@ function extractBlock(src, startMarker, endMarker) {
   assert.strictEqual(isolatedSrc.includes("source: 'dom'"), true);
   assert.strictEqual(isolatedSrc.includes("source: 'cached'"), true);
   console.log('✓ Real-time Positions table PnL priority, live MutationObserver & cached delta projection verified');
+}
+
+// 9. Replacing (suppressing duplicate) native TradingView SL, TP & Position boxes in-place without touching Breach or Limit orders
+{
+  const nativeBlock = extractBlock(
+    mainSrc,
+    'const EMPTY_NATIVE_LINE_RENDERER =',
+    'function computeLiveHypernovaUnrealizedPnl('
+  );
+  const ctx = {
+    isHypernovaMainWorldHost: () => true,
+    latestHypernovaYToPriceFn: null,
+    cfg: { enabled: true, tpSlBoxesEnabled: true, positionOverlayEnabled: true }
+  };
+  vm.runInNewContext(
+    `
+      function getHypernovaVisualsConfig() { return cfg; }
+      ${nativeBlock}
+      this.extractNativeHypernovaChartLines = extractNativeHypernovaChartLines;
+      this.syncHypernovaNativeTradeLineSuppression = syncHypernovaNativeTradeLineSuppression;
+      this.EMPTY_NATIVE_LINE_RENDERER = EMPTY_NATIVE_LINE_RENDERER;
+    `,
+    ctx
+  );
+
+  const origSlRenderer = { _data: { text: 'SL', quantityText: '11.9226 +$12.39', bodyBackgroundColor: '#ef4444', cancelButtonBackgroundColor: '#ef4444', lineColor: '#ef4444' }, draw() {} };
+  const origTpRenderer = { _data: { text: 'TP', quantityText: '11.9226 +$48.50', bodyBackgroundColor: '#10b981', cancelButtonBackgroundColor: '#10b981', lineColor: '#10b981' }, draw() {} };
+  const origPosRenderer = { _data: { text: 'LONG +$30.09', quantityText: '11.9226', bodyBackgroundColor: '#10b981', closeButtonBackgroundColor: '#10b981', lineColor: '#10b981' }, draw() {} };
+  const origBreachRenderer = { _data: { text: 'Breach', bodyBackgroundColor: '#ef4444', lineColor: '#ef4444' }, draw() {} };
+  const origLimitRenderer = { _data: { text: 'Buy Limit', quantityText: '5.0', bodyBackgroundColor: '#3b82f6', cancelButtonBackgroundColor: '#3b82f6', lineColor: '#3b82f6' }, draw() {} };
+
+  const slPv = { renderer() { return { _renderers: [origSlRenderer] }; } };
+  const tpPv = { renderer() { return { _renderers: [origTpRenderer] }; } };
+  const posPv = { renderer() { return { _renderers: [origPosRenderer] }; } };
+  const breachPv = { renderer() { return { _renderers: [origBreachRenderer] }; } };
+  const limitPv = { renderer() { return { _renderers: [origLimitRenderer] }; } };
+
+  // Minified sources with mangled constructors, rendering via topPaneViews(pane)
+  const slSrc = { _price: 3575.2, topPaneViews() { return [slPv]; } };
+  const tpSrc = { _price: 3590.0, topPaneViews() { return [tpPv]; } };
+  const posSrc = { _price: 3574.2, topPaneViews() { return [posPv]; } };
+  const breachSrc = { _price: 3571.43, topPaneViews() { return [breachPv]; } };
+  const limitSrc = { _price: 3560.0, topPaneViews() { return [limitPv]; } };
+  const rectDrawingSrc = { toolname: 'LineToolRectangle', _price: 3575.2, paneViews() { return [slPv]; } };
+
+  let updateViewsCalls = 0;
+  let lightUpdateCalls = 0;
+  const pane = { orderedSources: () => [slSrc, tpSrc, posSrc, breachSrc, limitSrc, rectDrawingSrc] };
+  const model = {
+    mainSeries: () => ({}),
+    panes: () => [pane],
+    updateAllViews: () => { updateViewsCalls++; },
+    lightUpdate: () => { lightUpdateCalls++; }
+  };
+
+  const domHint = { entryPrice: 3574.2, slPrice: 3575.2, tpPrice: 3590.0 };
+  const extracted = ctx.extractNativeHypernovaChartLines(model, domHint);
+  assert.strictEqual(extracted.slLines.length, 1, 'Must detect minified native SL OrderLine');
+  assert.strictEqual(extracted.tpLines.length, 1, 'Must detect minified native TP OrderLine');
+  assert.strictEqual(extracted.positionLines.length, 1, 'Must detect minified native PositionLine');
+  assert.strictEqual(extracted.slLine.pnlUsd, 12.39, 'Must parse exact native SL dollar PnL (+$12.39)');
+  assert.strictEqual(extracted.tpLine.pnlUsd, 48.5, 'Must parse exact native TP dollar PnL (+$48.50)');
+
+  // Suppress duplicates when our visuals are ON
+  ctx.syncHypernovaNativeTradeLineSuppression(model, extracted, ctx.cfg);
+  assert.strictEqual(slPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native SL box renderer must be suppressed when tpSlBoxesEnabled is ON');
+  assert.strictEqual(tpPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native TP box renderer must be suppressed when tpSlBoxesEnabled is ON');
+  assert.strictEqual(posPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native Position box renderer must be suppressed when positionOverlayEnabled is ON');
+  assert.notStrictEqual(breachPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native Breach line must NEVER be suppressed');
+  assert.notStrictEqual(limitPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native Buy Limit order must NEVER be suppressed');
+  assert.ok(updateViewsCalls >= 1 && lightUpdateCalls >= 1, 'Suppressing native views must trigger TradingView repaint');
+
+  // Re-extraction on subsequent frame after suppression MUST still recognize suppressed sources cleanly!
+  const extractedFrame2 = ctx.extractNativeHypernovaChartLines(model, domHint);
+  assert.strictEqual(extractedFrame2.slLines.length, 1, 'Frame 2 extraction must still recognize wrapped SL OrderLine');
+  assert.strictEqual(extractedFrame2.tpLines.length, 1, 'Frame 2 extraction must still recognize wrapped TP OrderLine');
+  assert.strictEqual(extractedFrame2.positionLines.length, 1, 'Frame 2 extraction must still recognize wrapped PositionLine');
+
+  // Turning tpSlBoxesEnabled OFF immediately restores native SL & TP boxes without touching Position suppression!
+  ctx.cfg = { enabled: true, tpSlBoxesEnabled: false, positionOverlayEnabled: true };
+  ctx.syncHypernovaNativeTradeLineSuppression(model, extractedFrame2, ctx.cfg);
+  assert.notStrictEqual(slPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native SL renderer must restore when tpSlBoxesEnabled is OFF');
+  assert.notStrictEqual(tpPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native TP renderer must restore when tpSlBoxesEnabled is OFF');
+  assert.strictEqual(posPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native Position renderer stays suppressed while positionOverlayEnabled is ON');
+  console.log('✓ In-place native SL, TP & Position box suppression, re-detection & clean toggle restore verified');
 }
 
 console.log('All Hypernova Chart Visuals tests passed!');

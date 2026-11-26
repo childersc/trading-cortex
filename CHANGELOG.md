@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.152`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.153`) are documented in this file.
+
+---
+
+## [v1.1.153] — 2026-11-26
+
+### 🎯 Replaced Existing Native SL / TP & Position Boxes In-Place (No More Duplicate Second Box)
+- **Root Cause**: TradingView's native `OrderLine` (SL / TP) and `PositionLine` painted via `paneViews` / `topPaneViews` underneath or beside Trading Cortex's enhanced boxes — showing two Stop Loss boxes (or two Take Profit boxes) side-by-side on the same line (especially when SL sat near entry).
+- **Fixes (`content/content-main.js`)**:
+  - Upgraded `extractNativeHypernovaChartLines()` with full source discovery (`collectModelChartSources` across `sources`, `allSources`, `customSources`, `priceDataSources`, `orderedSources`, `sourcesByGroup`) and minified-safe renderer inspection (`inspectOrderOrPositionRendererData` on both `paneViews` and `topPaneViews`), while strictly ignoring indicators, user drawings (`LineTool*`), `"Breach"` lines, and regular `"Buy Limit"` / `"Sell Limit"` orders.
+  - Added reversible pane-renderer suppression (`hookNativeHypernovaTradeLinePaneView` & `syncHypernovaNativeTradeLineSuppression`) so TradingView's duplicate native SL, TP, and Position canvas boxes are cleanly replaced in-place by our single interactive boxes (preserving TradingView's right price-axis badges, and instantly restoring the original native boxes if toggled OFF in Settings).
+  - Parsed exact settled dollar PnL from native SL/TP lines so our replacement SL/TP box matches Hypernova's sub-tick unrounded entry fill to the exact penny when settled, while smoothly computing live dollar PnL on every pixel during drags.
+  - Added VM unit tests in `tests/hypernova-chart-visuals.test.js` covering minified `topPaneViews` suppression, re-detection across frames, Breach/Limit exclusion, and toggle restoration.
 
 ---
 

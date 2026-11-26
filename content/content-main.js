@@ -8687,76 +8687,364 @@
     return (targetPrice - pos.entryPrice) * qty * dir;
   }
 
-  function extractNativeHypernovaChartLines(model) {
-    const result = { position: null, tpLine: null, slLine: null };
-    try {
-      const sources = [];
-      if (model) {
-        if (typeof model.sources === 'function') {
-          const s = model.sources();
-          if (Array.isArray(s)) sources.push(...s);
+  const EMPTY_NATIVE_LINE_RENDERER = {
+    draw() {},
+    drawBackground() {},
+    hitTest() { return null; }
+  };
+  let lastNativeTradeLineSuppressionSig = '';
+
+  function collectModelChartSources(model) {
+    const out = [];
+    const seen = new Set();
+    const addList = (list) => {
+      if (!list) return;
+      if (Array.isArray(list)) {
+        for (let i = 0; i < list.length; i++) {
+          const s = list[i];
+          if (s && !seen.has(s)) {
+            seen.add(s);
+            out.push(s);
+          }
         }
-        if (Array.isArray(model._lineTools)) sources.push(...model._lineTools);
-        if (typeof model.panes === 'function') {
-          const panes = model.panes() || [];
-          panes.forEach(pane => {
-            if (pane && typeof pane.dataSources === 'function') {
-              const ds = pane.dataSources();
-              if (Array.isArray(ds)) sources.push(...ds);
+      } else if (typeof list.forEach === 'function') {
+        try {
+          list.forEach(s => {
+            if (s && !seen.has(s)) {
+              seen.add(s);
+              out.push(s);
             }
           });
+        } catch (e) {}
+      }
+    };
+    if (!model) return out;
+    try {
+      if (typeof model.sources === 'function') addList(model.sources());
+      if (typeof model.allSources === 'function') addList(model.allSources());
+      if (typeof model.customSources === 'function') addList(model.customSources());
+      if (typeof model.priceDataSources === 'function') addList(model.priceDataSources());
+      addList(model._lineTools);
+      addList(model._customSources);
+      addList(model._orderLines);
+      addList(model._positionLines);
+      const panes = typeof model.panes === 'function' ? (model.panes() || []) : [];
+      for (const pane of panes) {
+        if (!pane) continue;
+        if (typeof pane.dataSources === 'function') addList(pane.dataSources());
+        if (typeof pane.allSources === 'function') addList(pane.allSources());
+        if (typeof pane.orderedSources === 'function') addList(pane.orderedSources());
+        if (typeof pane.sourcesByGroup === 'function') {
+          try {
+            const byGroup = pane.sourcesByGroup();
+            if (byGroup) {
+              if (typeof byGroup.all === 'function') addList(byGroup.all());
+              if (typeof byGroup.values === 'function') {
+                for (const v of byGroup.values()) addList(v);
+              } else if (typeof byGroup === 'object') {
+                Object.values(byGroup).forEach(addList);
+              }
+            }
+          } catch (e) {}
+        }
+        addList(pane._dataSources);
+        addList(pane._sources);
+        addList(pane._customSources);
+        addList(pane._lineTools);
+        addList(pane._orderLines);
+        addList(pane._positionLines);
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  function collectSourcePaneViews(src, panes = []) {
+    const out = [];
+    const seen = new Set();
+    const addViews = (list) => {
+      if (!list) return;
+      if (Array.isArray(list)) {
+        for (const v of list) {
+          if (v && typeof v === 'object' && !seen.has(v)) {
+            seen.add(v);
+            out.push(v);
+          }
+        }
+      } else if (typeof list === 'object' && typeof list.renderer === 'function' && !seen.has(list)) {
+        seen.add(list);
+        out.push(list);
+      }
+    };
+    if (!src) return out;
+    try {
+      if (typeof src.paneViews === 'function') {
+        try { addViews(src.paneViews()); } catch (e) {}
+        for (const p of panes) {
+          try { addViews(src.paneViews(p)); } catch (e) {}
         }
       }
-      const seen = new Set();
+      if (typeof src.topPaneViews === 'function') {
+        try { addViews(src.topPaneViews()); } catch (e) {}
+        for (const p of panes) {
+          try { addViews(src.topPaneViews(p)); } catch (e) {}
+        }
+      }
+      addViews(src._paneViews);
+      addViews(src._topPaneViews);
+      addViews(src._paneView);
+    } catch (e) {}
+    return out;
+  }
+
+  function inspectOrderOrPositionRendererData(paneViews) {
+    const info = {
+      text: '',
+      quantityText: '',
+      colorStr: '',
+      y: NaN,
+      hasOrderBoxFields: false,
+      hasCloseBoxFields: false,
+      hasCancelBoxFields: false
+    };
+    const inspectDataObj = (d) => {
+      if (!d || typeof d !== 'object') return;
+      if (typeof d.y === 'number' && Number.isFinite(d.y) && !Number.isFinite(info.y)) info.y = d.y;
+      if (typeof d.text === 'string' && d.text.trim() && !info.text) info.text = d.text.trim();
+      if (typeof d.bodyText === 'string' && d.bodyText.trim() && !info.text) info.text = d.bodyText.trim();
+      if (typeof d.quantityText === 'string' && d.quantityText.trim() && !info.quantityText) info.quantityText = d.quantityText.trim();
+      if (typeof d.quantity === 'string' && d.quantity.trim() && !info.quantityText) info.quantityText = d.quantity.trim();
+      if (typeof d.lineColor === 'string' && d.lineColor && !info.colorStr) info.colorStr = d.lineColor;
+      if (typeof d.bodyBackgroundColor === 'string' && d.bodyBackgroundColor && !info.colorStr) info.colorStr = d.bodyBackgroundColor;
+      if (
+        ('closeButtonBackgroundColor' in d) ||
+        ('closeButtonIconColor' in d) ||
+        ('reverseButtonBackgroundColor' in d) ||
+        ('showCloseButton' in d)
+      ) {
+        info.hasCloseBoxFields = true;
+        info.hasOrderBoxFields = true;
+      }
+      if (
+        ('cancelButtonBackgroundColor' in d) ||
+        ('cancelButtonIconColor' in d) ||
+        ('showCancelButton' in d)
+      ) {
+        info.hasCancelBoxFields = true;
+        info.hasOrderBoxFields = true;
+      }
+      if (
+        ('quantityText' in d) ||
+        ('bodyBackgroundColor' in d && ('lineColor' in d || 'bodyBorderColor' in d))
+      ) {
+        info.hasOrderBoxFields = true;
+      }
+    };
+    const inspectRenderer = (r) => {
+      if (!r || typeof r !== 'object') return;
+      inspectDataObj(r._data);
+      inspectDataObj(r._rendererData);
+      if (Array.isArray(r._renderers)) {
+        for (const sub of r._renderers) {
+          inspectRenderer(sub);
+        }
+      }
+    };
+
+    for (const pv of paneViews) {
+      if (!pv || typeof pv !== 'object') continue;
+      try {
+        inspectDataObj(pv._data);
+        inspectDataObj(pv._rendererData);
+        inspectRenderer(pv._renderer);
+        // Use original unwrapped renderer when already hooked so suppression never blinds re-detection!
+        const rFn = pv.__cortexHnOrigRenderer || (typeof pv.renderer === 'function' ? pv.renderer.bind(pv) : null);
+        if (rFn) {
+          inspectRenderer(rFn());
+        }
+      } catch (e) {}
+    }
+    return info;
+  }
+
+  function hookNativeHypernovaTradeLinePaneView(pv, role) {
+    if (!pv || typeof pv !== 'object' || typeof pv.renderer !== 'function') return false;
+    const prevRole = pv.__cortexHnTradeRole;
+    pv.__cortexHnTradeRole = role;
+    if (pv.__cortexHnTradeLineWrapped) {
+      return prevRole !== role;
+    }
+    const origRenderer = pv.renderer.bind(pv);
+    pv.__cortexHnOrigRenderer = origRenderer;
+    pv.__cortexHnTradeLineWrapped = true;
+    pv.renderer = function (...args) {
+      try {
+        if (isHypernovaMainWorldHost()) {
+          const cfg = getHypernovaVisualsConfig();
+          const activeRole = pv.__cortexHnTradeRole;
+          if (cfg.enabled) {
+            if ((activeRole === 'tp' || activeRole === 'sl') && cfg.tpSlBoxesEnabled) {
+              return EMPTY_NATIVE_LINE_RENDERER;
+            }
+            if (activeRole === 'position' && cfg.positionOverlayEnabled) {
+              return EMPTY_NATIVE_LINE_RENDERER;
+            }
+          }
+        }
+      } catch (e) {}
+      return origRenderer(...args);
+    };
+    return true;
+  }
+
+  function syncHypernovaNativeTradeLineSuppression(model, nativeLines, hnCfg) {
+    let hookedNew = false;
+    const panes = (model && typeof model.panes === 'function') ? (model.panes() || []) : [];
+
+    if (nativeLines && hnCfg && hnCfg.enabled) {
+      const hookRoleList = (list, role) => {
+        if (!Array.isArray(list)) return;
+        for (const item of list) {
+          if (!item || !item.src) continue;
+          const views = collectSourcePaneViews(item.src, panes);
+          for (const pv of views) {
+            if (hookNativeHypernovaTradeLinePaneView(pv, role)) {
+              hookedNew = true;
+            }
+          }
+        }
+      };
+      if (hnCfg.tpSlBoxesEnabled) {
+        hookRoleList(nativeLines.tpLines, 'tp');
+        hookRoleList(nativeLines.slLines, 'sl');
+      }
+      if (hnCfg.positionOverlayEnabled) {
+        hookRoleList(nativeLines.positionLines, 'position');
+      }
+    }
+
+    const sig = hnCfg
+      ? `${Boolean(hnCfg.enabled)}|${Boolean(hnCfg.tpSlBoxesEnabled)}|${Boolean(hnCfg.positionOverlayEnabled)}|${nativeLines ? nativeLines.tpLines.length : 0}|${nativeLines ? nativeLines.slLines.length : 0}|${nativeLines ? nativeLines.positionLines.length : 0}`
+      : 'off';
+
+    if (hookedNew || sig !== lastNativeTradeLineSuppressionSig) {
+      lastNativeTradeLineSuppressionSig = sig;
+      if (model) {
+        try {
+          if (typeof model.updateAllViews === 'function') model.updateAllViews();
+          if (typeof model.lightUpdate === 'function') model.lightUpdate();
+        } catch (e) {}
+      }
+    }
+  }
+
+  function extractNativeHypernovaChartLines(model, knownPosHint = null) {
+    const result = {
+      position: null,
+      tpLine: null,
+      slLine: null,
+      positionLines: [],
+      tpLines: [],
+      slLines: []
+    };
+    try {
+      const mainSeries = model && typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+      const panes = model && typeof model.panes === 'function' ? (model.panes() || []) : [];
+      const sources = collectModelChartSources(model);
+
       for (const src of sources) {
-        if (!src || seen.has(src)) continue;
-        seen.add(src);
+        if (!src || src === mainSeries) continue;
+        // Never match indicators/studies or user chart drawings (LineToolRectangle, LineToolHorzLine, etc.)
+        if (typeof src.metaInfo === 'function' || src._metaInfo || src._studyId) continue;
+        const toolName = String(src.toolname || src._toolName || '');
+        if (/^LineTool/i.test(toolName)) continue;
+
         const ctorName = String((src.constructor && src.constructor.name) || '').toLowerCase();
-        const hasGetPrice = typeof src.getPrice === 'function' || typeof src.price === 'function';
-        const isPosSource = ctorName.includes('position') ||
+        const paneViews = collectSourcePaneViews(src, panes);
+        const rInfo = inspectOrderOrPositionRendererData(paneViews);
+
+        const isPosSource =
+          ctorName.includes('position') ||
           Boolean(src._positionLineAdapter) ||
           typeof src.onClose === 'function' ||
           typeof src.onReverse === 'function' ||
-          typeof src.callCloseCallback === 'function';
+          typeof src.callCloseCallback === 'function' ||
+          typeof src.setCloseButtonBackgroundColor === 'function' ||
+          rInfo.hasCloseBoxFields;
+
         const isOrdSource = !isPosSource && (
           ctorName.includes('order') ||
           Boolean(src._orderLineAdapter) ||
           typeof src.onCancel === 'function' ||
-          typeof src.callCancelCallback === 'function'
+          typeof src.callCancelCallback === 'function' ||
+          typeof src.setCancelButtonBackgroundColor === 'function' ||
+          typeof src.setQuantity === 'function' ||
+          typeof src.getQuantity === 'function' ||
+          rInfo.hasCancelBoxFields ||
+          rInfo.hasOrderBoxFields
         );
-        if (!isPosSource && !isOrdSource && !hasGetPrice) continue;
+
+        if (!isPosSource && !isOrdSource) continue;
 
         let price = NaN;
+        let text = '';
+        let qtyText = '';
+        let colorStr = '';
         try {
+          const srcData = (typeof src.data === 'function' ? src.data() : null) || src._data || null;
+          const srcProps = (typeof src.properties === 'function' && src.properties() && typeof src.properties().childs === 'function')
+            ? src.properties().childs()
+            : null;
+          const readPropVal = (p) => (p && typeof p.value === 'function' ? p.value() : p);
+
           if (typeof src.getPrice === 'function') price = Number(src.getPrice());
           else if (typeof src.price === 'function') price = Number(src.price());
           else if (typeof src._price === 'number') price = Number(src._price);
+          else if (srcData && typeof srcData.price === 'number') price = Number(srcData.price);
+          else if (srcProps && srcProps.price !== undefined) price = Number(readPropVal(srcProps.price));
           else if (typeof src.points === 'function') {
             const pts = src.points();
             if (Array.isArray(pts) && pts[0] && Number.isFinite(Number(pts[0].price))) {
               price = Number(pts[0].price);
             }
           }
-        } catch (e) {}
-        if (!Number.isFinite(price) || price <= 0) continue;
+          if ((!Number.isFinite(price) || price <= 0) && Number.isFinite(rInfo.y) && typeof latestHypernovaYToPriceFn === 'function') {
+            const fromY = Number(latestHypernovaYToPriceFn(rInfo.y));
+            if (Number.isFinite(fromY) && fromY > 0) price = fromY;
+          }
 
-        let text = '';
-        let qtyText = '';
-        let colorStr = '';
-        try {
           if (typeof src.getText === 'function') text = String(src.getText() || '');
           else if (typeof src.text === 'function') text = String(src.text() || '');
-          else if (src._text) text = String(src._text);
+          else if (typeof src._text === 'string') text = src._text;
+          else if (srcData && typeof srcData.text === 'string') text = srcData.text;
+          else if (srcProps && srcProps.text !== undefined) text = String(readPropVal(srcProps.text) || '');
+
           if (typeof src.getQuantity === 'function') qtyText = String(src.getQuantity() || '');
           else if (typeof src.quantity === 'function') qtyText = String(src.quantity() || '');
-          else if (src._quantity) qtyText = String(src._quantity);
+          else if (typeof src._quantity === 'string') qtyText = src._quantity;
+          else if (srcData && typeof srcData.quantity === 'string') qtyText = srcData.quantity;
+          else if (srcProps && srcProps.quantity !== undefined) qtyText = String(readPropVal(srcProps.quantity) || '');
+
           if (typeof src.getLineColor === 'function') colorStr = String(src.getLineColor() || '');
           else if (typeof src.lineColor === 'function') colorStr = String(src.lineColor() || '');
           else if (typeof src.getBodyBackgroundColor === 'function') colorStr = String(src.getBodyBackgroundColor() || '');
+          else if (srcData && typeof srcData.bodyBackgroundColor === 'string') colorStr = srcData.bodyBackgroundColor;
+          else if (srcProps && srcProps.lineColor !== undefined) colorStr = String(readPropVal(srcProps.lineColor) || '');
         } catch (e) {}
+        if (!Number.isFinite(price) || price <= 0) continue;
+
+        if (!text && rInfo.text) text = rInfo.text;
+        if (!qtyText && rInfo.quantityText) qtyText = rInfo.quantityText;
+        if (!colorStr && rInfo.colorStr) colorStr = rInfo.colorStr;
 
         const combinedText = `${text} ${qtyText}`.trim();
         const lower = combinedText.toLowerCase();
+
+        // Never touch Hypernova's native Breach / Liquidation lines or plain Limit entry orders!
+        if (/\bbreach\b|\bliq\b|\bliquidat/i.test(lower)) continue;
+
+        const pnlMatch = combinedText.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '').match(/([+-])\s*\$\s*(\d+(?:\.\d+)?)/) ||
+          text.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '').match(/([+-])\s*\$?\s*(\d+(?:\.\d+)?)/);
+        const parsedPnlUsd = pnlMatch ? parseFloat(pnlMatch[2]) * (pnlMatch[1] === '-' ? -1 : 1) : NaN;
 
         if (isPosSource) {
           let side = null;
@@ -8775,8 +9063,6 @@
               side = 'long';
             }
           }
-          const pnlMatch = text.replace(/,/g, '').match(/([+-])\s*\$?\s*(\d+(?:\.\d+)?)/);
-          const pnlUsd = pnlMatch ? parseFloat(pnlMatch[2]) * (pnlMatch[1] === '-' ? -1 : 1) : NaN;
           const nativeCloseFn = () => {
             try {
               if (typeof src.callCloseCallback === 'function') { src.callCloseCallback(); return true; }
@@ -8785,13 +9071,16 @@
             } catch (e) {}
             return false;
           };
-          result.position = {
+          const posObj = {
             entryPrice: price,
             side: side || 'long',
             sizeQty: Number.isFinite(qtyNum) && qtyNum !== 0 ? Math.abs(qtyNum) : null,
-            unrealizedPnl: Number.isFinite(pnlUsd) ? pnlUsd : null,
+            unrealizedPnl: Number.isFinite(parsedPnlUsd) ? parsedPnlUsd : null,
+            src,
             nativeCloseFn
           };
+          result.positionLines.push(posObj);
+          if (!result.position) result.position = posObj;
         } else if (isOrdSource) {
           const nativeCancelFn = () => {
             try {
@@ -8801,10 +9090,44 @@
             } catch (e) {}
             return false;
           };
-          if (/\btp\b|take\s*profit/i.test(lower)) {
-            result.tpLine = { price, src, nativeCancelFn };
-          } else if (/\bsl\b|stop\s*loss|stop/i.test(lower)) {
-            result.slLine = { price, src, nativeCancelFn };
+          const looksLikeTpByText = /\btp\b|take\s*profit/i.test(lower);
+          const looksLikeSlByText = /\bsl\b|stop\s*loss|\bstop\b/i.test(lower);
+          const looksLikePlainLimit = /\b(buy|sell)\s*limit\b|\blimit\s*(buy|sell|order)\b/i.test(lower) && !looksLikeTpByText && !looksLikeSlByText;
+          if (looksLikePlainLimit) continue;
+
+          const matchesKnownTp = Boolean(
+            knownPosHint &&
+            Number.isFinite(Number(knownPosHint.tpPrice)) &&
+            Number(knownPosHint.tpPrice) > 0 &&
+            Math.abs(price - Number(knownPosHint.tpPrice)) / Number(knownPosHint.tpPrice) < 0.0008
+          );
+          const matchesKnownSl = Boolean(
+            knownPosHint &&
+            Number.isFinite(Number(knownPosHint.slPrice)) &&
+            Number(knownPosHint.slPrice) > 0 &&
+            Math.abs(price - Number(knownPosHint.slPrice)) / Number(knownPosHint.slPrice) < 0.0008
+          );
+
+          const ordObj = {
+            price,
+            src,
+            pnlUsd: Number.isFinite(parsedPnlUsd) ? parsedPnlUsd : null,
+            nativeCancelFn
+          };
+          if (looksLikeTpByText || (matchesKnownTp && !looksLikeSlByText)) {
+            result.tpLines.push(ordObj);
+            if (!result.tpLine) result.tpLine = ordObj;
+          } else if (looksLikeSlByText || (matchesKnownSl && !looksLikeTpByText)) {
+            result.slLines.push(ordObj);
+            if (!result.slLine) result.slLine = ordObj;
+          } else if (
+            knownPosHint &&
+            Number.isFinite(Number(knownPosHint.entryPrice)) &&
+            Number(knownPosHint.entryPrice) > 0 &&
+            Math.abs(price - Number(knownPosHint.entryPrice)) / Number(knownPosHint.entryPrice) < 0.0008 &&
+            /\b(long|short|pos|position)\b/i.test(lower)
+          ) {
+            result.positionLines.push({ entryPrice: price, src });
           }
         }
       }
@@ -8849,10 +9172,10 @@
 
   function resolveActiveHypernovaPosition(symbolKey, model, livePrice) {
     const normSym = normalizeHypernovaMainSymbol(symbolKey);
-    const nativeLines = extractNativeHypernovaChartLines(model);
     const domMatch = Array.isArray(liveHypernovaPositions)
       ? liveHypernovaPositions.find(p => p && normalizeHypernovaMainSymbol(p.symbol) === normSym)
       : null;
+    const nativeLines = extractNativeHypernovaChartLines(model, domMatch);
 
     if (!nativeLines.position && !domMatch) {
       if (normSym && hypernovaManualTpSlBySymbol[normSym]) {
@@ -8922,7 +9245,12 @@
       priceDecimals: (domMatch && Number.isInteger(domMatch.priceDecimals)) ? domMatch.priceDecimals : null,
       nativeCloseFn: nativeLines.position ? nativeLines.position.nativeCloseFn : null,
       tpNativeCancelFn: nativeLines.tpLine ? nativeLines.tpLine.nativeCancelFn : null,
-      slNativeCancelFn: nativeLines.slLine ? nativeLines.slLine.nativeCancelFn : null
+      slNativeCancelFn: nativeLines.slLine ? nativeLines.slLine.nativeCancelFn : null,
+      nativeTpPrice: nativeLines.tpLine ? nativeLines.tpLine.price : null,
+      nativeSlPrice: nativeLines.slLine ? nativeLines.slLine.price : null,
+      nativeTpPnlUsd: nativeLines.tpLine && Number.isFinite(nativeLines.tpLine.pnlUsd) ? nativeLines.tpLine.pnlUsd : null,
+      nativeSlPnlUsd: nativeLines.slLine && Number.isFinite(nativeLines.slLine.pnlUsd) ? nativeLines.slLine.pnlUsd : null,
+      _nativeLines: nativeLines
     };
   }
 
@@ -9365,6 +9693,7 @@
     const hnCfg = getHypernovaVisualsConfig();
     if (!hnCfg.enabled) {
       restoreHypernovaNativeCurrentPriceLine(model, mainSeries);
+      syncHypernovaNativeTradeLineSuppression(model, null, hnCfg);
       removeHypernovaOverlayWidgets();
       return;
     }
@@ -9439,8 +9768,9 @@
     const boxesFontSize = Math.max(8, Math.min(18, Number(hnCfg.tradeBoxesFontSize) || 11));
     const boxesScale = Math.max(0.7, Math.min(1.65, boxesFontSize / 11));
 
-    // Resolve Active Position early so Breach Price can track BOTH Order Ticket preview and Open Position breach price
+    // Resolve Active Position early so Breach Price can track pre-trade state AND we can suppress duplicate native TP/SL/Position boxes
     const pos = resolveActiveHypernovaPosition(symbolKey, model, latestChartMarketPrice);
+    syncHypernovaNativeTradeLineSuppression(model, pos ? pos._nativeLines : null, hnCfg);
 
     // 1b. Hypernova Live "Breach Price" Red Line & Badge Box (moves dynamically with Order Ticket & Open Position)
     const breachData = hnCfg.breachPriceLineEnabled ? resolveActiveHypernovaBreachPrice(symbolKey, pos) : null;
@@ -9752,7 +10082,18 @@
         hypernovaOverlayEls[kind] = box;
       }
 
-      const pnlUsd = computeHypernovaTargetPnlUsd(pos, targetPrice);
+      // Prefer the native OrderLine's exact exchange-computed dollar PnL when settled at the same price (matches unrounded fill to the penny);
+      // use live formula while actively dragging or when no native line exists yet.
+      const nativeLinePrice = isTp ? pos.nativeTpPrice : pos.nativeSlPrice;
+      const nativeLinePnl = isTp ? pos.nativeTpPnlUsd : pos.nativeSlPnlUsd;
+      const useNativePnl = Boolean(
+        !isDraggingThis &&
+        Number.isFinite(nativeLinePnl) &&
+        Number.isFinite(nativeLinePrice) &&
+        nativeLinePrice > 0 &&
+        Math.abs(nativeLinePrice - targetPrice) / targetPrice < 0.0005
+      );
+      const pnlUsd = useNativePnl ? nativeLinePnl : computeHypernovaTargetPnlUsd(pos, targetPrice);
       const pctMove = pos.entryPrice > 0
         ? ((targetPrice - pos.entryPrice) / pos.entryPrice) * 100 * (pos.side === 'short' ? -1 : 1)
         : null;

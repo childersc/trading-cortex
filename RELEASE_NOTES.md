@@ -1,3 +1,7 @@
+Trading Cortex v1.1.153 — Replaced Existing Native SL / TP & Position Boxes In-Place (Single Clean Box Per Line)
+
+- **No More Duplicate Stop Loss / Take Profit Boxes (`v1.1.153`)**: Instead of drawing a second SL or TP box next to the exchange's existing TradingView OrderLine box, Trading Cortex now cleanly replaces the native SL, TP, and Position canvas boxes in-place (preserving TradingView's right price-axis tags, leaving Breach and regular Limit orders untouched, and instantly restoring native boxes if toggled off in Settings). Settled SL/TP boxes also pull Hypernova's exact sub-tick dollar PnL when not dragging.
+
 Trading Cortex v1.1.152 — Real-Time Entry Box PnL Synced 1:1 to Live Positions Table
 
 - **Exact Real-Time Entry Box PnL (`v1.1.152`)**: Fixed the Position Entry Box PnL lagging behind or differing from the Positions table on Hypernova, Kalshi Pro, and My Funded Perps. The Entry Box now tracks the live Positions table's exact Mark-Price PnL in real time via a scoped `MutationObserver` (~100ms response) so both numbers match to the exact cent, while projecting live chart price deltas when the Positions tab is hidden.
