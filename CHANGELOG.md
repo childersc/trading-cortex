@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.157`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.158`) are documented in this file.
+
+---
+
+## [v1.1.158] — 2026-11-26
+
+### 🎯 Overwrote Hypernova's Native `LineToolOrder` SL/TP/Position Code, Upgraded to 3-Line High Box & Configurable Solid Line Style
+- **Root Cause (Verified Directly in Hypernova's `trade-page` & TradingView `line-tool-order` Bundles)**:
+  - Hypernova creates its Stop Loss (`SL ...`), Take Profit (`TP ...`), and Position Entry (`Close position`) lines via `chartApi.createOrderLine()`, which produces TradingView **`LineToolOrder`** sources (`src.toolname === 'LineToolOrder'`, adapter at `src._adapter`, lazy `OrderPaneView` attached via `_setPaneViews(...)`), while `Breach` / `Pass` use `LineToolPosition`.
+  - `v1.1.153`'s filter skipped all `LineTool*` toolnames (accidentally skipping `LineToolOrder` & `LineToolPosition`!) and didn't read `src._adapter`, allowing the platform's native red SL box (`SL 27.7440 +$29.41 ×`) and dashed line to keep rendering alongside our box.
+- **Fixes (`content/content-main.js`, `content/content-isolated.js`)**:
+  - **Direct Native `LineToolOrder` / `LineToolPosition` Overwrite**: Updated `extractNativeHypernovaChartLines()` to match `LineToolOrder` / `LineToolPosition` via `src._adapter` / `src.adapter()` (still skipping user drawing `LineTool*`, `Breach`, `Pass`, and working `Limit` orders!), hooked lazy `_setPaneViews` so `OrderPaneView` is suppressed before painting a single duplicate frame, and overwrote `adapter.setLineStyle` / `adapter.getLineStyle` / `adapter.setLineWidth` / `adapter.getLineWidth` directly so Hypernova's `setLineStyle(dashed)` calls automatically enforce your configured style (and cleanly restore original native lines/boxes when toggled OFF).
+  - **3-Line High SL / TP Replacement Box**: Redesigned `.vest-hn-tpsl-box` into a crisp 3-line high box: Row 1 (`SL`/`TP` badge + position qty + `×` cancel), Row 2 (prominent bold signed dollar PnL colored green for profit / red for loss), Row 3 (exact target price + `%` move).
+  - **Solid Default & Configurable Line Style (`tradeLineStyle` + `tradeLineWidth`)**: Changed Position, TP, and SL lines from hardcoded dashed to **Solid (`───`) by default**, and added **Position / TP / SL Line Style** (`Solid` / `Dashed` / `Dotted`) and **Line Thickness** (`1–4px`) controls inside **Perp Firm Settings → Chart Visuals** with instant live preview.
+  - Added exact `LineToolOrder` / `LineToolPosition` VM tests in `tests/hypernova-chart-visuals.test.js`.
 
 ---
 

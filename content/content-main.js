@@ -8296,6 +8296,8 @@
       positionOverlayEnabled: true,
       tpSlBoxesEnabled: true,
       tradeBoxesFontSize: 11,
+      tradeLineStyle: 'solid',
+      tradeLineWidth: 1.5,
       currentPriceLineEnabled: true,
       currentPriceColor: '#38bdf8',
       currentPriceStyle: 'dashed',
@@ -8340,6 +8342,8 @@
     const op = Number(raw.currentPriceOpacity);
     const priceFont = Number(raw.currentPriceFontSize);
     const boxesFont = Number(raw.tradeBoxesFontSize);
+    const tradeLineStyle = ['solid', 'dashed', 'dotted'].includes(raw.tradeLineStyle) ? raw.tradeLineStyle : defaults.tradeLineStyle;
+    const tradeLineWidthNum = Number(raw.tradeLineWidth);
 
     const breachStyle = ['solid', 'dashed', 'dotted'].includes(raw.breachPriceStyle) ? raw.breachPriceStyle : defaults.breachPriceStyle;
     const breachAlign = ['left', 'center', 'right'].includes(raw.breachPriceLabelAlign) ? raw.breachPriceLabelAlign : defaults.breachPriceLabelAlign;
@@ -8355,6 +8359,8 @@
       positionOverlayEnabled: raw.positionOverlayEnabled !== false,
       tpSlBoxesEnabled: raw.tpSlBoxesEnabled !== false,
       tradeBoxesFontSize: Number.isFinite(boxesFont) ? Math.max(8, Math.min(18, Math.round(boxesFont))) : defaults.tradeBoxesFontSize,
+      tradeLineStyle,
+      tradeLineWidth: Number.isFinite(tradeLineWidthNum) ? Math.max(1, Math.min(4, tradeLineWidthNum)) : defaults.tradeLineWidth,
       currentPriceLineEnabled: raw.currentPriceLineEnabled !== false,
       currentPriceColor: rawColor,
       currentPriceStyle: style,
@@ -8694,6 +8700,157 @@
   };
   let lastNativeTradeLineSuppressionSig = '';
 
+  function getHypernovaTvLineStyleCode(styleName) {
+    if (styleName === 'dotted') return 1;
+    if (styleName === 'dashed') return 2;
+    return 0; // solid (default)
+  }
+
+  function applyHypernovaCanvasLineDash(ctx, styleName) {
+    if (styleName === 'dotted') ctx.setLineDash([2, 4]);
+    else if (styleName === 'dashed') ctx.setLineDash([6, 4]);
+    else ctx.setLineDash([]);
+  }
+
+  function getSourceTradingAdapter(src) {
+    if (!src || typeof src !== 'object') return null;
+    try {
+      if (typeof src.adapter === 'function') {
+        const a = src.adapter();
+        if (a && typeof a === 'object') return a;
+      }
+    } catch (e) {}
+    return src._adapter || src._orderLineAdapter || src._positionLineAdapter || null;
+  }
+
+  function isHypernovaRoleSuppressed(role, hnCfg) {
+    if (!hnCfg || !hnCfg.enabled) return false;
+    if (role === 'tp' || role === 'sl') return Boolean(hnCfg.tpSlBoxesEnabled);
+    if (role === 'position') return Boolean(hnCfg.positionOverlayEnabled);
+    return false;
+  }
+
+  function overwriteNativeHypernovaTradeLineAdapter(src, role, hnCfg) {
+    if (!src || typeof src !== 'object') return false;
+    let changed = false;
+
+    // 1. Hook lazy _setPaneViews on LineToolOrder / LineToolPosition so async OrderPaneView chunks get wrapped immediately
+    if (typeof src._setPaneViews === 'function' && !src.__cortexHnSetPaneViewsWrapped) {
+      const origSetPaneViews = src._setPaneViews.bind(src);
+      src.__cortexHnSetPaneViewsWrapped = true;
+      src.__cortexHnTradeRole = role;
+      src._setPaneViews = function (views, ...rest) {
+        if (Array.isArray(views)) {
+          for (let i = 0; i < views.length; i++) {
+            hookNativeHypernovaTradeLinePaneView(views[i], src.__cortexHnTradeRole || role);
+          }
+        }
+        return origSetPaneViews(views, ...rest);
+      };
+      changed = true;
+    } else if (src.__cortexHnTradeRole !== role) {
+      src.__cortexHnTradeRole = role;
+      changed = true;
+    }
+
+    // 2. Overwrite adapter lineStyle & lineWidth directly so the platform's own OrderLine code obeys our configured style (default: solid = 0)
+    const adapter = getSourceTradingAdapter(src);
+    if (!adapter) return changed;
+
+    const prevRole = adapter.__cortexHnTradeRole;
+    adapter.__cortexHnTradeRole = role;
+    const active = isHypernovaRoleSuppressed(role, hnCfg);
+    const targetStyleCode = getHypernovaTvLineStyleCode(hnCfg ? hnCfg.tradeLineStyle : 'solid');
+    const targetWidth = hnCfg && Number.isFinite(Number(hnCfg.tradeLineWidth))
+      ? Math.max(1, Math.min(4, Number(hnCfg.tradeLineWidth)))
+      : 1.5;
+
+    if (!adapter.__cortexHnLineCodeWrapped) {
+      adapter.__cortexHnLineCodeWrapped = true;
+      try {
+        if (typeof adapter.getLineStyle === 'function') {
+          adapter.__cortexHnOrigGetLineStyle = adapter.getLineStyle.bind(adapter);
+          adapter.__cortexHnOrigLineStyle = adapter.__cortexHnOrigGetLineStyle();
+          adapter.getLineStyle = function () {
+            try {
+              const cfg = getHypernovaVisualsConfig();
+              if (isHypernovaMainWorldHost() && isHypernovaRoleSuppressed(adapter.__cortexHnTradeRole, cfg)) {
+                return getHypernovaTvLineStyleCode(cfg.tradeLineStyle);
+              }
+            } catch (e) {}
+            return adapter.__cortexHnOrigGetLineStyle();
+          };
+        }
+        if (typeof adapter.setLineStyle === 'function') {
+          adapter.__cortexHnOrigSetLineStyle = adapter.setLineStyle.bind(adapter);
+          adapter.setLineStyle = function (val) {
+            adapter.__cortexHnOrigLineStyle = val;
+            try {
+              const cfg = getHypernovaVisualsConfig();
+              if (isHypernovaMainWorldHost() && isHypernovaRoleSuppressed(adapter.__cortexHnTradeRole, cfg)) {
+                return adapter.__cortexHnOrigSetLineStyle(getHypernovaTvLineStyleCode(cfg.tradeLineStyle));
+              }
+            } catch (e) {}
+            return adapter.__cortexHnOrigSetLineStyle(val);
+          };
+        }
+        if (typeof adapter.getLineWidth === 'function') {
+          adapter.__cortexHnOrigGetLineWidth = adapter.getLineWidth.bind(adapter);
+          adapter.__cortexHnOrigLineWidth = adapter.__cortexHnOrigGetLineWidth();
+          adapter.getLineWidth = function () {
+            try {
+              const cfg = getHypernovaVisualsConfig();
+              if (isHypernovaMainWorldHost() && isHypernovaRoleSuppressed(adapter.__cortexHnTradeRole, cfg)) {
+                return Number.isFinite(Number(cfg.tradeLineWidth)) ? Number(cfg.tradeLineWidth) : 1.5;
+              }
+            } catch (e) {}
+            return adapter.__cortexHnOrigGetLineWidth();
+          };
+        }
+        if (typeof adapter.setLineWidth === 'function') {
+          adapter.__cortexHnOrigSetLineWidth = adapter.setLineWidth.bind(adapter);
+          adapter.setLineWidth = function (val) {
+            adapter.__cortexHnOrigLineWidth = val;
+            try {
+              const cfg = getHypernovaVisualsConfig();
+              if (isHypernovaMainWorldHost() && isHypernovaRoleSuppressed(adapter.__cortexHnTradeRole, cfg)) {
+                return adapter.__cortexHnOrigSetLineWidth(Number.isFinite(Number(cfg.tradeLineWidth)) ? Number(cfg.tradeLineWidth) : 1.5);
+              }
+            } catch (e) {}
+            return adapter.__cortexHnOrigSetLineWidth(val);
+          };
+        }
+      } catch (e) {}
+      changed = true;
+    }
+
+    // Apply (or restore) the overwritten style & width directly on the source's TradingView properties
+    try {
+      const props = typeof src.properties === 'function' ? src.properties() : null;
+      const desiredStyle = active ? targetStyleCode : adapter.__cortexHnOrigLineStyle;
+      const desiredWidth = active ? targetWidth : adapter.__cortexHnOrigLineWidth;
+      if (desiredStyle !== undefined && props && props.lineStyle && typeof props.lineStyle.setValue === 'function') {
+        const cur = typeof props.lineStyle.value === 'function' ? props.lineStyle.value() : undefined;
+        if (cur !== desiredStyle) {
+          props.lineStyle.setValue(desiredStyle);
+          changed = true;
+        }
+      } else if (desiredStyle !== undefined && typeof adapter.__cortexHnOrigSetLineStyle === 'function' && prevRole !== role) {
+        adapter.__cortexHnOrigSetLineStyle(desiredStyle);
+        changed = true;
+      }
+      if (desiredWidth !== undefined && props && props.lineWidth && typeof props.lineWidth.setValue === 'function') {
+        const curW = typeof props.lineWidth.value === 'function' ? props.lineWidth.value() : undefined;
+        if (curW !== desiredWidth) {
+          props.lineWidth.setValue(desiredWidth);
+          changed = true;
+        }
+      }
+    } catch (e) {}
+
+    return changed;
+  }
+
   function collectModelChartSources(model) {
     const out = [];
     const seen = new Set();
@@ -8900,11 +9057,14 @@
     let hookedNew = false;
     const panes = (model && typeof model.panes === 'function') ? (model.panes() || []) : [];
 
-    if (nativeLines && hnCfg && hnCfg.enabled) {
+    if (nativeLines) {
       const hookRoleList = (list, role) => {
         if (!Array.isArray(list)) return;
         for (const item of list) {
           if (!item || !item.src) continue;
+          if (overwriteNativeHypernovaTradeLineAdapter(item.src, role, hnCfg)) {
+            hookedNew = true;
+          }
           const views = collectSourcePaneViews(item.src, panes);
           for (const pv of views) {
             if (hookNativeHypernovaTradeLinePaneView(pv, role)) {
@@ -8913,17 +9073,13 @@
           }
         }
       };
-      if (hnCfg.tpSlBoxesEnabled) {
-        hookRoleList(nativeLines.tpLines, 'tp');
-        hookRoleList(nativeLines.slLines, 'sl');
-      }
-      if (hnCfg.positionOverlayEnabled) {
-        hookRoleList(nativeLines.positionLines, 'position');
-      }
+      hookRoleList(nativeLines.tpLines, 'tp');
+      hookRoleList(nativeLines.slLines, 'sl');
+      hookRoleList(nativeLines.positionLines, 'position');
     }
 
     const sig = hnCfg
-      ? `${Boolean(hnCfg.enabled)}|${Boolean(hnCfg.tpSlBoxesEnabled)}|${Boolean(hnCfg.positionOverlayEnabled)}|${nativeLines ? nativeLines.tpLines.length : 0}|${nativeLines ? nativeLines.slLines.length : 0}|${nativeLines ? nativeLines.positionLines.length : 0}`
+      ? `${Boolean(hnCfg.enabled)}|${Boolean(hnCfg.tpSlBoxesEnabled)}|${Boolean(hnCfg.positionOverlayEnabled)}|${hnCfg.tradeLineStyle || 'solid'}|${hnCfg.tradeLineWidth || 1.5}|${nativeLines ? nativeLines.tpLines.length : 0}|${nativeLines ? nativeLines.slLines.length : 0}|${nativeLines ? nativeLines.positionLines.length : 0}`
       : 'off';
 
     if (hookedNew || sig !== lastNativeTradeLineSuppressionSig) {
@@ -8954,17 +9110,29 @@
       for (const src of sources) {
         if (!src || src === mainSeries) continue;
         // Never match indicators/studies or user chart drawings (LineToolRectangle, LineToolHorzLine, etc.)
+        // IMPORTANT: TradingView's native OrderLine & PositionLine ARE LineToolOrder / LineToolPosition — NEVER skip them!
         if (typeof src.metaInfo === 'function' || src._metaInfo || src._studyId) continue;
-        const toolName = String(src.toolname || src._toolName || '');
-        if (/^LineTool/i.test(toolName)) continue;
+        const toolName = String(src.toolname || src._toolName || (typeof src.name === 'function' ? src.name() : '') || '');
+        const isTvLineToolOrder = /^LineToolOrder$/i.test(toolName);
+        const isTvLineToolPosition = /^LineToolPosition$/i.test(toolName);
+        if (/^LineTool/i.test(toolName) && !isTvLineToolOrder && !isTvLineToolPosition) continue;
 
         const ctorName = String((src.constructor && src.constructor.name) || '').toLowerCase();
+        const adapter = getSourceTradingAdapter(src);
         const paneViews = collectSourcePaneViews(src, panes);
         const rInfo = inspectOrderOrPositionRendererData(paneViews);
 
         const isPosSource =
+          isTvLineToolPosition ||
           ctorName.includes('position') ||
           Boolean(src._positionLineAdapter) ||
+          Boolean(adapter && (
+            typeof adapter.setCloseButtonBackgroundColor === 'function' ||
+            typeof adapter.getCloseButtonBackgroundColor === 'function' ||
+            typeof adapter.onClose === 'function' ||
+            typeof adapter.onReverse === 'function' ||
+            typeof adapter.callCloseCallback === 'function'
+          )) ||
           typeof src.onClose === 'function' ||
           typeof src.onReverse === 'function' ||
           typeof src.callCloseCallback === 'function' ||
@@ -8972,8 +9140,18 @@
           rInfo.hasCloseBoxFields;
 
         const isOrdSource = !isPosSource && (
+          isTvLineToolOrder ||
           ctorName.includes('order') ||
           Boolean(src._orderLineAdapter) ||
+          Boolean(adapter && (
+            typeof adapter.setCancelButtonBackgroundColor === 'function' ||
+            typeof adapter.getCancelButtonBackgroundColor === 'function' ||
+            typeof adapter.onCancel === 'function' ||
+            typeof adapter.callCancelCallback === 'function' ||
+            typeof adapter.setQuantity === 'function' ||
+            typeof adapter.getQuantity === 'function' ||
+            (adapter._data && typeof adapter._data === 'object' && ('bodyText' in adapter._data || 'quantityText' in adapter._data))
+          )) ||
           typeof src.onCancel === 'function' ||
           typeof src.callCancelCallback === 'function' ||
           typeof src.setCancelButtonBackgroundColor === 'function' ||
@@ -8989,46 +9167,63 @@
         let text = '';
         let qtyText = '';
         let colorStr = '';
+        let tooltipStr = '';
         try {
+          const adapterData = adapter && adapter._data && typeof adapter._data === 'object' ? adapter._data : null;
           const srcData = (typeof src.data === 'function' ? src.data() : null) || src._data || null;
-          const srcProps = (typeof src.properties === 'function' && src.properties() && typeof src.properties().childs === 'function')
-            ? src.properties().childs()
-            : null;
+          const rawProps = typeof src.properties === 'function' ? src.properties() : null;
+          const srcProps = (rawProps && typeof rawProps.childs === 'function') ? rawProps.childs() : rawProps;
           const readPropVal = (p) => (p && typeof p.value === 'function' ? p.value() : p);
 
-          if (typeof src.getPrice === 'function') price = Number(src.getPrice());
+          if (adapter && typeof adapter.getPrice === 'function') price = Number(adapter.getPrice());
+          else if (typeof src.getPrice === 'function') price = Number(src.getPrice());
           else if (typeof src.price === 'function') price = Number(src.price());
           else if (typeof src._price === 'number') price = Number(src._price);
           else if (srcData && typeof srcData.price === 'number') price = Number(srcData.price);
           else if (srcProps && srcProps.price !== undefined) price = Number(readPropVal(srcProps.price));
-          else if (typeof src.points === 'function') {
+
+          if ((!Number.isFinite(price) || price <= 0) && typeof src.points === 'function') {
             const pts = src.points();
             if (Array.isArray(pts) && pts[0] && Number.isFinite(Number(pts[0].price))) {
               price = Number(pts[0].price);
             }
+          }
+          if ((!Number.isFinite(price) || price <= 0) && Array.isArray(src._points) && src._points[0] && Number.isFinite(Number(src._points[0].price))) {
+            price = Number(src._points[0].price);
           }
           if ((!Number.isFinite(price) || price <= 0) && Number.isFinite(rInfo.y) && typeof latestHypernovaYToPriceFn === 'function') {
             const fromY = Number(latestHypernovaYToPriceFn(rInfo.y));
             if (Number.isFinite(fromY) && fromY > 0) price = fromY;
           }
 
-          if (typeof src.getText === 'function') text = String(src.getText() || '');
+          if (adapter && typeof adapter.getText === 'function') text = String(adapter.getText() || '');
+          else if (adapterData && typeof adapterData.bodyText === 'string') text = adapterData.bodyText;
+          else if (typeof src.getText === 'function') text = String(src.getText() || '');
           else if (typeof src.text === 'function') text = String(src.text() || '');
           else if (typeof src._text === 'string') text = src._text;
           else if (srcData && typeof srcData.text === 'string') text = srcData.text;
           else if (srcProps && srcProps.text !== undefined) text = String(readPropVal(srcProps.text) || '');
 
-          if (typeof src.getQuantity === 'function') qtyText = String(src.getQuantity() || '');
+          if (adapter && typeof adapter.getQuantity === 'function') qtyText = String(adapter.getQuantity() || '');
+          else if (adapterData && typeof adapterData.quantityText === 'string') qtyText = adapterData.quantityText;
+          else if (typeof src.getQuantity === 'function') qtyText = String(src.getQuantity() || '');
           else if (typeof src.quantity === 'function') qtyText = String(src.quantity() || '');
           else if (typeof src._quantity === 'string') qtyText = src._quantity;
           else if (srcData && typeof srcData.quantity === 'string') qtyText = srcData.quantity;
           else if (srcProps && srcProps.quantity !== undefined) qtyText = String(readPropVal(srcProps.quantity) || '');
 
-          if (typeof src.getLineColor === 'function') colorStr = String(src.getLineColor() || '');
+          if (adapter && typeof adapter.getLineColor === 'function') colorStr = String(adapter.getLineColor() || '');
+          else if (adapter && typeof adapter.getBodyBackgroundColor === 'function') colorStr = String(adapter.getBodyBackgroundColor() || '');
+          else if (typeof src.getLineColor === 'function') colorStr = String(src.getLineColor() || '');
           else if (typeof src.lineColor === 'function') colorStr = String(src.lineColor() || '');
           else if (typeof src.getBodyBackgroundColor === 'function') colorStr = String(src.getBodyBackgroundColor() || '');
           else if (srcData && typeof srcData.bodyBackgroundColor === 'string') colorStr = srcData.bodyBackgroundColor;
           else if (srcProps && srcProps.lineColor !== undefined) colorStr = String(readPropVal(srcProps.lineColor) || '');
+
+          if (adapter && typeof adapter.getCancelTooltip === 'function') tooltipStr = String(adapter.getCancelTooltip() || '');
+          else if (adapter && typeof adapter.getCloseTooltip === 'function') tooltipStr = String(adapter.getCloseTooltip() || '');
+          else if (srcProps && srcProps.cancelButtonTooltip !== undefined) tooltipStr = String(readPropVal(srcProps.cancelButtonTooltip) || '');
+          else if (srcProps && srcProps.closeButtonTooltip !== undefined) tooltipStr = String(readPropVal(srcProps.closeButtonTooltip) || '');
         } catch (e) {}
         if (!Number.isFinite(price) || price <= 0) continue;
 
@@ -9038,19 +9233,56 @@
 
         const combinedText = `${text} ${qtyText}`.trim();
         const lower = combinedText.toLowerCase();
+        const tooltipLower = tooltipStr.toLowerCase();
 
-        // Never touch Hypernova's native Breach / Liquidation lines or plain Limit entry orders!
-        if (/\bbreach\b|\bliq\b|\bliquidat/i.test(lower)) continue;
+        // Never touch Hypernova's native Breach / Pass / Liquidation lines!
+        if (/\bbreach\b|\bpass\b|\bliq\b|\bliquidat/i.test(lower)) continue;
 
         const pnlMatch = combinedText.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '').match(/([+-])\s*\$\s*(\d+(?:\.\d+)?)/) ||
           text.replace(/[\u2212\u2013]/g, '-').replace(/,/g, '').match(/([+-])\s*\$?\s*(\d+(?:\.\d+)?)/);
         const parsedPnlUsd = pnlMatch ? parseFloat(pnlMatch[2]) * (pnlMatch[1] === '-' ? -1 : 1) : NaN;
 
-        if (isPosSource) {
+        const makeNativeCloseFn = () => {
+          try {
+            if (adapter && typeof adapter.callCloseCallback === 'function') { adapter.callCloseCallback(); return true; }
+            if (adapter && typeof adapter._closeCallback === 'function') { adapter._closeCallback(); return true; }
+            if (adapter && typeof adapter.callCancelCallback === 'function') { adapter.callCancelCallback(); return true; }
+            if (adapter && typeof adapter._cancelCallback === 'function') { adapter._cancelCallback(); return true; }
+            if (typeof src.callCloseCallback === 'function') { src.callCloseCallback(); return true; }
+            if (src._closeCallback && typeof src._closeCallback === 'function') { src._closeCallback(); return true; }
+            if (src._onClose && typeof src._onClose === 'function') { src._onClose(); return true; }
+          } catch (e) {}
+          return false;
+        };
+
+        const makeNativeCancelFn = () => {
+          try {
+            if (adapter && typeof adapter.callCancelCallback === 'function') { adapter.callCancelCallback(); return true; }
+            if (adapter && typeof adapter._cancelCallback === 'function') { adapter._cancelCallback(); return true; }
+            if (typeof src.callCancelCallback === 'function') { src.callCancelCallback(); return true; }
+            if (src._cancelCallback && typeof src._cancelCallback === 'function') { src._cancelCallback(); return true; }
+            if (src._onCancel && typeof src._onCancel === 'function') { src._onCancel(); return true; }
+          } catch (e) {}
+          return false;
+        };
+
+        const looksLikePositionOrderLine = isOrdSource && (
+          /close\s*position/i.test(tooltipLower) ||
+          (
+            knownPosHint &&
+            Number.isFinite(Number(knownPosHint.entryPrice)) &&
+            Number(knownPosHint.entryPrice) > 0 &&
+            Math.abs(price - Number(knownPosHint.entryPrice)) / Number(knownPosHint.entryPrice) < 0.0008 &&
+            !/\btp\b|\bsl\b|take\s*profit|stop\s*loss|\blimit\b/i.test(lower) &&
+            !/cancel\s*(tp|sl|order)/i.test(tooltipLower)
+          )
+        );
+
+        if (isPosSource || looksLikePositionOrderLine) {
           let side = null;
           if (/\bshort\b/i.test(lower)) side = 'short';
           else if (/\blong\b/i.test(lower)) side = 'long';
-          const qtyMatch = qtyText.replace(/,/g, '').match(/[+-]?\d+(?:\.\d+)?/);
+          const qtyMatch = (qtyText || text).replace(/,/g, '').match(/[+-]?\d+(?:\.\d+)?/);
           const qtyNum = qtyMatch ? parseFloat(qtyMatch[0]) : NaN;
           if (!side && Number.isFinite(qtyNum) && qtyNum !== 0) {
             side = qtyNum < 0 ? 'short' : 'long';
@@ -9063,36 +9295,24 @@
               side = 'long';
             }
           }
-          const nativeCloseFn = () => {
-            try {
-              if (typeof src.callCloseCallback === 'function') { src.callCloseCallback(); return true; }
-              if (src._closeCallback && typeof src._closeCallback === 'function') { src._closeCallback(); return true; }
-              if (src._onClose && typeof src._onClose === 'function') { src._onClose(); return true; }
-            } catch (e) {}
-            return false;
-          };
           const posObj = {
             entryPrice: price,
-            side: side || 'long',
+            side: side || (knownPosHint && knownPosHint.side) || 'long',
             sizeQty: Number.isFinite(qtyNum) && qtyNum !== 0 ? Math.abs(qtyNum) : null,
             unrealizedPnl: Number.isFinite(parsedPnlUsd) ? parsedPnlUsd : null,
             src,
-            nativeCloseFn
+            adapter,
+            nativeCloseFn: makeNativeCloseFn
           };
           result.positionLines.push(posObj);
           if (!result.position) result.position = posObj;
         } else if (isOrdSource) {
-          const nativeCancelFn = () => {
-            try {
-              if (typeof src.callCancelCallback === 'function') { src.callCancelCallback(); return true; }
-              if (src._cancelCallback && typeof src._cancelCallback === 'function') { src._cancelCallback(); return true; }
-              if (src._onCancel && typeof src._onCancel === 'function') { src._onCancel(); return true; }
-            } catch (e) {}
-            return false;
-          };
-          const looksLikeTpByText = /\btp\b|take\s*profit/i.test(lower);
-          const looksLikeSlByText = /\bsl\b|stop\s*loss|\bstop\b/i.test(lower);
-          const looksLikePlainLimit = /\b(buy|sell)\s*limit\b|\blimit\s*(buy|sell|order)\b/i.test(lower) && !looksLikeTpByText && !looksLikeSlByText;
+          const looksLikeTpByText = /\btp\b|take\s*profit/i.test(lower) || /cancel\s*tp|clear\s*tp/i.test(tooltipLower);
+          const looksLikeSlByText = /\bsl\b|stop\s*loss|\bstop\b/i.test(lower) || /cancel\s*sl|clear\s*sl/i.test(tooltipLower);
+          const looksLikePlainLimit = (
+            /\b(buy|sell)\s*limit\b|\blimit\s*(buy|sell|order)\b/i.test(lower) ||
+            /cancel\s*order/i.test(tooltipLower)
+          ) && !looksLikeTpByText && !looksLikeSlByText;
           if (looksLikePlainLimit) continue;
 
           const matchesKnownTp = Boolean(
@@ -9111,8 +9331,9 @@
           const ordObj = {
             price,
             src,
+            adapter,
             pnlUsd: Number.isFinite(parsedPnlUsd) ? parsedPnlUsd : null,
-            nativeCancelFn
+            nativeCancelFn: makeNativeCancelFn
           };
           if (looksLikeTpByText || (matchesKnownTp && !looksLikeSlByText)) {
             result.tpLines.push(ordObj);
@@ -9120,14 +9341,6 @@
           } else if (looksLikeSlByText || (matchesKnownSl && !looksLikeTpByText)) {
             result.slLines.push(ordObj);
             if (!result.slLine) result.slLine = ordObj;
-          } else if (
-            knownPosHint &&
-            Number.isFinite(Number(knownPosHint.entryPrice)) &&
-            Number(knownPosHint.entryPrice) > 0 &&
-            Math.abs(price - Number(knownPosHint.entryPrice)) / Number(knownPosHint.entryPrice) < 0.0008 &&
-            /\b(long|short|pos|position)\b/i.test(lower)
-          ) {
-            result.positionLines.push({ entryPrice: price, src });
           }
         }
       }
@@ -9429,30 +9642,58 @@
           color: #ffffff !important;
         }
         .vest-hn-tpsl-box {
+          display: flex !important;
+          flex-direction: column !important;
+          align-items: stretch !important;
+          justify-content: center !important;
+          height: auto !important;
+          min-height: calc(58px * var(--hn-scale, 1)) !important;
+          min-width: calc(138px * var(--hn-scale, 1)) !important;
           cursor: ns-resize !important;
-          padding: 0 calc(6px * var(--hn-scale, 1)) 0 calc(7px * var(--hn-scale, 1)) !important;
-          gap: calc(6px * var(--hn-scale, 1)) !important;
+          padding: calc(5px * var(--hn-scale, 1)) calc(8px * var(--hn-scale, 1)) !important;
+          gap: calc(3px * var(--hn-scale, 1)) !important;
           transition: box-shadow 0.12s ease !important;
+        }
+        .vest-hn-tpsl-row-top,
+        .vest-hn-tpsl-row-mid,
+        .vest-hn-tpsl-row-bot {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          gap: calc(6px * var(--hn-scale, 1)) !important;
+          width: 100% !important;
+          line-height: 1.15 !important;
+        }
+        .vest-hn-tpsl-top-left {
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: calc(5px * var(--hn-scale, 1)) !important;
+        }
+        .vest-hn-tpsl-qty {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.88) !important;
+          font-weight: 600 !important;
+          color: rgba(226, 232, 240, 0.85) !important;
         }
         .vest-hn-tpsl-box.is-dragging {
           filter: brightness(1.16) !important;
         }
         .vest-hn-tp-box {
-          background: linear-gradient(135deg, rgba(6, 78, 59, 0.95), rgba(4, 47, 46, 0.96)) !important;
-          border: 1px solid rgba(16, 185, 129, 0.9) !important;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(16, 185, 129, 0.3) !important;
+          background: linear-gradient(150deg, rgba(6, 78, 59, 0.96), rgba(4, 47, 46, 0.97)) !important;
+          border: 1px solid rgba(16, 185, 129, 0.92) !important;
+          box-shadow: 0 5px 18px rgba(0, 0, 0, 0.58), 0 0 14px rgba(16, 185, 129, 0.3) !important;
           color: #ecfdf5 !important;
         }
         .vest-hn-sl-box {
-          background: linear-gradient(135deg, rgba(127, 29, 29, 0.95), rgba(69, 10, 10, 0.96)) !important;
-          border: 1px solid rgba(239, 68, 68, 0.9) !important;
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 14px rgba(239, 68, 68, 0.3) !important;
+          background: linear-gradient(150deg, rgba(127, 29, 29, 0.96), rgba(69, 10, 10, 0.97)) !important;
+          border: 1px solid rgba(239, 68, 68, 0.92) !important;
+          box-shadow: 0 5px 18px rgba(0, 0, 0, 0.58), 0 0 14px rgba(239, 68, 68, 0.3) !important;
           color: #fef2f2 !important;
         }
         .vest-hn-tpsl-tag {
-          padding: calc(2px * var(--hn-scale, 1)) calc(5px * var(--hn-scale, 1)) !important;
+          padding: calc(1.5px * var(--hn-scale, 1)) calc(5px * var(--hn-scale, 1)) !important;
           border-radius: 4px !important;
-          font-size: calc(var(--hn-fs, 11px) * 0.88) !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.86) !important;
           font-weight: 800 !important;
           letter-spacing: 0.05em !important;
         }
@@ -9466,18 +9707,22 @@
         }
         .vest-hn-tpsl-usd {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: calc(var(--hn-fs, 11px) * 1.04) !important;
+          font-size: calc(var(--hn-fs, 11px) * 1.16) !important;
           font-weight: 800 !important;
+          letter-spacing: 0.01em !important;
         }
-        .vest-hn-tp-box .vest-hn-tpsl-usd { color: #34d399 !important; }
-        .vest-hn-sl-box .vest-hn-tpsl-usd { color: #f87171 !important; }
-        .vest-hn-tpsl-sep {
-          opacity: 0.4 !important;
-          font-weight: 400 !important;
+        .vest-hn-tpsl-usd.pos { color: #34d399 !important; }
+        .vest-hn-tpsl-usd.neg { color: #fca5a5 !important; }
+        .vest-hn-tpsl-usd.flat { color: #e2e8f0 !important; }
+        .vest-hn-tpsl-pct {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.86) !important;
+          font-weight: 600 !important;
+          color: rgba(226, 232, 240, 0.78) !important;
         }
         .vest-hn-tpsl-price {
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: var(--hn-fs, 11px) !important;
+          font-size: calc(var(--hn-fs, 11px) * 0.96) !important;
           font-weight: 700 !important;
           color: #f8fafc !important;
         }
@@ -9724,7 +9969,7 @@
     const hnCfg = getHypernovaVisualsConfig();
     if (!hnCfg.enabled) {
       restoreHypernovaNativeCurrentPriceLine(model, mainSeries);
-      syncHypernovaNativeTradeLineSuppression(model, null, hnCfg);
+      syncHypernovaNativeTradeLineSuppression(model, extractNativeHypernovaChartLines(model, null), hnCfg);
       removeHypernovaOverlayWidgets();
       return;
     }
@@ -9933,9 +10178,9 @@
 
       ctx.save();
       ctx.strokeStyle = sideColor;
-      ctx.globalAlpha = 0.78;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = Math.max(1, Math.min(4, Number(hnCfg.tradeLineWidth) || 1.5));
+      applyHypernovaCanvasLineDash(ctx, hnCfg.tradeLineStyle || 'solid');
       ctx.beginPath();
       ctx.moveTo(0, clampedEntryY);
       ctx.lineTo(cssWidth, clampedEntryY);
@@ -10080,11 +10325,13 @@
       const clampedY = Math.max(14, Math.min(cssHeight - 14, lineY));
       const strokeColor = isTp ? '#10b981' : '#ef4444';
 
+      const baseLineW = Math.max(1, Math.min(4, Number(hnCfg.tradeLineWidth) || 1.5));
       ctx.save();
       ctx.strokeStyle = strokeColor;
-      ctx.globalAlpha = isDraggingThis ? 1 : 0.9;
-      ctx.lineWidth = isDraggingThis ? 2 : 1.5;
-      ctx.setLineDash(isDraggingThis ? [] : [6, 4]);
+      ctx.globalAlpha = isDraggingThis ? 1 : 0.92;
+      ctx.lineWidth = isDraggingThis ? Math.min(4.5, baseLineW + 0.5) : baseLineW;
+      if (isDraggingThis) ctx.setLineDash([]);
+      else applyHypernovaCanvasLineDash(ctx, hnCfg.tradeLineStyle || 'solid');
       ctx.beginPath();
       ctx.moveTo(0, clampedY);
       ctx.lineTo(cssWidth, clampedY);
@@ -10093,18 +10340,27 @@
 
       if (!parentEl) return;
       let box = hypernovaOverlayEls[kind];
-      if (!box || !box.isConnected || box.parentElement !== parentEl) {
+      if (!box || !box.isConnected || box.parentElement !== parentEl || !box.querySelector('.vest-hn-tpsl-row-mid')) {
         if (box && box.isConnected) box.remove();
         box = ownerDoc.createElement('div');
         box.id = isTp ? 'vest-hn-tp-box' : 'vest-hn-sl-box';
         box.className = `vest-hn-chart-box vest-hn-tpsl-box ${isTp ? 'vest-hn-tp-box' : 'vest-hn-sl-box'}`;
         box.title = `Drag vertically to adjust ${isTp ? 'Take Profit' : 'Stop Loss'} (right-click or Esc to cancel)`;
         box.innerHTML = `
-          <span class="vest-hn-tpsl-tag">${isTp ? 'TP' : 'SL'}</span>
-          <span class="vest-hn-tpsl-usd"></span>
-          <span class="vest-hn-tpsl-sep">·</span>
-          <span class="vest-hn-tpsl-price"></span>
-          <button type="button" class="vest-hn-tpsl-clear" title="Clear ${isTp ? 'Take Profit' : 'Stop Loss'} line">×</button>
+          <div class="vest-hn-tpsl-row-top">
+            <div class="vest-hn-tpsl-top-left">
+              <span class="vest-hn-tpsl-tag">${isTp ? 'TP' : 'SL'}</span>
+              <span class="vest-hn-tpsl-qty"></span>
+            </div>
+            <button type="button" class="vest-hn-tpsl-clear" title="Clear ${isTp ? 'Take Profit' : 'Stop Loss'} line">×</button>
+          </div>
+          <div class="vest-hn-tpsl-row-mid">
+            <span class="vest-hn-tpsl-usd"></span>
+          </div>
+          <div class="vest-hn-tpsl-row-bot">
+            <span class="vest-hn-tpsl-price"></span>
+            <span class="vest-hn-tpsl-pct"></span>
+          </div>
         `;
         ['mousedown', 'click'].forEach(evt => {
           box.addEventListener(evt, ev => ev.stopPropagation());
@@ -10132,11 +10388,29 @@
         ? formatHypernovaDollarAmount(pnlUsd)
         : (pctMove !== null ? `${pctMove >= 0 ? '+' : ''}${pctMove.toFixed(2)}%` : '$0.00');
       const priceText = `$${formatHypernovaDisplayPrice(targetPrice)}`;
+      const qtyStr = formatHypernovaQty(pos.sizeQty);
+      const pctText = pctMove !== null ? `${pctMove >= 0 ? '+' : ''}${pctMove.toFixed(2)}%` : '';
 
+      const qtyEl = box.querySelector('.vest-hn-tpsl-qty');
+      if (qtyEl) {
+        qtyEl.textContent = qtyStr;
+        qtyEl.style.display = qtyStr ? '' : 'none';
+      }
       const usdEl = box.querySelector('.vest-hn-tpsl-usd');
-      if (usdEl) usdEl.textContent = usdText;
+      if (usdEl) {
+        usdEl.textContent = usdText;
+        const pnlClass = (pnlUsd !== null && Number.isFinite(pnlUsd))
+          ? (pnlUsd > 0.005 ? 'pos' : (pnlUsd < -0.005 ? 'neg' : 'flat'))
+          : (isTp ? 'pos' : 'neg');
+        usdEl.className = `vest-hn-tpsl-usd ${pnlClass}`;
+      }
       const priceEl = box.querySelector('.vest-hn-tpsl-price');
       if (priceEl) priceEl.textContent = priceText;
+      const pctEl = box.querySelector('.vest-hn-tpsl-pct');
+      if (pctEl) {
+        pctEl.textContent = pctText;
+        pctEl.style.display = pctText ? '' : 'none';
+      }
 
       box.style.setProperty('--hn-fs', `${boxesFontSize}px`);
       box.style.setProperty('--hn-scale', boxesScale.toFixed(3));
@@ -10173,8 +10447,8 @@
         };
       }
 
-      const boxH = box.offsetHeight || Math.round(26 * boxesScale);
-      const boxW = box.offsetWidth || Math.round(168 * boxesScale);
+      const boxH = box.offsetHeight || Math.round(58 * boxesScale);
+      const boxW = box.offsetWidth || Math.round(142 * boxesScale);
       const entryBoxH = (hypernovaOverlayEls.entry && hypernovaOverlayEls.entry.offsetHeight) || Math.round(44 * boxesScale);
       // Anti-overlap: if this TP/SL sits right on top of the Entry box (e.g., SL moved to Breakeven!),
       // offset horizontally to the left of the Entry box so BOTH remain 100% readable & clickable!

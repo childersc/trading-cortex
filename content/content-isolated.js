@@ -1707,6 +1707,8 @@
     positionOverlayEnabled: true,
     tpSlBoxesEnabled: true,
     tradeBoxesFontSize: 11,
+    tradeLineStyle: 'solid',
+    tradeLineWidth: 1.5,
     currentPriceLineEnabled: true,
     currentPriceColor: '#38bdf8',
     currentPriceStyle: 'dashed',
@@ -1740,6 +1742,8 @@
     const opNum = Number(src.currentPriceOpacity);
     const priceFontNum = Number(src.currentPriceFontSize);
     const boxesFontNum = Number(src.tradeBoxesFontSize);
+    const tradeLineStyle = ['solid', 'dashed', 'dotted'].includes(src.tradeLineStyle) ? src.tradeLineStyle : DEFAULT_HYPERNOVA_VISUALS.tradeLineStyle;
+    const tradeLineWidthNum = Number(src.tradeLineWidth);
 
     const breachStyle = ['solid', 'dashed', 'dotted'].includes(src.breachPriceStyle) ? src.breachPriceStyle : DEFAULT_HYPERNOVA_VISUALS.breachPriceStyle;
     const breachAlign = ['left', 'center', 'right'].includes(src.breachPriceLabelAlign) ? src.breachPriceLabelAlign : DEFAULT_HYPERNOVA_VISUALS.breachPriceLabelAlign;
@@ -1755,6 +1759,8 @@
       positionOverlayEnabled: src.positionOverlayEnabled !== false,
       tpSlBoxesEnabled: src.tpSlBoxesEnabled !== false,
       tradeBoxesFontSize: Number.isFinite(boxesFontNum) ? Math.max(8, Math.min(18, Math.round(boxesFontNum))) : DEFAULT_HYPERNOVA_VISUALS.tradeBoxesFontSize,
+      tradeLineStyle,
+      tradeLineWidth: Number.isFinite(tradeLineWidthNum) ? Math.max(1, Math.min(4, Math.round(tradeLineWidthNum * 2) / 2)) : DEFAULT_HYPERNOVA_VISUALS.tradeLineWidth,
       currentPriceLineEnabled: src.currentPriceLineEnabled !== false,
       currentPriceColor: rawColor,
       currentPriceStyle: style,
@@ -8535,10 +8541,24 @@
                   </label>
                 </div>
 
-                <div style="padding:8px 10px; border-radius:8px; background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.06);">
+                <div style="padding:8px 10px; border-radius:8px; background:rgba(15,23,42,0.6); border:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:8px;">
                   <div class="vest-ed-field" style="margin:0;">
                     <label class="vest-ed-label">Trade &amp; TP/SL Box Font Size: <span id="vest-pf-hn-boxes-font-size-val" style="color:#38bdf8; font-weight:700;">${hnVis.tradeBoxesFontSize}px</span></label>
                     <input type="range" class="vest-ed-range" id="vest-pf-hn-boxes-font-size" min="8" max="18" step="1" value="${hnVis.tradeBoxesFontSize}" />
+                  </div>
+                  <div class="vest-ed-grid-2">
+                    <div class="vest-ed-field" style="margin:0;">
+                      <label class="vest-ed-label">Position / TP / SL Line Style</label>
+                      <select class="vest-ed-select" id="vest-pf-hn-trade-line-style">
+                        <option value="solid" ${(hnVis.tradeLineStyle || 'solid') === 'solid' ? 'selected' : ''}>Solid (───)</option>
+                        <option value="dashed" ${hnVis.tradeLineStyle === 'dashed' ? 'selected' : ''}>Dashed (- - -)</option>
+                        <option value="dotted" ${hnVis.tradeLineStyle === 'dotted' ? 'selected' : ''}>Dotted (···)</option>
+                      </select>
+                    </div>
+                    <div class="vest-ed-field" style="margin:0;">
+                      <label class="vest-ed-label">Line Thickness: <span id="vest-pf-hn-trade-line-width-val" style="color:#38bdf8; font-weight:700;">${hnVis.tradeLineWidth || 1.5}px</span></label>
+                      <input type="range" class="vest-ed-range" id="vest-pf-hn-trade-line-width" min="1" max="4" step="0.5" value="${hnVis.tradeLineWidth || 1.5}" />
+                    </div>
                   </div>
                 </div>
 
@@ -11353,6 +11373,8 @@
           const hnPos = overlay.querySelector('#vest-pf-hn-pos-overlay');
           const hnTpSl = overlay.querySelector('#vest-pf-hn-tpsl-boxes');
           const hnBoxesFont = overlay.querySelector('#vest-pf-hn-boxes-font-size');
+          const hnTradeLineStyle = overlay.querySelector('#vest-pf-hn-trade-line-style');
+          const hnTradeLineWidth = overlay.querySelector('#vest-pf-hn-trade-line-width');
           const hnPriceLine = overlay.querySelector('#vest-pf-hn-price-line');
           const hnColor = overlay.querySelector('#vest-pf-hn-price-color');
           const hnStyle = overlay.querySelector('#vest-pf-hn-price-style');
@@ -11379,6 +11401,8 @@
             positionOverlayEnabled: hnPos ? Boolean(hnPos.checked) : prevHn.positionOverlayEnabled,
             tpSlBoxesEnabled: hnTpSl ? Boolean(hnTpSl.checked) : prevHn.tpSlBoxesEnabled,
             tradeBoxesFontSize: hnBoxesFont ? Number(hnBoxesFont.value) : prevHn.tradeBoxesFontSize,
+            tradeLineStyle: hnTradeLineStyle ? hnTradeLineStyle.value : prevHn.tradeLineStyle,
+            tradeLineWidth: hnTradeLineWidth ? Number(hnTradeLineWidth.value) : prevHn.tradeLineWidth,
             currentPriceLineEnabled: hnPriceLine ? Boolean(hnPriceLine.checked) : prevHn.currentPriceLineEnabled,
             currentPriceColor: hnColor ? hnColor.value : prevHn.currentPriceColor,
             currentPriceStyle: hnStyle ? hnStyle.value : prevHn.currentPriceStyle,
@@ -13257,6 +13281,14 @@
           if (hnBoxesFontRange && hnBoxesFontVal) {
             hnBoxesFontRange.addEventListener('input', () => {
               hnBoxesFontVal.textContent = `${hnBoxesFontRange.value}px`;
+            });
+          }
+
+          const hnTradeLineWidthRange = detailCard.querySelector('#vest-pf-hn-trade-line-width');
+          const hnTradeLineWidthVal = detailCard.querySelector('#vest-pf-hn-trade-line-width-val');
+          if (hnTradeLineWidthRange && hnTradeLineWidthVal) {
+            hnTradeLineWidthRange.addEventListener('input', () => {
+              hnTradeLineWidthVal.textContent = `${hnTradeLineWidthRange.value}px`;
             });
           }
 

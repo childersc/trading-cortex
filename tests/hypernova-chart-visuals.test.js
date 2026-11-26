@@ -744,12 +744,114 @@ function extractBlock(src, startMarker, endMarker) {
   assert.strictEqual(extractedFrame2.positionLines.length, 1, 'Frame 2 extraction must still recognize wrapped PositionLine');
 
   // Turning tpSlBoxesEnabled OFF immediately restores native SL & TP boxes without touching Position suppression!
-  ctx.cfg = { enabled: true, tpSlBoxesEnabled: false, positionOverlayEnabled: true };
+  ctx.cfg = { enabled: true, tpSlBoxesEnabled: false, positionOverlayEnabled: true, tradeLineStyle: 'solid', tradeLineWidth: 1.5 };
   ctx.syncHypernovaNativeTradeLineSuppression(model, extractedFrame2, ctx.cfg);
   assert.notStrictEqual(slPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native SL renderer must restore when tpSlBoxesEnabled is OFF');
   assert.notStrictEqual(tpPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native TP renderer must restore when tpSlBoxesEnabled is OFF');
   assert.strictEqual(posPv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Native Position renderer stays suppressed while positionOverlayEnabled is ON');
-  console.log('✓ In-place native SL, TP & Position box suppression, re-detection & clean toggle restore verified');
+
+  // 9b. Exact Hypernova TradingView LineToolOrder / LineToolPosition + _adapter overwrite (solid default, configurable style, lazy _setPaneViews)
+  {
+    ctx.cfg = { enabled: true, tpSlBoxesEnabled: true, positionOverlayEnabled: true, tradeLineStyle: 'solid', tradeLineWidth: 2 };
+    const makeTvProp = (initial) => {
+      let val = initial;
+      return { value: () => val, setValue: (v) => { val = v; } };
+    };
+    const makeTvLineTool = ({ toolname, price, bodyText, tooltip, initialStyle = 2, lazyPaneView = false }) => {
+      const props = { lineStyle: makeTvProp(initialStyle), lineWidth: makeTvProp(1) };
+      let cancelCalled = false;
+      const pv = { renderer: () => ({ draw() {} }) };
+      const src = {
+        toolname,
+        _paneViews: lazyPaneView ? [] : [pv],
+        points: () => [{ price }],
+        properties: () => props,
+        paneViews: () => src._paneViews,
+        _setPaneViews(views) { src._paneViews = views; },
+        adapter: () => src._adapter
+      };
+      src._adapter = {
+        _line: src,
+        _data: { bodyText, quantityText: '' },
+        getPrice: () => price,
+        getText: () => bodyText,
+        getQuantity: () => '',
+        getLineColor: () => '#ef4444',
+        getLineStyle: () => props.lineStyle.value(),
+        setLineStyle: (v) => { props.lineStyle.setValue(v); return src._adapter; },
+        getLineWidth: () => props.lineWidth.value(),
+        setLineWidth: (v) => { props.lineWidth.setValue(v); return src._adapter; },
+        getCancelTooltip: () => tooltip,
+        callCancelCallback: () => { cancelCalled = true; },
+        setCancelButtonBackgroundColor: () => src._adapter
+      };
+      return { src, pv, props, wasCancelled: () => cancelCalled };
+    };
+
+    const hnSl = makeTvLineTool({ toolname: 'LineToolOrder', price: 3569.0, bodyText: 'SL 27.7440  +$29.41', tooltip: 'Cancel SL', initialStyle: 2, lazyPaneView: true });
+    const hnTp = makeTvLineTool({ toolname: 'LineToolOrder', price: 3550.0, bodyText: 'TP 27.7440  +$557.65', tooltip: 'Cancel TP', initialStyle: 2 });
+    const hnPos = makeTvLineTool({ toolname: 'LineToolOrder', price: 3570.1, bodyText: '27.7440  +$100.97', tooltip: 'Close position', initialStyle: 0 });
+    const hnBreach = makeTvLineTool({ toolname: 'LineToolPosition', price: 3571.3, bodyText: 'Breach', tooltip: '', initialStyle: 2 });
+    const hnPass = makeTvLineTool({ toolname: 'LineToolPosition', price: 3530.0, bodyText: 'Pass', tooltip: '', initialStyle: 2 });
+    const hnLimit = makeTvLineTool({ toolname: 'LineToolOrder', price: 3560.0, bodyText: 'Buy Limit', tooltip: 'Cancel order', initialStyle: 2 });
+
+    const hnModel = {
+      mainSeries: () => ({}),
+      panes: () => [{ dataSources: () => [hnSl.src, hnTp.src, hnPos.src, hnBreach.src, hnPass.src, hnLimit.src] }],
+      updateAllViews: () => {},
+      lightUpdate: () => {}
+    };
+
+    const hint = { side: 'short', entryPrice: 3570.1, slPrice: 3569.0, tpPrice: 3550.0 };
+    const hnExtracted = ctx.extractNativeHypernovaChartLines(hnModel, hint);
+    assert.strictEqual(hnExtracted.slLines.length, 1, 'Must match Hypernova LineToolOrder SL box ("SL 27.7440  +$29.41")');
+    assert.strictEqual(hnExtracted.slLine.pnlUsd, 29.41, 'Must parse Hypernova SL dollar PnL (+$29.41)');
+    assert.strictEqual(hnExtracted.tpLines.length, 1, 'Must match Hypernova LineToolOrder TP box');
+    assert.strictEqual(hnExtracted.positionLines.length, 1, 'Must match Hypernova Position Entry LineToolOrder ("Close position")');
+
+    ctx.syncHypernovaNativeTradeLineSuppression(hnModel, hnExtracted, ctx.cfg);
+
+    // Overwritten native line code enforces solid (0) even if Hypernova calls setLineStyle(2) (dashed) again!
+    assert.strictEqual(hnSl.props.lineStyle.value(), 0, 'SL native LineToolOrder must be overwritten to solid (0)');
+    assert.strictEqual(hnSl.props.lineWidth.value(), 2, 'SL native LineToolOrder width must match tradeLineWidth');
+    hnSl.src._adapter.setLineStyle(2);
+    assert.strictEqual(hnSl.props.lineStyle.value(), 0, 'Hypernova re-applying dashed (2) must stay overwritten to solid (0)');
+    assert.strictEqual(hnSl.src._adapter.getLineStyle(), 0);
+
+    // Lazy async OrderPaneView mounted via _setPaneViews gets immediately suppressed!
+    hnSl.src._setPaneViews([hnSl.pv]);
+    assert.strictEqual(hnSl.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Lazily mounted OrderPaneView for SL must be immediately suppressed');
+    assert.strictEqual(hnTp.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'TP OrderPaneView must be suppressed');
+    assert.strictEqual(hnPos.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Position Entry OrderPaneView must be suppressed');
+
+    // Breach, Pass, and Limit orders stay completely untouched!
+    assert.strictEqual(hnBreach.props.lineStyle.value(), 2, 'Breach line must remain untouched');
+    assert.strictEqual(hnPass.props.lineStyle.value(), 2, 'Pass line must remain untouched');
+    assert.strictEqual(hnLimit.props.lineStyle.value(), 2, 'Buy Limit order must remain untouched');
+    assert.notStrictEqual(hnBreach.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER);
+    assert.notStrictEqual(hnPass.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER);
+    assert.notStrictEqual(hnLimit.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER);
+
+    // Switching configured tradeLineStyle to 'dotted' (1) updates the overwritten line style immediately!
+    ctx.cfg = { enabled: true, tpSlBoxesEnabled: true, positionOverlayEnabled: true, tradeLineStyle: 'dotted', tradeLineWidth: 2.5 };
+    ctx.syncHypernovaNativeTradeLineSuppression(hnModel, hnExtracted, ctx.cfg);
+    assert.strictEqual(hnSl.props.lineStyle.value(), 1, 'Configured dotted style must overwrite native LineToolOrder to 1');
+    assert.strictEqual(hnSl.props.lineWidth.value(), 2.5);
+
+    // Disabling restores original dashed (2) style and native box renderer!
+    ctx.cfg = { enabled: false, tpSlBoxesEnabled: true, positionOverlayEnabled: true, tradeLineStyle: 'solid', tradeLineWidth: 1.5 };
+    ctx.syncHypernovaNativeTradeLineSuppression(hnModel, hnExtracted, ctx.cfg);
+    assert.strictEqual(hnSl.props.lineStyle.value(), 2, 'Disabling visuals must restore original dashed style (2)');
+    assert.notStrictEqual(hnSl.pv.renderer(), ctx.EMPTY_NATIVE_LINE_RENDERER, 'Disabling visuals must restore native SL box');
+
+    // Verify 3-line high TP/SL box markup and Settings dropdown in source
+    assert.strictEqual(mainSrc.includes('vest-hn-tpsl-row-top'), true, '3-line high TP/SL box must include row-top');
+    assert.strictEqual(mainSrc.includes('vest-hn-tpsl-row-mid'), true, '3-line high TP/SL box must include row-mid');
+    assert.strictEqual(mainSrc.includes('vest-hn-tpsl-row-bot'), true, '3-line high TP/SL box must include row-bot');
+    assert.strictEqual(isolatedSrc.includes('id="vest-pf-hn-trade-line-style"'), true, 'Settings must expose configurable tradeLineStyle dropdown');
+    assert.strictEqual(isolatedSrc.includes('id="vest-pf-hn-trade-line-width"'), true, 'Settings must expose configurable tradeLineWidth slider');
+  }
+  console.log('✓ In-place native LineToolOrder/LineToolPosition overwrite, 3-line box, configurable solid line style & clean toggle restore verified');
 }
 
 console.log('All Hypernova Chart Visuals tests passed!');

@@ -1,3 +1,9 @@
+Trading Cortex v1.1.158 — Truly Overwrote Platform SL/TP/Position Line Code, 3-Line High Box & Configurable Solid Line Style
+
+- **Zero Duplicate Platform SL / TP / Position Boxes (`v1.1.158`)**: Fixed why Hypernova's native `SL 27.7440 +$29.41 ×` box was still appearing beside ours (`createOrderLine()` creates TradingView `LineToolOrder` sources with `src._adapter` and lazy `_setPaneViews`). Trading Cortex now directly overwrites the native `LineToolOrder` adapter & `OrderPaneView` code cleanly (leaving Breach, Pass, and Limit orders untouched, and restoring originals if toggled off).
+- **3-Line High SL / TP Box (`v1.1.158`)**: Upgraded the Stop Loss and Take Profit box into a clean 3-line high box — Line 1: `SL`/`TP` badge + size qty + `×`, Line 2: bold signed dollar PnL (green for locked-in profit, red for loss), Line 3: exact price + `%` move.
+- **Solid Line Default & Configurable Style (`v1.1.158`)**: Position, TP, and SL lines are now **solid** instead of dashed by default, and both **Line Style** (`Solid` / `Dashed` / `Dotted`) and **Line Thickness** (`1–4px`) are configurable with live preview in **Perp Firm Settings → Chart Visuals**.
+
 Trading Cortex v1.1.157 — Locked Dark Theme Across Charting Indicator Tiles, Toggle Boxes & All Mobile Settings Cards
 
 - **Zero White Boxes Inside Settings (`v1.1.157`)**: Extended high-specificity dark backgrounds, `-webkit-appearance: none` on all buttons/inputs (countering iOS Safari & Tailwind `appearance: button`), inline dark fallbacks, and a self-contained `<style id="vest-tvs-scoped-dark-lock">` inside `#vest-studio-settings-dialog` covering every Charting Indicator tile, drawer, toggle card, Perp Firm card, Diagnostics tile, and input control.

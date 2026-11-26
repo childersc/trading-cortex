@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Trading Cortex
 // @namespace    https://github.com/childersc/trading-cortex
-// @version      1.1.157
+// @version      1.1.158
 // @description  Smart chart memory, drawing tool persistence, ICT/SMC templates, and workspace enhancements for TradingView-powered exchanges. (Safari Mobile & Universal Userscript Edition)
 // @author       Trading Cortex
 // @updateURL    https://raw.githubusercontent.com/childersc/trading-cortex/dev/userscript/trading-cortex.meta.js
