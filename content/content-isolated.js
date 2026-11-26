@@ -10911,20 +10911,20 @@
 
           <div class="vest-indicators-container">
             ${INDICATORS.map(ind => `
-              <div class="vest-indicator-tile ${ind.isEnabled ? 'is-enabled' : ''}" id="vest-ind-tile-${ind.id}" data-indicator-id="${ind.id}">
-                <div class="vest-indicator-tile-header" data-indicator-id="${ind.id}">
+              <div class="vest-indicator-tile ${ind.isEnabled ? 'is-enabled' : ''}" id="vest-ind-tile-${ind.id}" data-indicator-id="${ind.id}" style="background-color:${ind.isEnabled ? '#131f33' : '#111827'};color:#e2e8f0;">
+                <div class="vest-indicator-tile-header" data-indicator-id="${ind.id}" style="background:transparent;color:#f8fafc;">
                   <div class="vest-indicator-tile-left">
                     <div class="vest-indicator-tile-icon" style="color: ${ind.accentColor}; background: ${ind.bgTint};">
                       ${ind.icon}
                     </div>
                     <div class="vest-indicator-tile-info">
-                      <div class="vest-indicator-tile-title">${ind.title}</div>
-                      <div class="vest-indicator-tile-desc">${ind.desc}</div>
+                      <div class="vest-indicator-tile-title" style="color:#f8fafc;">${ind.title}</div>
+                      <div class="vest-indicator-tile-desc" style="color:#94a3b8;">${ind.desc}</div>
                     </div>
                   </div>
                   <div class="vest-indicator-tile-right">
                     <span class="vest-indicator-status-badge ${ind.isEnabled ? 'on' : 'off'}">${ind.isEnabled ? 'ON' : 'OFF'}</span>
-                    <button type="button" class="vest-indicator-settings-btn" id="vest-ind-settings-btn-${ind.id}" data-indicator-id="${ind.id}" title="View and configure ${ind.title} settings" style="display: ${ind.isEnabled ? 'inline-flex' : 'none'};">
+                    <button type="button" class="vest-indicator-settings-btn" id="vest-ind-settings-btn-${ind.id}" data-indicator-id="${ind.id}" title="View and configure ${ind.title} settings" style="display: ${ind.isEnabled ? 'inline-flex' : 'none'}; -webkit-appearance:none; appearance:none; background-color:#1e293b; color:#e2e8f0;">
                       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -11175,7 +11175,43 @@
       const mobileHdrStyle = isMobileModal ? ' style="background-color:#111827;color:#f8fafc;"' : '';
       const mobileBodyStyle = isMobileModal ? ' style="background-color:#0d121d;color:#e2e8f0;"' : '';
       const mobileSidebarStyle = isMobileModal ? ' style="background-color:#090d16;color:#e2e8f0;"' : '';
+      const scopedDarkLockStyle = `
+        <style id="vest-tvs-scoped-dark-lock">
+          #vest-studio-settings-dialog { color-scheme: dark !important; color: #e2e8f0 !important; }
+          #vest-studio-settings-dialog button { -webkit-appearance: none !important; appearance: none !important; }
+          body:not(.vest-dialog-glass-mode) #vest-studio-settings-dialog .vest-tvs-card,
+          body.vest-mobile-top-dock-active #vest-studio-settings-dialog .vest-tvs-card { background: #0d121d !important; background-color: #0d121d !important; color: #e2e8f0 !important; }
+          @media (max-width: 900px) { #vest-studio-settings-dialog .vest-tvs-card { background: #0d121d !important; background-color: #0d121d !important; color: #e2e8f0 !important; } }
+          #vest-studio-settings-dialog .vest-tvs-header,
+          #vest-studio-settings-dialog .vest-tvs-footer { background: #111827 !important; background-color: #111827 !important; color: #f8fafc !important; }
+          #vest-studio-settings-dialog .vest-tvs-sidebar { background: #090d16 !important; background-color: #090d16 !important; color: #e2e8f0 !important; }
+          #vest-studio-settings-dialog .vest-tvs-body,
+          #vest-studio-settings-dialog .vest-tvs-content { background: #0d121d !important; background-color: #0d121d !important; color: #e2e8f0 !important; }
+          #vest-studio-settings-dialog .vest-indicator-tile { background: #111827 !important; background-color: #111827 !important; color: #e2e8f0 !important; border-color: rgba(148,163,184,0.22) !important; }
+          #vest-studio-settings-dialog .vest-indicator-tile.is-enabled { background: #131f33 !important; background-color: #131f33 !important; border-color: rgba(56,189,248,0.42) !important; }
+          #vest-studio-settings-dialog .vest-indicator-tile-header { background: transparent !important; color: #f8fafc !important; }
+          #vest-studio-settings-dialog .vest-indicator-tile-title { color: #f8fafc !important; }
+          #vest-studio-settings-dialog .vest-indicator-tile-desc { color: #94a3b8 !important; }
+          #vest-studio-settings-dialog .vest-indicator-settings-btn,
+          #vest-studio-settings-dialog .vest-tvs-action-btn,
+          #vest-studio-settings-dialog .vest-cdb-act-btn { background: #1e293b !important; background-color: #1e293b !important; color: #e2e8f0 !important; border-color: rgba(148,163,184,0.35) !important; }
+          #vest-studio-settings-dialog .vest-indicator-settings-drawer { background: #0b101b !important; background-color: #0b101b !important; color: #e2e8f0 !important; }
+          #vest-studio-settings-dialog .vest-tvs-toggle-box,
+          #vest-studio-settings-dialog .vest-tvs-toggle-card,
+          #vest-studio-settings-dialog .vest-tvs-about-card { background: #131b2c !important; background-color: #131b2c !important; color: #e2e8f0 !important; }
+          #vest-studio-settings-dialog .vest-pf-tile,
+          #vest-studio-settings-dialog .vest-pf-tile-add,
+          #vest-studio-settings-dialog .vest-pf-detail-card,
+          #vest-studio-settings-dialog .vest-ed-section,
+          #vest-studio-settings-dialog .vest-cdb-tile,
+          #vest-studio-settings-dialog .vest-cdb-module-row { background: #111827 !important; background-color: #111827 !important; color: #e2e8f0 !important; }
+          #vest-studio-settings-dialog select,
+          #vest-studio-settings-dialog textarea,
+          #vest-studio-settings-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) { -webkit-appearance: none !important; appearance: none !important; background: #0b101b !important; background-color: #0b101b !important; color: #f8fafc !important; -webkit-text-fill-color: #f8fafc !important; color-scheme: dark !important; }
+        </style>
+      `;
       overlay.innerHTML = `
+        ${scopedDarkLockStyle}
         <div class="vest-tvs-card" role="dialog" aria-label="Trading Cortex Settings" style="${cardStyle}">
           <div class="vest-tvs-header" id="vest-tvs-drag-handle" title="Drag to move"${mobileHdrStyle}>
             <div class="vest-tvs-title" style="color:#f8fafc;">Settings</div>

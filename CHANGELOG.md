@@ -1,6 +1,16 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.156`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.157`) are documented in this file.
+
+---
+
+## [v1.1.157] — 2026-11-26
+
+### 🌑 Extended Dark Theme Lock to Charting Indicator Tiles, Toggle Boxes, Perp Firm Cards & All iOS Buttons
+- **Fixes (`content/template-bar.css`, `content/content-isolated.js`)**:
+  - Extended high-specificity `#vest-studio-settings-dialog` dark backgrounds (`!important`), light text colors, and `-webkit-appearance: none !important` (countering Tailwind v4 `button { appearance: button; }` and iOS Safari native light button/input chrome) to ALL inner settings cards & tiles: `.vest-indicator-tile`, `.vest-indicator-tile-header`, `.vest-indicator-settings-btn`, `.vest-indicator-settings-drawer`, `.vest-tvs-toggle-box`, `.vest-tvs-about-card`, `.vest-tvs-action-btn`, `.vest-pf-tile`, `.vest-pf-detail-card`, `.vest-ed-section`, `.vest-cdb-tile`, and all `<button>`, `<select>`, `<input>`, and `<textarea>` elements.
+  - Added a self-contained scoped `<style id="vest-tvs-scoped-dark-lock">` mounted directly inside `#vest-studio-settings-dialog` plus inline dark fallbacks on Charting Indicator tiles so inner boxes can never turn white even if `<head>` stylesheets are modified by SPA hydration or overridden by site themes.
+  - Made `.vest-indicator-tile-header` wrap cleanly with readable multi-line descriptions on narrow mobile viewports.
 
 ---
 

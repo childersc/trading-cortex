@@ -5117,10 +5117,126 @@ body.vest-dialog-glass-mode #vest-template-manager-dialog .vest-tvs-card {
 #vest-template-manager-dialog select,
 #vest-template-manager-dialog textarea,
 #vest-template-manager-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]) {
-  background-color: #131b2c !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background: #0b101b !important;
+  background-color: #0b101b !important;
   color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
   border-color: rgba(148, 163, 184, 0.35) !important;
   color-scheme: dark !important;
+}
+
+#vest-studio-settings-dialog button,
+#vest-template-manager-dialog button,
+#vest-studio-dropdown-menu button,
+#vest-cortex-mobile-dock button {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-tile {
+  background: #111827 !important;
+  background-color: #111827 !important;
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  color: #e2e8f0 !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-tile.is-enabled {
+  background: #131f33 !important;
+  background-color: #131f33 !important;
+  border-color: rgba(56, 189, 248, 0.42) !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-tile-header {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #f8fafc !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-tile-title {
+  color: #f8fafc !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-tile-desc {
+  color: #94a3b8 !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-settings-btn {
+  background: #1e293b !important;
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(148, 163, 184, 0.32) !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-settings-btn.is-active {
+  background: rgba(56, 189, 248, 0.2) !important;
+  background-color: rgba(56, 189, 248, 0.2) !important;
+  color: #38bdf8 !important;
+  border-color: rgba(56, 189, 248, 0.55) !important;
+}
+
+#vest-studio-settings-dialog .vest-indicator-settings-drawer {
+  background: #0b101b !important;
+  background-color: #0b101b !important;
+  color: #e2e8f0 !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-toggle-box,
+#vest-studio-settings-dialog .vest-tvs-toggle-card,
+#vest-studio-settings-dialog .vest-tvs-about-card {
+  background: #131b2c !important;
+  background-color: #131b2c !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(56, 189, 248, 0.28) !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-toggle-title {
+  color: #f1f5f9 !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-toggle-desc {
+  color: #94a3b8 !important;
+}
+
+#vest-studio-settings-dialog .vest-tvs-action-btn,
+#vest-studio-settings-dialog .vest-cdb-act-btn,
+#vest-template-manager-dialog .vest-ed-btn-ghost {
+  background: #1e293b !important;
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
+}
+
+#vest-studio-settings-dialog .vest-pf-tile,
+#vest-studio-settings-dialog .vest-pf-tile-add,
+#vest-studio-settings-dialog .vest-pf-detail-card,
+#vest-studio-settings-dialog .vest-ed-section,
+#vest-studio-settings-dialog .vest-cdb-tile,
+#vest-studio-settings-dialog .vest-cdb-module-row,
+#vest-template-manager-dialog .vest-ed-section {
+  background: #111827 !important;
+  background-color: #111827 !important;
+  color: #e2e8f0 !important;
+}
+
+#vest-studio-settings-dialog .vest-pf-tile.selected {
+  background: #0f2536 !important;
+  background-color: #0f2536 !important;
+}
+
+#vest-studio-settings-dialog .vest-pf-name {
+  color: #f8fafc !important;
+}
+
+body.vest-mobile-top-dock-active .vest-indicator-tile-header {
+  padding: 12px !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+body.vest-mobile-top-dock-active .vest-indicator-tile-desc {
+  white-space: normal !important;
 }
 
 body.vest-mobile-top-dock-active #vest-studio-dropdown-menu,

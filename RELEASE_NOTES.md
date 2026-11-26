@@ -1,3 +1,7 @@
+Trading Cortex v1.1.157 — Locked Dark Theme Across Charting Indicator Tiles, Toggle Boxes & All Mobile Settings Cards
+
+- **Zero White Boxes Inside Settings (`v1.1.157`)**: Extended high-specificity dark backgrounds, `-webkit-appearance: none` on all buttons/inputs (countering iOS Safari & Tailwind `appearance: button`), inline dark fallbacks, and a self-contained `<style id="vest-tvs-scoped-dark-lock">` inside `#vest-studio-settings-dialog` covering every Charting Indicator tile, drawer, toggle card, Perp Firm card, Diagnostics tile, and input control.
+
 Trading Cortex v1.1.156 — Fixed White Settings Menu & Dropdown on Mobile Safari
 
 - **Fixed White / Unreadable Mobile Settings Menu (`v1.1.156`)**: Fixed the Settings modal and Cortex dropdown menu appearing white on iOS Safari / mobile by adding native `GM.addStyle` WebExtension-level stylesheet injection + post-hydration `<head>` re-sync in `trading-cortex.user.js`, enforcing high-specificity ID dark backgrounds (`#0d121d` / `#111827` / `#090d16`), `color-scheme: dark`, `-webkit-appearance: none` on iOS buttons/inputs, and disabling `backdrop-filter` / `translate3d` on mobile modals to eliminate WebKit compositor white-box glitches.
