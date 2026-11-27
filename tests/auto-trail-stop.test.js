@@ -230,16 +230,17 @@ function createMainEngineHarness(initialSettings, initialAccount = { firmId: 'hy
   const rUsd = ctx.evaluateAutoTrailTarget({ cfg: { mode: 'dollars', dollarsDistance: 50, activationMode: 'immediate', stepMinTicks: 1, onlyTighten: true }, pos: { symbol: 'GOLD', side: 'short', entryPrice: 3570, sizeQty: 25, slPrice: 3575 }, state: { peakPrice: 3565 }, livePrice: 3565, tickSize: 0.1 });
   assert.strictEqual(rUsd.targetSl, 3567);
 
-  // Mode 5: Specific Timeframe Bar Highs & Lows with PER-TIMEFRAME bars-back (`barLookbackByTf`)!
+  // Mode 5: Specific Timeframe Bar Trailing — Candle Close (`0` ticks = exact close, `N` ticks behind), Wick (High/Low) & Body + PER-TIMEFRAME bars-back!
   const tfBars = [
-    { timeSec: 1000, open: 3550, high: 3560, low: 3548.0, close: 3556 },
-    { timeSec: 1300, open: 3556, high: 3563, low: 3552.0, close: 3560 },
-    { timeSec: 1600, open: 3560, high: 3568, low: 3558.5, close: 3566 }, // last closed bar
-    { timeSec: 1900, open: 3566, high: 3572, low: 3565.0, close: 3570 }  // live forming bar
+    { timeSec: 1000, open: 3550, high: 3560, low: 3548.0, close: 3556.0 },
+    { timeSec: 1300, open: 3556, high: 3563, low: 3552.0, close: 3560.0 },
+    { timeSec: 1600, open: 3560, high: 3568, low: 3558.5, close: 3566.0 }, // last closed bar
+    { timeSec: 1900, open: 3566, high: 3572, low: 3565.0, close: 3570.0 }  // live forming bar
   ];
   const perTfCfg = {
     mode: 'bar_hl',
     barTimeframe: '5m',
+    barAnchor: 'wick',
     barLookbackByTf: { '1m': 3, '5m': 1, '15m': 2 },
     barUseClosedOnly: true,
     barBufferTicks: 2,
@@ -247,15 +248,59 @@ function createMainEngineHarness(initialSettings, initialAccount = { firmId: 'hy
     stepMinTicks: 1,
     onlyTighten: true
   };
-  // 5m uses 1 bar back -> 3558.5 - 0.2 = 3558.3
+  // Wick anchor: 5m (1 bar back) -> 3558.5 - 0.2 = 3558.3
   const r5m = ctx.evaluateAutoTrailTarget({ cfg: perTfCfg, pos: longPos, state: {}, livePrice: 3570, tickSize: 0.1, tfBars });
-  assert.strictEqual(r5m.targetSl, 3558.3, '5m (1 bar back) must use last closed bar low 3558.5 - 0.2');
-  // 15m uses 2 bars back -> min(3552.0, 3558.5) - 0.2 = 3551.8
+  assert.strictEqual(r5m.targetSl, 3558.3, '5m wick (1 bar back) must use last closed bar low 3558.5 - 0.2');
+  // Wick anchor: 15m (2 bars back) -> min(3552.0, 3558.5) - 0.2 = 3551.8
   const r15m = ctx.evaluateAutoTrailTarget({ cfg: { ...perTfCfg, barTimeframe: '15m' }, pos: longPos, state: {}, livePrice: 3570, tickSize: 0.1, tfBars });
-  assert.strictEqual(r15m.targetSl, 3551.8, '15m (2 bars back) must use lowest low of last 2 closed bars');
-  // 1m uses 3 bars back -> min(3548.0, 3552.0, 3558.5) - 0.2 = 3547.8
+  assert.strictEqual(r15m.targetSl, 3551.8, '15m wick (2 bars back) must use lowest low of last 2 closed bars');
+  // Wick anchor: 1m (3 bars back) -> min(3548.0, 3552.0, 3558.5) - 0.2 = 3547.8
   const r1m = ctx.evaluateAutoTrailTarget({ cfg: { ...perTfCfg, barTimeframe: '1m' }, pos: longPos, state: {}, livePrice: 3570, tickSize: 0.1, tfBars });
-  assert.strictEqual(r1m.targetSl, 3547.8, '1m (3 bars back) must use lowest low of last 3 closed bars');
+  assert.strictEqual(r1m.targetSl, 3547.8, '1m wick (3 bars back) must use lowest low of last 3 closed bars');
+
+  // Close anchor with 0 ticks behind -> RIGHT AT THE CLOSE of that candle (3566.0)!
+  const rClose0 = ctx.evaluateAutoTrailTarget({
+    cfg: { ...perTfCfg, barAnchor: 'close', barBufferTicks: 0 },
+    pos: longPos,
+    state: {},
+    livePrice: 3570,
+    tickSize: 0.1,
+    tfBars
+  });
+  assert.strictEqual(rClose0.targetSl, 3566.0, 'Close anchor with 0 ticks behind must place SL right at candle close (3566.0)');
+  assert.strictEqual(rClose0.shouldSubmit, true);
+
+  // Close anchor with 5 ticks behind -> 3566.0 - 0.5 = 3565.5 (Long), and 3566.0 + 0.5 = 3566.5 (Short)!
+  const rClose5Long = ctx.evaluateAutoTrailTarget({
+    cfg: { ...perTfCfg, barAnchor: 'close', barBufferTicks: 5 },
+    pos: longPos,
+    state: {},
+    livePrice: 3570,
+    tickSize: 0.1,
+    tfBars
+  });
+  assert.strictEqual(rClose5Long.targetSl, 3565.5, 'Close anchor with 5 ticks behind (Long) = 3566.0 - 0.5 = 3565.5');
+
+  const rClose5Short = ctx.evaluateAutoTrailTarget({
+    cfg: { ...perTfCfg, barAnchor: 'close', barBufferTicks: 5 },
+    pos: { symbol: 'GOLD', side: 'short', entryPrice: 3575, sizeQty: 10, slPrice: 3580 },
+    state: {},
+    livePrice: 3562,
+    tickSize: 0.1,
+    tfBars
+  });
+  assert.strictEqual(rClose5Short.targetSl, 3566.5, 'Close anchor with 5 ticks behind (Short) = 3566.0 + 0.5 = 3566.5');
+
+  // Body anchor with 0 ticks behind -> lower edge min(3560, 3566) = 3560.0 (Long)
+  const rBody0 = ctx.evaluateAutoTrailTarget({
+    cfg: { ...perTfCfg, barAnchor: 'body', barBufferTicks: 0 },
+    pos: longPos,
+    state: {},
+    livePrice: 3570,
+    tickSize: 0.1,
+    tfBars
+  });
+  assert.strictEqual(rBody0.targetSl, 3560.0, 'Body anchor with 0 ticks behind (Long) = lower body edge 3560.0');
 
   // Activation Trigger `in_profit_price`: does NOT start trailing if price never went into profit!
   const actCfg = { mode: 'ticks', ticksDistance: 10, activationMode: 'in_profit_price', activationValue: 5.0, moveToBreakevenOnActivate: false, stepMinTicks: 1, onlyTighten: true };
@@ -419,6 +464,8 @@ function createMainEngineHarness(initialSettings, initialAccount = { firmId: 'hy
     'id="vest-at-auto-arm"',
     'id="vest-at-mode"',
     'id="vest-at-act-mode"',
+    'id="vest-at-bar-anchor"',
+    'Ticks Behind Candle (0 = exact)',
     'in_profit_price',
     'data-at-tf=',
     'vest-at-remove-record-btn',

@@ -1,3 +1,7 @@
+Trading Cortex v1.1.164 — Auto-Trail Candle Close Anchor & Ticks Behind Candle (`0` = Exact Close)
+
+- **Ticks Behind Candle & Candle Anchor (`v1.1.164`)**: Under **Auto-Trail Stop → Timeframe Bar Highs & Lows**, added a **Candle Anchor Point** selector (**Candle Close** [default], **Candle High / Low (Wick)**, or **Candle Body Edge**) paired with **Ticks Behind Candle (`0 = exact`)** — set `0` to place the stop right at the close of the candle, or `1+` to place the stop that many ticks behind it (below for Long, above for Short).
+
 Trading Cortex v1.1.163 — On-Chart "AT" Immediate Stop Button, Per-Timeframe Bars-Back & Persistent Multi-Account Trail Memory
 
 - **1-Tap `"AT"` Button on Price Entry Panel (`v1.1.163`)**: Added the **`AT`** button (`BE | TP | SL | AT`, visible by default) right on the chart Position Entry panel. Clicking **`AT`** arms Auto-Trail and immediately sets your Stop Loss to the pre-defined trail level (or holds in amber waiting mode if your configured profit activation trigger hasn't been reached yet; clicking again disarms).

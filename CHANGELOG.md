@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.163`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.164`) are documented in this file.
+
+---
+
+## [v1.1.164] — 2026-11-26
+
+### 🎯 Auto-Trail Candle Anchor (Close / Wick / Body) & Ticks Behind Candle (`0` = Exact Close)
+- **Upgrades (`content/content-isolated.js`, `content/content-main.js`, `tests/auto-trail-stop.test.js`)**:
+  - Added **Candle Anchor Point** (`barAnchor`) selector under **Auto-Trail Stop → Timeframe Bar Highs & Lows**:
+    - **`Candle Close`** (default): `0` ticks behind places the Stop Loss **right at the close** of the candle; any value `> 0` places the stop that many ticks further behind the close (below for Long, above for Short).
+    - **`Candle High / Low (Wick)`**: `0` ticks = exact low (Long) / high (Short); `N` ticks = `N` ticks behind the wick.
+    - **`Candle Body Edge (Open / Close)`**: `0` ticks = exact lower body edge (Long) / upper body edge (Short); `N` ticks = `N` ticks behind the body.
+  - Updated **Ticks Behind Candle (`0 = exact`)** (`barBufferTicks`) to default to `0` and handle `0` cleanly across UI input, normalization, plain-English summary, and main-world evaluation.
+  - Added VM tests verifying `close` (`0` ticks exact close, `5` ticks behind Long & Short), `wick`, and `body` anchors in `tests/auto-trail-stop.test.js`.
 
 ---
 

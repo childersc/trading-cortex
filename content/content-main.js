@@ -11029,6 +11029,7 @@
       : {};
     const validModes = ['price', 'ticks', 'points', 'dollars', 'bar_hl'];
     const validTfs = ['chart', '1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
+    const validAnchors = ['close', 'wick', 'body'];
     const validAct = ['immediate', 'in_profit_price', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
     const clampPos = (v, min, max, fallback) => {
       const n = Number(v);
@@ -11062,10 +11063,11 @@
       pointValue: clampPos(raw.pointValue, 0.000001, 100000, 1),
       dollarsDistance: clampPos(raw.dollarsDistance, 0.5, 1000000, 50),
       barTimeframe,
+      barAnchor: validAnchors.includes(raw.barAnchor) ? raw.barAnchor : 'close',
       barLookback: barLookbackByTf[barTimeframe] || 1,
       barLookbackByTf,
       barUseClosedOnly: raw.barUseClosedOnly !== false,
-      barBufferTicks: Math.round(clampPos(raw.barBufferTicks, 0, 500, 2)),
+      barBufferTicks: Math.round(clampPos(raw.barBufferTicks, 0, 500, 0)),
       activationMode: validAct.includes(raw.activationMode) ? raw.activationMode : 'immediate',
       activationValue: clampPos(raw.activationValue, 0, 1000000, 0),
       moveToBreakevenOnActivate: Boolean(raw.moveToBreakevenOnActivate),
@@ -11386,19 +11388,38 @@
         const lookback = getAutoTrailBarLookback(cfg);
         const startIdx = Math.max(0, endIdx - lookback);
         const windowBars = tfBars.slice(startIdx, endIdx);
+        const anchor = (cfg.barAnchor === 'wick' || cfg.barAnchor === 'body' || cfg.barAnchor === 'close')
+          ? cfg.barAnchor
+          : 'close';
         let extreme = isShort ? -Infinity : Infinity;
         for (let i = 0; i < windowBars.length; i++) {
           const b = windowBars[i];
           if (!b) continue;
-          if (isShort && Number.isFinite(Number(b.high))) extreme = Math.max(extreme, Number(b.high));
-          if (!isShort && Number.isFinite(Number(b.low))) extreme = Math.min(extreme, Number(b.low));
+          let candidate = NaN;
+          if (anchor === 'close') {
+            candidate = Number(b.close);
+          } else if (anchor === 'body') {
+            const o = Number(b.open);
+            const c = Number(b.close);
+            if (Number.isFinite(o) && Number.isFinite(c)) {
+              candidate = isShort ? Math.max(o, c) : Math.min(o, c);
+            }
+          } else {
+            candidate = isShort ? Number(b.high) : Number(b.low);
+          }
+          if (Number.isFinite(candidate)) {
+            extreme = isShort ? Math.max(extreme, candidate) : Math.min(extreme, candidate);
+          }
         }
         if (Number.isFinite(extreme)) {
-          const bufTicks = Math.max(0, Math.round(Number(cfg.barBufferTicks) || 0));
+          const bufTicks = Number.isFinite(Number(cfg.barBufferTicks))
+            ? Math.max(0, Math.round(Number(cfg.barBufferTicks)))
+            : 0;
           const buf = bufTicks * safeTick;
           rawSl = isShort ? (extreme + buf) : (extreme - buf);
           const tfTag = cfg.barTimeframe === 'chart' ? 'Bar' : cfg.barTimeframe;
-          reason = `${tfTag}(${lookback}b) ${isShort ? 'High' : 'Low'}${bufTicks > 0 ? ` ${isShort ? '+' : '-'}${bufTicks}t` : ''}`;
+          const anchorTag = anchor === 'close' ? 'Close' : (anchor === 'body' ? 'Body' : (isShort ? 'High' : 'Low'));
+          reason = `${tfTag}(${lookback}b) ${anchorTag}${bufTicks > 0 ? ` ${isShort ? '+' : '-'}${bufTicks}t` : ''}`;
         } else {
           calcSkip = 'invalid_bars';
         }

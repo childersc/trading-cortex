@@ -800,10 +800,11 @@
     pointValue: 1,
     dollarsDistance: 50,
     barTimeframe: '5m', // 'chart' | '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
+    barAnchor: 'close', // 'close' | 'wick' | 'body'
     barLookback: 1,
     barLookbackByTf: { ...DEFAULT_AUTO_TRAIL_BAR_LOOKBACK_BY_TF },
     barUseClosedOnly: true,
-    barBufferTicks: 2,
+    barBufferTicks: 0,
     activationMode: 'immediate', // 'immediate' | 'in_profit_price' | 'in_profit_dollars' | 'in_profit_ticks' | 'in_profit_points' | 'in_profit_percent'
     activationValue: 0,
     moveToBreakevenOnActivate: false,
@@ -817,6 +818,7 @@
     const src = rawCfg && typeof rawCfg === 'object' ? rawCfg : {};
     const validModes = ['price', 'ticks', 'points', 'dollars', 'bar_hl'];
     const validTfs = AUTO_TRAIL_TF_KEYS;
+    const validAnchors = ['close', 'wick', 'body'];
     const validAct = ['immediate', 'in_profit_price', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
     const clampPos = (v, min, max, fallback) => {
       const n = Number(v);
@@ -853,6 +855,7 @@
       pointValue: clampPos(src.pointValue, 0.000001, 100000, DEFAULT_AUTO_TRAIL.pointValue),
       dollarsDistance: clampPos(src.dollarsDistance, 0.5, 1000000, DEFAULT_AUTO_TRAIL.dollarsDistance),
       barTimeframe,
+      barAnchor: validAnchors.includes(src.barAnchor) ? src.barAnchor : DEFAULT_AUTO_TRAIL.barAnchor,
       barLookback: activeBarLookback,
       barLookbackByTf,
       barUseClosedOnly: src.barUseClosedOnly !== false,
@@ -936,9 +939,15 @@
       const tfLabel = cfg.barTimeframe === 'chart' ? 'Active Chart TF' : cfg.barTimeframe;
       const lb = (cfg.barLookbackByTf && cfg.barLookbackByTf[cfg.barTimeframe]) || cfg.barLookback || 1;
       const barType = cfg.barUseClosedOnly ? 'closed' : 'live/closed';
-      const nBars = lb === 1 ? `last ${barType} ${tfLabel} bar` : `last ${lb} ${barType} ${tfLabel} bars`;
-      const buf = cfg.barBufferTicks > 0 ? ` ± ${cfg.barBufferTicks}t buffer` : '';
-      rule = `LONG: lowest low of ${nBars}${buf} · SHORT: highest high of ${nBars}${buf}`;
+      const nBars = lb === 1 ? `last ${barType} ${tfLabel} candle` : `last ${lb} ${barType} ${tfLabel} candles`;
+      const buf = cfg.barBufferTicks > 0 ? `${cfg.barBufferTicks}t behind` : 'right at';
+      if (cfg.barAnchor === 'close') {
+        rule = `Stops ${buf} the close of the ${nBars} (0t = exact close)`;
+      } else if (cfg.barAnchor === 'body') {
+        rule = `Stops ${buf} the body edge of the ${nBars} (Long: lower edge · Short: upper edge)`;
+      } else {
+        rule = `LONG: ${buf} lowest low of ${nBars} · SHORT: ${buf} highest high of ${nBars}`;
+      }
     }
     let act = 'Starts immediately when AT clicked / armed';
     if (cfg.activationMode === 'in_profit_price') act = `Starts trailing after +${cfg.activationValue} price in profit`;
@@ -9720,8 +9729,24 @@
                     </select>
                   </div>
                   <div class="vest-ed-field">
-                    <label class="vest-ed-label">Protective Buffer (Ticks)</label>
+                    <label class="vest-ed-label">Candle Anchor Point</label>
+                    <select class="vest-ed-select" id="vest-at-bar-anchor">
+                      <option value="close" ${at.barAnchor === 'close' ? 'selected' : ''}>Candle Close (0t = right at close)</option>
+                      <option value="wick" ${at.barAnchor === 'wick' ? 'selected' : ''}>Candle High / Low (Wick)</option>
+                      <option value="body" ${at.barAnchor === 'body' ? 'selected' : ''}>Candle Body Edge (Open / Close)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Ticks Behind Candle (0 = exact)</label>
                     <input type="number" class="vest-ed-input" id="vest-at-bar-buffer-ticks" min="0" max="500" step="1" value="${at.barBufferTicks}" />
+                    <div style="font-size:10px; color:#94a3b8; margin-top:3px;">0 = right at ${at.barAnchor === 'close' ? 'candle close' : (at.barAnchor === 'body' ? 'candle body edge' : 'candle low / high')}; 1+ = ticks behind it.</div>
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Tick Size Override (0 = Auto)</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-custom-tick-size" min="0" max="10000" step="any" value="${at.customTickSize}" />
                   </div>
                 </div>
 
@@ -9742,15 +9767,10 @@
                   </div>
                 </div>
 
-                <div class="vest-ed-field" style="margin-bottom:8px;">
-                  <label class="vest-ed-label">Tick Size Override (0 = Auto)</label>
-                  <input type="number" class="vest-ed-input" id="vest-at-custom-tick-size" min="0" max="10000" step="any" value="${at.customTickSize}" />
-                </div>
-
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                   <div>
                     <div style="font-size:12px; font-weight:600; color:#e2e8f0;">Use Completed (Closed) Bars Only</div>
-                    <div style="font-size:10.5px; color:#94a3b8;">Recommended — waits for each candle to close before ratcheting SL below its low (Long) or above its high (Short).</div>
+                    <div style="font-size:10.5px; color:#94a3b8;">Recommended — waits for each candle to close before ratcheting SL behind it.</div>
                   </div>
                   <label class="vest-tvs-switch">
                     <input type="checkbox" id="vest-at-bar-closed-only" ${at.barUseClosedOnly ? 'checked' : ''} />
@@ -13076,6 +13096,7 @@
         if (q('#vest-at-point-value')) at.pointValue = Number(q('#vest-at-point-value').value);
         if (q('#vest-at-dollars-distance')) at.dollarsDistance = Number(q('#vest-at-dollars-distance').value);
         if (q('#vest-at-bar-tf')) at.barTimeframe = q('#vest-at-bar-tf').value;
+        if (q('#vest-at-bar-anchor')) at.barAnchor = q('#vest-at-bar-anchor').value;
         const nextByTf = { ...(at.barLookbackByTf || {}) };
         let sawTfInput = false;
         overlay.querySelectorAll('input[data-at-tf]').forEach(inp => {
@@ -13090,7 +13111,10 @@
           at.barLookback = nextByTf[at.barTimeframe] || at.barLookback;
         }
         if (q('#vest-at-bar-closed-only')) at.barUseClosedOnly = Boolean(q('#vest-at-bar-closed-only').checked);
-        if (q('#vest-at-bar-buffer-ticks')) at.barBufferTicks = Number(q('#vest-at-bar-buffer-ticks').value);
+        if (q('#vest-at-bar-buffer-ticks')) {
+          const rawBuf = q('#vest-at-bar-buffer-ticks').value;
+          at.barBufferTicks = rawBuf === '' ? 0 : Number(rawBuf);
+        }
         if (q('#vest-at-act-mode')) at.activationMode = q('#vest-at-act-mode').value;
         if (q('#vest-at-act-val')) at.activationValue = Number(q('#vest-at-act-val').value);
         if (q('#vest-at-be-on-act')) at.moveToBreakevenOnActivate = Boolean(q('#vest-at-be-on-act').checked);
@@ -14481,8 +14505,8 @@
         overlay.querySelector('#vest-at-enabled')?.addEventListener('change', syncDimState);
         overlay.querySelector('#vest-at-show-at-btn')?.addEventListener('change', syncDimState);
 
-        // Re-render pane when mode, timeframe, price unit, or activation mode changes so highlighted cards & inputs update cleanly
-        ['#vest-at-mode', '#vest-at-bar-tf', '#vest-at-price-offset-type', '#vest-at-act-mode'].forEach(sel => {
+        // Re-render pane when mode, timeframe, candle anchor, price unit, or activation mode changes so highlighted cards & helper copy update cleanly
+        ['#vest-at-mode', '#vest-at-bar-tf', '#vest-at-bar-anchor', '#vest-at-price-offset-type', '#vest-at-act-mode'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('change', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
@@ -14499,7 +14523,7 @@
         }
 
         overlay.querySelectorAll('[id^="vest-at-"]').forEach(el => {
-          if (['vest-at-enabled', 'vest-at-show-at-btn', 'vest-at-mode', 'vest-at-bar-tf', 'vest-at-price-offset-type', 'vest-at-act-mode', 'vest-at-reset-btn', 'vest-at-clear-records-btn'].includes(el.id)) return;
+          if (['vest-at-enabled', 'vest-at-show-at-btn', 'vest-at-mode', 'vest-at-bar-tf', 'vest-at-bar-anchor', 'vest-at-price-offset-type', 'vest-at-act-mode', 'vest-at-reset-btn', 'vest-at-clear-records-btn'].includes(el.id)) return;
           const evtName = (el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'range' || el.type === 'text')) ? 'input' : 'change';
           el.addEventListener(evtName, updateAtSummary);
           if (evtName === 'input') el.addEventListener('change', updateAtSummary);
