@@ -1,3 +1,9 @@
+Trading Cortex v1.1.163 — On-Chart "AT" Immediate Stop Button, Per-Timeframe Bars-Back & Persistent Multi-Account Trail Memory
+
+- **1-Tap `"AT"` Button on Price Entry Panel (`v1.1.163`)**: Added the **`AT`** button (`BE | TP | SL | AT`, visible by default) right on the chart Position Entry panel. Clicking **`AT`** arms Auto-Trail and immediately sets your Stop Loss to the pre-defined trail level (or holds in amber waiting mode if your configured profit activation trigger hasn't been reached yet; clicking again disarms).
+- **Per-Timeframe Bars-Back Grid & Profit Activation (`v1.1.163`)**: Configure how many bars back (`1–50`) independently for **each** timeframe (`Chart TF`, `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`), plus **Start Trailing When In Profit** by **Price Units**, **$ USD**, **Ticks**, **Points**, or **% Move** so trailing never starts if price never went into profit.
+- **Persistent Per-Account & Instrument Trail Memory (`v1.1.163`)**: Remembers every trailed `(Account, Instrument, Side, Entry, Status, Peak, Last SL)` in persistent storage across page refreshes and multi-account switches (using Hypernova's exact selected account ID + badge). Switching accounts preserves other accounts' trails, and refreshing or switching back to a trailed account catches up from bars printed while away and immediately updates the Stop Loss. View or remove remembered trails anytime in **Settings → Auto-Trail Stop**.
+
 Trading Cortex v1.1.162 — Configurable Auto-Trail Stop Loss Engine (Price, Ticks, Points, Dollars & Timeframe Bar Highs/Lows)
 
 - **Configurable Auto-Trail Stop Loss (`v1.1.162`)**: Added a full Auto-Trail Stop Loss engine accessible from **Cortex Settings → Auto-Trail Stop** and the Cortex dropdown menu, with a 1-tap **`TRL`** arm/disarm button right on the chart Position Entry box (`BE | TP | SL | TRL`) and a live violet dotted Trail Target preview line.

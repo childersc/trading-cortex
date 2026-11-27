@@ -4445,6 +4445,28 @@
       }
       case 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE': {
         const incoming = payload && Array.isArray(payload.positions) ? payload.positions : [];
+        if (payload && payload.activeAccount && typeof payload.activeAccount === 'object') {
+          const prevAccId = activeTradingAccount && activeTradingAccount.accountId;
+          const nextAccId = String(payload.activeAccount.accountId || 'default');
+          const switched = Boolean(prevAccId && prevAccId !== nextAccId);
+          activeTradingAccount = {
+            firmId: String(payload.activeAccount.firmId || getChartVisualsMainWorldFirmId() || 'hypernova'),
+            accountId: nextAccId,
+            accountLabel: String(payload.activeAccount.accountLabel || nextAccId)
+          };
+          if (switched) {
+            lastTradingAccountSwitchAt = Date.now();
+            // Reset submit cooldown for the newly active account so restored trails catch up immediately!
+            Object.keys(autoTrailStateBySymbol).forEach(k => {
+              if (k.includes(`::${nextAccId}::`)) {
+                autoTrailStateBySymbol[k].lastSubmitAt = 0;
+                autoTrailStateBySymbol[k].inFlight = false;
+                autoTrailStateBySymbol[k].inFlightAt = 0;
+              }
+            });
+          }
+        }
+        lastPositionsDomAuthoritativeMain = Boolean(payload && payload.positionsAuthoritative);
         liveHypernovaPositions = incoming;
         liveHypernovaOrderTicketBreach = (payload && payload.orderTicketBreach && typeof payload.orderTicketBreach === 'object')
           ? payload.orderTicketBreach
@@ -4478,18 +4500,26 @@
             hypernovaManualTpSlBySymbol[normSym][tsField] = Date.now();
           }
         }
-        if (normSym && typeof autoTrailStateBySymbol === 'object' && autoTrailStateBySymbol[normSym]) {
-          const atSt = autoTrailStateBySymbol[normSym];
-          atSt.inFlight = false;
-          atSt.inFlightAt = 0;
-          if (res.isAutoTrail) {
-            if (res.ok === true && Number.isFinite(Number(res.price)) && Number(res.price) > 0) {
-              atSt.lastSubmittedSl = Number(res.price);
-              atSt.lastSubmitAt = Date.now();
-              atSt.lastErrorReason = '';
-            } else if (res.ok === false) {
-              atSt.lastSubmitAt = Date.now();
-              atSt.lastErrorReason = String(res.reason || 'rejected');
+        if (normSym && typeof autoTrailStateBySymbol === 'object') {
+          const activeRecKey = makeAutoTrailRecordKey(
+            activeTradingAccount.firmId || getChartVisualsMainWorldFirmId() || 'hypernova',
+            activeTradingAccount.accountId || 'default',
+            normSym
+          );
+          const atSt = autoTrailStateBySymbol[activeRecKey] || autoTrailStateBySymbol[normSym] || null;
+          if (atSt) {
+            atSt.inFlight = false;
+            atSt.inFlightAt = 0;
+            if (res.isAutoTrail) {
+              if (res.ok === true && Number.isFinite(Number(res.price)) && Number(res.price) > 0) {
+                atSt.lastSubmittedSl = Number(res.price);
+                atSt.lastSubmitAt = Date.now();
+                atSt.lastErrorReason = '';
+                persistAutoTrailStateRecord(atSt, false);
+              } else if (res.ok === false) {
+                atSt.lastSubmitAt = Date.now();
+                atSt.lastErrorReason = String(res.reason || 'rejected');
+              }
             }
           }
         }
@@ -10529,7 +10559,12 @@
     }
 
     const autoTrailCfg = getAutoTrailConfig();
-    const autoTrailEval = autoTrailCfg.enabled
+    const shouldRunAutoTrail = Boolean(
+      autoTrailCfg.enabled ||
+      autoTrailCfg.showAtButton ||
+      hasPersistedAutoTrailForPosition(pos)
+    );
+    const autoTrailEval = shouldRunAutoTrail
       ? runAutoTrailForActivePosition({
           pos,
           symbolKey,
@@ -10553,7 +10588,6 @@
 
     // 2a-pre. Auto-Trail Dotted Preview Line (shows live target SL level while armed & tracking)
     if (
-      autoTrailCfg.enabled &&
       autoTrailCfg.showPreviewLine &&
       autoTrailEval &&
       autoTrailEval.armed &&
@@ -10575,7 +10609,7 @@
         ctx.lineTo(cssWidth, clampedTrailY);
         ctx.stroke();
 
-        const tagText = `${autoTrailEval.activated ? 'TRL' : 'TRL WAIT'} · $${formatHypernovaDisplayPrice(autoTrailEval.targetSl)}`;
+        const tagText = `${autoTrailEval.activated ? 'AT' : 'AT WAIT'} · $${formatHypernovaDisplayPrice(autoTrailEval.targetSl)}`;
         const tagFs = isCompactMobileChart ? 8.5 : 10;
         ctx.setLineDash([]);
         ctx.font = `700 ${tagFs}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
@@ -10600,7 +10634,7 @@
       }
     }
 
-    // 2a. Entry Line + Position Control Box (LONG/SHORT + BE + TP + SL + TRL + X)
+    // 2a. Entry Line + Position Control Box (LONG/SHORT + BE + TP + SL + AT + X)
     if (hnCfg.positionOverlayEnabled && entryY !== null && Number.isFinite(entryY)) {
       const clampedEntryY = Math.max(14, Math.min(cssHeight - 14, entryY));
       const sideColor = pos.side === 'short' ? '#f43f5e' : '#10b981';
@@ -10639,7 +10673,7 @@
                 <button type="button" class="vest-hn-ctrl-btn be-btn" title="Move Stop Loss to Breakeven (Entry Price)">BE</button>
                 <button type="button" class="vest-hn-ctrl-btn tp-btn" title="Grab &amp; drag vertically to set Take Profit (right-click or Esc to cancel)">TP</button>
                 <button type="button" class="vest-hn-ctrl-btn sl-btn" title="Grab &amp; drag vertically to set Stop Loss (right-click or Esc to cancel)">SL</button>
-                <button type="button" class="vest-hn-ctrl-btn trail-btn" title="Toggle Auto-Trail Stop Loss">TRL</button>
+                <button type="button" class="vest-hn-ctrl-btn trail-btn" title="Auto-Trail: Click to immediately arm &amp; set Stop Loss to your pre-defined Auto-Trail">AT</button>
               </div>
               <span class="vest-hn-entry-price"></span>
             </div>
@@ -10720,7 +10754,8 @@
         }
         const trailBtn = entryBox.querySelector('.trail-btn');
         if (trailBtn) {
-          if (!autoTrailCfg.enabled) {
+          const showAtBtn = Boolean(autoTrailCfg.showAtButton !== false || autoTrailCfg.enabled || (autoTrailEval && autoTrailEval.armed));
+          if (!showAtBtn) {
             trailBtn.style.display = 'none';
           } else {
             trailBtn.style.display = '';
@@ -10728,18 +10763,26 @@
             const isActivated = Boolean(autoTrailEval && autoTrailEval.activated);
             trailBtn.classList.toggle('is-active', isArmed && isActivated);
             trailBtn.classList.toggle('is-waiting', isArmed && !isActivated);
-            trailBtn.textContent = isArmed ? (isActivated ? 'TRL' : 'WAIT') : 'TRL';
+            trailBtn.textContent = 'AT';
             const tgtInfo = (autoTrailEval && Number.isFinite(autoTrailEval.targetSl))
               ? ` → $${formatHypernovaDisplayPrice(autoTrailEval.targetSl)}`
               : '';
             const modeDesc = (autoTrailEval && autoTrailEval.reason) ? ` (${autoTrailEval.reason})` : '';
+            const accDesc = activeTradingAccount && activeTradingAccount.accountLabel ? ` [${activeTradingAccount.accountLabel}]` : '';
             trailBtn.title = isArmed
-              ? `Auto-Trail ${isActivated ? 'ACTIVE' : 'WAITING FOR TRIGGER'}${modeDesc}${tgtInfo} · Click to disarm`
-              : `Click to arm Auto-Trail Stop Loss${modeDesc}`;
+              ? `Auto-Trail ${isActivated ? 'ACTIVE' : 'WAITING FOR PROFIT TRIGGER'}${modeDesc}${tgtInfo}${accDesc} · Click to disarm`
+              : `Click AT to immediately arm & set pre-defined Auto-Trail Stop${modeDesc}`;
             trailBtn.onclick = (ev) => {
               ev.stopPropagation();
               ev.preventDefault();
-              toggleAutoTrailArmedForPosition(pos, latestChartMarketPrice);
+              handleAtButtonClick({
+                pos,
+                symbolKey,
+                mainSeries,
+                bars: latestAutoTrailChartBars,
+                barIntervalSec: latestAutoTrailBarIntervalSec,
+                livePrice: latestChartMarketPrice
+              });
               scheduleIctSessionsRender(false);
             };
           }
@@ -10944,9 +10987,41 @@
     '1d':  { key: '1d',  tvRes: '1D',  sec: 86400, ttlMs: 300000 }
   };
 
+  const DEFAULT_AUTO_TRAIL_BAR_LOOKBACK_BY_TF_MAIN = {
+    chart: 1,
+    '1m': 3,
+    '3m': 2,
+    '5m': 1,
+    '15m': 1,
+    '30m': 1,
+    '1h': 1,
+    '4h': 1,
+    '1d': 1
+  };
+
   const autoTrailStateBySymbol = {};
   let latestAutoTrailChartBars = null;
   let latestAutoTrailBarIntervalSec = 300;
+  let activeTradingAccount = { firmId: '', accountId: 'default', accountLabel: 'Default Account' };
+  let lastTradingAccountSwitchAt = 0;
+  let lastPositionsDomAuthoritativeMain = false;
+
+  function makeAutoTrailRecordKey(firmId, accountId, symbol) {
+    const f = String(firmId || getChartVisualsMainWorldFirmId() || 'hypernova').trim().toLowerCase();
+    const a = String(accountId || (activeTradingAccount && activeTradingAccount.accountId) || 'default').trim();
+    const s = normalizeHypernovaMainSymbol(symbol || '');
+    return `${f}::${a}::${s}`;
+  }
+
+  function getAutoTrailBarLookback(cfg) {
+    const tf = (cfg && cfg.barTimeframe) || '5m';
+    if (cfg && cfg.barLookbackByTf && typeof cfg.barLookbackByTf === 'object') {
+      const v = Number(cfg.barLookbackByTf[tf]);
+      if (Number.isFinite(v) && v >= 1) return Math.max(1, Math.min(50, Math.round(v)));
+    }
+    const fb = Number(cfg && cfg.barLookback);
+    return Number.isFinite(fb) && fb >= 1 ? Math.max(1, Math.min(50, Math.round(fb))) : 1;
+  }
 
   function getAutoTrailConfig() {
     const raw = (currentSettings && currentSettings.autoTrail && typeof currentSettings.autoTrail === 'object')
@@ -10954,14 +11029,30 @@
       : {};
     const validModes = ['price', 'ticks', 'points', 'dollars', 'bar_hl'];
     const validTfs = ['chart', '1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
-    const validAct = ['immediate', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
+    const validAct = ['immediate', 'in_profit_price', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
     const clampPos = (v, min, max, fallback) => {
       const n = Number(v);
       return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
     };
+    const barTimeframe = validTfs.includes(raw.barTimeframe) ? raw.barTimeframe : '5m';
+    const rawByTf = (raw.barLookbackByTf && typeof raw.barLookbackByTf === 'object') ? raw.barLookbackByTf : {};
+    const legacyLb = Number.isFinite(Number(raw.barLookback)) ? Math.round(clampPos(raw.barLookback, 1, 50, 1)) : null;
+    const barLookbackByTf = {};
+    for (const tf of validTfs) {
+      const defVal = DEFAULT_AUTO_TRAIL_BAR_LOOKBACK_BY_TF_MAIN[tf] || 1;
+      if (rawByTf[tf] !== undefined && rawByTf[tf] !== null && rawByTf[tf] !== '') {
+        barLookbackByTf[tf] = Math.round(clampPos(rawByTf[tf], 1, 50, defVal));
+      } else if (tf === barTimeframe && legacyLb !== null) {
+        barLookbackByTf[tf] = legacyLb;
+      } else {
+        barLookbackByTf[tf] = defVal;
+      }
+    }
     return {
       enabled: Boolean(raw.enabled),
+      showAtButton: raw.showAtButton !== false,
       autoArmOnNewTrade: Boolean(raw.autoArmOnNewTrade),
+      setInitialSlOnAtClick: Boolean(raw.setInitialSlOnAtClick),
       mode: validModes.includes(raw.mode) ? raw.mode : 'ticks',
       priceOffset: clampPos(raw.priceOffset, 0.000001, 1000000, 10),
       priceOffsetType: raw.priceOffsetType === 'percent' ? 'percent' : 'absolute',
@@ -10970,8 +11061,9 @@
       pointsDistance: clampPos(raw.pointsDistance, 0.01, 100000, 5),
       pointValue: clampPos(raw.pointValue, 0.000001, 100000, 1),
       dollarsDistance: clampPos(raw.dollarsDistance, 0.5, 1000000, 50),
-      barTimeframe: validTfs.includes(raw.barTimeframe) ? raw.barTimeframe : '5m',
-      barLookback: Math.round(clampPos(raw.barLookback, 1, 20, 1)),
+      barTimeframe,
+      barLookback: barLookbackByTf[barTimeframe] || 1,
+      barLookbackByTf,
       barUseClosedOnly: raw.barUseClosedOnly !== false,
       barBufferTicks: Math.round(clampPos(raw.barBufferTicks, 0, 500, 2)),
       activationMode: validAct.includes(raw.activationMode) ? raw.activationMode : 'immediate',
@@ -10982,6 +11074,117 @@
       onlyTighten: raw.onlyTighten !== false,
       showPreviewLine: raw.showPreviewLine !== false
     };
+  }
+
+  function getPersistedAutoTrailRecordsMap() {
+    return (currentSettings && currentSettings.autoTrailRecords && typeof currentSettings.autoTrailRecords === 'object')
+      ? currentSettings.autoTrailRecords
+      : {};
+  }
+
+  function findPersistedAutoTrailRecord(pos) {
+    if (!pos) return null;
+    const firmId = (activeTradingAccount && activeTradingAccount.firmId) || getChartVisualsMainWorldFirmId() || 'hypernova';
+    const accountId = (activeTradingAccount && activeTradingAccount.accountId) || 'default';
+    const sym = normalizeHypernovaMainSymbol(pos.symbol || '');
+    if (!sym) return null;
+    const key = makeAutoTrailRecordKey(firmId, accountId, sym);
+    const records = getPersistedAutoTrailRecordsMap();
+    const rec = records[key];
+    if (!rec || typeof rec !== 'object') return null;
+    // Verify record matches this position's side and entry price (prevents stale closed-trade inheritance)
+    if (rec.side !== pos.side) return null;
+    const recEntry = Number(rec.entryPrice);
+    const posEntry = Number(pos.entryPrice);
+    if (!Number.isFinite(recEntry) || recEntry <= 0 || !Number.isFinite(posEntry) || posEntry <= 0) return null;
+    if (Math.abs(recEntry - posEntry) / posEntry > 0.0025) return null;
+    return { key, record: rec };
+  }
+
+  function hasPersistedAutoTrailForPosition(pos) {
+    const found = findPersistedAutoTrailRecord(pos);
+    return Boolean(found && found.record && found.record.armed);
+  }
+
+  function hasAnyPersistedAutoTrailForActiveAccount() {
+    const firmId = (activeTradingAccount && activeTradingAccount.firmId) || getChartVisualsMainWorldFirmId() || 'hypernova';
+    const accountId = (activeTradingAccount && activeTradingAccount.accountId) || 'default';
+    const prefix = `${firmId}::${accountId}::`;
+    const records = getPersistedAutoTrailRecordsMap();
+    return Object.keys(records).some(k => k.startsWith(prefix) && records[k] && records[k].armed);
+  }
+
+  function persistAutoTrailStateRecord(st, ensureEnabled = false) {
+    if (!st || !st.symbol || !st.recordKey) return;
+    const now = Date.now();
+    const payload = {
+      firmId: st.firmId,
+      accountId: st.accountId,
+      accountLabel: st.accountLabel,
+      symbol: st.symbol,
+      side: st.side,
+      entryPrice: st.entryPrice,
+      positionKey: st.positionKey,
+      armed: Boolean(st.armed),
+      activated: Boolean(st.activated),
+      peakPrice: st.peakPrice,
+      lastTargetSl: st.lastTargetSl,
+      lastSubmittedSl: st.lastSubmittedSl,
+      lastReason: st.lastReason || '',
+      updatedAt: now,
+      ensureEnabled: Boolean(ensureEnabled)
+    };
+    st.lastPersistedAt = now;
+    st.lastPersistedSig = `${payload.armed}|${payload.activated}|${payload.peakPrice}|${payload.lastSubmittedSl}`;
+    // Optimistically mirror into local currentSettings so same-session re-reads stay synchronous
+    if (currentSettings && typeof currentSettings === 'object') {
+      if (!currentSettings.autoTrailRecords || typeof currentSettings.autoTrailRecords !== 'object') {
+        currentSettings.autoTrailRecords = {};
+      }
+      currentSettings.autoTrailRecords[st.recordKey] = payload;
+      if (ensureEnabled) {
+        if (!currentSettings.autoTrail || typeof currentSettings.autoTrail !== 'object') currentSettings.autoTrail = {};
+        currentSettings.autoTrail.enabled = true;
+      }
+    }
+    try {
+      window.top.postMessage({ type: 'VEST_TV_AUTO_TRAIL_RECORD_UPSERT', payload }, '*');
+    } catch (e) {}
+  }
+
+  function removePersistedAutoTrailRecord(recordKey) {
+    if (!recordKey) return;
+    if (currentSettings && currentSettings.autoTrailRecords && currentSettings.autoTrailRecords[recordKey]) {
+      delete currentSettings.autoTrailRecords[recordKey];
+    }
+    try {
+      window.top.postMessage({ type: 'VEST_TV_AUTO_TRAIL_RECORD_REMOVE', payload: { key: recordKey } }, '*');
+    } catch (e) {}
+  }
+
+  function catchUpPeakFromRecentBars(bars, side, sinceMs, currentPeak, livePrice) {
+    const isShort = side === 'short';
+    let peak = Number(currentPeak);
+    const live = Number(livePrice);
+    if (!Number.isFinite(peak) || peak <= 0) peak = live;
+    if (Number.isFinite(live) && live > 0) {
+      peak = isShort ? Math.min(peak, live) : Math.max(peak, live);
+    }
+    if (!Array.isArray(bars) || bars.length === 0 || !Number.isFinite(sinceMs) || sinceMs <= 0) {
+      return peak;
+    }
+    const sinceSec = Math.floor(sinceMs / 1000);
+    for (let i = bars.length - 1; i >= 0; i--) {
+      const b = bars[i];
+      if (!b || !Number.isFinite(Number(b.timeSec))) continue;
+      if (Number(b.timeSec) < sinceSec) break;
+      if (isShort && Number.isFinite(Number(b.low)) && Number(b.low) > 0) {
+        peak = Math.min(peak, Number(b.low));
+      } else if (!isShort && Number.isFinite(Number(b.high)) && Number(b.high) > 0) {
+        peak = Math.max(peak, Number(b.high));
+      }
+    }
+    return peak;
   }
 
   function resolveAutoTrailTickSize(mainSeries, pos, customTickSize, referencePrice) {
@@ -11081,7 +11284,7 @@
     return resampled;
   }
 
-  function evaluateAutoTrailTarget({ cfg, pos, state, livePrice, tickSize, tfBars }) {
+  function evaluateAutoTrailTarget({ cfg, pos, state, livePrice, tickSize, tfBars, forceInitialSubmit = false }) {
     const safeTick = (Number.isFinite(Number(tickSize)) && Number(tickSize) > 0) ? Number(tickSize) : 0.01;
     const isShort = Boolean(pos && pos.side === 'short');
     const dir = isShort ? -1 : 1;
@@ -11110,26 +11313,27 @@
       peakPrice = isShort ? Math.min(peakPrice, live) : Math.max(peakPrice, live);
     }
 
-    // Check activation trigger (latches true once reached for this trade)
+    // Check activation trigger using BOTH live price & peak excursion (catches threshold crossed while away!)
     let activated = Boolean(prevState.activated);
     if (!activated) {
       const actMode = cfg.activationMode || 'immediate';
       const actVal = Number(cfg.activationValue) || 0;
-      const favorableMove = (live - entry) * dir;
+      const bestFavorableMove = Math.max((live - entry) * dir, (peakPrice - entry) * dir);
       if (actMode === 'immediate' || actVal <= 0) {
         activated = true;
+      } else if (actMode === 'in_profit_price') {
+        if (bestFavorableMove >= actVal - 1e-12) activated = true;
       } else if (actMode === 'in_profit_dollars') {
-        const livePnl = Number.isFinite(Number(pos.unrealizedPnl))
-          ? Number(pos.unrealizedPnl)
-          : (Number.isFinite(sizeQty) && sizeQty > 0 ? favorableMove * sizeQty : -Infinity);
-        if (livePnl >= actVal - 1e-9) activated = true;
+        const livePnl = Number.isFinite(Number(pos.unrealizedPnl)) ? Number(pos.unrealizedPnl) : -Infinity;
+        const peakPnl = (Number.isFinite(sizeQty) && sizeQty > 0) ? bestFavorableMove * sizeQty : -Infinity;
+        if (Math.max(livePnl, peakPnl) >= actVal - 1e-9) activated = true;
       } else if (actMode === 'in_profit_ticks') {
-        if (favorableMove >= actVal * safeTick - 1e-12) activated = true;
+        if (bestFavorableMove >= actVal * safeTick - 1e-12) activated = true;
       } else if (actMode === 'in_profit_points') {
         const ptVal = (Number.isFinite(Number(cfg.pointValue)) && Number(cfg.pointValue) > 0) ? Number(cfg.pointValue) : 1;
-        if (favorableMove >= actVal * ptVal - 1e-12) activated = true;
+        if (bestFavorableMove >= actVal * ptVal - 1e-12) activated = true;
       } else if (actMode === 'in_profit_percent') {
-        const pctMove = (favorableMove / entry) * 100;
+        const pctMove = (bestFavorableMove / entry) * 100;
         if (pctMove >= actVal - 1e-12) activated = true;
       }
     }
@@ -11179,7 +11383,7 @@
         calcSkip = 'waiting_tf_bars';
       } else {
         const endIdx = closedOnly ? tfBars.length - 1 : tfBars.length;
-        const lookback = Math.max(1, Math.min(20, Math.round(Number(cfg.barLookback) || 1)));
+        const lookback = getAutoTrailBarLookback(cfg);
         const startIdx = Math.max(0, endIdx - lookback);
         const windowBars = tfBars.slice(startIdx, endIdx);
         let extreme = isShort ? -Infinity : Infinity;
@@ -11194,7 +11398,7 @@
           const buf = bufTicks * safeTick;
           rawSl = isShort ? (extreme + buf) : (extreme - buf);
           const tfTag = cfg.barTimeframe === 'chart' ? 'Bar' : cfg.barTimeframe;
-          reason = `${tfTag} ${isShort ? 'High' : 'Low'}${bufTicks > 0 ? ` ${isShort ? '+' : '-'}${bufTicks}t` : ''}`;
+          reason = `${tfTag}(${lookback}b) ${isShort ? 'High' : 'Low'}${bufTicks > 0 ? ` ${isShort ? '+' : '-'}${bufTicks}t` : ''}`;
         } else {
           calcSkip = 'invalid_bars';
         }
@@ -11215,19 +11419,19 @@
 
     const targetSl = Number.isFinite(rawSl) && rawSl > 0 ? snapPriceToAutoTrailTick(rawSl, safeTick) : null;
 
-    if (!activated) {
+    if (!activated && !forceInitialSubmit) {
       return { peakPrice, activated: false, targetSl, shouldSubmit: false, skipReason: 'waiting_activation', reason, tickSize: safeTick };
     }
     if (calcSkip || targetSl === null) {
-      return { peakPrice, activated: true, targetSl, shouldSubmit: false, skipReason: calcSkip || 'no_target', reason, tickSize: safeTick };
+      return { peakPrice, activated, targetSl, shouldSubmit: false, skipReason: calcSkip || 'no_target', reason, tickSize: safeTick };
     }
 
     // Safety guard #1: Never cross live market price (prevents instant stop-out / exchange rejection)
     if (!isShort && targetSl >= live - safeTick * 0.5) {
-      return { peakPrice, activated: true, targetSl, shouldSubmit: false, skipReason: 'crosses_market', reason, tickSize: safeTick };
+      return { peakPrice, activated, targetSl, shouldSubmit: false, skipReason: 'crosses_market', reason, tickSize: safeTick };
     }
     if (isShort && targetSl <= live + safeTick * 0.5) {
-      return { peakPrice, activated: true, targetSl, shouldSubmit: false, skipReason: 'crosses_market', reason, tickSize: safeTick };
+      return { peakPrice, activated, targetSl, shouldSubmit: false, skipReason: 'crosses_market', reason, tickSize: safeTick };
     }
 
     // Safety guard #2: Strict ratchet & minimum step against current live SL (or recently submitted SL)
@@ -11241,19 +11445,19 @@
     if (currentSl !== null) {
       if (cfg.onlyTighten !== false) {
         if (!isShort && targetSl < currentSl + minStep) {
-          return { peakPrice, activated: true, targetSl, shouldSubmit: false, skipReason: 'no_tighten', reason, tickSize: safeTick };
+          return { peakPrice, activated, targetSl, shouldSubmit: false, skipReason: 'no_tighten', reason, tickSize: safeTick };
         }
         if (isShort && targetSl > currentSl - minStep) {
-          return { peakPrice, activated: true, targetSl, shouldSubmit: false, skipReason: 'no_tighten', reason, tickSize: safeTick };
+          return { peakPrice, activated, targetSl, shouldSubmit: false, skipReason: 'no_tighten', reason, tickSize: safeTick };
         }
       } else if (Math.abs(targetSl - currentSl) < minStep) {
-        return { peakPrice, activated: true, targetSl, shouldSubmit: false, skipReason: 'below_step', reason, tickSize: safeTick };
+        return { peakPrice, activated, targetSl, shouldSubmit: false, skipReason: 'below_step', reason, tickSize: safeTick };
       }
     }
 
     return {
       peakPrice,
-      activated: true,
+      activated,
       targetSl,
       shouldSubmit: true,
       skipReason: '',
@@ -11271,32 +11475,102 @@
 
   function clearAutoTrailStateForSymbol(symbolKey) {
     const sym = normalizeHypernovaMainSymbol(symbolKey || '');
-    if (sym && autoTrailStateBySymbol[sym]) {
-      delete autoTrailStateBySymbol[sym];
+    if (!sym) return;
+    const firmId = (activeTradingAccount && activeTradingAccount.firmId) || getChartVisualsMainWorldFirmId() || 'hypernova';
+    const accountId = (activeTradingAccount && activeTradingAccount.accountId) || 'default';
+    const recKey = makeAutoTrailRecordKey(firmId, accountId, sym);
+    if (autoTrailStateBySymbol[recKey]) {
+      delete autoTrailStateBySymbol[recKey];
+    }
+    // Only remove the persisted trail record when the active account's Positions panel authoritatively confirms flat
+    // AND we are past the 3s account-switch DOM grace period (so switching accounts NEVER deletes another account's trail!)
+    const pastGrace = (Date.now() - lastTradingAccountSwitchAt) > 3000;
+    if (lastPositionsDomAuthoritativeMain && pastGrace) {
+      const records = getPersistedAutoTrailRecordsMap();
+      if (records[recKey]) {
+        removePersistedAutoTrailRecord(recKey);
+      }
     }
   }
 
-  function getOrSyncAutoTrailState(pos, cfg, livePrice) {
+  function getOrSyncAutoTrailState(pos, cfg, livePrice, bars = null) {
     const sym = normalizeHypernovaMainSymbol(pos && pos.symbol);
     if (!sym) return null;
+    const firmId = (activeTradingAccount && activeTradingAccount.firmId) || getChartVisualsMainWorldFirmId() || 'hypernova';
+    const accountId = (activeTradingAccount && activeTradingAccount.accountId) || 'default';
+    const accountLabel = (activeTradingAccount && activeTradingAccount.accountLabel) || accountId;
+    const recKey = makeAutoTrailRecordKey(firmId, accountId, sym);
     const posKey = makeAutoTrailPositionKey(pos);
-    let st = autoTrailStateBySymbol[sym];
+    let st = autoTrailStateBySymbol[recKey];
+
+    // Check persisted storage record (handles page refresh & switching back from another account!)
+    const persisted = findPersistedAutoTrailRecord(pos);
     if (!st || st.positionKey !== posKey) {
-      st = {
-        positionKey: posKey,
-        armed: Boolean(cfg && cfg.autoArmOnNewTrade),
-        activated: false,
-        peakPrice: Number.isFinite(Number(livePrice)) && Number(livePrice) > 0 ? Number(livePrice) : Number(pos.entryPrice),
-        lastTargetSl: null,
-        lastSubmittedSl: null,
-        lastSubmitAt: 0,
-        inFlight: false,
-        inFlightAt: 0,
-        lastReason: '',
-        lastSkipReason: '',
-        lastErrorReason: ''
-      };
+      if (persisted && persisted.record) {
+        const rec = persisted.record;
+        const caughtUpPeak = catchUpPeakFromRecentBars(bars, pos.side, rec.updatedAt, rec.peakPrice, livePrice);
+        st = {
+          recordKey: recKey,
+          firmId,
+          accountId,
+          accountLabel,
+          symbol: sym,
+          side: pos.side || 'long',
+          entryPrice: Number(pos.entryPrice),
+          positionKey: posKey,
+          armed: Boolean(rec.armed),
+          activated: Boolean(rec.activated),
+          peakPrice: caughtUpPeak,
+          lastTargetSl: rec.lastTargetSl || null,
+          lastSubmittedSl: rec.lastSubmittedSl || null,
+          lastSubmitAt: 0, // Zero cooldown so restored trail immediately adjusts SL if tighter!
+          inFlight: false,
+          inFlightAt: 0,
+          lastReason: rec.lastReason || '',
+          lastSkipReason: '',
+          lastErrorReason: '',
+          lastPersistedAt: rec.updatedAt || 0,
+          lastPersistedSig: ''
+        };
+      } else {
+        st = {
+          recordKey: recKey,
+          firmId,
+          accountId,
+          accountLabel,
+          symbol: sym,
+          side: pos.side || 'long',
+          entryPrice: Number(pos.entryPrice),
+          positionKey: posKey,
+          armed: Boolean(cfg && cfg.enabled && cfg.autoArmOnNewTrade),
+          activated: false,
+          peakPrice: Number.isFinite(Number(livePrice)) && Number(livePrice) > 0 ? Number(livePrice) : Number(pos.entryPrice),
+          lastTargetSl: null,
+          lastSubmittedSl: null,
+          lastSubmitAt: 0,
+          inFlight: false,
+          inFlightAt: 0,
+          lastReason: '',
+          lastSkipReason: '',
+          lastErrorReason: '',
+          lastPersistedAt: 0,
+          lastPersistedSig: ''
+        };
+      }
+      autoTrailStateBySymbol[recKey] = st;
+      // Keep legacy symbol alias updated for quick lookup/debug
       autoTrailStateBySymbol[sym] = st;
+    } else if (persisted && persisted.record && persisted.record.armed && !st.armed && !st.userDisarmedLocally) {
+      // Hydrate if storage finished loading asynchronously after first render frame
+      const rec = persisted.record;
+      st.armed = true;
+      st.activated = Boolean(rec.activated);
+      st.peakPrice = catchUpPeakFromRecentBars(bars, pos.side, rec.updatedAt, rec.peakPrice, livePrice);
+      st.lastSubmittedSl = rec.lastSubmittedSl || st.lastSubmittedSl;
+      st.lastSubmitAt = 0;
+    } else if (st && st.armed && persisted && !persisted.record) {
+      // Keep accountLabel fresh
+      st.accountLabel = accountLabel;
     }
     return st;
   }
@@ -11304,24 +11578,50 @@
   function toggleAutoTrailArmedForPosition(pos, livePrice) {
     if (!pos) return false;
     const cfg = getAutoTrailConfig();
-    const st = getOrSyncAutoTrailState(pos, cfg, livePrice);
+    const st = getOrSyncAutoTrailState(pos, cfg, livePrice, latestAutoTrailChartBars);
     if (!st) return false;
     st.armed = !st.armed;
+    st.userDisarmedLocally = !st.armed;
     if (st.armed) {
       st.activated = false;
       st.peakPrice = (Number.isFinite(Number(livePrice)) && Number(livePrice) > 0) ? Number(livePrice) : Number(pos.entryPrice);
       st.lastSubmitAt = 0;
       st.inFlight = false;
       st.inFlightAt = 0;
+      persistAutoTrailStateRecord(st, true);
+    } else {
+      removePersistedAutoTrailRecord(st.recordKey);
     }
     return st.armed;
   }
 
-  function runAutoTrailForActivePosition({ pos, symbolKey, mainSeries, bars, barIntervalSec, livePrice }) {
+  function handleAtButtonClick({ pos, symbolKey, mainSeries, bars, barIntervalSec, livePrice }) {
+    if (!pos) return null;
+    const nowArmed = toggleAutoTrailArmedForPosition(pos, livePrice);
+    if (!nowArmed) {
+      return { armed: false };
+    }
+    // Immediately evaluate & submit pre-defined Auto-Trail SL on click (bypassing cooldown!)
     const cfg = getAutoTrailConfig();
-    if (!cfg.enabled || !pos) return null;
-    const st = getOrSyncAutoTrailState(pos, cfg, livePrice);
+    return runAutoTrailForActivePosition({
+      pos,
+      symbolKey,
+      mainSeries,
+      bars,
+      barIntervalSec,
+      livePrice,
+      forceImmediate: true,
+      forceInitialSubmit: Boolean(cfg.setInitialSlOnAtClick)
+    });
+  }
+
+  function runAutoTrailForActivePosition({ pos, symbolKey, mainSeries, bars, barIntervalSec, livePrice, forceImmediate = false, forceInitialSubmit = false }) {
+    const cfg = getAutoTrailConfig();
+    if (!pos) return null;
+    const st = getOrSyncAutoTrailState(pos, cfg, livePrice, bars);
     if (!st) return null;
+
+    if (!cfg.enabled && !cfg.showAtButton && !st.armed) return null;
 
     const tickSize = resolveAutoTrailTickSize(mainSeries, pos, cfg.customTickSize, livePrice);
     const tfBars = cfg.mode === 'bar_hl'
@@ -11334,9 +11634,12 @@
       state: st,
       livePrice,
       tickSize,
-      tfBars
+      tfBars,
+      forceInitialSubmit
     });
 
+    const prevActivated = st.activated;
+    const prevPeak = st.peakPrice;
     if (st.armed) {
       st.peakPrice = evalRes.peakPrice;
       st.activated = evalRes.activated;
@@ -11346,6 +11649,17 @@
     st.lastSkipReason = evalRes.skipReason;
 
     const nowMs = Date.now();
+    // Persist armed state updates (immediately on activation change, or throttled every 2s on peak updates)
+    if (st.armed) {
+      const nextSig = `${st.armed}|${st.activated}|${st.peakPrice}|${st.lastSubmittedSl}`;
+      if (
+        st.activated !== prevActivated ||
+        (nextSig !== st.lastPersistedSig && (st.lastPersistedAt === 0 || (nowMs - st.lastPersistedAt >= 2000) || (prevPeak !== st.peakPrice && Math.abs((st.peakPrice || 0) - (prevPeak || 0)) >= tickSize)))
+      ) {
+        persistAutoTrailStateRecord(st, false);
+      }
+    }
+
     // Failsafe clear of stale in-flight lock after 7 seconds
     if (st.inFlight && st.inFlightAt && (nowMs - st.inFlightAt > 7000)) {
       st.inFlight = false;
@@ -11358,7 +11672,7 @@
       evalRes.shouldSubmit &&
       !activeHypernovaDrag &&
       !st.inFlight &&
-      (nowMs - st.lastSubmitAt >= cooldownMs)
+      (forceImmediate || st.lastSubmitAt === 0 || (nowMs - st.lastSubmitAt >= cooldownMs))
     );
 
     if (canSubmitNow) {
@@ -11397,7 +11711,8 @@
     return {
       ...evalRes,
       armed: st.armed,
-      inFlight: st.inFlight
+      inFlight: st.inFlight,
+      recordKey: st.recordKey
     };
   }
   // === END CORTEX AUTO-TRAIL STOP ENGINE ===
@@ -17366,7 +17681,7 @@
     const marketStructureEnabled = Boolean(marketStructureConfig && marketStructureConfig.enabled);
     const accountsRiskEnabled = Boolean(accountsRiskConfig && accountsRiskConfig.enabled);
     const hypernovaVisualsEnabled = isHypernovaMainWorldHost() && getHypernovaVisualsConfig().enabled;
-    const autoTrailEnabled = isHypernovaMainWorldHost() && getAutoTrailConfig().enabled;
+    const autoTrailEnabled = isHypernovaMainWorldHost() && (getAutoTrailConfig().enabled || hasAnyPersistedAutoTrailForActiveAccount());
     if (!failLinesEnabled) removeFailPriceLineButtons();
     if (!cortexIndicatorEnabled) syncCortexManualBuyButton(false, '', null);
     if (!hypernovaVisualsEnabled) {

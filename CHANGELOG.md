@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.162`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.163`) are documented in this file.
+
+---
+
+## [v1.1.163] — 2026-11-26
+
+### 🎯 On-Chart "AT" Immediate Stop Button, Per-Timeframe Bars-Back Grid & Persistent Per-Account Trail Memory
+- **Upgrades (`content/content-isolated.js`, `content/content-main.js`, `tests/auto-trail-stop.test.js`)**:
+  - **1-Tap `"AT"` Button on Price Entry Panel (`BE | TP | SL | AT`)**: Always shown by default (`showAtButton: true`) right on the chart Position Entry box. Clicking **`AT`** arms the trade and **immediately sets the Stop Loss to your pre-defined Auto-Trail level** (or arms in amber waiting mode when a profit activation trigger has not yet been reached, with an optional **Place Initial Stop Immediately on AT Click** toggle). Clicking **`AT`** again disarms cleanly.
+  - **Expanded Profit Activation Triggers (`in_profit_price` + `$` / Ticks / Points / `%`)**: Added **In Profit by Price Units** alongside `$ USD`, `Ticks`, `Points`, and `% Move` so Auto-Trail never activates prematurely if price never went into profit (and automatically evaluates both live price and caught-up peak excursion).
+  - **Per-Timeframe Bars-Back Configuration (`barLookbackByTf`)**: Added an independent **Bars Back Per Timeframe** grid (`Chart TF`, `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d` — `1–50` bars each) under **Auto-Trail Stop → Timeframe Bar Highs & Lows**, so every timeframe remembers its own exact bar lookback count.
+  - **Persistent Per-Account & Per-Instrument Trail Memory (`settings.autoTrailRecords`)**: Uniquely identifies the active account (using Hypernova's `hypernova:selected-account-id` UUID + switcher pill `A10` / banner status, plus `readCurrentSelectedAccount()` on MFP/Kalshi/Vest) and persists every armed trade's `(firmId, accountId, symbol, side, entryPrice, armed, activated, peakPrice, lastSubmittedSl)` across page refreshes and account switches.
+  - **Instant Catch-Up on Refresh & Account Switch-Back**: Switching to a different account never deletes another account's remembered trails (protected by a 3s account-switch grace period); refreshing or switching back to a trailed account catches up the peak from recent chart bars printed while away and **immediately adjusts the exchange Stop Loss** on the first frame without waiting for cooldown.
+  - **Remembered Active Trails Manager**: Added **Section 4: Remembered Active Trails** inside **Settings → Auto-Trail Stop** showing every saved `(Account, Symbol, Side, Status, Entry, Peak, SL)` with 1-click **Remove** and **Clear All** buttons.
+  - Expanded VM tests in `tests/auto-trail-stop.test.js` covering `AT` immediate click submission, per-TF bars-back, `in_profit_price`, multi-account isolation, and refresh/switch-back catch-up.
 
 ---
 

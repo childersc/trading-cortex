@@ -773,9 +773,24 @@
     };
   }
 
+  const AUTO_TRAIL_TF_KEYS = ['chart', '1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
+  const DEFAULT_AUTO_TRAIL_BAR_LOOKBACK_BY_TF = {
+    chart: 1,
+    '1m': 3,
+    '3m': 2,
+    '5m': 1,
+    '15m': 1,
+    '30m': 1,
+    '1h': 1,
+    '4h': 1,
+    '1d': 1
+  };
+
   const DEFAULT_AUTO_TRAIL = {
     enabled: false,
+    showAtButton: true,
     autoArmOnNewTrade: false,
+    setInitialSlOnAtClick: false,
     mode: 'ticks', // 'price' | 'ticks' | 'points' | 'dollars' | 'bar_hl'
     priceOffset: 10,
     priceOffsetType: 'absolute', // 'absolute' | 'percent'
@@ -786,9 +801,10 @@
     dollarsDistance: 50,
     barTimeframe: '5m', // 'chart' | '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
     barLookback: 1,
+    barLookbackByTf: { ...DEFAULT_AUTO_TRAIL_BAR_LOOKBACK_BY_TF },
     barUseClosedOnly: true,
     barBufferTicks: 2,
-    activationMode: 'immediate', // 'immediate' | 'in_profit_dollars' | 'in_profit_ticks' | 'in_profit_points' | 'in_profit_percent'
+    activationMode: 'immediate', // 'immediate' | 'in_profit_price' | 'in_profit_dollars' | 'in_profit_ticks' | 'in_profit_points' | 'in_profit_percent'
     activationValue: 0,
     moveToBreakevenOnActivate: false,
     stepMinTicks: 1,
@@ -800,15 +816,34 @@
   function normalizeAutoTrailConfig(rawCfg) {
     const src = rawCfg && typeof rawCfg === 'object' ? rawCfg : {};
     const validModes = ['price', 'ticks', 'points', 'dollars', 'bar_hl'];
-    const validTfs = ['chart', '1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
-    const validAct = ['immediate', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
+    const validTfs = AUTO_TRAIL_TF_KEYS;
+    const validAct = ['immediate', 'in_profit_price', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
     const clampPos = (v, min, max, fallback) => {
       const n = Number(v);
       return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
     };
+    const barTimeframe = validTfs.includes(src.barTimeframe) ? src.barTimeframe : DEFAULT_AUTO_TRAIL.barTimeframe;
+    const rawByTf = (src.barLookbackByTf && typeof src.barLookbackByTf === 'object') ? src.barLookbackByTf : {};
+    const legacyLb = Number.isFinite(Number(src.barLookback))
+      ? Math.round(clampPos(src.barLookback, 1, 50, 1))
+      : null;
+    const barLookbackByTf = {};
+    for (const tf of validTfs) {
+      const defVal = DEFAULT_AUTO_TRAIL_BAR_LOOKBACK_BY_TF[tf] || 1;
+      if (rawByTf[tf] !== undefined && rawByTf[tf] !== null && rawByTf[tf] !== '') {
+        barLookbackByTf[tf] = Math.round(clampPos(rawByTf[tf], 1, 50, defVal));
+      } else if (tf === barTimeframe && legacyLb !== null) {
+        barLookbackByTf[tf] = legacyLb;
+      } else {
+        barLookbackByTf[tf] = defVal;
+      }
+    }
+    const activeBarLookback = barLookbackByTf[barTimeframe] || 1;
     return {
       enabled: Boolean(src.enabled),
+      showAtButton: src.showAtButton !== false,
       autoArmOnNewTrade: Boolean(src.autoArmOnNewTrade),
+      setInitialSlOnAtClick: Boolean(src.setInitialSlOnAtClick),
       mode: validModes.includes(src.mode) ? src.mode : DEFAULT_AUTO_TRAIL.mode,
       priceOffset: clampPos(src.priceOffset, 0.000001, 1000000, DEFAULT_AUTO_TRAIL.priceOffset),
       priceOffsetType: src.priceOffsetType === 'percent' ? 'percent' : 'absolute',
@@ -817,8 +852,9 @@
       pointsDistance: clampPos(src.pointsDistance, 0.01, 100000, DEFAULT_AUTO_TRAIL.pointsDistance),
       pointValue: clampPos(src.pointValue, 0.000001, 100000, DEFAULT_AUTO_TRAIL.pointValue),
       dollarsDistance: clampPos(src.dollarsDistance, 0.5, 1000000, DEFAULT_AUTO_TRAIL.dollarsDistance),
-      barTimeframe: validTfs.includes(src.barTimeframe) ? src.barTimeframe : DEFAULT_AUTO_TRAIL.barTimeframe,
-      barLookback: Math.round(clampPos(src.barLookback, 1, 20, DEFAULT_AUTO_TRAIL.barLookback)),
+      barTimeframe,
+      barLookback: activeBarLookback,
+      barLookbackByTf,
       barUseClosedOnly: src.barUseClosedOnly !== false,
       barBufferTicks: Math.round(clampPos(src.barBufferTicks, 0, 500, DEFAULT_AUTO_TRAIL.barBufferTicks)),
       activationMode: validAct.includes(src.activationMode) ? src.activationMode : DEFAULT_AUTO_TRAIL.activationMode,
@@ -831,18 +867,56 @@
     };
   }
 
+  function normalizeAutoTrailRecords(rawMap) {
+    const out = {};
+    if (!rawMap || typeof rawMap !== 'object' || Array.isArray(rawMap)) return out;
+    const now = Date.now();
+    const maxAgeMs = 14 * 24 * 60 * 60 * 1000; // Keep active trail records up to 14 days
+    const keys = Object.keys(rawMap).slice(0, 100);
+    for (const key of keys) {
+      const r = rawMap[key];
+      if (!r || typeof r !== 'object') continue;
+      const firmId = String(r.firmId || '').trim().toLowerCase();
+      const accountId = String(r.accountId || '').trim();
+      const symbol = String(r.symbol || '').trim().toUpperCase();
+      const entryPrice = Number(r.entryPrice);
+      const updatedAt = Number(r.updatedAt) || now;
+      if (!firmId || !accountId || !symbol || !Number.isFinite(entryPrice) || entryPrice <= 0) continue;
+      if (now - updatedAt > maxAgeMs) continue;
+      const cleanKey = `${firmId}::${accountId}::${symbol}`;
+      out[cleanKey] = {
+        firmId,
+        accountId,
+        accountLabel: String(r.accountLabel || accountId).slice(0, 80),
+        symbol,
+        side: r.side === 'short' ? 'short' : 'long',
+        entryPrice,
+        positionKey: String(r.positionKey || `${symbol}|${r.side === 'short' ? 'short' : 'long'}|${entryPrice.toFixed(4)}`),
+        armed: Boolean(r.armed),
+        activated: Boolean(r.activated),
+        peakPrice: Number.isFinite(Number(r.peakPrice)) && Number(r.peakPrice) > 0 ? Number(r.peakPrice) : entryPrice,
+        lastTargetSl: Number.isFinite(Number(r.lastTargetSl)) && Number(r.lastTargetSl) > 0 ? Number(r.lastTargetSl) : null,
+        lastSubmittedSl: Number.isFinite(Number(r.lastSubmittedSl)) && Number(r.lastSubmittedSl) > 0 ? Number(r.lastSubmittedSl) : null,
+        lastReason: String(r.lastReason || '').slice(0, 64),
+        updatedAt
+      };
+    }
+    return out;
+  }
+
   function formatAutoTrailBadge(rawCfg) {
     const cfg = normalizeAutoTrailConfig(rawCfg);
-    if (!cfg.enabled) return 'OFF';
+    if (!cfg.enabled && !cfg.showAtButton) return 'OFF';
     if (cfg.mode === 'price') return cfg.priceOffsetType === 'percent' ? `${cfg.priceOffset}%` : `±${cfg.priceOffset}`;
     if (cfg.mode === 'ticks') return `${cfg.ticksDistance}t`;
     if (cfg.mode === 'points') return `${cfg.pointsDistance}pt`;
     if (cfg.mode === 'dollars') return `$${cfg.dollarsDistance}`;
     if (cfg.mode === 'bar_hl') {
       const tf = cfg.barTimeframe === 'chart' ? 'TF' : cfg.barTimeframe;
-      return `${tf} H/L`;
+      const lb = (cfg.barLookbackByTf && cfg.barLookbackByTf[cfg.barTimeframe]) || cfg.barLookback || 1;
+      return `${tf} ${lb}b`;
     }
-    return 'ON';
+    return 'AT';
   }
 
   function formatAutoTrailSummary(rawCfg) {
@@ -860,21 +934,23 @@
       rule = `Trails $${cfg.dollarsDistance} behind peak unrealized PnL (distance = $${cfg.dollarsDistance} ÷ position size)`;
     } else {
       const tfLabel = cfg.barTimeframe === 'chart' ? 'Active Chart TF' : cfg.barTimeframe;
+      const lb = (cfg.barLookbackByTf && cfg.barLookbackByTf[cfg.barTimeframe]) || cfg.barLookback || 1;
       const barType = cfg.barUseClosedOnly ? 'closed' : 'live/closed';
-      const nBars = cfg.barLookback === 1 ? `last ${barType} ${tfLabel} bar` : `last ${cfg.barLookback} ${barType} ${tfLabel} bars`;
+      const nBars = lb === 1 ? `last ${barType} ${tfLabel} bar` : `last ${lb} ${barType} ${tfLabel} bars`;
       const buf = cfg.barBufferTicks > 0 ? ` ± ${cfg.barBufferTicks}t buffer` : '';
       rule = `LONG: lowest low of ${nBars}${buf} · SHORT: highest high of ${nBars}${buf}`;
     }
-    let act = 'Starts immediately when armed';
-    if (cfg.activationMode === 'in_profit_dollars') act = `Activates at +$${cfg.activationValue} profit`;
-    else if (cfg.activationMode === 'in_profit_ticks') act = `Activates at +${cfg.activationValue} ticks profit`;
-    else if (cfg.activationMode === 'in_profit_points') act = `Activates at +${cfg.activationValue} points profit`;
-    else if (cfg.activationMode === 'in_profit_percent') act = `Activates at +${cfg.activationValue}% move`;
+    let act = 'Starts immediately when AT clicked / armed';
+    if (cfg.activationMode === 'in_profit_price') act = `Starts trailing after +${cfg.activationValue} price in profit`;
+    else if (cfg.activationMode === 'in_profit_dollars') act = `Starts trailing at +$${cfg.activationValue} profit`;
+    else if (cfg.activationMode === 'in_profit_ticks') act = `Starts trailing at +${cfg.activationValue} ticks profit`;
+    else if (cfg.activationMode === 'in_profit_points') act = `Starts trailing at +${cfg.activationValue} points profit`;
+    else if (cfg.activationMode === 'in_profit_percent') act = `Starts trailing at +${cfg.activationValue}% move`;
     if (cfg.activationMode !== 'immediate' && cfg.moveToBreakevenOnActivate) {
       act += ' (snaps SL to BE)';
     }
-    const arm = cfg.autoArmOnNewTrade ? 'Auto-arms on every trade' : 'Manual 1-tap TRL button on chart';
-    return `${rule}. ${act}. ${arm} · Min ${cfg.stepMinTicks}t step · ${cfg.minUpdateIntervalSec}s cooldown${cfg.onlyTighten ? ' · Tighten only' : ''}.`;
+    const arm = cfg.autoArmOnNewTrade ? 'Auto-arms on every trade' : 'Click AT on entry panel to arm';
+    return `${rule}. ${act}. ${arm} · Remembers account & instrument across refreshes · ${cfg.minUpdateIntervalSec}s cooldown${cfg.onlyTighten ? ' · Tighten only' : ''}.`;
   }
 
   const DEFAULT_ORDER_BLOCKS = {
@@ -2211,6 +2287,7 @@
     marketStructure: JSON.parse(JSON.stringify(DEFAULT_MARKET_STRUCTURE)),
     rangeDetector: JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR)),
     autoTrail: JSON.parse(JSON.stringify(DEFAULT_AUTO_TRAIL)),
+    autoTrailRecords: {},
     debugMode: false,
     dialogGlassEffect: false,
     dialogGlassOpacity: 78,
@@ -3806,6 +3883,31 @@
       speakCortexSignalAlert(event.data.payload || {}, true);
     } else if (type === 'VEST_TV_CI_BAR_CLOSED') {
       handleCortexIndicatorBar(event.data.payload || {});
+    } else if (type === 'VEST_TV_AUTO_TRAIL_RECORD_UPSERT') {
+      if (isTopWindow && isExtensionValid() && event.data.payload && typeof event.data.payload === 'object') {
+        const p = event.data.payload;
+        const current = normalizeAutoTrailRecords(settings.autoTrailRecords);
+        const merged = normalizeAutoTrailRecords({
+          ...current,
+          [`${p.firmId || getChartVisualsHostFirmId() || 'hypernova'}::${p.accountId || 'default'}::${String(p.symbol || '').toUpperCase()}`]: p
+        });
+        settings.autoTrailRecords = merged;
+        if (p.ensureEnabled && (!settings.autoTrail || !settings.autoTrail.enabled)) {
+          settings.autoTrail = normalizeAutoTrailConfig({ ...(settings.autoTrail || {}), enabled: true });
+        }
+        safeStorageSet({ settings });
+        notifyMainWorldConfig();
+      }
+    } else if (type === 'VEST_TV_AUTO_TRAIL_RECORD_REMOVE') {
+      if (isTopWindow && isExtensionValid() && event.data.payload && event.data.payload.key) {
+        const current = normalizeAutoTrailRecords(settings.autoTrailRecords);
+        if (current[event.data.payload.key]) {
+          delete current[event.data.payload.key];
+          settings.autoTrailRecords = current;
+          safeStorageSet({ settings });
+          notifyMainWorldConfig();
+        }
+      }
     } else if (type === 'VEST_TV_MAIN_READY') {
       if (settingsLoaded) {
         notifyMainWorldConfig();
@@ -5847,19 +5949,71 @@
     return null;
   }
 
+  let lastPositionsDomAuthoritative = false;
+  let lastSyncedTradingAccountId = '';
+
+  function getActiveTradingAccountIdentity() {
+    const firmId = getChartVisualsHostFirmId() || (typeof getActivePerpFirm === 'function' && getActivePerpFirm() ? getActivePerpFirm().id : '') || 'default';
+    let accountId = '';
+    let accountLabel = '';
+    try {
+      if (firmId === 'hypernova') {
+        try {
+          const lsId = window.localStorage && window.localStorage.getItem('hypernova:selected-account-id');
+          if (lsId && String(lsId).trim()) accountId = String(lsId).trim();
+        } catch (e) {}
+        const switcher = document.querySelector('button[data-testid="account-switcher-trigger"], .account-switcher-trigger');
+        const badgeTxt = switcher ? (switcher.innerText || switcher.textContent || '').replace(/[↕▼⌄▾\s]+/g, ' ').trim() : '';
+        const bannerEl = document.querySelector('[data-testid="account-status-banner-label"]');
+        const bannerTxt = bannerEl ? (bannerEl.innerText || bannerEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        if (badgeTxt && bannerTxt) accountLabel = `${badgeTxt} · ${bannerTxt}`;
+        else if (badgeTxt) accountLabel = badgeTxt;
+        else if (bannerTxt) accountLabel = bannerTxt;
+        if (!accountId && badgeTxt) accountId = badgeTxt.toLowerCase();
+      }
+      if (!accountId && typeof readCurrentSelectedAccount === 'function') {
+        const sel = readCurrentSelectedAccount();
+        if (sel && (sel.id || sel.name)) {
+          accountId = String(sel.id || sel.name).trim();
+          if (!accountLabel) accountLabel = String(sel.name || sel.id).trim();
+        }
+      }
+    } catch (e) {}
+    if (!accountId) accountId = 'default';
+    if (!accountLabel) accountLabel = accountId === 'default' ? 'Default Account' : accountId;
+    return { firmId, accountId, accountLabel };
+  }
+
   function syncHypernovaPositionsToMainWorld(force = false) {
     if (!isTopWindow || !isChartVisualsHost()) return;
     hypernovaSyncTickCount++;
+    const activeAccount = getActiveTradingAccountIdentity();
+    const accountChanged = Boolean(lastSyncedTradingAccountId && activeAccount.accountId !== lastSyncedTradingAccountId);
+    if (accountChanged) {
+      // Clear cached DOM/API rows from previous account immediately so they never bleed into the new account!
+      lastKnownDomPositions = [];
+      lastApiCapturedPositions = [];
+      lastApiPositionsCapturedAt = 0;
+    }
+    lastSyncedTradingAccountId = activeAccount.accountId;
+
+    const domRes = scrapeVenueOpenPositionsWithMeta();
+    lastPositionsDomAuthoritative = Boolean(domRes.foundTable);
     const positions = getMergedVenueOpenPositions();
     const orderTicketBreach = scrapeHypernovaOrderTicketBreachPrice();
-    const sig = JSON.stringify({ positions, orderTicketBreach });
+    const sig = JSON.stringify({ positions, orderTicketBreach, activeAccount, positionsAuthoritative: lastPositionsDomAuthoritative });
     // Periodically rebroadcast every 4th tick (~3.2s) so newly recreated TradingView iframes always stay in sync (including flat!)
     const periodicRefresh = (hypernovaSyncTickCount % 4 === 0);
-    if (!force && !periodicRefresh && sig === lastHypernovaPositionsSig) return;
+    if (!force && !accountChanged && !periodicRefresh && sig === lastHypernovaPositionsSig) return;
     lastHypernovaPositionsSig = sig;
     postToMainWorlds({
       type: 'VEST_TV_HYPERNOVA_POSITIONS_UPDATE',
-      payload: { positions, orderTicketBreach }
+      payload: {
+        positions,
+        orderTicketBreach,
+        activeAccount,
+        positionsAuthoritative: lastPositionsDomAuthoritative
+      }
     });
   }
 
@@ -9426,19 +9580,22 @@
       if (activeTab === 'autotrail') {
         const at = normalizeAutoTrailConfig(draftSettings.autoTrail);
         draftSettings.autoTrail = at;
-        const dimStyle = at.enabled ? '' : 'opacity:0.45; pointer-events:none;';
+        const activeRecords = normalizeAutoTrailRecords(settings.autoTrailRecords);
+        const recordEntries = Object.entries(activeRecords);
+        const dimStyle = (at.enabled || at.showAtButton) ? '' : 'opacity:0.45; pointer-events:none;';
         const tfOptions = [
-          { v: 'chart', l: 'Active Chart Timeframe' },
-          { v: '1m', l: '1 Minute (1m)' },
-          { v: '3m', l: '3 Minute (3m)' },
-          { v: '5m', l: '5 Minute (5m)' },
-          { v: '15m', l: '15 Minute (15m)' },
-          { v: '30m', l: '30 Minute (30m)' },
-          { v: '1h', l: '1 Hour (1h)' },
-          { v: '4h', l: '4 Hour (4h)' },
-          { v: '1d', l: 'Daily (1d)' }
+          { v: 'chart', l: 'Active Chart TF', short: 'Chart' },
+          { v: '1m', l: '1 Minute (1m)', short: '1m' },
+          { v: '3m', l: '3 Minute (3m)', short: '3m' },
+          { v: '5m', l: '5 Minute (5m)', short: '5m' },
+          { v: '15m', l: '15 Minute (15m)', short: '15m' },
+          { v: '30m', l: '30 Minute (30m)', short: '30m' },
+          { v: '1h', l: '1 Hour (1h)', short: '1h' },
+          { v: '4h', l: '4 Hour (4h)', short: '4h' },
+          { v: '1d', l: 'Daily (1d)', short: '1d' }
         ];
         const actLabel =
+          at.activationMode === 'in_profit_price' ? 'Profit Threshold (Price Units)' :
           at.activationMode === 'in_profit_dollars' ? 'Profit Threshold ($ USD)' :
           at.activationMode === 'in_profit_ticks' ? 'Profit Threshold (Ticks)' :
           at.activationMode === 'in_profit_points' ? 'Profit Threshold (Points)' :
@@ -9447,15 +9604,26 @@
         return `
           <div class="vest-tvs-section-title">AUTO-TRAIL STOP LOSS ENGINE</div>
           <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">
-            Automatically ratchets your live exchange Stop Loss in your favor by <strong style="color:#e2e8f0;">Price</strong>, <strong style="color:#e2e8f0;">Ticks</strong>, <strong style="color:#e2e8f0;">Points</strong>, <strong style="color:#e2e8f0;">Dollars ($)</strong>, or <strong style="color:#e2e8f0;">Timeframe Bar Highs &amp; Lows</strong>. Works on Hypernova, My Funded Perpetuals, and Kalshi Pro (Desktop &amp; Mobile).
+            Click the <strong style="color:#c4b5fd;">AT</strong> button on the chart Position Entry panel to immediately apply your pre-defined Auto-Trail Stop by <strong style="color:#e2e8f0;">Price</strong>, <strong style="color:#e2e8f0;">Ticks</strong>, <strong style="color:#e2e8f0;">Points</strong>, <strong style="color:#e2e8f0;">Dollars ($)</strong>, or <strong style="color:#e2e8f0;">Timeframe Bar Highs &amp; Lows</strong>. Cortex remembers each trailed account &amp; instrument across refreshes and account switches.
           </p>
 
-          <!-- Master Enable & Arm Mode -->
+          <!-- Master Enable, AT Button & Arm Mode -->
           <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(167,139,250,0.38); border-radius:10px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
               <div>
-                <div style="font-size:13px; font-weight:700; color:#f8fafc;">Enable Auto-Trail Stop Engine</div>
-                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Adds a 1-tap <strong style="color:#c4b5fd;">TRL</strong> arm/disarm button right on the chart Position Entry box and enables automatic SL trailing.</div>
+                <div style="font-size:13px; font-weight:700; color:#f8fafc;">Show "AT" Button on Price Entry Panel</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Shows a 1-tap <strong style="color:#c4b5fd;">AT</strong> button next to BE / TP / SL on the chart. Clicking <strong style="color:#c4b5fd;">AT</strong> immediately arms &amp; sets your stop to the pre-defined trail below.</div>
+              </div>
+              <label class="vest-tvs-switch">
+                <input type="checkbox" id="vest-at-show-at-btn" ${at.showAtButton ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07); margin-bottom:10px;">
+              <div>
+                <div style="font-size:12px; font-weight:600; color:#f1f5f9;">Enable Background Auto-Trail Engine</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Continuously monitors armed trades and auto-adjusts stops on refresh or when switching back to a trailed account.</div>
               </div>
               <label class="vest-tvs-switch">
                 <input type="checkbox" id="vest-at-enabled" ${at.enabled ? 'checked' : ''} />
@@ -9465,8 +9633,8 @@
 
             <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07); ${dimStyle}" id="vest-at-autoarm-row">
               <div>
-                <div style="font-size:12px; font-weight:600; color:#f1f5f9;">Auto-Arm Automatically on Every Open Trade</div>
-                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">When OFF (safer default), click the <strong style="color:#c4b5fd;">TRL</strong> button on the chart to arm trailing on trades you choose.</div>
+                <div style="font-size:12px; font-weight:600; color:#f1f5f9;">Auto-Arm Automatically on Every New Trade</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">When OFF (recommended), only trades where you click <strong style="color:#c4b5fd;">AT</strong> are trailed.</div>
               </div>
               <label class="vest-tvs-switch">
                 <input type="checkbox" id="vest-at-auto-arm" ${at.autoArmOnNewTrade ? 'checked' : ''} />
@@ -9544,28 +9712,41 @@
               ` : ''}
 
               ${at.mode === 'bar_hl' ? `
-                <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                <div class="vest-ed-grid-2" style="margin-bottom:10px;">
                   <div class="vest-ed-field">
-                    <label class="vest-ed-label">Candle Timeframe</label>
+                    <label class="vest-ed-label">Active Candle Timeframe</label>
                     <select class="vest-ed-select" id="vest-at-bar-tf">
                       ${tfOptions.map(o => `<option value="${o.v}" ${at.barTimeframe === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
                     </select>
                   </div>
                   <div class="vest-ed-field">
-                    <label class="vest-ed-label">Lookback Bars: <span id="vest-at-bar-lookback-val" style="color:#a78bfa; font-weight:700;">${at.barLookback}</span></label>
-                    <input type="range" class="vest-ed-range" id="vest-at-bar-lookback" min="1" max="20" step="1" value="${at.barLookback}" />
-                  </div>
-                </div>
-                <div class="vest-ed-grid-2" style="margin-bottom:8px;">
-                  <div class="vest-ed-field">
                     <label class="vest-ed-label">Protective Buffer (Ticks)</label>
                     <input type="number" class="vest-ed-input" id="vest-at-bar-buffer-ticks" min="0" max="500" step="1" value="${at.barBufferTicks}" />
                   </div>
-                  <div class="vest-ed-field">
-                    <label class="vest-ed-label">Tick Size Override (0 = Auto)</label>
-                    <input type="number" class="vest-ed-input" id="vest-at-custom-tick-size" min="0" max="10000" step="any" value="${at.customTickSize}" />
+                </div>
+
+                <!-- Per-Timeframe Bars Back Configuration Grid -->
+                <div style="margin-bottom:10px; padding:10px; border-radius:8px; background:rgba(15,23,42,0.72); border:1px solid rgba(167,139,250,0.22);">
+                  <div style="font-size:11px; font-weight:700; color:#c4b5fd; margin-bottom:6px;">Bars Back Per Timeframe (1–50 bars)</div>
+                  <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(84px, 1fr)); gap:6px;">
+                    ${tfOptions.map(o => {
+                      const isCurTf = at.barTimeframe === o.v;
+                      const lbVal = (at.barLookbackByTf && at.barLookbackByTf[o.v]) || 1;
+                      return `
+                        <div style="padding:6px; border-radius:6px; background:${isCurTf ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.03)'}; border:1px solid ${isCurTf ? 'rgba(167,139,250,0.7)' : 'rgba(148,163,184,0.18)'};">
+                          <label for="vest-at-bar-lb-${o.v}" style="display:block; font-size:10px; font-weight:700; color:${isCurTf ? '#ede9fe' : '#94a3b8'}; margin-bottom:3px;">${o.short}${isCurTf ? ' ★' : ''}</label>
+                          <input type="number" class="vest-ed-input" id="vest-at-bar-lb-${o.v}" data-at-tf="${o.v}" min="1" max="50" step="1" value="${lbVal}" style="height:26px; padding:2px 6px; font-size:11.5px; width:100%;" />
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 </div>
+
+                <div class="vest-ed-field" style="margin-bottom:8px;">
+                  <label class="vest-ed-label">Tick Size Override (0 = Auto)</label>
+                  <input type="number" class="vest-ed-input" id="vest-at-custom-tick-size" min="0" max="10000" step="any" value="${at.customTickSize}" />
+                </div>
+
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                   <div>
                     <div style="font-size:12px; font-weight:600; color:#e2e8f0;">Use Completed (Closed) Bars Only</div>
@@ -9582,13 +9763,14 @@
             <!-- Section 2: Activation Trigger -->
             <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(255,255,255,0.09); border-radius:10px; margin-bottom:12px;">
               <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
-                2. Activation Trigger (When Trailing Begins)
+                2. When To Start Trailing (Profit Activation Trigger)
               </div>
               <div class="vest-ed-grid-2" style="margin-bottom:8px;">
                 <div class="vest-ed-field">
                   <label class="vest-ed-label">Start Trailing When</label>
                   <select class="vest-ed-select" id="vest-at-act-mode">
                     <option value="immediate" ${at.activationMode === 'immediate' ? 'selected' : ''}>Immediately When Armed</option>
+                    <option value="in_profit_price" ${at.activationMode === 'in_profit_price' ? 'selected' : ''}>In Profit by Price Units</option>
                     <option value="in_profit_dollars" ${at.activationMode === 'in_profit_dollars' ? 'selected' : ''}>In Profit by $ USD</option>
                     <option value="in_profit_ticks" ${at.activationMode === 'in_profit_ticks' ? 'selected' : ''}>In Profit by Ticks</option>
                     <option value="in_profit_points" ${at.activationMode === 'in_profit_points' ? 'selected' : ''}>In Profit by Points</option>
@@ -9601,17 +9783,27 @@
                   <input type="number" class="vest-ed-input" id="vest-at-act-val" min="0" max="1000000" step="any" value="${at.activationValue}" />
                 </div>` : `
                 <div class="vest-ed-field" style="display:flex; align-items:flex-end;">
-                  <div style="font-size:11px; color:#94a3b8; padding-bottom:6px;">Begins tracking immediately as soon as trade is armed.</div>
+                  <div style="font-size:11px; color:#94a3b8; padding-bottom:6px;">Starts trailing immediately as soon as you click AT (or open a trade if Auto-Arm is ON).</div>
                 </div>`}
               </div>
               ${at.activationMode !== 'immediate' ? `
-              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
                 <div>
                   <div style="font-size:12px; font-weight:600; color:#e2e8f0;">Snap SL to Breakeven on Activation</div>
                   <div style="font-size:10.5px; color:#94a3b8;">Immediately protects your entry price when the profit threshold is hit, then trails tighter from there.</div>
                 </div>
                 <label class="vest-tvs-switch">
                   <input type="checkbox" id="vest-at-be-on-act" ${at.moveToBreakevenOnActivate ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <div>
+                  <div style="font-size:12px; font-weight:600; color:#e2e8f0;">Place Initial Stop Immediately on AT Click</div>
+                  <div style="font-size:10.5px; color:#94a3b8;">When OFF, clicking AT arms in WAITING mode until profit threshold is hit. When ON, places the initial pre-defined stop immediately on click and waits for profit before trailing tighter.</div>
+                </div>
+                <label class="vest-tvs-switch">
+                  <input type="checkbox" id="vest-at-init-sl-on-click" ${at.setInitialSlOnAtClick ? 'checked' : ''} />
                   <span class="vest-tvs-switch-slider"></span>
                 </label>
               </div>` : ''}
@@ -9649,6 +9841,44 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- Section 4: Remembered Trails Across Accounts & Instruments -->
+          <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(56,189,248,0.22); border-radius:10px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px;">
+                4. Remembered Active Trails (${recordEntries.length})
+              </div>
+              ${recordEntries.length > 0 ? `<button type="button" class="vest-tvs-action-btn" id="vest-at-clear-records-btn" style="height:24px; padding:0 8px; font-size:10.5px;">Clear All</button>` : ''}
+            </div>
+            ${recordEntries.length === 0 ? `
+              <div style="font-size:11.5px; color:#94a3b8;">No active trails remembered yet. Click <strong style="color:#c4b5fd;">AT</strong> on any open position to start trailing — Cortex automatically remembers the account, instrument, peak price, and trail status across page refreshes and account switches.</div>
+            ` : `
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                ${recordEntries.map(([recKey, rec]) => {
+                  const statusColor = !rec.armed ? '#94a3b8' : (rec.activated ? '#a78bfa' : '#fbbf24');
+                  const statusTxt = !rec.armed ? 'DISARMED' : (rec.activated ? 'TRAILING' : 'WAITING');
+                  const sideColor = rec.side === 'short' ? '#fb7185' : '#34d399';
+                  const slTxt = rec.lastSubmittedSl ? `SL $${rec.lastSubmittedSl}` : (rec.lastTargetSl ? `Target $${rec.lastTargetSl}` : 'No SL yet');
+                  return `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border-radius:7px; background:rgba(15,23,42,0.75); border:1px solid rgba(148,163,184,0.18); flex-wrap:wrap;">
+                      <div style="min-width:0; flex:1;">
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                          <span style="font-size:11.5px; font-weight:700; color:#f8fafc;">${escapeHtml(rec.symbol)}</span>
+                          <span style="font-size:10px; font-weight:800; color:${sideColor};">${rec.side.toUpperCase()}</span>
+                          <span style="font-size:9.5px; font-weight:800; padding:1px 5px; border-radius:4px; background:rgba(255,255,255,0.06); color:${statusColor};">${statusTxt}</span>
+                          <span style="font-size:10.5px; color:#94a3b8;">${escapeHtml(rec.accountLabel || rec.accountId)}</span>
+                        </div>
+                        <div style="font-size:10.5px; color:#94a3b8; margin-top:2px; font-family:monospace;">
+                          Entry ${rec.entryPrice} · Peak ${rec.peakPrice} · ${escapeHtml(slTxt)}${rec.lastReason ? ` (${escapeHtml(rec.lastReason)})` : ''}
+                        </div>
+                      </div>
+                      <button type="button" class="vest-tvs-action-btn vest-at-remove-record-btn" data-record-key="${escapeHtml(recKey)}" style="height:24px; padding:0 8px; font-size:10.5px; color:#fca5a5;">Remove</button>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
           </div>
 
           <!-- Live Plain-English Rule Summary -->
@@ -12830,11 +13060,13 @@
 
       // Sync Auto-Trail Stop Engine
       const atEnabledEl = overlay.querySelector('#vest-at-enabled');
-      if (atEnabledEl || overlay.querySelector('#vest-at-mode')) {
+      if (atEnabledEl || overlay.querySelector('#vest-at-mode') || overlay.querySelector('#vest-at-show-at-btn')) {
         const at = normalizeAutoTrailConfig(draftSettings.autoTrail);
         const q = (sel) => overlay.querySelector(sel);
         if (atEnabledEl) at.enabled = Boolean(atEnabledEl.checked);
+        if (q('#vest-at-show-at-btn')) at.showAtButton = Boolean(q('#vest-at-show-at-btn').checked);
         if (q('#vest-at-auto-arm')) at.autoArmOnNewTrade = Boolean(q('#vest-at-auto-arm').checked);
+        if (q('#vest-at-init-sl-on-click')) at.setInitialSlOnAtClick = Boolean(q('#vest-at-init-sl-on-click').checked);
         if (q('#vest-at-mode')) at.mode = q('#vest-at-mode').value;
         if (q('#vest-at-price-offset')) at.priceOffset = Number(q('#vest-at-price-offset').value);
         if (q('#vest-at-price-offset-type')) at.priceOffsetType = q('#vest-at-price-offset-type').value;
@@ -12844,7 +13076,19 @@
         if (q('#vest-at-point-value')) at.pointValue = Number(q('#vest-at-point-value').value);
         if (q('#vest-at-dollars-distance')) at.dollarsDistance = Number(q('#vest-at-dollars-distance').value);
         if (q('#vest-at-bar-tf')) at.barTimeframe = q('#vest-at-bar-tf').value;
-        if (q('#vest-at-bar-lookback')) at.barLookback = Number(q('#vest-at-bar-lookback').value);
+        const nextByTf = { ...(at.barLookbackByTf || {}) };
+        let sawTfInput = false;
+        overlay.querySelectorAll('input[data-at-tf]').forEach(inp => {
+          const tfKey = inp.getAttribute('data-at-tf');
+          if (tfKey) {
+            nextByTf[tfKey] = Number(inp.value);
+            sawTfInput = true;
+          }
+        });
+        if (sawTfInput) {
+          at.barLookbackByTf = nextByTf;
+          at.barLookback = nextByTf[at.barTimeframe] || at.barLookback;
+        }
         if (q('#vest-at-bar-closed-only')) at.barUseClosedOnly = Boolean(q('#vest-at-bar-closed-only').checked);
         if (q('#vest-at-bar-buffer-ticks')) at.barBufferTicks = Number(q('#vest-at-bar-buffer-ticks').value);
         if (q('#vest-at-act-mode')) at.activationMode = q('#vest-at-act-mode').value;
@@ -12865,9 +13109,11 @@
         saveSettingsTimeout = null;
       }
       pendingSettingsUpdate = null;
+      const liveTrailRecords = normalizeAutoTrailRecords(settings.autoTrailRecords);
       settings = {
         ...settings,
         ...draftSettings,
+        autoTrailRecords: liveTrailRecords,
         sidebarState: mergeSidebarState(draftSettings.sidebarState, settings.sidebarState),
         lastChartSettings: mergeLastChartSettings(draftSettings.lastChartSettings, settings.lastChartSettings)
       };
@@ -14217,40 +14463,32 @@
           broadcastLiveSessionDraft();
         };
 
-        const atEnToggle = overlay.querySelector('#vest-at-enabled');
-        const atBody = overlay.querySelector('#vest-at-config-body');
-        const atAutoArmRow = overlay.querySelector('#vest-at-autoarm-row');
-        if (atEnToggle) {
-          atEnToggle.addEventListener('change', () => {
-            const on = Boolean(atEnToggle.checked);
-            if (atBody) {
-              atBody.style.opacity = on ? '1' : '0.45';
-              atBody.style.pointerEvents = on ? 'auto' : 'none';
-            }
-            if (atAutoArmRow) {
-              atAutoArmRow.style.opacity = on ? '1' : '0.45';
-              atAutoArmRow.style.pointerEvents = on ? 'auto' : 'none';
-            }
-            updateAtSummary();
-          });
-        }
+        const syncDimState = () => {
+          const on = Boolean(overlay.querySelector('#vest-at-enabled')?.checked || overlay.querySelector('#vest-at-show-at-btn')?.checked);
+          const atBody = overlay.querySelector('#vest-at-config-body');
+          const atAutoArmRow = overlay.querySelector('#vest-at-autoarm-row');
+          if (atBody) {
+            atBody.style.opacity = on ? '1' : '0.45';
+            atBody.style.pointerEvents = on ? 'auto' : 'none';
+          }
+          if (atAutoArmRow) {
+            atAutoArmRow.style.opacity = on ? '1' : '0.45';
+            atAutoArmRow.style.pointerEvents = on ? 'auto' : 'none';
+          }
+          updateAtSummary();
+        };
 
-        // Re-render pane when mode, price unit, or activation mode changes so only relevant fields display
-        ['#vest-at-mode', '#vest-at-price-offset-type', '#vest-at-act-mode'].forEach(sel => {
+        overlay.querySelector('#vest-at-enabled')?.addEventListener('change', syncDimState);
+        overlay.querySelector('#vest-at-show-at-btn')?.addEventListener('change', syncDimState);
+
+        // Re-render pane when mode, timeframe, price unit, or activation mode changes so highlighted cards & inputs update cleanly
+        ['#vest-at-mode', '#vest-at-bar-tf', '#vest-at-price-offset-type', '#vest-at-act-mode'].forEach(sel => {
           overlay.querySelector(sel)?.addEventListener('change', () => {
             syncCurrentPaneToDraft();
             broadcastLiveSessionDraft();
             renderDialog();
           });
         });
-
-        const lbRange = overlay.querySelector('#vest-at-bar-lookback');
-        const lbVal = overlay.querySelector('#vest-at-bar-lookback-val');
-        if (lbRange && lbVal) {
-          lbRange.addEventListener('input', () => {
-            lbVal.textContent = String(lbRange.value);
-          });
-        }
 
         const cdRange = overlay.querySelector('#vest-at-cooldown');
         const cdVal = overlay.querySelector('#vest-at-cooldown-val');
@@ -14261,10 +14499,34 @@
         }
 
         overlay.querySelectorAll('[id^="vest-at-"]').forEach(el => {
-          if (['vest-at-enabled', 'vest-at-mode', 'vest-at-price-offset-type', 'vest-at-act-mode', 'vest-at-reset-btn'].includes(el.id)) return;
+          if (['vest-at-enabled', 'vest-at-show-at-btn', 'vest-at-mode', 'vest-at-bar-tf', 'vest-at-price-offset-type', 'vest-at-act-mode', 'vest-at-reset-btn', 'vest-at-clear-records-btn'].includes(el.id)) return;
           const evtName = (el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'range' || el.type === 'text')) ? 'input' : 'change';
           el.addEventListener(evtName, updateAtSummary);
           if (evtName === 'input') el.addEventListener('change', updateAtSummary);
+        });
+
+        overlay.querySelectorAll('.vest-at-remove-record-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const key = btn.getAttribute('data-record-key');
+            if (!key) return;
+            const nextRecs = normalizeAutoTrailRecords(settings.autoTrailRecords);
+            delete nextRecs[key];
+            settings.autoTrailRecords = nextRecs;
+            draftSettings.autoTrailRecords = { ...nextRecs };
+            safeStorageSet({ settings });
+            notifyMainWorldConfig();
+            renderDialog();
+            showToast('Removed remembered Auto-Trail record');
+          });
+        });
+
+        overlay.querySelector('#vest-at-clear-records-btn')?.addEventListener('click', () => {
+          settings.autoTrailRecords = {};
+          draftSettings.autoTrailRecords = {};
+          safeStorageSet({ settings });
+          notifyMainWorldConfig();
+          renderDialog();
+          showToast('Cleared all remembered Auto-Trail records');
         });
 
         overlay.querySelector('#vest-at-reset-btn')?.addEventListener('click', () => {
@@ -22064,6 +22326,8 @@ if (activeTab === 'diagnostics') {
           cortexIndicator: normalizeCortexIndicatorConfig(data.settings.cortexIndicator),
           orderBlocks: normalizeOrderBlocksConfig(data.settings.orderBlocks),
           marketStructure: normalizeMarketStructureConfig(data.settings.marketStructure),
+          autoTrail: normalizeAutoTrailConfig(data.settings.autoTrail),
+          autoTrailRecords: normalizeAutoTrailRecords(data.settings.autoTrailRecords),
           diagnosticsBox: normalizeDiagnosticsBoxConfig(data.settings.diagnosticsBox),
           accountsRiskBox: normalizeAccountsRiskBoxConfig(data.settings.accountsRiskBox),
           debugMode: Boolean(data.settings.debugMode),
@@ -22088,6 +22352,8 @@ if (activeTab === 'diagnostics') {
         settings.candleOhlc = normalizeCandleOhlcConfig(settings.candleOhlc);
         settings.failLines = normalizeFailLinesConfig(settings.failLines);
         settings.cortexIndicator = normalizeCortexIndicatorConfig(settings.cortexIndicator);
+        settings.autoTrail = normalizeAutoTrailConfig(settings.autoTrail);
+        settings.autoTrailRecords = normalizeAutoTrailRecords(settings.autoTrailRecords);
         settings.diagnosticsBox = normalizeDiagnosticsBoxConfig(settings.diagnosticsBox);
         settings.accountsRiskBox = normalizeAccountsRiskBoxConfig(settings.accountsRiskBox);
         settings.debugMode = Boolean(settings.debugMode);
