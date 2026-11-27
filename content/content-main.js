@@ -4666,7 +4666,26 @@
 
       case 'VEST_TV_CAPTURE_CHART_SETTINGS': {
         if (currentSettings.rememberLastChartSettings !== false) {
-          saveCurrentChartSettings();
+          saveCurrentChartSettings(true);
+        }
+        break;
+      }
+
+      case 'VEST_TV_CLEAR_SAVED_VIEWPORTS': {
+        cancelActiveViewportRestore('user_cleared_viewports');
+        lastKnownChartConfigs.clear();
+        chartViewportAppliedAt.clear();
+        lastSteadyViewportSnapshot = null;
+        if (currentSettings && currentSettings.lastChartSettings) {
+          currentSettings.lastChartSettings = {
+            ...currentSettings.lastChartSettings,
+            viewport: null,
+            viewportsBySymbol: {},
+            viewportsByChart: {}
+          };
+          try {
+            window.localStorage.setItem('__trading_cortex_chart_settings__', JSON.stringify(currentSettings.lastChartSettings));
+          } catch (e) {}
         }
         break;
       }
@@ -7077,7 +7096,7 @@
 
   // -------------------------------------------------------------
   // Chart Settings & Viewport Position Memory
-  // (Timeframe, Candle Style, Left/Right Pan, Up/Down Price Scale, Zoom)
+  // (Per-Instrument & Per-Timeframe: Zoom, Pan/Scroll, Vertical Price Scale, AutoScale, Log/Inverted Mode)
   // -------------------------------------------------------------
   let chartSettingsObserverInitialized = false;
   let isRestoringChartSettings = false;
@@ -7092,9 +7111,106 @@
   let lastLocalChartInteractionAt = 0;
   let viewportRestoreGeneration = 0;
   let intervalSwitchSaveBlockUntil = 0;
-  function markLocalChartInteraction() {
+  let viewportRestoreSessionSeq = 0;
+  let activeViewportRestoreSession = null;
+  let currentTrackedViewportContext = null;
+  let lastSteadyViewportSnapshot = null;
+  let chartViewportContextPollTimer = null;
+  let lastObservedWindowViewportSize = { w: 0, h: 0 };
+  const hookedChartSettingsCharts = new WeakSet();
+  const hookedChartSettingsTimeScales = new WeakSet();
+  const hookedChartSettingsPriceScales = new WeakSet();
+  const hookedChartSettingsMainSeries = new WeakSet();
+  const hookedChartSettingsDocs = new WeakSet();
+  const VIEWPORT_MAP_MAX_ENTRIES = 400;
+
+  function normalizeViewportResolutionKey(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    // Preserve case sensitivity for 'm' (minutes) vs 'M' (months)
+    if (/^\d+m$/.test(s)) return String(parseInt(s, 10));
+    if (s === 'M') return '1M';
+    if (/^\d+M$/.test(s)) return s;
+    const up = s.toUpperCase();
+    const hMatch = up.match(/^(\d+)H$/);
+    if (hMatch) return String(parseInt(hMatch[1], 10) * 60);
+    if (up === 'D' || up === '1D' || up === '1440') return '1D';
+    if (/^\d+D$/.test(up)) return up;
+    if (up === 'W' || up === '1W') return '1W';
+    if (/^\d+W$/.test(up)) return up;
+    if (/^\d+S$/.test(up)) return up;
+    if (/^\d+$/.test(up)) return String(parseInt(up, 10));
+    return up;
+  }
+
+  function viewportResolutionToSeconds(rawRes) {
+    const norm = normalizeViewportResolutionKey(rawRes);
+    if (!norm) return 0;
+    if (/^\d+$/.test(norm)) return parseInt(norm, 10) * 60;
+    const sMatch = norm.match(/^(\d+)S$/);
+    if (sMatch) return parseInt(sMatch[1], 10);
+    const dMatch = norm.match(/^(\d+)D$/);
+    if (dMatch) return parseInt(dMatch[1], 10) * 86400;
+    const wMatch = norm.match(/^(\d+)W$/);
+    if (wMatch) return parseInt(wMatch[1], 10) * 604800;
+    const mMatch = norm.match(/^(\d+)M$/);
+    if (mMatch) return parseInt(mMatch[1], 10) * 2592000;
+    return 0;
+  }
+
+  function normalizeViewportSymbolKey(raw) {
+    return String(raw || '').trim().toUpperCase();
+  }
+
+  function buildViewportChartKeys(symbol, resolution, hostOverride = null) {
+    const normSym = normalizeViewportSymbolKey(symbol);
+    const normRes = normalizeViewportResolutionKey(resolution);
+    if (!normSym || !normRes) {
+      return { primaryKey: '', legacyKey: '', symbol: normSym, resolution: normRes, host: '' };
+    }
+    const cleanHost = String(hostOverride !== null ? hostOverride : (getCurrentChartHostKey() || '')).trim().toLowerCase();
+    const legacyKey = `${normSym}|${normRes}`;
+    const primaryKey = cleanHost ? `${cleanHost}|${legacyKey}` : legacyKey;
+    return { primaryKey, legacyKey, symbol: normSym, resolution: normRes, host: cleanHost };
+  }
+
+  function pruneViewportMapEntries(mapObj, maxEntries = VIEWPORT_MAP_MAX_ENTRIES) {
+    const entries = Object.entries(mapObj || {});
+    if (entries.length <= maxEntries) return mapObj || {};
+    entries.sort((a, b) => (Number(b[1] && b[1].updatedAt) || 0) - (Number(a[1] && a[1].updatedAt) || 0));
+    return Object.fromEntries(entries.slice(0, maxEntries));
+  }
+
+  function cancelActiveViewportRestore(reason = 'cancelled') {
+    if (!activeViewportRestoreSession) return;
+    const sess = activeViewportRestoreSession;
+    sess.completed = true;
+    if (Array.isArray(sess.timers)) {
+      sess.timers.forEach(tid => {
+        try { clearTimeout(tid); } catch (e) {}
+      });
+      sess.timers = [];
+    }
+    activeViewportRestoreSession = null;
+    isRestoringChartSettings = false;
+    if (reason === 'user_canvas_interaction') {
+      intervalSwitchSaveBlockUntil = 0;
+    }
+  }
+
+  function isChartCanvasInteractionTarget(target) {
+    if (!target || target.nodeType !== 1) return false;
+    if (target.tagName === 'CANVAS') return true;
+    return false;
+  }
+
+  function markLocalChartInteraction(cancelRestore = true) {
     lastLocalChartInteractionAt = Date.now();
-    viewportRestoreGeneration++;
+    if (cancelRestore) {
+      viewportRestoreGeneration++;
+      intervalSwitchSaveBlockUntil = 0;
+      cancelActiveViewportRestore('user_canvas_interaction');
+    }
   }
   function getCurrentChartHostKey() {
     try {
@@ -7121,12 +7237,26 @@
     return false;
   }
   try {
-    window.addEventListener('resize', markLocalChartInteraction, { capture: true, passive: true });
+    lastObservedWindowViewportSize = { w: window.innerWidth || 0, h: window.innerHeight || 0 };
+    const onViewportResize = () => {
+      const nw = window.innerWidth || 0;
+      const nh = window.innerHeight || 0;
+      if (nw !== lastObservedWindowViewportSize.w || nh !== lastObservedWindowViewportSize.h) {
+        lastObservedWindowViewportSize = { w: nw, h: nh };
+        markLocalChartInteraction(false);
+      }
+    };
+    window.addEventListener('resize', onViewportResize, { capture: true, passive: true });
     if (window.top && window.top !== window) {
-      window.top.addEventListener('resize', markLocalChartInteraction, { capture: true, passive: true });
-      window.top.addEventListener('pointerdown', markLocalChartInteraction, { capture: true, passive: true });
-      window.top.addEventListener('pointerup', markLocalChartInteraction, { capture: true, passive: true });
+      window.top.addEventListener('resize', onViewportResize, { capture: true, passive: true });
     }
+    const flushViewportBeforeUnload = () => {
+      if (Date.now() - lastLocalChartInteractionAt < 60000) {
+        captureSteadyViewportSnapshotForActiveContext(true);
+      }
+    };
+    window.addEventListener('pagehide', flushViewportBeforeUnload, { capture: true, passive: true });
+    window.addEventListener('beforeunload', flushViewportBeforeUnload, { capture: true, passive: true });
   } catch (e) {}
   try {
     chartMemoryTabId = window.__TRADING_CORTEX_CHART_MEMORY_TAB_ID__ ||
@@ -7141,12 +7271,37 @@
     let symbol = '';
     let resolution = '';
     try { symbol = typeof activeChart.symbol === 'function' ? String(activeChart.symbol() || '') : ''; } catch (e) {}
+    if (!symbol) {
+      try {
+        if (typeof activeChart.symbolExt === 'function') {
+          const ext = activeChart.symbolExt();
+          if (ext && ext.symbol) symbol = String(ext.symbol);
+        }
+      } catch (e) {}
+    }
     try { resolution = typeof activeChart.resolution === 'function' ? String(activeChart.resolution() || '') : ''; } catch (e) {}
+    if (!resolution) {
+      try {
+        const model = getViewportChartModel();
+        const ms = model && typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+        if (ms) {
+          if (typeof ms.resolution === 'function') resolution = String(ms.resolution() || '');
+          else if (ms._interval) resolution = String(ms._interval);
+        }
+      } catch (e) {}
+    }
     if (!symbol || !resolution) return null;
+    const keys = buildViewportChartKeys(symbol, resolution);
+    if (!keys.primaryKey) return null;
     return {
-      symbol,
-      resolution,
-      key: `${symbol.toUpperCase()}|${resolution.toUpperCase()}`
+      symbol: keys.symbol,
+      rawSymbol: symbol.trim(),
+      resolution: keys.resolution,
+      rawResolution: resolution.trim(),
+      host: keys.host,
+      key: keys.primaryKey,
+      primaryKey: keys.primaryKey,
+      legacyKey: keys.legacyKey
     };
   }
 
@@ -7156,7 +7311,9 @@
     const viewportsByChart = { ...(prev.viewportsByChart || {}) };
     Object.entries(next.viewportsByChart || {}).forEach(([key, state]) => {
       const current = viewportsByChart[key];
-      if (!current || (Number(state && state.updatedAt) || 0) >= (Number(current.updatedAt) || 0)) {
+      const nextTs = Number(state && state.updatedAt) || 0;
+      const curTs = Number(current && current.updatedAt) || 0;
+      if (!current || nextTs > curTs) {
         viewportsByChart[key] = state;
       }
     });
@@ -7165,26 +7322,93 @@
       ...next,
       localStorageEntries: { ...(prev.localStorageEntries || {}), ...(next.localStorageEntries || {}) },
       viewportsBySymbol: { ...(prev.viewportsBySymbol || {}), ...(next.viewportsBySymbol || {}) },
-      viewportsByChart
+      viewportsByChart: pruneViewportMapEntries(viewportsByChart)
     };
+  }
+
+  function getSavedViewportForChartKeys(saved, symbol, resolution, hostOverride = null) {
+    const keys = buildViewportChartKeys(symbol, resolution, hostOverride);
+    if (!keys.primaryKey) return null;
+    const byChart = (saved && saved.viewportsByChart) || {};
+    const checkStateHost = (st) => !st || !st.host || !keys.host || String(st.host).toLowerCase() === keys.host;
+
+    // 1. Exact host|symbol|resolution match in persisted viewportsByChart
+    const exactPrimary = byChart[keys.primaryKey];
+    if (exactPrimary && (exactPrimary.viewport || typeof exactPrimary.barSpacing === 'number')) {
+      return exactPrimary.viewport ? exactPrimary : { ...exactPrimary, viewport: exactPrimary };
+    }
+
+    // 2. Exact host|symbol|resolution in live session lastKnownChartConfigs
+    if (lastKnownChartConfigs.has(keys.primaryKey)) {
+      const known = lastKnownChartConfigs.get(keys.primaryKey);
+      if (known && (known.viewport || typeof known.barSpacing === 'number')) {
+        return known.viewport ? known : { ...known, viewport: known };
+      }
+    }
+
+    // 3. Legacy symbol|resolution match (same host or host-agnostic)
+    if (keys.legacyKey && keys.legacyKey !== keys.primaryKey) {
+      const exactLegacy = byChart[keys.legacyKey];
+      if (exactLegacy && checkStateHost(exactLegacy) && (exactLegacy.viewport || typeof exactLegacy.barSpacing === 'number')) {
+        return exactLegacy.viewport ? exactLegacy : { ...exactLegacy, viewport: exactLegacy };
+      }
+      if (lastKnownChartConfigs.has(keys.legacyKey)) {
+        const knownLegacy = lastKnownChartConfigs.get(keys.legacyKey);
+        if (knownLegacy && checkStateHost(knownLegacy) && (knownLegacy.viewport || typeof knownLegacy.barSpacing === 'number')) {
+          return knownLegacy.viewport ? knownLegacy : { ...knownLegacy, viewport: knownLegacy };
+        }
+      }
+    }
+
+    // 4. Case/format-normalized scan of viewportsByChart (handles e.g. legacy "BTC-PERP|1H" vs "BTC-PERP|60")
+    let bestNormMatch = null;
+    let bestNormTs = -1;
+    Object.entries(byChart).forEach(([k, st]) => {
+      if (!st || !checkStateHost(st)) return;
+      if (!(st.viewport || typeof st.barSpacing === 'number')) return;
+      const stSym = normalizeViewportSymbolKey(st.symbol || '');
+      const stRes = normalizeViewportResolutionKey(st.resolution || '');
+      if (stSym === keys.symbol && stRes === keys.resolution) {
+        const ts = Number(st.updatedAt) || 0;
+        if (ts >= bestNormTs) {
+          bestNormTs = ts;
+          bestNormMatch = st;
+        }
+      }
+    });
+    if (bestNormMatch) {
+      return bestNormMatch.viewport ? bestNormMatch : { ...bestNormMatch, viewport: bestNormMatch };
+    }
+
+    // 5. Fallback to viewportsBySymbol ONLY if its saved resolution strictly matches!
+    if (saved && saved.viewportsBySymbol) {
+      const symState = saved.viewportsBySymbol[keys.symbol] || saved.viewportsBySymbol[symbol];
+      if (
+        symState &&
+        checkStateHost(symState) &&
+        normalizeViewportResolutionKey(symState.resolution) === keys.resolution &&
+        (symState.viewport || typeof symState.barSpacing === 'number')
+      ) {
+        return symState.viewport ? symState : { ...symState, viewport: symState };
+      }
+    }
+
+    // 6. Legacy root-level saved.viewport ONLY if symbol AND resolution both match!
+    if (
+      saved &&
+      saved.viewport &&
+      normalizeViewportSymbolKey(saved.symbol) === keys.symbol &&
+      normalizeViewportResolutionKey(saved.resolution) === keys.resolution
+    ) {
+      return { viewport: saved.viewport, resolution: keys.resolution, symbol: keys.symbol, host: keys.host, updatedAt: 0 };
+    }
+    return null;
   }
 
   function getSavedViewportForActiveChart(saved) {
     const context = getActiveChartMemoryContext();
     if (!saved || !context) return null;
-    const chartState = saved.viewportsByChart && saved.viewportsByChart[context.key];
-    if (chartState && chartState.viewport) return chartState;
-    const symbolState = saved.viewportsBySymbol && saved.viewportsBySymbol[context.symbol];
-    if (symbolState && String(symbolState.resolution || '').toUpperCase() === context.resolution.toUpperCase()) {
-      return symbolState.viewport ? symbolState : { ...symbolState, viewport: symbolState };
-    }
-    if (
-      saved.symbol && String(saved.symbol).toUpperCase() === context.symbol.toUpperCase() &&
-      String(saved.resolution || '').toUpperCase() === context.resolution.toUpperCase() && saved.viewport
-    ) {
-      return { viewport: saved.viewport, resolution: context.resolution, symbol: context.symbol, updatedAt: 0 };
-    }
-    return null;
+    return getSavedViewportForChartKeys(saved, context.symbol, context.resolution, context.host);
   }
 
   function applyIncomingChartViewportIfNewer(meta = null) {
@@ -7201,12 +7425,12 @@
 
     // Strict Timeframe Isolation: Never apply viewport updates across differing resolutions!
     if (meta && meta.resolution) {
-      if (String(meta.resolution).toUpperCase() !== String(context.resolution).toUpperCase()) {
+      if (normalizeViewportResolutionKey(meta.resolution) !== context.resolution) {
         return;
       }
     }
     if (meta && meta.symbol) {
-      if (String(meta.symbol).toUpperCase() !== String(context.symbol).toUpperCase()) {
+      if (normalizeViewportSymbolKey(meta.symbol) !== context.symbol) {
         return;
       }
     }
@@ -7216,23 +7440,31 @@
     if (state.host && currentHost && String(state.host).toLowerCase() !== currentHost) return;
 
     // Strict verification that stored state matches this chart's active resolution
-    if (state.resolution && String(state.resolution).toUpperCase() !== String(context.resolution).toUpperCase()) {
+    if (state.resolution && normalizeViewportResolutionKey(state.resolution) !== context.resolution) {
       return;
     }
 
     const updatedAt = Number(state.updatedAt) || 0;
-    if (updatedAt <= (chartViewportAppliedAt.get(context.key) || 0)) return;
-    chartViewportAppliedAt.set(context.key, updatedAt);
+    if (updatedAt <= (chartViewportAppliedAt.get(context.primaryKey) || 0)) return;
+    chartViewportAppliedAt.set(context.primaryKey, updatedAt);
     isRestoringChartSettings = true;
-    applyViewportStateToChart(state.viewport);
+    applyViewportStateToChart(state.viewport, { savedUpdatedAt: updatedAt });
     setTimeout(() => { isRestoringChartSettings = false; }, 450);
   }
 
-  function scheduleSaveCurrentChartSettings(delayMs = 280) {
-    if (isRestoringChartSettings || isResettingChartView) return;
+  function canSaveChartMemoryNow(allowBlurred = false) {
+    if (allowBlurred) return true;
+    if (chartMemoryTabFocused || hasLiveWindowFocus()) return true;
+    // Allow saving if the user genuinely interacted with the chart recently (covers blob: iframes & mobile touch)
+    if (Date.now() - lastLocalChartInteractionAt < 10000) return true;
+    return false;
+  }
+
+  function scheduleSaveCurrentChartSettings(delayMs = 240) {
+    if (isRestoringChartSettings || isResettingChartView || activeViewportRestoreSession) return;
     if (Date.now() < intervalSwitchSaveBlockUntil) return;
     if (currentSettings.rememberLastChartSettings === false) return;
-    if (!chartMemoryTabFocused && !hasLiveWindowFocus()) return;
+    if (!canSaveChartMemoryNow(false)) return;
     if (chartSettingsCaptureDebounceTimer) {
       clearTimeout(chartSettingsCaptureDebounceTimer);
     }
@@ -7282,6 +7514,41 @@
         }
       } catch (e) {}
     }
+    return null;
+  }
+
+  function getViewportChartModel() {
+    const direct = getInternalChartModel();
+    if (direct) return direct;
+    try {
+      if (typeof findChartModelForSessions === 'function') {
+        const discovered = findChartModelForSessions();
+        if (discovered) return discovered;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function getLatestSeriesBarMeta(modelArg = null) {
+    try {
+      const model = modelArg || getViewportChartModel();
+      const ms = model && typeof model.mainSeries === 'function' ? model.mainSeries() : (model && model._mainSeries ? model._mainSeries : null);
+      if (!ms) return null;
+      const bars = typeof ms.bars === 'function' ? ms.bars() : (ms._data && ms._data.bars ? ms._data.bars : null);
+      if (!bars) return null;
+      const last = typeof bars.last === 'function' ? bars.last() : null;
+      if (!last) return null;
+      const val = last.value || last;
+      if (Array.isArray(val) && val.length >= 5) {
+        const rawTime = Number(val[0]);
+        const closePrice = Number(val[4]);
+        const timeSec = Number.isFinite(rawTime) ? (rawTime > 1e12 ? Math.floor(rawTime / 1000) : Math.floor(rawTime)) : 0;
+        return {
+          timeSec: timeSec > 0 ? timeSec : 0,
+          closePrice: Number.isFinite(closePrice) ? closePrice : null
+        };
+      }
+    } catch (e) {}
     return null;
   }
 
@@ -7356,8 +7623,8 @@
       }
     } catch (e) {}
 
-    // Also check internal chart model timeScale for barSpacing / rightOffset if public API omitted either
-    const model = getInternalChartModel();
+    // Also check internal chart model timeScale (including discovered model via findChartModelForSessions)
+    const model = getViewportChartModel();
     if (model && typeof model.timeScale === 'function') {
       try {
         const internalTs = model.timeScale();
@@ -7378,7 +7645,7 @@
       } catch (e) {}
     }
 
-    // 3. Vertical Price Scale (Up/Down position, vertical zoom, autoScale state)
+    // 3. Vertical Price Scale (Up/Down position, vertical zoom, autoScale state, mode, inverted)
     const psApi = getPrimaryPriceScaleApi();
     if (psApi) {
       try {
@@ -7387,7 +7654,7 @@
         }
         if (typeof psApi.getVisiblePriceRange === 'function') {
           const pr = psApi.getVisiblePriceRange();
-          if (pr && typeof pr.from === 'number' && typeof pr.to === 'number' && isFinite(pr.from) && isFinite(pr.to)) {
+          if (pr && typeof pr.from === 'number' && typeof pr.to === 'number' && isFinite(pr.from) && isFinite(pr.to) && pr.to > pr.from) {
             viewport.priceRange = {
               from: Number(pr.from),
               to: Number(pr.to)
@@ -7406,21 +7673,24 @@
       } catch (e) {}
     }
 
-    // Fallback to internal model mainPriceScale if getPrimaryPriceScaleApi didn't yield priceRange
-    if (model && (!viewport.priceRange || viewport.isAutoScale === undefined)) {
+    // Fallback to internal model mainPriceScale if public psApi omitted any field
+    if (model) {
       try {
-        const mainSeries = typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+        const mainSeries = typeof model.mainSeries === 'function' ? model.mainSeries() : (model._mainSeries || null);
         const internalPs = mainSeries && typeof mainSeries.priceScale === 'function' ? mainSeries.priceScale() : null;
         if (internalPs) {
           if (viewport.isAutoScale === undefined && typeof internalPs.isAutoScale === 'function') {
             viewport.isAutoScale = Boolean(internalPs.isAutoScale());
+          }
+          if (viewport.isInverted === undefined && typeof internalPs.isInverted === 'function') {
+            viewport.isInverted = Boolean(internalPs.isInverted());
           }
           if (!viewport.priceRange && typeof internalPs.priceRange === 'function') {
             const prObj = internalPs.priceRange();
             if (prObj) {
               const fromVal = typeof prObj.minValue === 'function' ? prObj.minValue() : prObj.from;
               const toVal = typeof prObj.maxValue === 'function' ? prObj.maxValue() : prObj.to;
-              if (typeof fromVal === 'number' && typeof toVal === 'number' && isFinite(fromVal) && isFinite(toVal)) {
+              if (typeof fromVal === 'number' && typeof toVal === 'number' && isFinite(fromVal) && isFinite(toVal) && toVal > fromVal) {
                 viewport.priceRange = { from: fromVal, to: toVal };
               }
             }
@@ -7429,86 +7699,486 @@
       } catch (e) {}
     }
 
+    // Capture latest bar timestamp & interval seconds so historical left-scroll stays pinned if new bars close while away
+    try {
+      const barMeta = getLatestSeriesBarMeta(model);
+      if (barMeta && barMeta.timeSec > 0) {
+        viewport.lastBarTime = barMeta.timeSec;
+      }
+      const resRaw = typeof activeChart.resolution === 'function' ? activeChart.resolution() : '';
+      const sec = viewportResolutionToSeconds(resRaw);
+      if (sec > 0) {
+        viewport.barIntervalSec = sec;
+      }
+    } catch (e) {}
+
     return Object.keys(viewport).length > 0 ? viewport : null;
   }
 
-  function applyViewportStateToChart(viewport, options = {}) {
-    if (!viewport || !activeChart) return;
-    const expectedGen = typeof options.generation === 'number' ? options.generation : viewportRestoreGeneration;
-    const forceAutoScale = options.forceAutoScale === true;
+  function isSavedPriceRangeSaneForCurrentChart(viewport, savedUpdatedAt = 0, modelArg = null) {
+    if (!viewport || !viewport.priceRange) return false;
+    const from = Number(viewport.priceRange.from);
+    const to = Number(viewport.priceRange.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return false;
+    // If user intentionally scrolled back into history, always restore their exact vertical price range
+    if (typeof viewport.rightOffset === 'number' && viewport.rightOffset < -5) return true;
+    // Within 4 hours (same session), always restore the exact manual vertical price range
+    const ageMs = savedUpdatedAt > 0 ? (Date.now() - savedUpdatedAt) : 0;
+    if (ageMs <= 4 * 3600 * 1000) return true;
+    // For older multi-day saved ranges at the live edge, guard against a completely blank chart if price jumped > 3x span away
+    const barMeta = getLatestSeriesBarMeta(modelArg);
+    if (barMeta && Number.isFinite(barMeta.closePrice)) {
+      const span = to - from;
+      if (barMeta.closePrice < from - span * 3 || barMeta.closePrice > to + span * 3) {
+        return false;
+      }
+    }
+    return true;
+  }
 
-    const model = getInternalChartModel();
+  function computeTargetRightOffsetForRestore(viewport, modelArg = null) {
+    if (!viewport || typeof viewport.rightOffset !== 'number' || !isFinite(viewport.rightOffset)) return null;
+    const savedOffset = Math.max(-50000, Math.min(500, viewport.rightOffset));
+    // At or near live edge: preserve exact right-side whitespace
+    if (savedOffset >= -2) return savedOffset;
+    // Scrolled into history: compensate if new bars printed on this timeframe while user was on another timeframe
+    const savedLastBarTime = Number(viewport.lastBarTime) || 0;
+    const barIntervalSec = Number(viewport.barIntervalSec) || 0;
+    if (savedLastBarTime > 0 && barIntervalSec > 0) {
+      const liveMeta = getLatestSeriesBarMeta(modelArg);
+      if (liveMeta && liveMeta.timeSec > savedLastBarTime) {
+        const deltaBars = Math.round((liveMeta.timeSec - savedLastBarTime) / barIntervalSec);
+        if (deltaBars > 0 && deltaBars <= 5000) {
+          return Math.max(-50000, savedOffset - deltaBars);
+        }
+      }
+    }
+    return savedOffset;
+  }
+
+  function applyManualPriceRangeToScale(psApi, internalPs, from, to) {
+    let appliedPublic = false;
+    if (psApi) {
+      try {
+        if (typeof psApi.setAutoScale === 'function') {
+          psApi.setAutoScale(false);
+        }
+        if (typeof psApi.setVisiblePriceRange === 'function') {
+          psApi.setVisiblePriceRange({ from, to });
+          appliedPublic = true;
+        }
+      } catch (e) {}
+    }
+    if (internalPs) {
+      try {
+        if (typeof internalPs.setAutoScale === 'function') {
+          internalPs.setAutoScale(false);
+        }
+        if (!appliedPublic && typeof internalPs.setPriceRange === 'function') {
+          const curRange = typeof internalPs.priceRange === 'function' ? internalPs.priceRange() : null;
+          let rangeObj = null;
+          if (curRange && typeof curRange.constructor === 'function' && curRange.constructor !== Object) {
+            try { rangeObj = new curRange.constructor(from, to); } catch (e) {}
+          }
+          if (!rangeObj) {
+            rangeObj = {
+              minValue: () => from,
+              maxValue: () => to,
+              length: () => to - from,
+              isEmpty: () => false,
+              equals: (other) => Boolean(other && typeof other.minValue === 'function' && other.minValue() === from && other.maxValue() === to),
+              clone: () => ({ ...rangeObj })
+            };
+          }
+          internalPs.setPriceRange(rangeObj, true);
+        }
+      } catch (e) {}
+    }
+  }
+
+  function applyViewportStateToChart(viewport, options = {}) {
+    if (!viewport || !activeChart) return false;
+    const expectedGen = typeof options.generation === 'number' ? options.generation : viewportRestoreGeneration;
+    if (viewportRestoreGeneration !== expectedGen) return false;
+    const forceAutoScale = options.forceAutoScale === true;
+    const savedUpdatedAt = Number(options.savedUpdatedAt || viewport.updatedAt) || 0;
+
+    const model = getViewportChartModel();
     const tsApi = typeof activeChart.getTimeScale === 'function' ? activeChart.getTimeScale() : null;
     const internalTs = model && typeof model.timeScale === 'function' ? model.timeScale() : null;
 
-    // 1. Restore ONLY sane horizontal zoom (barSpacing) & live-edge rightOffset.
-    // NEVER replay historical setVisibleRange({ from, to }) timestamps across sessions/timeframes —
-    // squeezing a narrow or stale timestamp window onto a higher timeframe (e.g. 5m -> 1h) blows
-    // candles up into giant bars and breaks the time axis!
-    const applyHorizontal = () => {
-      if (viewportRestoreGeneration !== expectedGen) return;
-      try {
-        if (typeof viewport.barSpacing === 'number' && isFinite(viewport.barSpacing) && viewport.barSpacing >= 2 && viewport.barSpacing <= 40) {
-          const clampedSpacing = Math.max(4, Math.min(24, viewport.barSpacing));
-          if (tsApi && typeof tsApi.setBarSpacing === 'function') {
-            tsApi.setBarSpacing(clampedSpacing);
-          } else if (internalTs && typeof internalTs.setBarSpacing === 'function') {
-            internalTs.setBarSpacing(clampedSpacing);
+    // 1. Horizontal Zoom (barSpacing) — full range preserved with exact float precision
+    try {
+      if (typeof viewport.barSpacing === 'number' && isFinite(viewport.barSpacing) && viewport.barSpacing >= 0.5 && viewport.barSpacing <= 250) {
+        const targetSpacing = viewport.barSpacing;
+        if (tsApi && typeof tsApi.setBarSpacing === 'function') {
+          tsApi.setBarSpacing(targetSpacing);
+        } else if (internalTs && typeof internalTs.setBarSpacing === 'function') {
+          internalTs.setBarSpacing(targetSpacing);
+        }
+        if (internalTs && typeof internalTs.setBarSpacing === 'function' && typeof internalTs.barSpacing === 'function') {
+          const actualBs = internalTs.barSpacing();
+          if (typeof actualBs === 'number' && Math.abs(actualBs - targetSpacing) > 0.05) {
+            internalTs.setBarSpacing(targetSpacing);
           }
         }
-      } catch (e) {}
+      }
+    } catch (e) {}
 
-      try {
-        if (typeof viewport.rightOffset === 'number' && isFinite(viewport.rightOffset) && viewport.rightOffset >= -2 && viewport.rightOffset <= 30) {
-          const clampedOffset = Math.max(2, Math.min(25, viewport.rightOffset));
-          if (tsApi && typeof tsApi.setRightOffset === 'function') {
-            tsApi.setRightOffset(clampedOffset);
-          } else if (internalTs && typeof internalTs.setRightOffset === 'function') {
-            internalTs.setRightOffset(clampedOffset);
+    // 2. Horizontal Pan / Scroll Position (rightOffset) — exact live-edge OR historical scroll restored!
+    try {
+      const targetOffset = computeTargetRightOffsetForRestore(viewport, model);
+      if (targetOffset !== null) {
+        if (tsApi && typeof tsApi.setRightOffset === 'function') {
+          tsApi.setRightOffset(targetOffset);
+        } else if (internalTs && typeof internalTs.setRightOffset === 'function') {
+          internalTs.setRightOffset(targetOffset);
+        }
+        if (internalTs && typeof internalTs.setRightOffset === 'function' && typeof internalTs.rightOffset === 'function') {
+          const actualRo = internalTs.rightOffset();
+          if (typeof actualRo === 'number' && Math.abs(actualRo - targetOffset) > 0.05) {
+            internalTs.setRightOffset(targetOffset);
           }
         }
-      } catch (e) {}
-    };
+      }
+    } catch (e) {}
 
-    // 2. Restore Vertical Price Scale mode — NEVER force a stale locked priceRange on timeframe switch
-    // (which locks the Y-axis to a narrow lower-TF range and makes HTF candles shoot off top & bottom!).
-    const applyVertical = () => {
-      if (viewportRestoreGeneration !== expectedGen) return;
-      const psApi = getPrimaryPriceScaleApi();
-      if (psApi) {
-        try {
-          if (typeof viewport.priceScaleMode === 'number' && typeof psApi.setMode === 'function') {
+    // 3. Vertical Price Scale (Mode, Inverted, AutoScale, and Exact Manual Price Range for THIS instrument + timeframe!)
+    const psApi = getPrimaryPriceScaleApi();
+    let internalPs = null;
+    try {
+      const ms = model && typeof model.mainSeries === 'function' ? model.mainSeries() : (model && model._mainSeries ? model._mainSeries : null);
+      internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+    } catch (e) {}
+
+    if (psApi) {
+      try {
+        if (typeof viewport.priceScaleMode === 'number' && typeof psApi.setMode === 'function') {
+          const curMode = typeof psApi.getMode === 'function' ? psApi.getMode() : null;
+          if (curMode !== viewport.priceScaleMode) {
             psApi.setMode(viewport.priceScaleMode);
           }
-        } catch (e) {}
+        }
+      } catch (e) {}
 
-        try {
-          if (typeof viewport.isInverted === 'boolean' && typeof psApi.setInverted === 'function') {
+      try {
+        if (typeof viewport.isInverted === 'boolean' && typeof psApi.setInverted === 'function') {
+          const curInv = typeof psApi.isInverted === 'function' ? psApi.isInverted() : null;
+          if (curInv !== viewport.isInverted) {
             psApi.setInverted(viewport.isInverted);
           }
-        } catch (e) {}
+        }
+      } catch (e) {}
+    }
 
-        try {
-          if (forceAutoScale || viewport.isAutoScale !== false) {
-            if (typeof psApi.setAutoScale === 'function') {
-              psApi.setAutoScale(true);
-            }
-          }
-        } catch (e) {}
+    const shouldRestoreManualRange = !forceAutoScale &&
+      viewport.isAutoScale === false &&
+      isSavedPriceRangeSaneForCurrentChart(viewport, savedUpdatedAt, model);
+
+    if (shouldRestoreManualRange) {
+      applyManualPriceRangeToScale(psApi, internalPs, Number(viewport.priceRange.from), Number(viewport.priceRange.to));
+    } else {
+      try {
+        if (psApi && typeof psApi.setAutoScale === 'function') {
+          psApi.setAutoScale(true);
+        }
+      } catch (e) {}
+      try {
+        if (internalPs && typeof internalPs.setAutoScale === 'function') {
+          internalPs.setAutoScale(true);
+        }
+      } catch (e) {}
+    }
+
+    // Trigger immediate redraw on TradingView's internal model when available
+    try {
+      if (model && typeof model.lightUpdate === 'function') {
+        model.lightUpdate();
       }
-      if (model && (forceAutoScale || viewport.isAutoScale !== false)) {
-        try {
-          const ms = typeof model.mainSeries === 'function' ? model.mainSeries() : null;
-          const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
-          if (internalPs && typeof internalPs.setAutoScale === 'function') {
-            internalPs.setAutoScale(true);
-          }
-        } catch (e) {}
+    } catch (e) {}
+    return true;
+  }
+
+  function persistViewportStateForContext(context, viewport, options = {}) {
+    if (!context || !context.primaryKey || !viewport) return false;
+    if (currentSettings.rememberLastChartSettings === false) return false;
+
+    const prev = currentSettings.lastChartSettings || {};
+    let chartType = typeof prev.chartType === 'number' ? prev.chartType : null;
+    if (activeChart && !options.skipLiveChartType) {
+      try {
+        if (typeof activeChart.chartType === 'function') {
+          const ct = activeChart.chartType();
+          if (typeof ct === 'number') chartType = ct;
+        }
+      } catch (e) {}
+    }
+
+    const viewportsBySymbol = { ...(prev.viewportsBySymbol || {}) };
+    const viewportsByChart = { ...(prev.viewportsByChart || {}) };
+    const savedAt = Number(options.savedAt) || Date.now();
+    const chartState = {
+      ...viewport,
+      viewport,
+      symbol: context.symbol,
+      resolution: context.resolution,
+      host: context.host,
+      sourceTabId: chartMemoryTabId,
+      updatedAt: savedAt
+    };
+
+    viewportsBySymbol[context.symbol] = chartState;
+    viewportsByChart[context.primaryKey] = chartState;
+    if (context.legacyKey && context.legacyKey !== context.primaryKey) {
+      viewportsByChart[context.legacyKey] = chartState;
+    }
+
+    const existingKnown = lastKnownChartConfigs.get(context.primaryKey) || {};
+    const updatedKnown = {
+      ...existingKnown,
+      symbol: context.symbol,
+      resolution: context.resolution,
+      host: context.host,
+      chartType: chartType !== null ? chartType : (existingKnown.chartType !== undefined ? existingKnown.chartType : 1),
+      barSpacing: (typeof viewport.barSpacing === 'number' && viewport.barSpacing > 0)
+        ? viewport.barSpacing
+        : (existingKnown.barSpacing || 12),
+      rightOffset: (typeof viewport.rightOffset === 'number' && isFinite(viewport.rightOffset))
+        ? viewport.rightOffset
+        : (existingKnown.rightOffset !== undefined ? existingKnown.rightOffset : 6),
+      isAutoScale: viewport.isAutoScale !== undefined ? viewport.isAutoScale : true,
+      priceRange: viewport.priceRange || null,
+      priceScaleMode: typeof viewport.priceScaleMode === 'number' ? viewport.priceScaleMode : 0,
+      isInverted: Boolean(viewport.isInverted),
+      lastBarTime: viewport.lastBarTime || existingKnown.lastBarTime || 0,
+      barIntervalSec: viewport.barIntervalSec || existingKnown.barIntervalSec || 0,
+      viewport,
+      candleWidthPx: (currentSettings.candleOhlc && currentSettings.candleOhlc.candleWidthPx) || 140,
+      customCandleWidthEnabled: Boolean(currentSettings.candleOhlc && currentSettings.candleOhlc.customCandleWidthEnabled),
+      updatedAt: savedAt
+    };
+    lastKnownChartConfigs.set(context.primaryKey, updatedKnown);
+    if (context.legacyKey && context.legacyKey !== context.primaryKey) {
+      lastKnownChartConfigs.set(context.legacyKey, updatedKnown);
+    }
+
+    const prunedByChart = pruneViewportMapEntries(viewportsByChart);
+    const localEntries = collectTvChartLocalStorage();
+    const mergedEntries = {
+      ...(prev.localStorageEntries || {}),
+      ...localEntries
+    };
+
+    const nextSettings = {
+      symbol: context.symbol,
+      resolution: context.resolution,
+      chartType,
+      viewport,
+      viewportsBySymbol,
+      viewportsByChart: prunedByChart,
+      localStorageEntries: mergedEntries
+    };
+
+    const comparableViewportMap = viewportMap => Object.fromEntries(
+      Object.entries(viewportMap || {}).map(([key, state]) => {
+        const { updatedAt, sourceTabId, ...stableState } = state || {};
+        return [key, stableState];
+      })
+    );
+
+    const prevComparable = JSON.stringify({
+      symbol: prev.symbol,
+      resolution: prev.resolution,
+      chartType: prev.chartType,
+      viewport: prev.viewport,
+      viewportsByChart: comparableViewportMap(prev.viewportsByChart),
+      localStorageEntries: prev.localStorageEntries
+    });
+    const nextComparable = JSON.stringify({
+      symbol: nextSettings.symbol,
+      resolution: nextSettings.resolution,
+      chartType: nextSettings.chartType,
+      viewport: nextSettings.viewport,
+      viewportsByChart: comparableViewportMap(nextSettings.viewportsByChart),
+      localStorageEntries: nextSettings.localStorageEntries
+    });
+
+    if (prevComparable === nextComparable && !options.forceBroadcast) {
+      return false;
+    }
+
+    currentSettings.lastChartSettings = nextSettings;
+    try {
+      window.localStorage.setItem('__trading_cortex_chart_settings__', JSON.stringify(nextSettings));
+    } catch (e) {}
+    log('Saved per-chart viewport for', context.primaryKey, viewport);
+
+    postToIsolated({
+      type: 'VEST_TV_CHART_SETTINGS_CHANGED',
+      lastChartSettings: nextSettings,
+      meta: {
+        symbol: context.symbol,
+        resolution: context.resolution,
+        chartKey: context.primaryKey,
+        host: context.host,
+        sourceTabId: chartMemoryTabId
+      }
+    });
+    return true;
+  }
+
+  function captureSteadyViewportSnapshotForActiveContext(alsoPersist = false) {
+    if (isRestoringChartSettings || isResettingChartView || activeViewportRestoreSession) return null;
+    if (Date.now() < intervalSwitchSaveBlockUntil) return null;
+    const ctx = getActiveChartMemoryContext();
+    if (!ctx) return null;
+    const vp = captureCurrentViewportState();
+    if (!vp) return null;
+    currentTrackedViewportContext = ctx;
+    lastSteadyViewportSnapshot = {
+      ...ctx,
+      viewport: vp,
+      capturedAt: Date.now()
+    };
+    if (alsoPersist && currentSettings.rememberLastChartSettings !== false) {
+      persistViewportStateForContext(ctx, vp);
+    }
+    return lastSteadyViewportSnapshot;
+  }
+
+  function flushPreviousContextViewport(prevContext) {
+    if (!prevContext || !prevContext.primaryKey) return false;
+    if (
+      lastSteadyViewportSnapshot &&
+      lastSteadyViewportSnapshot.primaryKey === prevContext.primaryKey &&
+      lastSteadyViewportSnapshot.viewport
+    ) {
+      return persistViewportStateForContext(prevContext, lastSteadyViewportSnapshot.viewport, {
+        savedAt: lastSteadyViewportSnapshot.capturedAt || Date.now(),
+        skipLiveChartType: true
+      });
+    }
+    return false;
+  }
+
+  function beginViewportRestoreForContext(context, savedState, options = {}) {
+    if (!context || !context.primaryKey || !savedState) return false;
+    const vp = savedState.viewport || savedState;
+    if (!vp) return false;
+
+    cancelActiveViewportRestore('superseded');
+    const now = Date.now();
+    const savedUpdatedAt = Number(savedState.updatedAt) || now;
+    const restoreGen = viewportRestoreGeneration;
+    const session = {
+      id: ++viewportRestoreSessionSeq,
+      generation: restoreGen,
+      primaryKey: context.primaryKey,
+      legacyKey: context.legacyKey,
+      symbol: context.symbol,
+      resolution: context.resolution,
+      host: context.host,
+      viewport: vp,
+      savedUpdatedAt,
+      startedAt: now,
+      maxUntil: now + 3500,
+      suppressReleaseCancelUntil: now + 450,
+      forceAutoScale: options.forceAutoScale === true,
+      timers: [],
+      completed: false
+    };
+    activeViewportRestoreSession = session;
+    isRestoringChartSettings = true;
+    chartViewportAppliedAt.set(context.primaryKey, savedUpdatedAt);
+
+    const runPass = (isFinalPass = false) => {
+      if (!activeViewportRestoreSession || activeViewportRestoreSession.id !== session.id || session.completed) return;
+      if (viewportRestoreGeneration !== session.generation) {
+        cancelActiveViewportRestore('generation_changed');
+        return;
+      }
+      const liveCtx = getActiveChartMemoryContext();
+      if (liveCtx && liveCtx.primaryKey !== session.primaryKey) {
+        cancelActiveViewportRestore('context_changed');
+        return;
+      }
+      applyViewportStateToChart(session.viewport, {
+        generation: session.generation,
+        forceAutoScale: session.forceAutoScale,
+        savedUpdatedAt: session.savedUpdatedAt
+      });
+      if (isFinalPass) {
+        session.completed = true;
+        activeViewportRestoreSession = null;
+        isRestoringChartSettings = false;
+        intervalSwitchSaveBlockUntil = 0;
+        const settledCtx = getActiveChartMemoryContext() || context;
+        const settledVp = captureCurrentViewportState();
+        if (settledCtx && settledCtx.primaryKey === session.primaryKey && settledVp) {
+          currentTrackedViewportContext = settledCtx;
+          lastSteadyViewportSnapshot = {
+            ...settledCtx,
+            viewport: settledVp,
+            capturedAt: Date.now()
+          };
+        }
       }
     };
 
-    applyHorizontal();
-    setTimeout(applyVertical, 100);
+    const scheduleDelays = Array.isArray(options.delays) ? options.delays : [0, 60, 180, 400, 750, 1200];
+    scheduleDelays.forEach((delay, idx) => {
+      const isLast = idx === scheduleDelays.length - 1;
+      if (delay === 0) {
+        runPass(isLast);
+      } else {
+        const tid = setTimeout(() => runPass(isLast), delay);
+        session.timers.push(tid);
+      }
+    });
+    return true;
+  }
+
+  function onChartBarsReadyForViewportRestore() {
+    const session = activeViewportRestoreSession;
+    if (!session || session.completed) return;
+    if (Date.now() > session.maxUntil) {
+      cancelActiveViewportRestore('expired');
+      return;
+    }
+    if (viewportRestoreGeneration !== session.generation) {
+      cancelActiveViewportRestore('generation_changed');
+      return;
+    }
+    const liveCtx = getActiveChartMemoryContext();
+    if (liveCtx && liveCtx.primaryKey !== session.primaryKey) {
+      return;
+    }
+    applyViewportStateToChart(session.viewport, {
+      generation: session.generation,
+      forceAutoScale: session.forceAutoScale,
+      savedUpdatedAt: session.savedUpdatedAt
+    });
+    const followTid = setTimeout(() => {
+      if (!activeViewportRestoreSession || activeViewportRestoreSession.id !== session.id || session.completed) return;
+      if (viewportRestoreGeneration !== session.generation) return;
+      applyViewportStateToChart(session.viewport, {
+        generation: session.generation,
+        forceAutoScale: session.forceAutoScale,
+        savedUpdatedAt: session.savedUpdatedAt
+      });
+    }, 60);
+    session.timers.push(followTid);
+  }
+
+  function handleViewportActivity(source = 'scale', fromUserAction = false) {
+    if (isResettingChartView) return;
+    if (fromUserAction) {
+      markLocalChartInteraction(true);
+    }
+    if (isRestoringChartSettings || activeViewportRestoreSession) return;
+    if (Date.now() < intervalSwitchSaveBlockUntil) return;
+    captureSteadyViewportSnapshotForActiveContext(false);
+    scheduleSaveCurrentChartSettings(fromUserAction ? 200 : 280);
   }
 
   function collectTvChartLocalStorage() {
@@ -7530,94 +8200,141 @@
     return entries;
   }
 
-  let lastHandledIntervalKey = '';
-  let lastHandledIntervalTime = 0;
+  let lastHandledContextSwitchKey = '';
+  let lastHandledContextSwitchTime = 0;
 
-  function handleChartIntervalChanged(targetResolution = null) {
-    if (isRestoringChartSettings) return;
-    if (!activeChart) return;
+  function handleChartContextSwitch(targetSymbol = null, targetResolution = null, reason = 'interval_changed') {
+    if (!activeChart) return false;
+    if (isResettingChartView) return false;
 
-    let resolution = targetResolution ? String(targetResolution).trim() : '';
-    if (!resolution) {
-      try {
-        if (typeof activeChart.resolution === 'function') {
-          resolution = String(activeChart.resolution() || '').trim();
-        }
-      } catch (e) {}
-    }
-    let symbol = '';
-    try {
-      if (typeof activeChart.symbol === 'function') {
-        symbol = String(activeChart.symbol() || '').trim();
-      }
-    } catch (e) {}
-    if (!symbol) symbol = getCurrentChartSymbolKey() || lastTrackedInstrument || '';
-    if (!symbol || !resolution) return;
+    const liveCtx = getActiveChartMemoryContext();
+    const rawSym = targetSymbol ? String(targetSymbol).trim() : (liveCtx ? liveCtx.symbol : (getCurrentChartSymbolKey() || lastTrackedInstrument || ''));
+    const rawRes = targetResolution ? String(targetResolution).trim() : (liveCtx ? liveCtx.resolution : (typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : ''));
+    const nextKeys = buildViewportChartKeys(rawSym, rawRes);
+    if (!nextKeys.primaryKey) return false;
 
-    const chartKey = `${symbol.toUpperCase()}|${resolution.toUpperCase()}`;
     const now = Date.now();
-    if (chartKey === lastHandledIntervalKey && (now - lastHandledIntervalTime < 450)) {
-      return;
+    if (nextKeys.primaryKey === lastHandledContextSwitchKey && (now - lastHandledContextSwitchTime < 350)) {
+      return false;
     }
-    lastHandledIntervalKey = chartKey;
-    lastHandledIntervalTime = now;
+    lastHandledContextSwitchKey = nextKeys.primaryKey;
+    lastHandledContextSwitchTime = now;
 
-    // Immediately cancel any pending save from the PREVIOUS timeframe so 5m's scale/zoom
-    // can never get written under the NEW timeframe's key (e.g. 1h) while bars are still streaming!
+    // 1. Cancel any pending debounced save so the previous context never writes under the NEW key
     if (chartSettingsCaptureDebounceTimer) {
       clearTimeout(chartSettingsCaptureDebounceTimer);
       chartSettingsCaptureDebounceTimer = null;
     }
-    intervalSwitchSaveBlockUntil = now + 1400;
 
-    log(`Chart interval changed to ${resolution} for ${symbol} (${chartKey})`);
+    // 2. Immediately flush the PREVIOUS (instrument, timeframe) steady-state viewport BEFORE switching!
+    const prevCtx = currentTrackedViewportContext;
+    if (prevCtx && prevCtx.primaryKey && prevCtx.primaryKey !== nextKeys.primaryKey) {
+      flushPreviousContextViewport(prevCtx);
+    }
 
-    // Always enable autoScale on timeframe switch so higher/lower timeframe candles frame cleanly
-    // instead of getting clipped off the top & bottom by a stale locked price range!
+    // 3. Advance tracked context & clear stale snapshot so old state can never contaminate the new key
+    currentTrackedViewportContext = {
+      symbol: nextKeys.symbol,
+      resolution: nextKeys.resolution,
+      host: nextKeys.host,
+      key: nextKeys.primaryKey,
+      primaryKey: nextKeys.primaryKey,
+      legacyKey: nextKeys.legacyKey
+    };
+    lastSteadyViewportSnapshot = null;
+
+    if (currentSettings.rememberLastChartSettings === false) return false;
+
+    // 4. Look up the saved viewport exclusively for THIS (host, instrument, timeframe)
+    const saved = currentSettings && currentSettings.lastChartSettings;
+    const savedState = getSavedViewportForChartKeys(saved, nextKeys.symbol, nextKeys.resolution, nextKeys.host);
+
+    if (savedState && (savedState.viewport || typeof savedState.barSpacing === 'number')) {
+      log(`Restoring exact saved viewport for ${nextKeys.primaryKey} (${reason}):`, savedState.viewport || savedState);
+      intervalSwitchSaveBlockUntil = now + 1350;
+      beginViewportRestoreForContext(currentTrackedViewportContext, savedState);
+      return true;
+    }
+
+    // 5. Never-before-visited (instrument, timeframe): enable autoScale cleanly so it never inherits
+    //    a locked vertical range from the previous timeframe or previous instrument!
+    cancelActiveViewportRestore('unvisited_context');
+    intervalSwitchSaveBlockUntil = now + 750;
     try {
       const psApi = getPrimaryPriceScaleApi();
       if (psApi && typeof psApi.setAutoScale === 'function') {
         psApi.setAutoScale(true);
       }
-      const model = getInternalChartModel();
-      const ms = model && typeof model.mainSeries === 'function' ? model.mainSeries() : null;
+      const model = getViewportChartModel();
+      const ms = model && typeof model.mainSeries === 'function' ? model.mainSeries() : (model && model._mainSeries ? model._mainSeries : null);
       const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
       if (internalPs && typeof internalPs.setAutoScale === 'function') {
         internalPs.setAutoScale(true);
       }
     } catch (e) {}
 
-    // Pull last known focused chart settings for this specific symbol + resolution
-    const saved = currentSettings && currentSettings.lastChartSettings;
-    const savedState = (saved && saved.viewportsByChart && saved.viewportsByChart[chartKey])
-      || (lastKnownChartConfigs.has(chartKey) ? lastKnownChartConfigs.get(chartKey) : null);
+    // Capture the settled initial viewport once bars settle for this new context
+    const expectedKey = nextKeys.primaryKey;
+    setTimeout(() => {
+      const nowCtx = getActiveChartMemoryContext();
+      if (nowCtx && nowCtx.primaryKey === expectedKey && !activeViewportRestoreSession && !isRestoringChartSettings) {
+        intervalSwitchSaveBlockUntil = 0;
+        captureSteadyViewportSnapshotForActiveContext(false);
+      }
+    }, 850);
+    return false;
+  }
 
-    const switchGen = viewportRestoreGeneration;
-    if (savedState && (savedState.viewport || savedState.barSpacing)) {
-      const vp = savedState.viewport || savedState;
-      log(`Restoring sanitized zoom/offset for ${chartKey}:`, vp);
-      isRestoringChartSettings = true;
-      chartViewportAppliedAt.set(chartKey, Number(savedState.updatedAt) || now);
+  function handleChartIntervalChanged(targetResolution = null) {
+    return handleChartContextSwitch(null, targetResolution, 'interval_changed');
+  }
 
-      setTimeout(() => {
-        if (viewportRestoreGeneration === switchGen) {
-          applyViewportStateToChart(vp, { generation: switchGen, forceAutoScale: true });
-        }
-        isRestoringChartSettings = false;
-      }, 160);
+  function handleChartSymbolChanged(targetSymbol = null) {
+    return handleChartContextSwitch(targetSymbol, null, 'symbol_changed');
+  }
+
+  function checkAndHandleChartContextChange(reason = 'context_poll') {
+    if (!activeChart || isResettingChartView) return false;
+    const liveCtx = getActiveChartMemoryContext();
+    if (!liveCtx || !liveCtx.primaryKey) return false;
+    if (!currentTrackedViewportContext || !currentTrackedViewportContext.primaryKey) {
+      currentTrackedViewportContext = liveCtx;
+      if (!activeViewportRestoreSession && !isRestoringChartSettings) {
+        captureSteadyViewportSnapshotForActiveContext(false);
+      }
+      return false;
     }
+    if (liveCtx.primaryKey !== currentTrackedViewportContext.primaryKey) {
+      return handleChartContextSwitch(liveCtx.symbol, liveCtx.resolution, reason);
+    }
+    return false;
   }
 
   function setupChartSettingsObserver() {
-    if (chartSettingsObserverInitialized) return;
-
     try {
-      if (activeChart) {
+      if (activeChart && !hookedChartSettingsCharts.has(activeChart)) {
+        hookedChartSettingsCharts.add(activeChart);
         if (typeof activeChart.onIntervalChanged === 'function') {
           const sub = activeChart.onIntervalChanged();
           if (sub && typeof sub.subscribe === 'function') {
             sub.subscribe(null, (newInterval) => {
               handleChartIntervalChanged(newInterval);
+            });
+          }
+        }
+        if (typeof activeChart.onSymbolChanged === 'function') {
+          const sub = activeChart.onSymbolChanged();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => {
+              handleChartSymbolChanged();
+            });
+          }
+        }
+        if (typeof activeChart.onDataLoaded === 'function') {
+          const sub = activeChart.onDataLoaded();
+          if (sub && typeof sub.subscribe === 'function') {
+            sub.subscribe(null, () => {
+              onChartBarsReadyForViewportRestore();
             });
           }
         }
@@ -7633,64 +8350,191 @@
           const sub = activeChart.onVisibleRangeChanged();
           if (sub && typeof sub.subscribe === 'function') {
             sub.subscribe(null, () => {
-              scheduleSaveCurrentChartSettings(300);
+              handleViewportActivity('onVisibleRangeChanged', false);
             });
           }
         }
         if (typeof activeChart.getTimeScale === 'function') {
           const ts = activeChart.getTimeScale();
-          if (ts) {
+          if (ts && !hookedChartSettingsTimeScales.has(ts)) {
+            hookedChartSettingsTimeScales.add(ts);
             if (typeof ts.barSpacingChanged === 'function') {
               const sub = ts.barSpacingChanged();
               if (sub && typeof sub.subscribe === 'function') {
-                sub.subscribe(null, () => scheduleSaveCurrentChartSettings(300));
+                sub.subscribe(null, () => handleViewportActivity('ts.barSpacingChanged', false));
               }
             }
             if (typeof ts.rightOffsetChanged === 'function') {
               const sub = ts.rightOffsetChanged();
               if (sub && typeof sub.subscribe === 'function') {
-                sub.subscribe(null, () => scheduleSaveCurrentChartSettings(300));
+                sub.subscribe(null, () => handleViewportActivity('ts.rightOffsetChanged', false));
               }
             }
           }
         }
       }
+
+      // Bind directly to internal model timeScale, priceScale, and mainSeries so Y-axis drags,
+      // autoScale toggles, and async bar loads are ALWAYS captured and restored reliably!
+      const model = getViewportChartModel();
+      if (model) {
+        const internalTs = typeof model.timeScale === 'function' ? model.timeScale() : model._timeScale;
+        if (internalTs && !hookedChartSettingsTimeScales.has(internalTs)) {
+          hookedChartSettingsTimeScales.add(internalTs);
+          ['barSpacingChanged', 'rightOffsetChanged', 'visibleBarsStrictRangeChanged'].forEach(evName => {
+            try {
+              if (typeof internalTs[evName] === 'function') {
+                const sub = internalTs[evName]();
+                if (sub && typeof sub.subscribe === 'function') {
+                  sub.subscribe(null, () => handleViewportActivity(`internalTs.${evName}`, false));
+                }
+              }
+            } catch (e) {}
+          });
+        }
+        const ms = typeof model.mainSeries === 'function' ? model.mainSeries() : (model._mainSeries || null);
+        if (ms && !hookedChartSettingsMainSeries.has(ms)) {
+          hookedChartSettingsMainSeries.add(ms);
+          ['barsReceived', 'dataUpdated', 'symbolResolved'].forEach(evName => {
+            try {
+              if (typeof ms[evName] === 'function') {
+                const sub = ms[evName]();
+                if (sub && typeof sub.subscribe === 'function') {
+                  sub.subscribe(null, () => {
+                    checkAndHandleChartContextChange(`ms.${evName}`);
+                    onChartBarsReadyForViewportRestore();
+                  });
+                }
+              }
+            } catch (e) {}
+          });
+          ['onSymbolIntervalChanged', 'timeframeChanged'].forEach(evName => {
+            try {
+              if (typeof ms[evName] === 'function') {
+                const sub = ms[evName]();
+                if (sub && typeof sub.subscribe === 'function') {
+                  sub.subscribe(null, () => checkAndHandleChartContextChange(`ms.${evName}`));
+                }
+              }
+            } catch (e) {}
+          });
+        }
+        const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
+        if (internalPs && !hookedChartSettingsPriceScales.has(internalPs)) {
+          hookedChartSettingsPriceScales.add(internalPs);
+          ['priceRangeChanged', 'modeChanged', 'autoScaleChanged'].forEach(evName => {
+            try {
+              if (typeof internalPs[evName] === 'function') {
+                const sub = internalPs[evName]();
+                if (sub && typeof sub.subscribe === 'function') {
+                  sub.subscribe(null, () => handleViewportActivity(`internalPs.${evName}`, false));
+                }
+              }
+            } catch (e) {}
+          });
+        }
+      }
     } catch (e) {}
 
-    // Listen for canvas drag/pan (mouseup), mousewheel zoom (wheel), resize, and toolbar/dialog clicks
+    // Listen for genuine canvas interactions (pan, zoom, Y-axis drag) vs toolbar clicks (pre-switch snapshot!)
     const docs = getSidebarDocuments();
     docs.forEach(doc => {
+      if (!doc || hookedChartSettingsDocs.has(doc)) return;
+      hookedChartSettingsDocs.add(doc);
       try {
-        doc.addEventListener('pointerdown', markLocalChartInteraction, { capture: true, passive: true });
-        doc.addEventListener('mousedown', markLocalChartInteraction, { capture: true, passive: true });
-        doc.addEventListener('mouseup', () => {
-          markLocalChartInteraction();
-          scheduleSaveCurrentChartSettings(250);
-        }, true);
+        let canvasPointerDown = null;
 
-        doc.addEventListener('wheel', () => {
-          markLocalChartInteraction();
-          scheduleSaveCurrentChartSettings(350);
+        doc.addEventListener('pointerdown', (e) => {
+          const target = e.target;
+          if (isChartCanvasInteractionTarget(target)) {
+            canvasPointerDown = { x: e.clientX || 0, y: e.clientY || 0, at: Date.now() };
+            lastLocalChartInteractionAt = Date.now();
+          } else {
+            canvasPointerDown = null;
+            // Before TradingView handles a click on any timeframe/symbol button, snapshot the current
+            // steady-state viewport so zero adjustments are lost on switch!
+            captureSteadyViewportSnapshotForActiveContext(false);
+          }
         }, { capture: true, passive: true });
 
-        doc.addEventListener('touchend', () => {
-          markLocalChartInteraction();
-          scheduleSaveCurrentChartSettings(300);
+        doc.addEventListener('pointermove', (e) => {
+          if (canvasPointerDown && (e.buttons > 0 || e.pointerType === 'touch')) {
+            const dx = (e.clientX || 0) - canvasPointerDown.x;
+            const dy = (e.clientY || 0) - canvasPointerDown.y;
+            if (Math.hypot(dx, dy) > 3) {
+              // User is actively dragging the chart or price/time axis -> immediately cancel any restore!
+              markLocalChartInteraction(true);
+            }
+          }
         }, { capture: true, passive: true });
 
-        if (doc.defaultView) {
-          doc.defaultView.addEventListener('resize', () => {
-            markLocalChartInteraction();
-            scheduleSaveCurrentChartSettings(350);
-          }, { capture: true, passive: true });
-        }
+        const onPointerRelease = (e) => {
+          const wasCanvasDrag = Boolean(canvasPointerDown);
+          canvasPointerDown = null;
+          if (wasCanvasDrag || isChartCanvasInteractionTarget(e.target)) {
+            lastLocalChartInteractionAt = Date.now();
+            if (!activeViewportRestoreSession && !isRestoringChartSettings) {
+              intervalSwitchSaveBlockUntil = 0;
+              captureSteadyViewportSnapshotForActiveContext(false);
+              scheduleSaveCurrentChartSettings(180);
+            }
+          }
+          // NEVER increment viewportRestoreGeneration on non-canvas mouseup/pointerup!
+          // Releasing a timeframe button click must NEVER abort the timeframe's viewport restore!
+        };
+
+        doc.addEventListener('pointerup', onPointerRelease, { capture: true, passive: true });
+        doc.addEventListener('mouseup', onPointerRelease, { capture: true, passive: true });
+
+        doc.addEventListener('dblclick', (e) => {
+          if (isChartCanvasInteractionTarget(e.target)) {
+            // Double-click on price/time axis resets auto-scale / view -> cancel restore and save result!
+            handleViewportActivity('canvas_dblclick', true);
+          }
+        }, { capture: true, passive: true });
+
+        doc.addEventListener('wheel', (e) => {
+          if (isChartCanvasInteractionTarget(e.target) || !activeViewportRestoreSession) {
+            handleViewportActivity('wheel', true);
+          }
+        }, { capture: true, passive: true });
+
+        doc.addEventListener('touchstart', (e) => {
+          if (isChartCanvasInteractionTarget(e.target)) {
+            canvasPointerDown = {
+              x: (e.touches && e.touches[0] ? e.touches[0].clientX : 0),
+              y: (e.touches && e.touches[0] ? e.touches[0].clientY : 0),
+              at: Date.now()
+            };
+            lastLocalChartInteractionAt = Date.now();
+          } else {
+            captureSteadyViewportSnapshotForActiveContext(false);
+          }
+        }, { capture: true, passive: true });
+
+        doc.addEventListener('touchmove', (e) => {
+          if (canvasPointerDown) {
+            markLocalChartInteraction(true);
+          }
+        }, { capture: true, passive: true });
+
+        doc.addEventListener('touchend', (e) => {
+          const wasCanvasTouch = Boolean(canvasPointerDown);
+          canvasPointerDown = null;
+          if (wasCanvasTouch || isChartCanvasInteractionTarget(e.target)) {
+            lastLocalChartInteractionAt = Date.now();
+            if (!activeViewportRestoreSession && !isRestoringChartSettings) {
+              intervalSwitchSaveBlockUntil = 0;
+              captureSteadyViewportSnapshotForActiveContext(false);
+              scheduleSaveCurrentChartSettings(220);
+            }
+          }
+        }, { capture: true, passive: true });
 
         doc.addEventListener('click', (e) => {
           const target = e.target;
           if (!target || typeof target.closest !== 'function') return;
           if (
-            target.closest('[id*="header-toolbar"]') ||
-            target.closest('[data-name*="intervals"]') ||
             target.closest('[data-name*="style"]') ||
             target.closest('[data-name="legend-settings-action"]') ||
             target.closest('[data-name="save-load-menu"]') ||
@@ -7703,153 +8547,52 @@
       } catch (e) {}
     });
 
+    // Lightweight 250ms context-change watcher catches timeframe/symbol changes on custom React toolbars
+    // or keyboard shortcuts even if TradingView's onIntervalChanged/onSymbolChanged doesn't fire!
+    if (!chartViewportContextPollTimer) {
+      chartViewportContextPollTimer = setInterval(() => {
+        if (!activeChart) return;
+        checkAndHandleChartContextChange('context_poll');
+      }, 250);
+    }
+
+    // Initialize currentTrackedViewportContext on first bind
+    if (!currentTrackedViewportContext) {
+      const initialCtx = getActiveChartMemoryContext();
+      if (initialCtx) {
+        currentTrackedViewportContext = initialCtx;
+      }
+    }
+
     chartSettingsObserverInitialized = true;
   }
 
   function saveCurrentChartSettings(allowBlurred = false) {
-    if (isRestoringChartSettings) return;
+    if (isRestoringChartSettings || activeViewportRestoreSession) return;
     if (Date.now() < intervalSwitchSaveBlockUntil) return;
     if (currentSettings.rememberLastChartSettings === false) return;
-    if (!allowBlurred && !chartMemoryTabFocused && !hasLiveWindowFocus()) return;
+    if (!canSaveChartMemoryNow(allowBlurred)) return;
 
-    const prev = currentSettings.lastChartSettings || {};
-    let resolution = prev.resolution || null;
-    let chartType = typeof prev.chartType === 'number' ? prev.chartType : null;
-    let symbol = prev.symbol || null;
+    const context = getActiveChartMemoryContext();
+    if (!context) return;
 
-    if (activeChart) {
-      try {
-        if (typeof activeChart.resolution === 'function') {
-          const r = activeChart.resolution();
-          if (r) resolution = String(r);
-        }
-      } catch (e) {}
-      try {
-        if (typeof activeChart.chartType === 'function') {
-          const ct = activeChart.chartType();
-          if (typeof ct === 'number') chartType = ct;
-        }
-      } catch (e) {}
-      try {
-        if (typeof activeChart.symbol === 'function') {
-          const sym = activeChart.symbol();
-          if (sym) symbol = String(sym);
-        }
-      } catch (e) {}
-    }
-
-    const viewport = captureCurrentViewportState();
-    const viewportsBySymbol = { ...(prev.viewportsBySymbol || {}) };
-    const viewportsByChart = { ...(prev.viewportsByChart || {}) };
-    const savedAt = Date.now();
-    const symKey = symbol || '__default__';
-    const chartKey = symbol && resolution
-      ? `${String(symbol).toUpperCase()}|${String(resolution).toUpperCase()}`
-      : null;
-    if (viewport) {
-      const currentHost = getCurrentChartHostKey();
-      const chartState = {
-        ...viewport,
-        viewport,
-        symbol,
-        resolution,
-        host: currentHost,
-        sourceTabId: chartMemoryTabId,
-        updatedAt: savedAt
-      };
-      viewportsBySymbol[symKey] = chartState;
-      if (chartKey) {
-        viewportsByChart[chartKey] = chartState;
-        const ro = typeof viewport.rightOffset === 'number' ? viewport.rightOffset : 6;
-        const isAtLiveEdge = Number.isFinite(ro) && ro >= -2 && ro <= 30;
-        const existingKnown = lastKnownChartConfigs.get(chartKey) || {};
-        const updatedKnown = {
-          ...existingKnown,
-          symbol,
-          resolution,
-          chartType: chartType !== null ? chartType : (existingKnown.chartType !== undefined ? existingKnown.chartType : 1),
-          barSpacing: (typeof viewport.barSpacing === 'number' && viewport.barSpacing > 0)
-            ? viewport.barSpacing
-            : (existingKnown.barSpacing || 12),
-          rightOffset: isAtLiveEdge ? ro : (existingKnown.rightOffset !== undefined ? existingKnown.rightOffset : 6),
-          isAutoScale: viewport.isAutoScale !== undefined ? viewport.isAutoScale : true,
-          priceScaleMode: typeof viewport.priceScaleMode === 'number' ? viewport.priceScaleMode : 0,
-          isInverted: Boolean(viewport.isInverted),
-          candleWidthPx: (currentSettings.candleOhlc && currentSettings.candleOhlc.candleWidthPx) || 140,
-          customCandleWidthEnabled: Boolean(currentSettings.candleOhlc && currentSettings.candleOhlc.customCandleWidthEnabled),
-          updatedAt: savedAt
-        };
-        lastKnownChartConfigs.set(chartKey, updatedKnown);
-      }
-    }
-
-    const localEntries = collectTvChartLocalStorage();
-    const mergedEntries = {
-      ...(prev.localStorageEntries || {}),
-      ...localEntries
-    };
-
-    const nextSettings = {
-      symbol,
-      resolution,
-      chartType,
-      viewport: viewport || prev.viewport || null,
-      viewportsBySymbol,
-      viewportsByChart,
-      localStorageEntries: mergedEntries
-    };
-
-    const comparableViewportMap = viewportMap => Object.fromEntries(
-      Object.entries(viewportMap || {}).map(([key, state]) => {
-        const { updatedAt, sourceTabId, ...stableState } = state || {};
-        return [key, stableState];
-      })
-    );
-
-    // Compare without metadata timestamps so unchanged viewports do not create cross-tab update loops.
-    const prevComparable = JSON.stringify({
-      symbol: prev.symbol,
-      resolution: prev.resolution,
-      chartType: prev.chartType,
-      viewport: prev.viewport,
-      viewportsByChart: comparableViewportMap(prev.viewportsByChart),
-      localStorageEntries: prev.localStorageEntries
-    });
-    const nextComparable = JSON.stringify({
-      symbol: nextSettings.symbol,
-      resolution: nextSettings.resolution,
-      chartType: nextSettings.chartType,
-      viewport: nextSettings.viewport,
-      viewportsByChart: comparableViewportMap(nextSettings.viewportsByChart),
-      localStorageEntries: nextSettings.localStorageEntries
-    });
-
-    if (prevComparable === nextComparable) {
+    // If the active symbol/resolution switched since our last tracked context, handle the switch
+    // (flushing the OLD context first) instead of saving under the wrong key!
+    if (currentTrackedViewportContext && currentTrackedViewportContext.primaryKey !== context.primaryKey) {
+      handleChartContextSwitch(context.symbol, context.resolution, 'save_detected_switch');
       return;
     }
 
-    currentSettings.lastChartSettings = nextSettings;
-    try {
-      window.localStorage.setItem('__trading_cortex_chart_settings__', JSON.stringify(nextSettings));
-    } catch (e) {}
-    log('Captured current chart settings & viewport:', {
-      symbol,
-      resolution,
-      chartType,
-      viewport: nextSettings.viewport
-    });
+    const viewport = captureCurrentViewportState();
+    if (!viewport) return;
 
-    postToIsolated({
-      type: 'VEST_TV_CHART_SETTINGS_CHANGED',
-      lastChartSettings: nextSettings,
-      meta: {
-        symbol,
-        resolution,
-        chartKey,
-        host: getCurrentChartHostKey(),
-        sourceTabId: chartMemoryTabId
-      }
-    });
+    currentTrackedViewportContext = context;
+    lastSteadyViewportSnapshot = {
+      ...context,
+      viewport,
+      capturedAt: Date.now()
+    };
+    persistViewportStateForContext(context, viewport);
   }
 
   function restoreLastChartSettings() {
@@ -7878,7 +8621,6 @@
       return;
     }
 
-    isRestoringChartSettings = true;
     hasCompletedInitialChartSettingsRestore = true;
 
     try {
@@ -7928,28 +8670,21 @@
         } catch (e) {}
       }
 
-      // Determine target viewport for current symbol (ONLY apply a saved priceRange if it was saved for THIS exact symbol!)
-      const savedChartState = getSavedViewportForActiveChart(saved);
-      const targetViewport = savedChartState && savedChartState.viewport;
-
-      // 3. Restore only the viewport saved for this exact instrument and selected interval.
-      // The chart's current interval is authoritative; another tab's last interval must not change it.
-      if (targetViewport) {
-        const context = getActiveChartMemoryContext();
-        if (context) chartViewportAppliedAt.set(context.key, Number(savedChartState.updatedAt) || 0);
-        const restoreGen = viewportRestoreGeneration;
-        setTimeout(() => {
-          if (viewportRestoreGeneration !== restoreGen) return;
-          log('Restoring chart viewport position & zoom for', context && context.key, targetViewport);
-          applyViewportStateToChart(targetViewport, { generation: restoreGen, forceAutoScale: true });
-        }, 180);
+      // 3. Restore ONLY the exact viewport saved for THIS (host, instrument, timeframe) via multi-pass + onDataLoaded
+      const context = getActiveChartMemoryContext();
+      if (context) {
+        currentTrackedViewportContext = context;
+        const savedChartState = getSavedViewportForChartKeys(saved, context.symbol, context.resolution, context.host);
+        if (savedChartState && (savedChartState.viewport || typeof savedChartState.barSpacing === 'number')) {
+          log('Restoring exact saved viewport on load for', context.primaryKey, savedChartState.viewport || savedChartState);
+          beginViewportRestoreForContext(context, savedChartState, {
+            delays: [80, 240, 520, 950, 1500]
+          });
+        }
       }
     } catch (err) {
       log('Error restoring last chart settings:', err);
-    } finally {
-      setTimeout(() => {
-        isRestoringChartSettings = false;
-      }, 1450);
+      isRestoringChartSettings = false;
     }
   }
 
@@ -7962,22 +8697,21 @@
       const context = typeof getActiveChartMemoryContext === 'function' ? getActiveChartMemoryContext() : null;
       const currentSym = context ? context.symbol : ((typeof getCurrentChartSymbolKey === 'function' ? getCurrentChartSymbolKey() : null) || lastTrackedInstrument || '');
       const currentRes = context ? context.resolution : ((typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : null) || '5');
-      const chartKey = currentSym && currentRes ? `${String(currentSym).toUpperCase()}|${String(currentRes).toUpperCase()}` : null;
+      const keys = buildViewportChartKeys(currentSym, currentRes);
+      const chartKey = keys.primaryKey || null;
 
-      // 1. Check in-memory live tracker for this specific instrument + interval
+      // 1. Check in-memory live tracker for this specific (host, instrument, interval)
       if (chartKey && lastKnownChartConfigs && typeof lastKnownChartConfigs.has === 'function' && lastKnownChartConfigs.has(chartKey)) {
         return { ...lastKnownChartConfigs.get(chartKey) };
       }
 
-      // 2. Check saved viewportsByChart / viewportsBySymbol / viewport
+      // 2. Check saved viewports strictly for THIS exact (host, instrument, interval)
       const saved = (currentSettings && currentSettings.lastChartSettings) || {};
-      const chartState = (chartKey && saved.viewportsByChart && saved.viewportsByChart[chartKey])
-        || (saved.viewportsBySymbol && currentSym && saved.viewportsBySymbol[currentSym])
-        || (saved.viewport ? saved : null);
+      const chartState = getSavedViewportForChartKeys(saved, keys.symbol, keys.resolution, keys.host);
 
       const vp = (chartState && (chartState.viewport || chartState)) || {};
       const savedBarSpacing = typeof vp.barSpacing === 'number' && vp.barSpacing > 0 ? vp.barSpacing : null;
-      const savedRightOffset = typeof vp.rightOffset === 'number' && isFinite(vp.rightOffset) && vp.rightOffset >= -2 && vp.rightOffset <= 30
+      const savedRightOffset = typeof vp.rightOffset === 'number' && isFinite(vp.rightOffset)
         ? vp.rightOffset
         : 6;
 
@@ -8000,12 +8734,14 @@
       } catch (e) {}
 
       const resolved = {
-        symbol: currentSym,
-        resolution: currentRes,
+        symbol: keys.symbol || currentSym,
+        resolution: keys.resolution || currentRes,
+        host: keys.host,
         chartType: liveChartType !== null ? liveChartType : (typeof saved.chartType === 'number' ? saved.chartType : 1),
         barSpacing: savedBarSpacing || liveBarSpacing || 12,
         rightOffset: savedRightOffset,
         isAutoScale: vp.isAutoScale !== undefined ? vp.isAutoScale : true,
+        priceRange: vp.priceRange || null,
         priceScaleMode: typeof vp.priceScaleMode === 'number' ? vp.priceScaleMode : 0,
         isInverted: Boolean(vp.isInverted),
         candleWidthPx: (currentSettings && currentSettings.candleOhlc && currentSettings.candleOhlc.candleWidthPx) || 140,
@@ -19180,33 +19916,15 @@
     lastPriceAxisBadgesHtml = '';
     ictSessionsNeedsFullRecompute = true;
 
-    // 3. ONLY reset vertical price scale to autoScale on an ACTUAL symbol switch (e.g. BTC -> ETH)
-    // so the new asset doesn't inherit the previous asset's price range.
-    // NEVER force setAutoScale(true) on active_chart_replaced / chart_api_replaced / interval_changed!
+    // 3. On an ACTUAL symbol switch (e.g. BTC -> ETH), flush the previous instrument's viewport
+    //    and restore the exact saved viewport for (newSymbol, currentResolution) — or auto-scale cleanly if unvisited!
     const isGenuineSymbolChange =
       reason === 'onSymbolChanged' ||
       String(reason || '').startsWith('instrument_poll:');
     if (isGenuineSymbolChange) {
       try {
-        const currentSym = getCurrentChartSymbolKey();
-        const currentRes = typeof getCurrentChartResolutionKey === 'function' ? getCurrentChartResolutionKey() : '';
-        const chartKey = currentSym && currentRes ? `${String(currentSym).toUpperCase()}|${String(currentRes).toUpperCase()}` : null;
-        const saved = currentSettings && currentSettings.lastChartSettings;
-        const hasExplicitLockedRange = Boolean(
-          (chartKey && saved && saved.viewportsByChart && saved.viewportsByChart[chartKey] && saved.viewportsByChart[chartKey].isAutoScale === false) ||
-          (currentSym && saved && saved.viewportsBySymbol && saved.viewportsBySymbol[currentSym] && saved.viewportsBySymbol[currentSym].isAutoScale === false)
-        );
-        if (!hasExplicitLockedRange) {
-          const psApi = getPrimaryPriceScaleApi();
-          if (psApi && typeof psApi.setAutoScale === 'function') {
-            psApi.setAutoScale(true);
-          }
-          const model = findChartModelForSessions();
-          const ms = model ? findMainSeriesFromModel(model) : null;
-          const internalPs = ms && typeof ms.priceScale === 'function' ? ms.priceScale() : null;
-          if (internalPs && typeof internalPs.setAutoScale === 'function') {
-            internalPs.setAutoScale(true);
-          }
+        if (typeof handleChartSymbolChanged === 'function') {
+          handleChartSymbolChanged();
         }
       } catch (e) {}
     }
@@ -19214,6 +19932,7 @@
     // 4. Re-bind listeners on any newly mounted iframe, activeChart, model, series, or priceScale
     setupContextMenuHandler();
     setupSidebarObserver();
+    setupChartSettingsObserver();
     setupIctSessionIndicators();
 
     // 5. Schedule immediate + staggered full recomputations as the new instrument's historical bars finish streaming in
@@ -19260,6 +19979,14 @@
                 sub.subscribe(null, () => {
                   cachedExtractedBarsObj = null;
                   cachedQuickPlotSig = '';
+                  if (evName === 'onSymbolIntervalChanged' || evName === 'timeframeChanged') {
+                    if (typeof checkAndHandleChartContextChange === 'function') {
+                      checkAndHandleChartContextChange(`ms_${evName}`);
+                    }
+                  }
+                  if (typeof onChartBarsReadyForViewportRestore === 'function') {
+                    onChartBarsReadyForViewportRestore();
+                  }
                   scheduleIctSessionsRender(true);
                 });
               }
@@ -19326,6 +20053,9 @@
               cachedSessionsChartModel = null;
               cachedExtractedBarsObj = null;
               cachedQuickPlotSig = '';
+              if (typeof onChartBarsReadyForViewportRestore === 'function') {
+                onChartBarsReadyForViewportRestore();
+              }
               scheduleIctSessionsRender(true);
             });
           }

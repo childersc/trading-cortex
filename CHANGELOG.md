@@ -1,6 +1,20 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.165`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.166`) are documented in this file.
+
+---
+
+## [v1.1.166] — 2026-11-27
+
+### 🎯 Exact Per-Instrument & Per-Timeframe Viewport Memory (Seamless Timeframe & Symbol Switching)
+- **Root Causes Fixed (`content/content-main.js`, `content/content-isolated.js`, `tests/chart-resolution-viewport-isolation.test.js`)**:
+  - **Eliminated Timeframe-Click Restore Abort**: Previously, releasing the mouse (`mouseup` / `pointerup`) after clicking a timeframe button incremented `viewportRestoreGeneration`, immediately aborting the pending viewport restore before it ran. Restore cancellation is now scoped strictly to genuine `<canvas>` chart interactions (wheel zoom, canvas drag, canvas double-click, touch drag).
+  - **Full-Fidelity Exact Viewport Restoration**: Removed artificial `[4, 24]` `barSpacing` and `[2, 25]` `rightOffset` clamps, and stopped forcibly overwriting saved manual vertical scales with `forceAutoScale: true`. Each `(host, instrument, timeframe)` now independently saves and restores exact horizontal zoom (`barSpacing`), horizontal pan/scroll (`rightOffset`, including negative historical scroll with bar-drift compensation and wide right-side whitespace), vertical price scale (`isAutoScale`, exact manual `priceRange`), scale mode (`Normal` / `Log` / `Percentage` / `Indexed`), and inverted state.
+  - **Pre-Switch Steady-State Flush (Zero Lost Edits)**: Continuously caches the active `(instrument, timeframe)` steady-state viewport (plus immediate pre-switch snapshot on toolbar `pointerdown` and `pagehide`/`beforeunload`) and flushes the previous context BEFORE switching so fast edits never get discarded or leak across timeframes/instruments.
+  - **Multi-Pass + `onDataLoaded` / `barsReceived` Restore Session**: Re-applies the target timeframe/instrument viewport across staggered passes and immediately when TradingView finishes streaming the new timeframe's bars, while yielding instantaneously if the user manually grabs/zooms the canvas.
+  - **Per-Instrument Switching & Canonical Key Normalization**: Switching instruments (`onSymbolChanged` / `instrument_poll`) now flushes the previous instrument's viewport and restores the exact saved `(host, newSymbol, resolution)` viewport (or auto-scales cleanly if unvisited). Canonicalizes resolution aliases (`1h`/`60`, `4h`/`240`, `5m`/`5`, `1D`/`D`/`1440`, keeping `1m` minutes distinct from `1M` months) and scopes keys per venue host with 400-entry LRU pruning.
+  - **Chart Memory Settings Control**: Updated **Settings → Chart Memory** to show the live count of saved instrument/timeframe viewports with a 1-click **Clear Saved Viewports** button (`VEST_TV_CLEAR_SAVED_VIEWPORTS`).
+  - **Real VM Tests**: Added comprehensive real-code VM test suite in `tests/chart-resolution-viewport-isolation.test.js`.
 
 ---
 

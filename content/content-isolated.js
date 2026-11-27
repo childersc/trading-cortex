@@ -2513,10 +2513,17 @@
     const merged = { ...(previous || {}) };
     Object.entries(incoming || {}).forEach(([key, state]) => {
       const existing = merged[key];
-      if (!existing || (Number(state && state.updatedAt) || 0) >= (Number(existing.updatedAt) || 0)) {
+      const nextTs = Number(state && state.updatedAt) || 0;
+      const curTs = Number(existing && existing.updatedAt) || 0;
+      if (!existing || nextTs > curTs) {
         merged[key] = state;
       }
     });
+    const entries = Object.entries(merged);
+    if (entries.length > 400) {
+      entries.sort((a, b) => (Number(b[1] && b[1].updatedAt) || 0) - (Number(a[1] && a[1].updatedAt) || 0));
+      return Object.fromEntries(entries.slice(0, 400));
+    }
     return merged;
   }
 
@@ -10164,12 +10171,29 @@
 
           <div class="vest-tvs-toggle-box" style="margin-top: 12px;">
             <div class="vest-tvs-toggle-info">
-              <div class="vest-tvs-toggle-title">Remember last chart settings</div>
+              <div class="vest-tvs-toggle-title">Remember per-instrument &amp; per-timeframe viewports</div>
               <div class="vest-tvs-toggle-desc">
-                Automatically remembers and restores your exact chart position (left/right pan, up/down price range, zoom level), timeframe, and candle style across page refreshes.
+                Independently saves and restores each instrument &amp; timeframe's exact zoom level, horizontal pan/scroll position, vertical price scale (auto-scale or manual price range), and log/inverted mode whenever you switch timeframes, change instruments, or refresh.
+              </div>
+              <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span id="vest-tvs-saved-viewports-count" style="font-size: 11px; color: #94a3b8;">
+                  ${(() => {
+                    const map = (settings.lastChartSettings && settings.lastChartSettings.viewportsByChart) || {};
+                    const unique = new Set();
+                    Object.entries(map).forEach(([k, v]) => {
+                      if (!v) return;
+                      const sym = String(v.symbol || '').toUpperCase();
+                      const res = String(v.resolution || '').toUpperCase();
+                      const host = String(v.host || '').toLowerCase();
+                      unique.add(sym && res ? `${host}|${sym}|${res}` : k);
+                    });
+                    return `${unique.size} saved instrument/timeframe viewport${unique.size === 1 ? '' : 's'}`;
+                  })()}
+                </span>
+                <button type="button" id="vest-tvs-clear-viewports-btn" class="vest-tvs-btn-secondary" style="padding: 3px 9px; font-size: 11px; height: auto;">Clear Saved Viewports</button>
               </div>
             </div>
-            <label class="vest-tvs-switch" title="Toggle Remember last chart settings">
+            <label class="vest-tvs-switch" title="Toggle per-instrument &amp; per-timeframe viewport memory">
               <input type="checkbox" id="vest-tvs-remember-chart-settings-toggle" ${isRememberChartSettingsOn ? 'checked' : ''} />
               <span class="vest-tvs-switch-slider"></span>
             </label>
@@ -13349,6 +13373,25 @@
       if (remChartToggle) {
         remChartToggle.addEventListener('change', () => {
           draftSettings.rememberLastChartSettings = Boolean(remChartToggle.checked);
+        });
+      }
+
+      const clearViewportsBtn = overlay.querySelector('#vest-tvs-clear-viewports-btn');
+      if (clearViewportsBtn) {
+        clearViewportsBtn.addEventListener('click', () => {
+          const clearedChartSettings = {
+            ...(settings.lastChartSettings || {}),
+            viewport: null,
+            viewportsBySymbol: {},
+            viewportsByChart: {}
+          };
+          settings.lastChartSettings = clearedChartSettings;
+          draftSettings.lastChartSettings = { ...clearedChartSettings };
+          safeStorageSet({ settings });
+          postToMainWorlds({ type: 'VEST_TV_CLEAR_SAVED_VIEWPORTS' });
+          const countEl = overlay.querySelector('#vest-tvs-saved-viewports-count');
+          if (countEl) countEl.textContent = '0 saved instrument/timeframe viewports';
+          showToast('Cleared all saved instrument & timeframe viewports');
         });
       }
 

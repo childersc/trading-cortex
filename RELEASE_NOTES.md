@@ -1,3 +1,7 @@
+Trading Cortex v1.1.166 — Exact Per-Instrument & Per-Timeframe Viewport Memory
+
+- **Exact Per-Timeframe & Per-Instrument Viewports (`v1.1.166`)**: Every `(venue, instrument, timeframe)` combination now independently saves and restores your exact zoom (`barSpacing`), horizontal pan/scroll (`rightOffset`, including historical scroll back in time and right-side whitespace), vertical price scale (`autoScale` or manual dragged `priceRange`), and Log/Percentage/Inverted mode whenever you click between timeframes, switch instruments, or refresh. Fixed the mouse-release abort bug on timeframe button clicks, added pre-switch flushing so quick adjustments are never lost, added multi-pass + `onDataLoaded` re-application so TradingView bar loads never overwrite your restored view, and added a **Clear Saved Viewports** control in **Settings → Chart Memory**.
+
 Trading Cortex v1.1.165 — Fixed Missing Cortex Pill on My Funded Perpetuals (Header-Aware Stacking Above `z-50` Navbars)
 
 - **Visible Cortex Pill on My Funded Perpetuals (`v1.1.165`)**: Fixed the Cortex pill disappearing behind My Funded Perpetuals' sticky `z-50` top `<header>` (`myfundedperpetuals.com`). Trading Cortex now dynamically detects each venue's top navbar stacking layer (`computeHeaderSafePillZIndex`) and positions the floating Cortex pill and mobile top dock cleanly above `z-50` headers while still dropping immediately to `z-index: 1` behind native exchange modals (`body.vest-site-modal-open`). Also added `myfundedperps.com` match patterns for the Safari Mobile userscript.
