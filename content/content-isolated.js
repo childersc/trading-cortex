@@ -2009,7 +2009,7 @@
       id: "myfundedperpetuals",
       name: "My Funded Perpetuals",
       url: "https://myfundedperpetuals.com/trade/",
-      matchPatterns: ["myfundedperpetuals.com"],
+      matchPatterns: ["myfundedperpetuals.com", "myfundedperps.com"],
       enabled: true,
       isBuiltin: true,
       enableTimeframeFavorites: false,
@@ -7496,6 +7496,87 @@
   let lastLocalStudioPillPosSavedAt = 0;
   let lastMobileTopDockPushAt = 0;
   let lastMobileTopDockHeight = 0;
+  let lastAppliedStudioPillZ = null;
+  let lastAppliedMobileDockZ = null;
+
+  function readEffectiveStackingZIndex(targetEl) {
+    let highest = 0;
+    let cur = targetEl;
+    let depth = 0;
+    while (cur && cur.nodeType === 1 && cur !== document.body && cur !== document.documentElement && depth < 6) {
+      try {
+        const cs = window.getComputedStyle(cur);
+        if (cs && (cur === targetEl || (cs.position && cs.position !== 'static'))) {
+          const parsed = parseFloat(cs.zIndex);
+          if (Number.isFinite(parsed)) {
+            const zVal = Math.floor(parsed);
+            if (zVal > highest && zVal <= 10000) {
+              highest = zVal;
+            }
+          }
+        }
+      } catch (e) {}
+      cur = cur.parentElement;
+      depth++;
+    }
+    return highest;
+  }
+
+  function computeHeaderSafePillZIndex() {
+    const fallback = { pillZ: 55, dockZ: 55, maxHeaderZ: 0, foundTopHeader: false };
+    if (!document.body || typeof window.getComputedStyle !== 'function') return fallback;
+    try {
+      const vw = Math.max(320, window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 1280);
+      const candidates = document.querySelectorAll(
+        'header, nav, [role="banner"], [role="navigation"], body > div, #__next > div, #root > div, main > header, main > nav'
+      );
+      let maxHeaderZ = 0;
+      let foundTopHeader = false;
+      for (let i = 0; i < candidates.length && i < 120; i++) {
+        const el = candidates[i];
+        if (!el || el.nodeType !== 1) continue;
+        if (isCortexOwnedElement(el)) continue;
+        if (el.matches && el.matches('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) continue;
+        if (el.closest && el.closest('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) continue;
+        const cs = window.getComputedStyle(el);
+        if (!cs || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') <= 0.05) continue;
+        const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        if (!rect || rect.width < vw * 0.45 || rect.height < 20 || rect.height > 160) continue;
+        const bottom = typeof rect.bottom === 'number' ? rect.bottom : (rect.top + rect.height);
+        if (rect.top > 100 || bottom <= 0) continue;
+        const tagUpper = String(el.tagName || '').toUpperCase();
+        const roleAttr = typeof el.getAttribute === 'function' ? el.getAttribute('role') : null;
+        const isHeaderLikeTag = tagUpper === 'HEADER' || tagUpper === 'NAV' || roleAttr === 'banner' || roleAttr === 'navigation';
+        const isStickyOrFixed = cs.position === 'fixed' || cs.position === 'sticky';
+        if (!isHeaderLikeTag && !isStickyOrFixed) continue;
+        foundTopHeader = true;
+        const z = readEffectiveStackingZIndex(el);
+        if (z > maxHeaderZ) maxHeaderZ = z;
+      }
+      if (!foundTopHeader) return fallback;
+      return {
+        pillZ: Math.min(10005, Math.max(25, maxHeaderZ + 2)),
+        dockZ: Math.min(10005, Math.max(38, maxHeaderZ + 2)),
+        maxHeaderZ,
+        foundTopHeader: true
+      };
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function syncHeaderAwarePillZIndex() {
+    if (!document.documentElement || !document.documentElement.style) return;
+    const { pillZ, dockZ } = computeHeaderSafePillZIndex();
+    if (lastAppliedStudioPillZ !== pillZ) {
+      lastAppliedStudioPillZ = pillZ;
+      document.documentElement.style.setProperty('--vest-studio-pill-z', String(pillZ));
+    }
+    if (lastAppliedMobileDockZ !== dockZ) {
+      lastAppliedMobileDockZ = dockZ;
+      document.documentElement.style.setProperty('--vest-mobile-dock-z', String(dockZ));
+    }
+  }
 
   function isMobileCortexLayout() {
     try {
@@ -7713,6 +7794,7 @@
       Math.round((dock.getBoundingClientRect && dock.getBoundingClientRect().height) || dock.offsetHeight || CORTEX_MOBILE_DOCK_DEFAULT_HEIGHT)
     );
     syncMobileTopDockLayoutPush(measuredH);
+    syncHeaderAwarePillZIndex();
 
     if (studioMenuOpen) {
       updateStudioDropdownPosition(pill);
@@ -7766,6 +7848,8 @@
     pill.style.right = 'auto';
     pill.style.bottom = 'auto';
     pill.style.transform = 'none';
+
+    syncHeaderAwarePillZIndex();
 
     if (studioMenuOpen) {
       updateStudioDropdownPosition(pill);
@@ -8350,7 +8434,9 @@
       updateStudioDropdownPosition(pill);
     }
     attachStudioPillEvents(pill, menuEl);
-  } catch (e) {}
+  } catch (e) {
+    try { console.warn('[TradingCortex] renderStudioHeaderPill error:', e); } catch (_) {}
+  }
 }
 
   function attachStudioPillEvents(pill, menuEl) {

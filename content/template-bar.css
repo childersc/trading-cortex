@@ -1524,7 +1524,7 @@ body.vest-cortex-top-bar-active {
   display: inline-flex;
   align-items: center;
   margin-right: 8px;
-  z-index: 25;
+  z-index: var(--vest-studio-pill-z, 55);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
   user-select: none;
   flex-shrink: 0;
@@ -1594,8 +1594,11 @@ body.vest-cortex-top-bar-active {
 
 #vest-studio-header-pill.vest-studio-pill-floating {
   position: fixed !important;
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
   margin: 0 !important;
-  z-index: 25 !important;
+  z-index: var(--vest-studio-pill-z, 55) !important;
   touch-action: none;
   cursor: grab;
 }
@@ -4861,6 +4864,7 @@ body.vest-dialog-glass-mode #vest-chart-diagnostics-box {
 /* behind native exchange modals/backdrops (even low z-index)    */
 /* ============================================================= */
 body.vest-site-modal-open #vest-studio-header-pill,
+body.vest-site-modal-open #vest-studio-header-pill.vest-studio-pill-floating,
 body.vest-site-modal-open #vest-cortex-mobile-dock,
 body.vest-site-modal-open #vest-cortex-top-bar,
 body.vest-site-modal-open #vest-chart-news-box,
@@ -4900,7 +4904,7 @@ body.vest-mobile-top-dock-active {
   width: 100% !important;
   min-height: calc(36px + env(safe-area-inset-top, 0px)) !important;
   padding-top: env(safe-area-inset-top, 0px) !important;
-  z-index: 38 !important;
+  z-index: var(--vest-mobile-dock-z, 55) !important;
   box-sizing: border-box !important;
   background: linear-gradient(180deg, rgba(10, 14, 23, 0.98), rgba(7, 10, 17, 0.96)) !important;
   backdrop-filter: blur(12px) !important;

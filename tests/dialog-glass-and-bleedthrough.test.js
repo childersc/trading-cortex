@@ -136,17 +136,23 @@ assert.strictEqual(
 console.log('✓ Detached panel modal-safe z-index and active raise verified');
 
 // 11. Verify persistent Cortex bars, pill & docks stay strictly behind site modals/backdrops
+//     AND float dynamically above z-50 exchange navbars (e.g. My Funded Perpetuals sticky z-50 header)
 assert.strictEqual(
   cssContent.includes('body.vest-site-modal-open #vest-studio-header-pill') &&
+  cssContent.includes('body.vest-site-modal-open #vest-studio-header-pill.vest-studio-pill-floating') &&
   cssContent.includes('body.vest-site-modal-open #vest-chart-trades-box') &&
   cssContent.includes('z-index: 1 !important;') &&
+  cssContent.includes('z-index: var(--vest-studio-pill-z, 55) !important;') &&
+  cssContent.includes('z-index: var(--vest-mobile-dock-z, 55) !important;') &&
   isolatedContent.includes('function detectOpenSiteModalOverlay()') &&
+  isolatedContent.includes('function computeHeaderSafePillZIndex()') &&
+  isolatedContent.includes('function syncHeaderAwarePillZIndex()') &&
   isolatedContent.includes("document.body.classList.toggle('vest-site-modal-open', hasSiteModal)") &&
   !cssContent.includes('#vest-studio-header-pill.vest-studio-pill-floating {\n  position: fixed !important;\n  margin: 0 !important;\n  z-index: 2147483640') &&
   !isolatedContent.includes("header.style.setProperty('z-index', '1005', 'important')"),
   true,
-  'Persistent Cortex pill, bars, and docks must stay behind site modals and drop to z-index 1 when any site modal opens'
+  'Persistent Cortex pill & mobile dock must clear sticky z-50 headers via header-aware CSS vars while dropping to z-index 1 when any site modal opens'
 );
-console.log('✓ Site modal stacking guard (body.vest-site-modal-open & modal-safe persistent z-indexes) verified');
+console.log('✓ Site modal stacking guard & header-aware pill z-index verified');
 
 console.log('All Dialog Glass Effect & Viewport Bleed-Through Prevention Tests Passed Successfully!');

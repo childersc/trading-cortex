@@ -1,3 +1,7 @@
+Trading Cortex v1.1.165 — Fixed Missing Cortex Pill on My Funded Perpetuals (Header-Aware Stacking Above `z-50` Navbars)
+
+- **Visible Cortex Pill on My Funded Perpetuals (`v1.1.165`)**: Fixed the Cortex pill disappearing behind My Funded Perpetuals' sticky `z-50` top `<header>` (`myfundedperpetuals.com`). Trading Cortex now dynamically detects each venue's top navbar stacking layer (`computeHeaderSafePillZIndex`) and positions the floating Cortex pill and mobile top dock cleanly above `z-50` headers while still dropping immediately to `z-index: 1` behind native exchange modals (`body.vest-site-modal-open`). Also added `myfundedperps.com` match patterns for the Safari Mobile userscript.
+
 Trading Cortex v1.1.164 — Auto-Trail Candle Close Anchor & Ticks Behind Candle (`0` = Exact Close)
 
 - **Ticks Behind Candle & Candle Anchor (`v1.1.164`)**: Under **Auto-Trail Stop → Timeframe Bar Highs & Lows**, added a **Candle Anchor Point** selector (**Candle Close** [default], **Candle High / Low (Wick)**, or **Candle Body Edge**) paired with **Ticks Behind Candle (`0 = exact`)** — set `0` to place the stop right at the close of the candle, or `1+` to place the stop that many ticks behind it (below for Long, above for Short).

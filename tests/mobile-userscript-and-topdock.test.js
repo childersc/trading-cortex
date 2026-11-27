@@ -328,6 +328,8 @@ function makeElement(tagName, opts = {}) {
       this.isMobileTopDockActive = isMobileTopDockActive;
       this.ensureMobileTopDock = ensureMobileTopDock;
       this.clearMobileTopDock = clearMobileTopDock;
+      this.computeHeaderSafePillZIndex = computeHeaderSafePillZIndex;
+      this.syncHeaderAwarePillZIndex = syncHeaderAwarePillZIndex;
       this.dockStudioPillNextToMarketSelector = dockStudioPillNextToMarketSelector;`,
       ctx
     );
@@ -426,7 +428,37 @@ function makeElement(tagName, opts = {}) {
     assert.strictEqual(desktop.mockDocument.getElementById('vest-cortex-mobile-dock'), null);
     assert.strictEqual(desktop.pill.classList.contains('vest-studio-pill-floating'), true);
   }
-  console.log('✓ Mobile docked top bar mount, site/header push-down, disabled-site guard, and desktop restore verified');
+
+  // 1d. Header-aware pill & mobile dock z-index: My Funded Perpetuals sticky z-50 header must NOT bury Cortex pill
+  {
+    const mfpDesktop = createMobileDockHarness({ width: 1440, height: 900, coarse: false, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0', platform: 'Win32', maxTouchPoints: 0 });
+    mfpDesktop.fixedHeader._computedStyle = { position: 'sticky', display: 'flex', visibility: 'visible', top: '0px', zIndex: '50' };
+    mfpDesktop.siteDialog._computedStyle = { position: 'fixed', display: 'block', visibility: 'visible', top: '0px', zIndex: '90' };
+    mfpDesktop.ctx.dockStudioPillNextToMarketSelector(mfpDesktop.pill);
+    const mfpRes = mfpDesktop.ctx.computeHeaderSafePillZIndex();
+    assert.strictEqual(mfpRes.foundTopHeader, true, 'MFP sticky z-50 header must be detected');
+    assert.strictEqual(mfpRes.maxHeaderZ, 50, 'MFP header z-index must read as 50 (ignoring z-90 dialog)');
+    assert.strictEqual(mfpRes.pillZ, 52, 'Floating Cortex pill z-index must sit just above z-50 header (52)');
+    assert.strictEqual(mfpRes.dockZ, 52, 'Mobile dock z-index must sit just above z-50 header (52)');
+    assert.strictEqual(mfpDesktop.docEl.style.getPropertyValue('--vest-studio-pill-z'), '52');
+    assert.strictEqual(mfpDesktop.docEl.style.getPropertyValue('--vest-mobile-dock-z'), '52');
+
+    // Low-z header (e.g. Hypernova / Kalshi z-20) stays in low modal-safe band (25 / 38)
+    const kalshiDesktop = createMobileDockHarness({ width: 1440, height: 900, coarse: false, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0', platform: 'Win32', maxTouchPoints: 0 });
+    kalshiDesktop.fixedHeader._computedStyle = { position: 'relative', display: 'flex', visibility: 'visible', top: '0px', zIndex: '20' };
+    kalshiDesktop.siteDialog._computedStyle = { position: 'fixed', display: 'block', visibility: 'visible', top: '0px', zIndex: '120' };
+    kalshiDesktop.ctx.dockStudioPillNextToMarketSelector(kalshiDesktop.pill);
+    assert.strictEqual(kalshiDesktop.docEl.style.getPropertyValue('--vest-studio-pill-z'), '25', 'Low-z header keeps pill in modal-safe z-25 band');
+    assert.strictEqual(kalshiDesktop.docEl.style.getPropertyValue('--vest-mobile-dock-z'), '38', 'Low-z header keeps mobile dock in z-38 band');
+
+    // Before top header mounts (initial SPA hydration), keeps safe fallback 55
+    const hydrating = createMobileDockHarness({ width: 1440, height: 900, coarse: false, ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0', platform: 'Win32', maxTouchPoints: 0 });
+    hydrating.fixedHeader.remove();
+    hydrating.stickySubHeader.remove();
+    hydrating.ctx.dockStudioPillNextToMarketSelector(hydrating.pill);
+    assert.strictEqual(hydrating.docEl.style.getPropertyValue('--vest-studio-pill-z'), '55', 'Hydrating page without header yet must use safe fallback z-55');
+  }
+  console.log('✓ Mobile docked top bar mount, site/header push-down, header-aware z-index, disabled-site guard, and desktop restore verified');
 }
 
 // ===========================================================================

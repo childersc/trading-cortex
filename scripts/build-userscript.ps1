@@ -94,6 +94,8 @@ $MetaBlock = @"
 // @match        https://vestmarkets.com/*
 // @match        https://*.myfundedperpetuals.com/*
 // @match        https://myfundedperpetuals.com/*
+// @match        https://*.myfundedperps.com/*
+// @match        https://myfundedperps.com/*
 // @match        https://*.kalshi.com/*
 // @match        https://kalshi.com/*
 // @match        https://*.hypernova.xyz/*

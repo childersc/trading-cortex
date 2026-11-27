@@ -1,6 +1,19 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.164`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.165`) are documented in this file.
+
+---
+
+## [v1.1.165] — 2026-11-26
+
+### 🔧 Fixed Missing Cortex Pill on My Funded Perpetuals (Header-Aware Stacking Above `z-50` Navbars)
+- **Root Cause**: My Funded Perpetuals (`myfundedperpetuals.com`) renders its top sticky `<header>` at `z-index: 50` (`sticky z-50 h-14 bg-background/85 backdrop-blur-xl`), which completely covered `#vest-studio-header-pill.vest-studio-pill-floating` (`z-index: 25`) and `#vest-cortex-mobile-dock` (`z-index: 38`).
+- **Fixes (`content/template-bar.css`, `content/content-isolated.js`, `scripts/build-userscript.ps1`, `tests/dialog-glass-and-bleedthrough.test.js`, `tests/mobile-userscript-and-topdock.test.js`)**:
+  - Replaced hardcoded `z-index: 25` / `38` on `#vest-studio-header-pill` and `#vest-cortex-mobile-dock` with CSS variables `var(--vest-studio-pill-z, 55)` and `var(--vest-mobile-dock-z, 55)` plus explicit `display: inline-flex !important; visibility: visible !important; opacity: 1 !important;` on the floating pill.
+  - Added `computeHeaderSafePillZIndex()` and `syncHeaderAwarePillZIndex()` in `content/content-isolated.js` to dynamically inspect the venue's top `<header>` / sticky navbar (ignoring `[role="dialog"]` / `[aria-modal="true"]` modals) and lift the pill & mobile dock cleanly above `z-50` navbars (e.g., `52` on My Funded Perpetuals) while staying in the low `25` / `38` modal-safe band on low-z venues like Hypernova and Kalshi Pro.
+  - Hardened `body.vest-site-modal-open #vest-studio-header-pill.vest-studio-pill-floating` to force `z-index: 1 !important` whenever any native exchange modal opens so Cortex chrome still drops cleanly behind site modals.
+  - Added `myfundedperps.com` match patterns to `DEFAULT_PERP_FIRMS` and the Safari Mobile userscript header (`scripts/build-userscript.ps1`), and added non-silent warning logging in `renderStudioHeaderPill()` catch.
+  - Added regression unit tests in `tests/mobile-userscript-and-topdock.test.js` and `tests/dialog-glass-and-bleedthrough.test.js`.
 
 ---
 
