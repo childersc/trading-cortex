@@ -1,3 +1,9 @@
+Trading Cortex v1.1.162 — Configurable Auto-Trail Stop Loss Engine (Price, Ticks, Points, Dollars & Timeframe Bar Highs/Lows)
+
+- **Configurable Auto-Trail Stop Loss (`v1.1.162`)**: Added a full Auto-Trail Stop Loss engine accessible from **Cortex Settings → Auto-Trail Stop** and the Cortex dropdown menu, with a 1-tap **`TRL`** arm/disarm button right on the chart Position Entry box (`BE | TP | SL | TRL`) and a live violet dotted Trail Target preview line.
+- **All 5 Trail Modes (`v1.1.162`)**: Trail automatically by **Price Distance** (fixed price units or `%`), **Ticks** (auto-detected symbol tick size or custom override), **Points** (configurable point value), **Dollar Amount (`$`)** behind peak PnL, or **Specific Timeframe Bar Highs & Lows** (`Chart TF`, `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d` with `1–20` bar lookback, Closed Bars Only toggle, and extra tick buffer).
+- **Activation & Safety Guards (`v1.1.162`)**: Optional profit activation trigger (`+$`, `+ticks`, `+points`, `+%`) with optional **Snap to Breakeven on Activation**, **Only Tighten SL** ratchet, market-side protection (never crosses live market price), manual-drag pause, minimum step ticks, and configurable update cooldown (`1–60s`).
+
 Trading Cortex v1.1.161 — Live In-Trade "Breach Trade" Blue Dashed Line & Dashed-Outline Box
 
 - **In-Trade Add-On Breach Preview (`v1.1.161`)**: Added a dedicated blue dashed **Breach Trade** line & matching **dashed-outline blue pill box** on Hypernova whenever you are in an open trade and typing an add-on order size in the Order Ticket—so you can instantly see where your Breach Price will move to before adding into your position (hidden while flat or when Order Ticket amount is `0` / `N/A`). Fully customizable (color, line style, thickness, opacity, label text, font size, alignment, dashed outline toggle) under **Perp Firms → Hypernova → Chart Visuals** with full off-screen clamping, anti-overlap, and mobile-compact scaling.

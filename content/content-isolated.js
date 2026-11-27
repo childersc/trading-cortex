@@ -773,6 +773,110 @@
     };
   }
 
+  const DEFAULT_AUTO_TRAIL = {
+    enabled: false,
+    autoArmOnNewTrade: false,
+    mode: 'ticks', // 'price' | 'ticks' | 'points' | 'dollars' | 'bar_hl'
+    priceOffset: 10,
+    priceOffsetType: 'absolute', // 'absolute' | 'percent'
+    ticksDistance: 20,
+    customTickSize: 0, // 0 = auto-detect from TradingView symbolInfo
+    pointsDistance: 5,
+    pointValue: 1,
+    dollarsDistance: 50,
+    barTimeframe: '5m', // 'chart' | '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d'
+    barLookback: 1,
+    barUseClosedOnly: true,
+    barBufferTicks: 2,
+    activationMode: 'immediate', // 'immediate' | 'in_profit_dollars' | 'in_profit_ticks' | 'in_profit_points' | 'in_profit_percent'
+    activationValue: 0,
+    moveToBreakevenOnActivate: false,
+    stepMinTicks: 1,
+    minUpdateIntervalSec: 3,
+    onlyTighten: true,
+    showPreviewLine: true
+  };
+
+  function normalizeAutoTrailConfig(rawCfg) {
+    const src = rawCfg && typeof rawCfg === 'object' ? rawCfg : {};
+    const validModes = ['price', 'ticks', 'points', 'dollars', 'bar_hl'];
+    const validTfs = ['chart', '1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
+    const validAct = ['immediate', 'in_profit_dollars', 'in_profit_ticks', 'in_profit_points', 'in_profit_percent'];
+    const clampPos = (v, min, max, fallback) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+    };
+    return {
+      enabled: Boolean(src.enabled),
+      autoArmOnNewTrade: Boolean(src.autoArmOnNewTrade),
+      mode: validModes.includes(src.mode) ? src.mode : DEFAULT_AUTO_TRAIL.mode,
+      priceOffset: clampPos(src.priceOffset, 0.000001, 1000000, DEFAULT_AUTO_TRAIL.priceOffset),
+      priceOffsetType: src.priceOffsetType === 'percent' ? 'percent' : 'absolute',
+      ticksDistance: Math.round(clampPos(src.ticksDistance, 1, 100000, DEFAULT_AUTO_TRAIL.ticksDistance)),
+      customTickSize: clampPos(src.customTickSize, 0, 10000, DEFAULT_AUTO_TRAIL.customTickSize),
+      pointsDistance: clampPos(src.pointsDistance, 0.01, 100000, DEFAULT_AUTO_TRAIL.pointsDistance),
+      pointValue: clampPos(src.pointValue, 0.000001, 100000, DEFAULT_AUTO_TRAIL.pointValue),
+      dollarsDistance: clampPos(src.dollarsDistance, 0.5, 1000000, DEFAULT_AUTO_TRAIL.dollarsDistance),
+      barTimeframe: validTfs.includes(src.barTimeframe) ? src.barTimeframe : DEFAULT_AUTO_TRAIL.barTimeframe,
+      barLookback: Math.round(clampPos(src.barLookback, 1, 20, DEFAULT_AUTO_TRAIL.barLookback)),
+      barUseClosedOnly: src.barUseClosedOnly !== false,
+      barBufferTicks: Math.round(clampPos(src.barBufferTicks, 0, 500, DEFAULT_AUTO_TRAIL.barBufferTicks)),
+      activationMode: validAct.includes(src.activationMode) ? src.activationMode : DEFAULT_AUTO_TRAIL.activationMode,
+      activationValue: clampPos(src.activationValue, 0, 1000000, DEFAULT_AUTO_TRAIL.activationValue),
+      moveToBreakevenOnActivate: Boolean(src.moveToBreakevenOnActivate),
+      stepMinTicks: Math.round(clampPos(src.stepMinTicks, 1, 1000, DEFAULT_AUTO_TRAIL.stepMinTicks)),
+      minUpdateIntervalSec: Math.round(clampPos(src.minUpdateIntervalSec, 1, 60, DEFAULT_AUTO_TRAIL.minUpdateIntervalSec)),
+      onlyTighten: src.onlyTighten !== false,
+      showPreviewLine: src.showPreviewLine !== false
+    };
+  }
+
+  function formatAutoTrailBadge(rawCfg) {
+    const cfg = normalizeAutoTrailConfig(rawCfg);
+    if (!cfg.enabled) return 'OFF';
+    if (cfg.mode === 'price') return cfg.priceOffsetType === 'percent' ? `${cfg.priceOffset}%` : `±${cfg.priceOffset}`;
+    if (cfg.mode === 'ticks') return `${cfg.ticksDistance}t`;
+    if (cfg.mode === 'points') return `${cfg.pointsDistance}pt`;
+    if (cfg.mode === 'dollars') return `$${cfg.dollarsDistance}`;
+    if (cfg.mode === 'bar_hl') {
+      const tf = cfg.barTimeframe === 'chart' ? 'TF' : cfg.barTimeframe;
+      return `${tf} H/L`;
+    }
+    return 'ON';
+  }
+
+  function formatAutoTrailSummary(rawCfg) {
+    const cfg = normalizeAutoTrailConfig(rawCfg);
+    let rule = '';
+    if (cfg.mode === 'price') {
+      const unit = cfg.priceOffsetType === 'percent' ? `${cfg.priceOffset}%` : `${cfg.priceOffset} price units`;
+      rule = `Trails ${unit} behind peak price (Long: peak − ${unit} · Short: peak + ${unit})`;
+    } else if (cfg.mode === 'ticks') {
+      const tickLabel = cfg.customTickSize > 0 ? `tick=${cfg.customTickSize}` : 'auto tick size';
+      rule = `Trails ${cfg.ticksDistance} ticks behind peak price (${tickLabel})`;
+    } else if (cfg.mode === 'points') {
+      rule = `Trails ${cfg.pointsDistance} points behind peak price (1 pt = ${cfg.pointValue})`;
+    } else if (cfg.mode === 'dollars') {
+      rule = `Trails $${cfg.dollarsDistance} behind peak unrealized PnL (distance = $${cfg.dollarsDistance} ÷ position size)`;
+    } else {
+      const tfLabel = cfg.barTimeframe === 'chart' ? 'Active Chart TF' : cfg.barTimeframe;
+      const barType = cfg.barUseClosedOnly ? 'closed' : 'live/closed';
+      const nBars = cfg.barLookback === 1 ? `last ${barType} ${tfLabel} bar` : `last ${cfg.barLookback} ${barType} ${tfLabel} bars`;
+      const buf = cfg.barBufferTicks > 0 ? ` ± ${cfg.barBufferTicks}t buffer` : '';
+      rule = `LONG: lowest low of ${nBars}${buf} · SHORT: highest high of ${nBars}${buf}`;
+    }
+    let act = 'Starts immediately when armed';
+    if (cfg.activationMode === 'in_profit_dollars') act = `Activates at +$${cfg.activationValue} profit`;
+    else if (cfg.activationMode === 'in_profit_ticks') act = `Activates at +${cfg.activationValue} ticks profit`;
+    else if (cfg.activationMode === 'in_profit_points') act = `Activates at +${cfg.activationValue} points profit`;
+    else if (cfg.activationMode === 'in_profit_percent') act = `Activates at +${cfg.activationValue}% move`;
+    if (cfg.activationMode !== 'immediate' && cfg.moveToBreakevenOnActivate) {
+      act += ' (snaps SL to BE)';
+    }
+    const arm = cfg.autoArmOnNewTrade ? 'Auto-arms on every trade' : 'Manual 1-tap TRL button on chart';
+    return `${rule}. ${act}. ${arm} · Min ${cfg.stepMinTicks}t step · ${cfg.minUpdateIntervalSec}s cooldown${cfg.onlyTighten ? ' · Tighten only' : ''}.`;
+  }
+
   const DEFAULT_ORDER_BLOCKS = {
     enabled: false,
     swingLookback: 5,
@@ -2106,6 +2210,7 @@
     orderBlocks: JSON.parse(JSON.stringify(DEFAULT_ORDER_BLOCKS)),
     marketStructure: JSON.parse(JSON.stringify(DEFAULT_MARKET_STRUCTURE)),
     rangeDetector: JSON.parse(JSON.stringify(DEFAULT_RANGE_DETECTOR)),
+    autoTrail: JSON.parse(JSON.stringify(DEFAULT_AUTO_TRAIL)),
     debugMode: false,
     dialogGlassEffect: false,
     dialogGlassOpacity: 78,
@@ -5939,14 +6044,25 @@
 
   let hypernovaTpSlActionInFlight = false;
 
-  async function submitHypernovaTpSlModalValue({ symbol, kind, valueStr, isBe = false, isClear = false, pnlStr = '' }) {
+  async function submitHypernovaTpSlModalValue({ symbol, kind, valueStr, isBe = false, isClear = false, pnlStr = '', isAutoTrail = false, trailReason = '' }) {
     if (hypernovaTpSlActionInFlight) return;
+    // Safety guard: Auto-Trail never steals focus if user has Cortex Settings or another exchange dialog open
+    if (isAutoTrail) {
+      const cortexModalOpen = Boolean(document.getElementById('vest-studio-settings-dialog') || document.getElementById('vest-template-manager-dialog'));
+      if (cortexModalOpen) {
+        postToMainWorlds({
+          type: 'VEST_TV_HYPERNOVA_TP_SL_RESULT',
+          payload: { ok: false, symbol, type: kind, isAutoTrail: true, reason: 'busy_modal' }
+        });
+        return;
+      }
+    }
     hypernovaTpSlActionInFlight = true;
     const venueLabel = getChartVisualsHostDisplayName();
     const notifyResult = (ok, extra = {}) => {
       postToMainWorlds({
         type: 'VEST_TV_HYPERNOVA_TP_SL_RESULT',
-        payload: { ok, symbol, type: kind, ...extra }
+        payload: { ok, symbol, type: kind, isAutoTrail: Boolean(isAutoTrail), ...extra }
       });
     };
 
@@ -6062,6 +6178,9 @@
 
       if (isClear) {
         showToast(`Cleared ${venueLabel} ${kind.toUpperCase()} order`);
+      } else if (isAutoTrail) {
+        const suffix = trailReason ? ` · ${trailReason}` : '';
+        showToast(`${venueLabel} Auto-Trail SL → $${formatted}${pnlStr}${suffix}`);
       } else {
         showToast(
           isBe
@@ -6084,11 +6203,13 @@
   function executeHypernovaTpSlAction(payload) {
     const kind = payload.type === 'tp' ? 'tp' : 'sl';
     const isBe = payload.type === 'be';
+    const isAutoTrail = Boolean(payload.isAutoTrail);
+    const trailReason = typeof payload.trailReason === 'string' ? payload.trailReason : '';
     const price = Number(payload.price);
     const symbol = payload.symbol || '';
     if (!Number.isFinite(price) || price <= 0) return;
     const pnlStr = typeof payload.pnlText === 'string' && payload.pnlText ? ` (${payload.pnlText})` : '';
-    submitHypernovaTpSlModalValue({ symbol, kind, valueStr: price, isBe, isClear: false, pnlStr });
+    submitHypernovaTpSlModalValue({ symbol, kind, valueStr: price, isBe, isClear: false, pnlStr, isAutoTrail, trailReason });
   }
 
   function executeHypernovaClearTpSlAction(payload) {
@@ -8004,6 +8125,16 @@
           <span class="vest-sdm-badge-pill ${latestDrawingToolbarVisible !== false ? 'on' : ''}" id="vest-sdm-drawing-toolbar-badge">${latestDrawingToolbarVisible !== false ? 'VISIBLE' : 'HIDDEN'}</span>
         </div>
         ${isChartVisualsHost() ? `
+        <div class="vest-sdm-menu-item" id="vest-sdm-open-autotrail-btn" style="padding: 8px 10px; background: linear-gradient(135deg, rgba(139,92,246,0.16), rgba(15,23,42,0.55)); border: 1px solid rgba(167,139,250,0.38);">
+          <div class="vest-sdm-item-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#a78bfa;">
+              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+              <polyline points="17 6 23 6 23 12"></polyline>
+            </svg>
+            <span style="font-weight:700; color:#ede9fe;">Auto-Trail Stop...</span>
+          </div>
+          <span class="vest-sdm-badge-pill ${settings.autoTrail && settings.autoTrail.enabled ? 'on' : ''}">${escapeHtml(formatAutoTrailBadge(settings.autoTrail))}</span>
+        </div>
         <div class="vest-sdm-menu-item" id="vest-sdm-open-hypernova-visuals-btn" style="padding: 8px 10px; background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(15,23,42,0.55)); border: 1px solid rgba(56,189,248,0.35);">
           <div class="vest-sdm-item-left">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#38bdf8;">
@@ -8298,6 +8429,12 @@
         payload: { force: nextVisible }
       });
       showToast(nextVisible ? 'Opening left drawing toolbar...' : 'Hiding left drawing toolbar...');
+    });
+
+    // Auto-Trail Stop Button -> opens Settings Dialog directly on Auto-Trail tab
+    menuEl.querySelector('#vest-sdm-open-autotrail-btn')?.addEventListener('click', () => {
+      closeStudioDropdown();
+      openStudioSettingsModal('autotrail');
     });
 
     // Hypernova Chart Visuals Button -> opens Perp Firm Settings on Hypernova
@@ -8621,6 +8758,11 @@
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`
       },
       {
+        id: 'autotrail',
+        label: 'Auto-Trail Stop',
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`
+      },
+      {
         id: 'diagnostics',
         label: 'Diagnostics & Debug',
         icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`
@@ -8674,6 +8816,9 @@
       if (draftSettings.perpFirms) {
         settings.perpFirms = normalizePerpFirmsConfig(draftSettings.perpFirms);
       }
+      if (draftSettings.autoTrail) {
+        settings.autoTrail = normalizeAutoTrailConfig(draftSettings.autoTrail);
+      }
       queueSettingsSave({
         sessionIndicators: settings.sessionIndicators,
         autoFvg: settings.autoFvg,
@@ -8686,6 +8831,7 @@
         orderBlocks: settings.orderBlocks,
         marketStructure: settings.marketStructure,
         rangeDetector: settings.rangeDetector,
+        autoTrail: settings.autoTrail,
         diagnosticsBox: settings.diagnosticsBox,
         accountsRiskBox: settings.accountsRiskBox,
         debugMode: settings.debugMode,
@@ -9277,6 +9423,244 @@
       }
 
     function renderRightPaneContent() {
+      if (activeTab === 'autotrail') {
+        const at = normalizeAutoTrailConfig(draftSettings.autoTrail);
+        draftSettings.autoTrail = at;
+        const dimStyle = at.enabled ? '' : 'opacity:0.45; pointer-events:none;';
+        const tfOptions = [
+          { v: 'chart', l: 'Active Chart Timeframe' },
+          { v: '1m', l: '1 Minute (1m)' },
+          { v: '3m', l: '3 Minute (3m)' },
+          { v: '5m', l: '5 Minute (5m)' },
+          { v: '15m', l: '15 Minute (15m)' },
+          { v: '30m', l: '30 Minute (30m)' },
+          { v: '1h', l: '1 Hour (1h)' },
+          { v: '4h', l: '4 Hour (4h)' },
+          { v: '1d', l: 'Daily (1d)' }
+        ];
+        const actLabel =
+          at.activationMode === 'in_profit_dollars' ? 'Profit Threshold ($ USD)' :
+          at.activationMode === 'in_profit_ticks' ? 'Profit Threshold (Ticks)' :
+          at.activationMode === 'in_profit_points' ? 'Profit Threshold (Points)' :
+          at.activationMode === 'in_profit_percent' ? 'Profit Threshold (% Move)' : 'Threshold';
+
+        return `
+          <div class="vest-tvs-section-title">AUTO-TRAIL STOP LOSS ENGINE</div>
+          <p style="font-size:12px;color:#a1a1aa;line-height:1.55;margin:0 0 14px;">
+            Automatically ratchets your live exchange Stop Loss in your favor by <strong style="color:#e2e8f0;">Price</strong>, <strong style="color:#e2e8f0;">Ticks</strong>, <strong style="color:#e2e8f0;">Points</strong>, <strong style="color:#e2e8f0;">Dollars ($)</strong>, or <strong style="color:#e2e8f0;">Timeframe Bar Highs &amp; Lows</strong>. Works on Hypernova, My Funded Perpetuals, and Kalshi Pro (Desktop &amp; Mobile).
+          </p>
+
+          <!-- Master Enable & Arm Mode -->
+          <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(167,139,250,0.38); border-radius:10px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#f8fafc;">Enable Auto-Trail Stop Engine</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Adds a 1-tap <strong style="color:#c4b5fd;">TRL</strong> arm/disarm button right on the chart Position Entry box and enables automatic SL trailing.</div>
+              </div>
+              <label class="vest-tvs-switch">
+                <input type="checkbox" id="vest-at-enabled" ${at.enabled ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07); ${dimStyle}" id="vest-at-autoarm-row">
+              <div>
+                <div style="font-size:12px; font-weight:600; color:#f1f5f9;">Auto-Arm Automatically on Every Open Trade</div>
+                <div style="font-size:11px; color:#94a3b8; margin-top:2px;">When OFF (safer default), click the <strong style="color:#c4b5fd;">TRL</strong> button on the chart to arm trailing on trades you choose.</div>
+              </div>
+              <label class="vest-tvs-switch">
+                <input type="checkbox" id="vest-at-auto-arm" ${at.autoArmOnNewTrade ? 'checked' : ''} />
+                <span class="vest-tvs-switch-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div id="vest-at-config-body" style="${dimStyle}">
+            <!-- Section 1: Trail Mode & Parameters -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(255,255,255,0.09); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#a78bfa; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                1. Trailing Method
+              </div>
+
+              <div class="vest-ed-field" style="margin-bottom:12px;">
+                <label class="vest-ed-label">Trail Mode</label>
+                <select class="vest-ed-select" id="vest-at-mode">
+                  <option value="price" ${at.mode === 'price' ? 'selected' : ''}>By Price Distance ($ price or %)</option>
+                  <option value="ticks" ${at.mode === 'ticks' ? 'selected' : ''}>By Ticks (Auto or Custom Tick Size)</option>
+                  <option value="points" ${at.mode === 'points' ? 'selected' : ''}>By Points</option>
+                  <option value="dollars" ${at.mode === 'dollars' ? 'selected' : ''}>By Dollar Amount ($ USD Giveback)</option>
+                  <option value="bar_hl" ${at.mode === 'bar_hl' ? 'selected' : ''}>By Timeframe Bar Highs &amp; Lows (Candle Trail)</option>
+                </select>
+              </div>
+
+              ${at.mode === 'price' ? `
+                <div class="vest-ed-grid-2">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Price Distance (${at.priceOffsetType === 'percent' ? '%' : 'Price Units'})</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-price-offset" min="0.0001" max="1000000" step="any" value="${at.priceOffset}" />
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Distance Unit</label>
+                    <select class="vest-ed-select" id="vest-at-price-offset-type">
+                      <option value="absolute" ${at.priceOffsetType === 'absolute' ? 'selected' : ''}>Fixed Price Units (e.g. 10.00)</option>
+                      <option value="percent" ${at.priceOffsetType === 'percent' ? 'selected' : ''}>Percent of Peak Price (%)</option>
+                    </select>
+                  </div>
+                </div>
+              ` : ''}
+
+              ${at.mode === 'ticks' ? `
+                <div class="vest-ed-grid-2">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Trail Distance (Ticks)</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-ticks-distance" min="1" max="100000" step="1" value="${at.ticksDistance}" />
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Tick Size Override (0 = Auto)</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-custom-tick-size" min="0" max="10000" step="any" value="${at.customTickSize}" placeholder="0 = auto from chart" />
+                  </div>
+                </div>
+              ` : ''}
+
+              ${at.mode === 'points' ? `
+                <div class="vest-ed-grid-2">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Trail Distance (Points)</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-points-distance" min="0.01" max="100000" step="any" value="${at.pointsDistance}" />
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Price Units Per 1 Point</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-point-value" min="0.000001" max="100000" step="any" value="${at.pointValue}" />
+                  </div>
+                </div>
+              ` : ''}
+
+              ${at.mode === 'dollars' ? `
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Dollar Trail Distance ($ USD from Peak PnL)</label>
+                  <input type="number" class="vest-ed-input" id="vest-at-dollars-distance" min="0.5" max="1000000" step="any" value="${at.dollarsDistance}" />
+                  <div style="font-size:10.5px; color:#94a3b8; margin-top:4px;">Automatically converts $ distance to exact price offset using your live position size (<code style="color:#cbd5e1;">$ ÷ qty</code>).</div>
+                </div>
+              ` : ''}
+
+              ${at.mode === 'bar_hl' ? `
+                <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Candle Timeframe</label>
+                    <select class="vest-ed-select" id="vest-at-bar-tf">
+                      ${tfOptions.map(o => `<option value="${o.v}" ${at.barTimeframe === o.v ? 'selected' : ''}>${o.l}</option>`).join('')}
+                    </select>
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Lookback Bars: <span id="vest-at-bar-lookback-val" style="color:#a78bfa; font-weight:700;">${at.barLookback}</span></label>
+                    <input type="range" class="vest-ed-range" id="vest-at-bar-lookback" min="1" max="20" step="1" value="${at.barLookback}" />
+                  </div>
+                </div>
+                <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Protective Buffer (Ticks)</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-bar-buffer-ticks" min="0" max="500" step="1" value="${at.barBufferTicks}" />
+                  </div>
+                  <div class="vest-ed-field">
+                    <label class="vest-ed-label">Tick Size Override (0 = Auto)</label>
+                    <input type="number" class="vest-ed-input" id="vest-at-custom-tick-size" min="0" max="10000" step="any" value="${at.customTickSize}" />
+                  </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                  <div>
+                    <div style="font-size:12px; font-weight:600; color:#e2e8f0;">Use Completed (Closed) Bars Only</div>
+                    <div style="font-size:10.5px; color:#94a3b8;">Recommended — waits for each candle to close before ratcheting SL below its low (Long) or above its high (Short).</div>
+                  </div>
+                  <label class="vest-tvs-switch">
+                    <input type="checkbox" id="vest-at-bar-closed-only" ${at.barUseClosedOnly ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Section 2: Activation Trigger -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(255,255,255,0.09); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                2. Activation Trigger (When Trailing Begins)
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Start Trailing When</label>
+                  <select class="vest-ed-select" id="vest-at-act-mode">
+                    <option value="immediate" ${at.activationMode === 'immediate' ? 'selected' : ''}>Immediately When Armed</option>
+                    <option value="in_profit_dollars" ${at.activationMode === 'in_profit_dollars' ? 'selected' : ''}>In Profit by $ USD</option>
+                    <option value="in_profit_ticks" ${at.activationMode === 'in_profit_ticks' ? 'selected' : ''}>In Profit by Ticks</option>
+                    <option value="in_profit_points" ${at.activationMode === 'in_profit_points' ? 'selected' : ''}>In Profit by Points</option>
+                    <option value="in_profit_percent" ${at.activationMode === 'in_profit_percent' ? 'selected' : ''}>In Profit by % Move</option>
+                  </select>
+                </div>
+                ${at.activationMode !== 'immediate' ? `
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">${actLabel}</label>
+                  <input type="number" class="vest-ed-input" id="vest-at-act-val" min="0" max="1000000" step="any" value="${at.activationValue}" />
+                </div>` : `
+                <div class="vest-ed-field" style="display:flex; align-items:flex-end;">
+                  <div style="font-size:11px; color:#94a3b8; padding-bottom:6px;">Begins tracking immediately as soon as trade is armed.</div>
+                </div>`}
+              </div>
+              ${at.activationMode !== 'immediate' ? `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                <div>
+                  <div style="font-size:12px; font-weight:600; color:#e2e8f0;">Snap SL to Breakeven on Activation</div>
+                  <div style="font-size:10.5px; color:#94a3b8;">Immediately protects your entry price when the profit threshold is hit, then trails tighter from there.</div>
+                </div>
+                <label class="vest-tvs-switch">
+                  <input type="checkbox" id="vest-at-be-on-act" ${at.moveToBreakevenOnActivate ? 'checked' : ''} />
+                  <span class="vest-tvs-switch-slider"></span>
+                </label>
+              </div>` : ''}
+            </div>
+
+            <!-- Section 3: Safety & Execution Guards -->
+            <div class="vest-ed-section" style="padding:12px 14px; background:#111827; border:1px solid rgba(255,255,255,0.09); border-radius:10px; margin-bottom:12px;">
+              <div style="font-size:11px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px;">
+                3. Safety &amp; Execution Throttle
+              </div>
+              <div class="vest-ed-grid-2" style="margin-bottom:10px;">
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Minimum Step to Move SL (Ticks)</label>
+                  <input type="number" class="vest-ed-input" id="vest-at-step-ticks" min="1" max="1000" step="1" value="${at.stepMinTicks}" />
+                </div>
+                <div class="vest-ed-field">
+                  <label class="vest-ed-label">Update Cooldown: <span id="vest-at-cooldown-val" style="color:#34d399; font-weight:700;">${at.minUpdateIntervalSec}s</span></label>
+                  <input type="range" class="vest-ed-range" id="vest-at-cooldown" min="1" max="60" step="1" value="${at.minUpdateIntervalSec}" />
+                </div>
+              </div>
+              <div class="vest-ed-grid-2">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                  <span style="font-size:11.5px; color:#cbd5e1;">Only Tighten SL (Never Loosen)</span>
+                  <label class="vest-tvs-switch">
+                    <input type="checkbox" id="vest-at-only-tighten" ${at.onlyTighten ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                  <span style="font-size:11.5px; color:#cbd5e1;">Show Trail Preview Line</span>
+                  <label class="vest-tvs-switch">
+                    <input type="checkbox" id="vest-at-show-preview" ${at.showPreviewLine ? 'checked' : ''} />
+                    <span class="vest-tvs-switch-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Plain-English Rule Summary -->
+          <div style="padding:10px 12px; border-radius:8px; background:rgba(139,92,246,0.12); border:1px solid rgba(167,139,250,0.34); display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <div id="vest-at-summary-text" style="font-size:11.5px; color:#ddd6fe; line-height:1.45; flex:1; min-width:200px;">
+              ${escapeHtml(formatAutoTrailSummary(at))}
+            </div>
+            <button type="button" class="vest-tvs-action-btn" id="vest-at-reset-btn" style="height:28px; padding:0 10px; font-size:11px; flex-shrink:0;">Reset Defaults</button>
+          </div>
+        `;
+      }
+
       if (activeTab === 'alertsvoice') {
         const cfg = normalizeCortexIndicatorConfig(draftSettings.cortexIndicator);
         draftSettings.cortexIndicator = cfg;
@@ -12443,6 +12827,35 @@
       if (false && 'vest_dummy_ci_close') {
         draftSettings.cortexIndicator = normalizeCortexIndicatorConfig(ci);
       }
+
+      // Sync Auto-Trail Stop Engine
+      const atEnabledEl = overlay.querySelector('#vest-at-enabled');
+      if (atEnabledEl || overlay.querySelector('#vest-at-mode')) {
+        const at = normalizeAutoTrailConfig(draftSettings.autoTrail);
+        const q = (sel) => overlay.querySelector(sel);
+        if (atEnabledEl) at.enabled = Boolean(atEnabledEl.checked);
+        if (q('#vest-at-auto-arm')) at.autoArmOnNewTrade = Boolean(q('#vest-at-auto-arm').checked);
+        if (q('#vest-at-mode')) at.mode = q('#vest-at-mode').value;
+        if (q('#vest-at-price-offset')) at.priceOffset = Number(q('#vest-at-price-offset').value);
+        if (q('#vest-at-price-offset-type')) at.priceOffsetType = q('#vest-at-price-offset-type').value;
+        if (q('#vest-at-ticks-distance')) at.ticksDistance = Number(q('#vest-at-ticks-distance').value);
+        if (q('#vest-at-custom-tick-size')) at.customTickSize = Number(q('#vest-at-custom-tick-size').value);
+        if (q('#vest-at-points-distance')) at.pointsDistance = Number(q('#vest-at-points-distance').value);
+        if (q('#vest-at-point-value')) at.pointValue = Number(q('#vest-at-point-value').value);
+        if (q('#vest-at-dollars-distance')) at.dollarsDistance = Number(q('#vest-at-dollars-distance').value);
+        if (q('#vest-at-bar-tf')) at.barTimeframe = q('#vest-at-bar-tf').value;
+        if (q('#vest-at-bar-lookback')) at.barLookback = Number(q('#vest-at-bar-lookback').value);
+        if (q('#vest-at-bar-closed-only')) at.barUseClosedOnly = Boolean(q('#vest-at-bar-closed-only').checked);
+        if (q('#vest-at-bar-buffer-ticks')) at.barBufferTicks = Number(q('#vest-at-bar-buffer-ticks').value);
+        if (q('#vest-at-act-mode')) at.activationMode = q('#vest-at-act-mode').value;
+        if (q('#vest-at-act-val')) at.activationValue = Number(q('#vest-at-act-val').value);
+        if (q('#vest-at-be-on-act')) at.moveToBreakevenOnActivate = Boolean(q('#vest-at-be-on-act').checked);
+        if (q('#vest-at-step-ticks')) at.stepMinTicks = Number(q('#vest-at-step-ticks').value);
+        if (q('#vest-at-cooldown')) at.minUpdateIntervalSec = Number(q('#vest-at-cooldown').value);
+        if (q('#vest-at-only-tighten')) at.onlyTighten = Boolean(q('#vest-at-only-tighten').checked);
+        if (q('#vest-at-show-preview')) at.showPreviewLine = Boolean(q('#vest-at-show-preview').checked);
+        draftSettings.autoTrail = normalizeAutoTrailConfig(at);
+      }
     }
 
     function commitDraftAndClose() {
@@ -13795,6 +14208,72 @@
 
       if (activeTab === 'perpfirms') {
         bindPerpFirmsListeners();
+      }
+      if (activeTab === 'autotrail') {
+        const updateAtSummary = () => {
+          syncCurrentPaneToDraft();
+          const summaryEl = overlay.querySelector('#vest-at-summary-text');
+          if (summaryEl) summaryEl.textContent = formatAutoTrailSummary(draftSettings.autoTrail);
+          broadcastLiveSessionDraft();
+        };
+
+        const atEnToggle = overlay.querySelector('#vest-at-enabled');
+        const atBody = overlay.querySelector('#vest-at-config-body');
+        const atAutoArmRow = overlay.querySelector('#vest-at-autoarm-row');
+        if (atEnToggle) {
+          atEnToggle.addEventListener('change', () => {
+            const on = Boolean(atEnToggle.checked);
+            if (atBody) {
+              atBody.style.opacity = on ? '1' : '0.45';
+              atBody.style.pointerEvents = on ? 'auto' : 'none';
+            }
+            if (atAutoArmRow) {
+              atAutoArmRow.style.opacity = on ? '1' : '0.45';
+              atAutoArmRow.style.pointerEvents = on ? 'auto' : 'none';
+            }
+            updateAtSummary();
+          });
+        }
+
+        // Re-render pane when mode, price unit, or activation mode changes so only relevant fields display
+        ['#vest-at-mode', '#vest-at-price-offset-type', '#vest-at-act-mode'].forEach(sel => {
+          overlay.querySelector(sel)?.addEventListener('change', () => {
+            syncCurrentPaneToDraft();
+            broadcastLiveSessionDraft();
+            renderDialog();
+          });
+        });
+
+        const lbRange = overlay.querySelector('#vest-at-bar-lookback');
+        const lbVal = overlay.querySelector('#vest-at-bar-lookback-val');
+        if (lbRange && lbVal) {
+          lbRange.addEventListener('input', () => {
+            lbVal.textContent = String(lbRange.value);
+          });
+        }
+
+        const cdRange = overlay.querySelector('#vest-at-cooldown');
+        const cdVal = overlay.querySelector('#vest-at-cooldown-val');
+        if (cdRange && cdVal) {
+          cdRange.addEventListener('input', () => {
+            cdVal.textContent = `${cdRange.value}s`;
+          });
+        }
+
+        overlay.querySelectorAll('[id^="vest-at-"]').forEach(el => {
+          if (['vest-at-enabled', 'vest-at-mode', 'vest-at-price-offset-type', 'vest-at-act-mode', 'vest-at-reset-btn'].includes(el.id)) return;
+          const evtName = (el.tagName === 'INPUT' && (el.type === 'number' || el.type === 'range' || el.type === 'text')) ? 'input' : 'change';
+          el.addEventListener(evtName, updateAtSummary);
+          if (evtName === 'input') el.addEventListener('change', updateAtSummary);
+        });
+
+        overlay.querySelector('#vest-at-reset-btn')?.addEventListener('click', () => {
+          const keepEnabled = Boolean(draftSettings.autoTrail && draftSettings.autoTrail.enabled);
+          draftSettings.autoTrail = { ...JSON.parse(JSON.stringify(DEFAULT_AUTO_TRAIL)), enabled: keepEnabled };
+          renderDialog();
+          broadcastLiveSessionDraft();
+          showToast('Reset Auto-Trail settings to defaults');
+        });
       }
 if (activeTab === 'diagnostics') {
         const wRange = overlay.querySelector('#vest-dbg-box-width');

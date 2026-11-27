@@ -1,6 +1,24 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.161`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.162`) are documented in this file.
+
+---
+
+## [v1.1.162] — 2026-11-26
+
+### 🎯 Configurable Auto-Trail Stop Loss Engine (Price, Ticks, Points, Dollars & Timeframe Bar Highs/Lows)
+- **New Feature (`content/content-isolated.js`, `content/content-main.js`, `tests/auto-trail-stop.test.js`)**:
+  - **5 Configurable Trail Modes**:
+    1. **By Price (`price`)**: Fixed price units OR `%` of peak price behind favorable excursion.
+    2. **By Ticks (`ticks`)**: Auto-detects live instrument tick size from TradingView's `symbolInfo()` (`minmov / pricescale`, with optional manual tick-size override) and snaps every SL update cleanly to exact tick increments.
+    3. **By Points (`points`)**: Trail by N points with configurable price-units-per-point (`pointValue`, default `1`).
+    4. **By Dollar Amount (`dollars`)**: Trail by `$X` USD behind peak unrealized PnL (automatically converted via `$ ÷ position size`).
+    5. **By Specific Timeframe Bar Highs & Lows (`bar_hl`)**: Trail behind the lowest low (Long) / highest high (Short) of the last `1–20` bars on the **Active Chart TF** or any specific timeframe (**`1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`** — automatically fetched from TradingView's datafeed & live-stitched even when viewing a different chart timeframe!), with **Completed (Closed) Bars Only** toggle and configurable **Protective Buffer (Ticks)**.
+  - **Activation Triggers**: Start trailing immediately when armed OR wait until in profit by `$ USD`, `Ticks`, `Points`, or `% Move`, with an optional **Snap SL to Breakeven on Activation** toggle.
+  - **1-Tap On-Chart `TRL` Button & Preview Line**: Adds a `TRL` arm/disarm button right on the Position Entry Box (`BE | TP | SL | TRL`, showing amber `WAIT` while waiting for profit trigger and glowing violet `TRL` when actively trailing) plus an optional violet dotted Trail Target Preview line on the chart (`TRL · $...`).
+  - **Dedicated Settings Tab & Dropdown Shortcut**: Added **Auto-Trail Stop** tab in Cortex Settings (with mode-adaptive fields, plain-English live rule summary, and Reset Defaults) and a live-badged **Auto-Trail Stop...** shortcut in the Cortex dropdown menu.
+  - **Safety & Execution Guards**: Disabled and manual-arm by default (optional Auto-Arm on every trade), strict **Only Tighten SL** ratchet (never loosens tighter manual stops), never crosses live market price, pauses while manually dragging SL/TP, skips silently if Cortex Settings is open, and enforces minimum step ticks + cooldown throttle (`1–60s`) + in-flight locking.
+  - Added comprehensive 19th test suite `tests/auto-trail-stop.test.js`.
 
 ---
 
