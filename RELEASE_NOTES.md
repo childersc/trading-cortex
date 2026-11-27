@@ -1,3 +1,7 @@
+Trading Cortex v1.1.161 — Live In-Trade "Breach Trade" Blue Dashed Line & Dashed-Outline Box
+
+- **In-Trade Add-On Breach Preview (`v1.1.161`)**: Added a dedicated blue dashed **Breach Trade** line & matching **dashed-outline blue pill box** on Hypernova whenever you are in an open trade and typing an add-on order size in the Order Ticket—so you can instantly see where your Breach Price will move to before adding into your position (hidden while flat or when Order Ticket amount is `0` / `N/A`). Fully customizable (color, line style, thickness, opacity, label text, font size, alignment, dashed outline toggle) under **Perp Firms → Hypernova → Chart Visuals** with full off-screen clamping, anti-overlap, and mobile-compact scaling.
+
 Trading Cortex v1.1.160 — Fixed Mobile Entry Box PnL Mismatch (Exact Real-Time Sync With Mobile Positions Panel)
 
 - **Exact Mobile Positions Panel PnL Sync (`v1.1.160`)**: Fixed the mobile chart Entry Box PnL not matching Hypernova's mobile Positions panel. Added native support + live `MutationObserver` for Hypernova's mobile position cards (`positions-mobile-list` / `positions-mobile-row-*` used below `1300px`, both collapsed and expanded), fixed parsing of Hypernova's native Position Line `"PnL: $XX.XX"` / `"PnL: -$XX.XX"` text (stopping negative PnL from being misread as size/side and handling unsigned positive values), hooked `adapter.setText` for 0ms real-time repaints on every WebSocket tick, and added auto-expand support when submitting BE / TP / SL / Close from mobile cards.

@@ -1728,7 +1728,18 @@
     breachPriceFontSize: 11,
     breachPriceShowLabel: true,
     breachPriceShowPrice: true,
-    breachPriceLabelAlign: 'right'
+    breachPriceLabelAlign: 'right',
+    breachTradeLineEnabled: true,
+    breachTradeColor: '#3b82f6',
+    breachTradeStyle: 'dashed',
+    breachTradeWidth: 1.5,
+    breachTradeOpacity: 90,
+    breachTradeText: 'Breach Trade',
+    breachTradeFontSize: 11,
+    breachTradeShowLabel: true,
+    breachTradeShowPrice: true,
+    breachTradeLabelAlign: 'right',
+    breachTradeBoxDashedOutline: true
   };
 
   function normalizeHypernovaVisualsConfig(raw) {
@@ -1753,6 +1764,15 @@
     const breachWidthNum = Number(src.breachPriceWidth);
     const breachOpNum = Number(src.breachPriceOpacity);
     const breachFontNum = Number(src.breachPriceFontSize);
+
+    const breachTradeStyle = ['solid', 'dashed', 'dotted'].includes(src.breachTradeStyle) ? src.breachTradeStyle : DEFAULT_HYPERNOVA_VISUALS.breachTradeStyle;
+    const breachTradeAlign = ['left', 'center', 'right'].includes(src.breachTradeLabelAlign) ? src.breachTradeLabelAlign : DEFAULT_HYPERNOVA_VISUALS.breachTradeLabelAlign;
+    const rawBreachTradeColor = typeof src.breachTradeColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(src.breachTradeColor.trim())
+      ? src.breachTradeColor.trim()
+      : DEFAULT_HYPERNOVA_VISUALS.breachTradeColor;
+    const breachTradeWidthNum = Number(src.breachTradeWidth);
+    const breachTradeOpNum = Number(src.breachTradeOpacity);
+    const breachTradeFontNum = Number(src.breachTradeFontSize);
 
     return {
       enabled: src.enabled !== false,
@@ -1780,7 +1800,18 @@
       breachPriceFontSize: Number.isFinite(breachFontNum) ? Math.max(8, Math.min(22, Math.round(breachFontNum))) : DEFAULT_HYPERNOVA_VISUALS.breachPriceFontSize,
       breachPriceShowLabel: src.breachPriceShowLabel !== false,
       breachPriceShowPrice: src.breachPriceShowPrice !== false,
-      breachPriceLabelAlign: breachAlign
+      breachPriceLabelAlign: breachAlign,
+      breachTradeLineEnabled: src.breachTradeLineEnabled !== false,
+      breachTradeColor: rawBreachTradeColor,
+      breachTradeStyle,
+      breachTradeWidth: Number.isFinite(breachTradeWidthNum) ? Math.max(1, Math.min(4, Math.round(breachTradeWidthNum * 2) / 2)) : DEFAULT_HYPERNOVA_VISUALS.breachTradeWidth,
+      breachTradeOpacity: Number.isFinite(breachTradeOpNum) ? Math.max(15, Math.min(100, Math.round(breachTradeOpNum))) : DEFAULT_HYPERNOVA_VISUALS.breachTradeOpacity,
+      breachTradeText: typeof src.breachTradeText === 'string' ? src.breachTradeText.slice(0, 48) : DEFAULT_HYPERNOVA_VISUALS.breachTradeText,
+      breachTradeFontSize: Number.isFinite(breachTradeFontNum) ? Math.max(8, Math.min(22, Math.round(breachTradeFontNum))) : DEFAULT_HYPERNOVA_VISUALS.breachTradeFontSize,
+      breachTradeShowLabel: src.breachTradeShowLabel !== false,
+      breachTradeShowPrice: src.breachTradeShowPrice !== false,
+      breachTradeLabelAlign: breachTradeAlign,
+      breachTradeBoxDashedOutline: src.breachTradeBoxDashedOutline !== false
     };
   }
 
@@ -5624,16 +5655,36 @@
   function findHypernovaOrderTicketBreachEl() {
     if (getChartVisualsHostFirmId() !== 'hypernova') return null;
     try {
-      const direct = document.querySelector('[data-testid="order-details-breach-price"]');
-      if (direct) return direct;
-      const rows = document.querySelectorAll('.order-info-row');
-      for (const row of rows) {
-        const label = row.querySelector('.order-info-label');
-        if (label && /^\s*breach\s*price\s*$/i.test(label.textContent || '')) {
-          const valEl = row.querySelector('.order-info-value');
-          if (valEl) return valEl;
+      const candidates = [];
+      const directAll = Array.from(document.querySelectorAll('[data-testid="order-details-breach-price"]'));
+      for (const el of directAll) candidates.push(el);
+      if (candidates.length === 0) {
+        const rows = document.querySelectorAll('.order-info-row');
+        for (const row of rows) {
+          const label = row.querySelector('.order-info-label');
+          if (label && /^\s*breach\s*price\s*$/i.test(label.textContent || '')) {
+            const valEl = row.querySelector('.order-info-value');
+            if (valEl) candidates.push(valEl);
+          }
         }
       }
+      if (candidates.length === 0) return null;
+      const isVisible = (el) => {
+        if (!el || typeof el.getBoundingClientRect !== 'function') return true;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const hasNumericPrice = (el) => {
+        const txt = (el.innerText || el.textContent || '').trim();
+        if (!txt || /n\/a|^[-—]+$/i.test(txt)) return false;
+        const v = Math.abs(parseHypernovaNumber(txt));
+        return Number.isFinite(v) && v > 0;
+      };
+      // Prefer a visible element with an active numeric price (handles desktop + mobile order drawer copies cleanly)
+      return candidates.find(el => isVisible(el) && hasNumericPrice(el)) ||
+        candidates.find(el => hasNumericPrice(el)) ||
+        candidates.find(el => isVisible(el)) ||
+        candidates[0];
     } catch (e) {}
     return null;
   }
@@ -5641,7 +5692,17 @@
   function ensureHypernovaBreachObserver() {
     if (!isTopWindow || getChartVisualsHostFirmId() !== 'hypernova') return;
     const el = findHypernovaOrderTicketBreachEl();
-    if (!el || el === observedHypernovaBreachEl) return;
+    if (!el) {
+      if (observedHypernovaBreachEl && !observedHypernovaBreachEl.isConnected) {
+        if (hypernovaBreachObserver) {
+          try { hypernovaBreachObserver.disconnect(); } catch (e) {}
+          hypernovaBreachObserver = null;
+        }
+        observedHypernovaBreachEl = null;
+      }
+      return;
+    }
+    if (el === observedHypernovaBreachEl && el.isConnected) return;
     try {
       if (hypernovaBreachObserver) {
         hypernovaBreachObserver.disconnect();
@@ -8953,6 +9014,94 @@
                       </div>
                     </div>
                   </div>
+                </div>
+                <div style="margin-top:10px; padding:10px 12px; border-radius:8px; background:rgba(10,22,48,0.56); border:1px dashed rgba(59,130,246,0.48);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div style="max-width:80%;">
+                      <div style="font-size:12px; font-weight:600; color:#93c5fd;">Live In-Trade "Breach Trade" Blue Dashed Line &amp; Box</div>
+                      <div style="font-size:10.5px; color:#94a3b8; margin-top:2px;">Draws a live blue dashed line &amp; dashed-outline badge while in an open trade whenever you size an add-on order in the Order Ticket, showing where your Breach Price would move to.</div>
+                    </div>
+                    <label class="vest-tvs-switch">
+                      <input type="checkbox" id="vest-pf-hn-breach-trade-line" ${hnVis.breachTradeLineEnabled ? 'checked' : ''} />
+                      <span class="vest-tvs-switch-slider"></span>
+                    </label>
+                  </div>
+
+                  <div id="vest-pf-hn-breach-trade-style-grid" style="${hnVis.breachTradeLineEnabled ? '' : 'opacity:0.45; pointer-events:none;'}">
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Color</label>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <input type="color" id="vest-pf-hn-breach-trade-color" value="${escapeHtml(hnVis.breachTradeColor)}" style="width:36px; height:28px; border:1px dashed #3b82f6; border-radius:6px; background:#0b0e14; cursor:pointer; padding:2px;" />
+                          <span id="vest-pf-hn-breach-trade-color-val" style="font-size:11px; color:#93c5fd; font-family:monospace;">${escapeHtml(hnVis.breachTradeColor)}</span>
+                        </div>
+                      </div>
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Style</label>
+                        <select class="vest-ed-select" id="vest-pf-hn-breach-trade-style">
+                          <option value="solid" ${hnVis.breachTradeStyle === 'solid' ? 'selected' : ''}>Solid Line</option>
+                          <option value="dashed" ${hnVis.breachTradeStyle === 'dashed' ? 'selected' : ''}>Dashed Line</option>
+                          <option value="dotted" ${hnVis.breachTradeStyle === 'dotted' ? 'selected' : ''}>Dotted Line</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Thickness: <span id="vest-pf-hn-breach-trade-width-val" style="color:#60a5fa; font-weight:700;">${hnVis.breachTradeWidth}px</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-breach-trade-width" min="1" max="4" step="0.5" value="${hnVis.breachTradeWidth}" />
+                      </div>
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Opacity: <span id="vest-pf-hn-breach-trade-opacity-val" style="color:#60a5fa; font-weight:700;">${hnVis.breachTradeOpacity}%</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-breach-trade-opacity" min="15" max="100" step="5" value="${hnVis.breachTradeOpacity}" />
+                      </div>
+                    </div>
+
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Line Label Text</label>
+                        <input type="text" class="vest-ed-input" id="vest-pf-hn-breach-trade-text" value="${escapeHtml(hnVis.breachTradeText)}" placeholder="Breach Trade" maxlength="48" />
+                      </div>
+                      <div class="vest-ed-field">
+                        <label class="vest-ed-label">Label &amp; Box Font Size: <span id="vest-pf-hn-breach-trade-font-size-val" style="color:#60a5fa; font-weight:700;">${hnVis.breachTradeFontSize}px</span></label>
+                        <input type="range" class="vest-ed-range" id="vest-pf-hn-breach-trade-font-size" min="8" max="22" step="1" value="${hnVis.breachTradeFontSize}" />
+                      </div>
+                    </div>
+
+                    <div class="vest-ed-field" style="margin-bottom:8px;">
+                      <label class="vest-ed-label">Label Position</label>
+                      <select class="vest-ed-select" id="vest-pf-hn-breach-trade-align">
+                        <option value="left" ${hnVis.breachTradeLabelAlign === 'left' ? 'selected' : ''}>Left</option>
+                        <option value="center" ${hnVis.breachTradeLabelAlign === 'center' ? 'selected' : ''}>Center</option>
+                        <option value="right" ${hnVis.breachTradeLabelAlign === 'right' ? 'selected' : ''}>Right (Near Price Axis)</option>
+                      </select>
+                    </div>
+
+                    <div class="vest-ed-grid-2" style="margin-bottom:8px;">
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <span style="font-size:11.5px; color:#cbd5e1;">Show Label Box</span>
+                        <label class="vest-tvs-switch">
+                          <input type="checkbox" id="vest-pf-hn-breach-trade-show-label" ${hnVis.breachTradeShowLabel ? 'checked' : ''} />
+                          <span class="vest-tvs-switch-slider"></span>
+                        </label>
+                      </div>
+                      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <span style="font-size:11.5px; color:#cbd5e1;">Include Price in Box</span>
+                        <label class="vest-tvs-switch">
+                          <input type="checkbox" id="vest-pf-hn-breach-trade-show-price" ${hnVis.breachTradeShowPrice ? 'checked' : ''} />
+                          <span class="vest-tvs-switch-slider"></span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                      <span style="font-size:11.5px; color:#cbd5e1;">Dashed Outline Around Box</span>
+                      <label class="vest-tvs-switch">
+                        <input type="checkbox" id="vest-pf-hn-breach-trade-box-dashed" ${hnVis.breachTradeBoxDashedOutline ? 'checked' : ''} />
+                        <span class="vest-tvs-switch-slider"></span>
+                      </label>
+                    </div>
+                  </div>
                 </div>` : ''}
               </div>
             </div>
@@ -11626,6 +11775,17 @@
           const hnBreachAlign = overlay.querySelector('#vest-pf-hn-breach-align');
           const hnBreachShowLabel = overlay.querySelector('#vest-pf-hn-breach-show-label');
           const hnBreachShowPrice = overlay.querySelector('#vest-pf-hn-breach-show-price');
+          const hnBreachTradeLine = overlay.querySelector('#vest-pf-hn-breach-trade-line');
+          const hnBreachTradeColor = overlay.querySelector('#vest-pf-hn-breach-trade-color');
+          const hnBreachTradeStyle = overlay.querySelector('#vest-pf-hn-breach-trade-style');
+          const hnBreachTradeWidth = overlay.querySelector('#vest-pf-hn-breach-trade-width');
+          const hnBreachTradeOpacity = overlay.querySelector('#vest-pf-hn-breach-trade-opacity');
+          const hnBreachTradeText = overlay.querySelector('#vest-pf-hn-breach-trade-text');
+          const hnBreachTradeFont = overlay.querySelector('#vest-pf-hn-breach-trade-font-size');
+          const hnBreachTradeAlign = overlay.querySelector('#vest-pf-hn-breach-trade-align');
+          const hnBreachTradeShowLabel = overlay.querySelector('#vest-pf-hn-breach-trade-show-label');
+          const hnBreachTradeShowPrice = overlay.querySelector('#vest-pf-hn-breach-trade-show-price');
+          const hnBreachTradeBoxDashed = overlay.querySelector('#vest-pf-hn-breach-trade-box-dashed');
           const nextVisuals = normalizeHypernovaVisualsConfig({
             ...prevHn,
             enabled: Boolean(hnEn.checked),
@@ -11653,7 +11813,18 @@
             breachPriceFontSize: hnBreachFont ? Number(hnBreachFont.value) : prevHn.breachPriceFontSize,
             breachPriceLabelAlign: hnBreachAlign ? hnBreachAlign.value : prevHn.breachPriceLabelAlign,
             breachPriceShowLabel: hnBreachShowLabel ? Boolean(hnBreachShowLabel.checked) : prevHn.breachPriceShowLabel,
-            breachPriceShowPrice: hnBreachShowPrice ? Boolean(hnBreachShowPrice.checked) : prevHn.breachPriceShowPrice
+            breachPriceShowPrice: hnBreachShowPrice ? Boolean(hnBreachShowPrice.checked) : prevHn.breachPriceShowPrice,
+            breachTradeLineEnabled: hnBreachTradeLine ? Boolean(hnBreachTradeLine.checked) : prevHn.breachTradeLineEnabled,
+            breachTradeColor: hnBreachTradeColor ? hnBreachTradeColor.value : prevHn.breachTradeColor,
+            breachTradeStyle: hnBreachTradeStyle ? hnBreachTradeStyle.value : prevHn.breachTradeStyle,
+            breachTradeWidth: hnBreachTradeWidth ? Number(hnBreachTradeWidth.value) : prevHn.breachTradeWidth,
+            breachTradeOpacity: hnBreachTradeOpacity ? Number(hnBreachTradeOpacity.value) : prevHn.breachTradeOpacity,
+            breachTradeText: hnBreachTradeText ? hnBreachTradeText.value : prevHn.breachTradeText,
+            breachTradeFontSize: hnBreachTradeFont ? Number(hnBreachTradeFont.value) : prevHn.breachTradeFontSize,
+            breachTradeLabelAlign: hnBreachTradeAlign ? hnBreachTradeAlign.value : prevHn.breachTradeLabelAlign,
+            breachTradeShowLabel: hnBreachTradeShowLabel ? Boolean(hnBreachTradeShowLabel.checked) : prevHn.breachTradeShowLabel,
+            breachTradeShowPrice: hnBreachTradeShowPrice ? Boolean(hnBreachTradeShowPrice.checked) : prevHn.breachTradeShowPrice,
+            breachTradeBoxDashedOutline: hnBreachTradeBoxDashed ? Boolean(hnBreachTradeBoxDashed.checked) : prevHn.breachTradeBoxDashedOutline
           });
           firm.chartVisuals = nextVisuals;
           if (firm.id === 'hypernova') {
@@ -13561,6 +13732,47 @@
           if (hnBreachFontRange && hnBreachFontVal) {
             hnBreachFontRange.addEventListener('input', () => {
               hnBreachFontVal.textContent = `${hnBreachFontRange.value}px`;
+            });
+          }
+
+          const hnBreachTradeToggle = detailCard.querySelector('#vest-pf-hn-breach-trade-line');
+          const hnBreachTradeGrid = detailCard.querySelector('#vest-pf-hn-breach-trade-style-grid');
+          if (hnBreachTradeToggle && hnBreachTradeGrid) {
+            hnBreachTradeToggle.addEventListener('change', () => {
+              hnBreachTradeGrid.style.opacity = hnBreachTradeToggle.checked ? '1' : '0.45';
+              hnBreachTradeGrid.style.pointerEvents = hnBreachTradeToggle.checked ? 'auto' : 'none';
+            });
+          }
+
+          const hnBreachTradeColorInput = detailCard.querySelector('#vest-pf-hn-breach-trade-color');
+          const hnBreachTradeColorVal = detailCard.querySelector('#vest-pf-hn-breach-trade-color-val');
+          if (hnBreachTradeColorInput && hnBreachTradeColorVal) {
+            hnBreachTradeColorInput.addEventListener('input', () => {
+              hnBreachTradeColorVal.textContent = hnBreachTradeColorInput.value;
+            });
+          }
+
+          const hnBreachTradeWidthRange = detailCard.querySelector('#vest-pf-hn-breach-trade-width');
+          const hnBreachTradeWidthVal = detailCard.querySelector('#vest-pf-hn-breach-trade-width-val');
+          if (hnBreachTradeWidthRange && hnBreachTradeWidthVal) {
+            hnBreachTradeWidthRange.addEventListener('input', () => {
+              hnBreachTradeWidthVal.textContent = `${hnBreachTradeWidthRange.value}px`;
+            });
+          }
+
+          const hnBreachTradeOpacityRange = detailCard.querySelector('#vest-pf-hn-breach-trade-opacity');
+          const hnBreachTradeOpacityVal = detailCard.querySelector('#vest-pf-hn-breach-trade-opacity-val');
+          if (hnBreachTradeOpacityRange && hnBreachTradeOpacityVal) {
+            hnBreachTradeOpacityRange.addEventListener('input', () => {
+              hnBreachTradeOpacityVal.textContent = `${hnBreachTradeOpacityRange.value}%`;
+            });
+          }
+
+          const hnBreachTradeFontRange = detailCard.querySelector('#vest-pf-hn-breach-trade-font-size');
+          const hnBreachTradeFontVal = detailCard.querySelector('#vest-pf-hn-breach-trade-font-size-val');
+          if (hnBreachTradeFontRange && hnBreachTradeFontVal) {
+            hnBreachTradeFontRange.addEventListener('input', () => {
+              hnBreachTradeFontVal.textContent = `${hnBreachTradeFontRange.value}px`;
             });
           }
 

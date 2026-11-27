@@ -1,6 +1,18 @@
 # Trading Cortex — Changelog & Version History
 
-All notable changes, new features, and bug fixes through the current release (`v1.1.160`) are documented in this file.
+All notable changes, new features, and bug fixes through the current release (`v1.1.161`) are documented in this file.
+
+---
+
+## [v1.1.161] — 2026-11-26
+
+### 🔵 Added Live In-Trade "Breach Trade" Blue Dashed Line & Dashed-Outline Box (Add-On Position Sizing Preview)
+- **Feature (`content/content-isolated.js`, `content/content-main.js`)**:
+  - Added a dedicated companion to the pre-trade red **Breach Price** line specifically for when you are **already in a trade** and sizing an add-on order in Hypernova's Order Ticket (`resolveActiveHypernovaBreachTradePrice()`), showing in real time where your new Breach Price will move to before you submit the add-on order.
+  - Styled by default in crisp **blue (`#3b82f6`)** with a **dashed horizontal line** (`[7, 5]`) and a **dashed blue outline around the rounded pill box** (`[4, 3]`, label `"Breach Trade · $..."`), including off-screen `▲ Above chart` / `▼ Below chart` clamping, Current Price pill anti-overlap, and mobile-compact scaling.
+  - Automatically hides when flat (where the red pre-trade Breach Price shows) OR when in a trade with `Amount: 0` (`Breach Price: N/A`), and immediately appears as soon as you type an add-on size in the Order Ticket (with improved desktop + mobile order-drawer breach element detection & observer recovery).
+  - Added full independent customization controls inside **Perp Firms → Hypernova → Chart Visuals** (toggle, color, line style, thickness, opacity, label text, font size, alignment, show label/price, and dashed box outline toggle) with live preview.
+  - Added VM unit tests in `tests/hypernova-chart-visuals.test.js`.
 
 ---
 

@@ -8317,7 +8317,18 @@
       breachPriceFontSize: 11,
       breachPriceShowLabel: true,
       breachPriceShowPrice: true,
-      breachPriceLabelAlign: 'right'
+      breachPriceLabelAlign: 'right',
+      breachTradeLineEnabled: true,
+      breachTradeColor: '#3b82f6',
+      breachTradeStyle: 'dashed',
+      breachTradeWidth: 1.5,
+      breachTradeOpacity: 90,
+      breachTradeText: 'Breach Trade',
+      breachTradeFontSize: 11,
+      breachTradeShowLabel: true,
+      breachTradeShowPrice: true,
+      breachTradeLabelAlign: 'right',
+      breachTradeBoxDashedOutline: true
     };
     const firmId = getChartVisualsMainWorldFirmId();
     if (!firmId) {
@@ -8354,6 +8365,15 @@
     const bop = Number(raw.breachPriceOpacity);
     const breachFont = Number(raw.breachPriceFontSize);
 
+    const breachTradeStyle = ['solid', 'dashed', 'dotted'].includes(raw.breachTradeStyle) ? raw.breachTradeStyle : defaults.breachTradeStyle;
+    const breachTradeAlign = ['left', 'center', 'right'].includes(raw.breachTradeLabelAlign) ? raw.breachTradeLabelAlign : defaults.breachTradeLabelAlign;
+    const rawBreachTradeColor = typeof raw.breachTradeColor === 'string' && /^#[0-9a-f]{3,8}$/i.test(raw.breachTradeColor.trim())
+      ? raw.breachTradeColor.trim()
+      : defaults.breachTradeColor;
+    const btw = Number(raw.breachTradeWidth);
+    const btop = Number(raw.breachTradeOpacity);
+    const breachTradeFont = Number(raw.breachTradeFontSize);
+
     return {
       enabled: raw.enabled !== false,
       positionOverlayEnabled: raw.positionOverlayEnabled !== false,
@@ -8380,7 +8400,18 @@
       breachPriceFontSize: Number.isFinite(breachFont) ? Math.max(8, Math.min(22, Math.round(breachFont))) : defaults.breachPriceFontSize,
       breachPriceShowLabel: raw.breachPriceShowLabel !== false,
       breachPriceShowPrice: raw.breachPriceShowPrice !== false,
-      breachPriceLabelAlign: breachAlign
+      breachPriceLabelAlign: breachAlign,
+      breachTradeLineEnabled: raw.breachTradeLineEnabled !== false,
+      breachTradeColor: rawBreachTradeColor,
+      breachTradeStyle,
+      breachTradeWidth: Number.isFinite(btw) ? Math.max(1, Math.min(4, btw)) : defaults.breachTradeWidth,
+      breachTradeOpacity: Number.isFinite(btop) ? Math.max(15, Math.min(100, btop)) : defaults.breachTradeOpacity,
+      breachTradeText: typeof raw.breachTradeText === 'string' ? raw.breachTradeText : defaults.breachTradeText,
+      breachTradeFontSize: Number.isFinite(breachTradeFont) ? Math.max(8, Math.min(22, Math.round(breachTradeFont))) : defaults.breachTradeFontSize,
+      breachTradeShowLabel: raw.breachTradeShowLabel !== false,
+      breachTradeShowPrice: raw.breachTradeShowPrice !== false,
+      breachTradeLabelAlign: breachTradeAlign,
+      breachTradeBoxDashedOutline: raw.breachTradeBoxDashedOutline !== false
     };
   }
 
@@ -9511,7 +9542,7 @@
 
   function resolveActiveHypernovaBreachPrice(symbolKey, activePos) {
     if (getChartVisualsMainWorldFirmId() !== 'hypernova') return null;
-    // Only show Breach Price when NO position is open yet — hide immediately when a position is open!
+    // Only show Pre-Trade red Breach Price when NO position is open yet — hide immediately when a position is open!
     if (activePos) return null;
 
     const normSym = normalizeHypernovaMainSymbol(symbolKey);
@@ -9528,6 +9559,31 @@
           price: Number(liveHypernovaOrderTicketBreach.price),
           decimals: Number.isInteger(liveHypernovaOrderTicketBreach.decimals) ? liveHypernovaOrderTicketBreach.decimals : null,
           source: 'order-ticket'
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function resolveActiveHypernovaBreachTradePrice(symbolKey, activePos) {
+    if (getChartVisualsMainWorldFirmId() !== 'hypernova') return null;
+    // Only show In-Trade blue dashed "Breach Trade" when IN an active trade AND sizing an add-on order in the Order Ticket!
+    if (!activePos) return null;
+
+    const normSym = normalizeHypernovaMainSymbol(symbolKey);
+
+    if (
+      liveHypernovaOrderTicketBreach &&
+      Number.isFinite(Number(liveHypernovaOrderTicketBreach.price)) &&
+      Number(liveHypernovaOrderTicketBreach.price) > 0
+    ) {
+      const ticketSym = normalizeHypernovaMainSymbol(liveHypernovaOrderTicketBreach.symbol || '');
+      if (!ticketSym || !normSym || ticketSym === normSym) {
+        return {
+          price: Number(liveHypernovaOrderTicketBreach.price),
+          decimals: Number.isInteger(liveHypernovaOrderTicketBreach.decimals) ? liveHypernovaOrderTicketBreach.decimals : null,
+          source: 'order-ticket-add'
         };
       }
     }
@@ -10308,6 +10364,124 @@
           ctx.fill();
 
           ctx.fillStyle = '#fef2f2';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(labelStr, pillX + padX + dotSpace, pillY + pillH / 2 + 0.5);
+          ctx.restore();
+        }
+      }
+    }
+
+    // 1c. Hypernova Live In-Trade "Breach Trade" Blue Dashed Line & Dashed-Outline Badge Box
+    // Shows projected new Breach Price while in an open position whenever sizing an add-on order in the Order Ticket!
+    const breachTradeData = hnCfg.breachTradeLineEnabled ? resolveActiveHypernovaBreachTradePrice(symbolKey, pos) : null;
+    if (breachTradeData && Number.isFinite(breachTradeData.price) && breachTradeData.price > 0) {
+      const btY = priceToY(breachTradeData.price);
+      if (btY !== null && Number.isFinite(btY)) {
+        const btColor = hnCfg.breachTradeColor || '#3b82f6';
+        const btPriceFormatted = (Number.isInteger(breachTradeData.decimals) && breachTradeData.decimals >= 0 && breachTradeData.decimals <= 8)
+          ? `$${breachTradeData.price.toFixed(breachTradeData.decimals)}`
+          : `$${formatHypernovaDisplayPrice(breachTradeData.price)}`;
+        const btBaseText = (hnCfg.breachTradeText || '').trim();
+        const btLabelBase = btBaseText
+          ? (hnCfg.breachTradeShowPrice ? `${btBaseText} · ${btPriceFormatted}` : btBaseText)
+          : (hnCfg.breachTradeShowPrice ? btPriceFormatted : '');
+
+        const isOnScreen = (btY >= -4 && btY <= cssHeight + 4);
+        if (isOnScreen) {
+          const clampedBtY = Math.max(2, Math.min(cssHeight - 2, btY));
+          ctx.save();
+          ctx.strokeStyle = hypernovaHexToRgba(btColor, hnCfg.breachTradeOpacity);
+          ctx.lineWidth = Math.max(1, Math.min(4, Number(hnCfg.breachTradeWidth) || 1.5));
+          if (hnCfg.breachTradeStyle === 'dotted') ctx.setLineDash([2, 4]);
+          else if (hnCfg.breachTradeStyle === 'dashed') ctx.setLineDash([7, 5]);
+          else ctx.setLineDash([]);
+          ctx.shadowColor = hypernovaHexToRgba(btColor, Math.min(60, hnCfg.breachTradeOpacity));
+          ctx.shadowBlur = 4;
+          ctx.beginPath();
+          ctx.moveTo(0, clampedBtY);
+          ctx.lineTo(cssWidth, clampedBtY);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        if (hnCfg.breachTradeShowLabel && btLabelBase) {
+          const isAbove = btY < -4;
+          const isBelow = btY > cssHeight + 4;
+          const compactBtBase = (isUltraNarrowChart && /^breach\s*trade$/i.test(btBaseText) && hnCfg.breachTradeShowPrice)
+            ? `Breach+ · ${btPriceFormatted}`
+            : btLabelBase;
+          const labelStr = isAbove
+            ? (isUltraNarrowChart ? `▲ ${compactBtBase}` : `▲ Above chart · ${compactBtBase}`)
+            : (isBelow ? (isUltraNarrowChart ? `▼ ${compactBtBase}` : `▼ Below chart · ${compactBtBase}`) : compactBtBase);
+          const rawBtFont = Math.max(8, Math.min(22, Number(hnCfg.breachTradeFontSize) || 11));
+          const btFontSize = isCompactMobileChart ? Math.min(mobileFontMax, Math.max(8, Math.round(rawBtFont * mobileFontFactor))) : rawBtFont;
+          const dotRadius = isCompactMobileChart ? 2 : Math.max(2.5, Math.min(5, btFontSize * 0.27));
+          const dotSpace = Math.round(dotRadius * 2 + (isCompactMobileChart ? 4 : 6));
+          const padX = isCompactMobileChart ? 4 : Math.max(6, Math.round(btFontSize * 0.72));
+          const pillH = Math.round(btFontSize + (isCompactMobileChart ? 6 : 9));
+
+          ctx.save();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.96;
+          ctx.font = `700 ${btFontSize}px -apple-system, BlinkMacSystemFont, "Inter", sans-serif`;
+          const textW = ctx.measureText(labelStr).width;
+          const pillW = textW + dotSpace + padX * 2;
+          const btEdgeMargin = isCompactMobileChart ? 6 : 10;
+          let pillX = cssWidth - pillW - btEdgeMargin;
+          if (hnCfg.breachTradeLabelAlign === 'left') pillX = btEdgeMargin;
+          else if (hnCfg.breachTradeLabelAlign === 'center') pillX = Math.round((cssWidth - pillW) / 2);
+          pillX = Math.max(4, Math.min(cssWidth - pillW - 4, pillX));
+
+          let pillY;
+          if (isAbove) {
+            pillY = 8;
+          } else if (isBelow) {
+            pillY = Math.max(4, cssHeight - pillH - 8);
+          } else {
+            pillY = Math.max(4, Math.min(cssHeight - pillH - 4, btY - pillH / 2));
+          }
+
+          // Smart anti-overlap nudge if Breach Trade pill collides with Current Price pill
+          if (curPillRect) {
+            const overlapX = pillX < (curPillRect.x + curPillRect.w + 4) && (pillX + pillW + 4) > curPillRect.x;
+            const overlapY = pillY < (curPillRect.y + curPillRect.h + 3) && (pillY + pillH + 3) > curPillRect.y;
+            if (overlapX && overlapY) {
+              const preferBelow = btY >= (curPillRect.y + curPillRect.h / 2);
+              const candidateY = preferBelow
+                ? curPillRect.y + curPillRect.h + 4
+                : curPillRect.y - pillH - 4;
+              if (candidateY >= 4 && candidateY + pillH <= cssHeight - 4) {
+                pillY = candidateY;
+              } else {
+                const altY = preferBelow
+                  ? curPillRect.y - pillH - 4
+                  : curPillRect.y + curPillRect.h + 4;
+                pillY = Math.max(4, Math.min(cssHeight - pillH - 4, altY));
+              }
+            }
+          }
+
+          ctx.beginPath();
+          ctx.roundRect(pillX, pillY, pillW, pillH, Math.max(4, Math.round(pillH * 0.28)));
+          ctx.fillStyle = 'rgba(10, 22, 48, 0.94)';
+          ctx.fill();
+          ctx.strokeStyle = btColor;
+          ctx.lineWidth = isCompactMobileChart ? 1.1 : 1.45;
+          if (hnCfg.breachTradeBoxDashedOutline !== false) {
+            ctx.setLineDash([4, 3]);
+          } else {
+            ctx.setLineDash([]);
+          }
+          ctx.stroke();
+
+          // Glowing blue indicator dot
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.arc(pillX + padX + dotRadius, pillY + pillH / 2, dotRadius, 0, Math.PI * 2);
+          ctx.fillStyle = btColor;
+          ctx.fill();
+
+          ctx.fillStyle = '#eff6ff';
           ctx.textBaseline = 'middle';
           ctx.fillText(labelStr, pillX + padX + dotSpace, pillY + pillH / 2 + 0.5);
           ctx.restore();

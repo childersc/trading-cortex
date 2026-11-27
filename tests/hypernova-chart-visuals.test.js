@@ -1020,4 +1020,114 @@ function extractBlock(src, startMarker, endMarker) {
   console.log('✓ Mobile positions-mobile-list card scraping, unsigned PnL: $XX.XX parsing, 0ms setText repaint & side/qty isolation verified');
 }
 
+// 11. Hypernova In-Trade "Breach Trade" Blue Dashed Line & Dashed-Outline Box (add-on sizing preview)
+{
+  const defaultsBlock = extractBlock(
+    isolatedSrc,
+    'const DEFAULT_HYPERNOVA_VISUALS =',
+    'const DEFAULT_PERP_FIRMS ='
+  );
+  const cfgCtx = {};
+  vm.runInNewContext(
+    `${defaultsBlock}
+     this.DEFAULT_HYPERNOVA_VISUALS = DEFAULT_HYPERNOVA_VISUALS;
+     this.normalizeHypernovaVisualsConfig = normalizeHypernovaVisualsConfig;`,
+    cfgCtx
+  );
+
+  // Verify blue dashed defaults & dashed box outline
+  assert.strictEqual(cfgCtx.DEFAULT_HYPERNOVA_VISUALS.breachTradeLineEnabled, true);
+  assert.strictEqual(cfgCtx.DEFAULT_HYPERNOVA_VISUALS.breachTradeColor, '#3b82f6');
+  assert.strictEqual(cfgCtx.DEFAULT_HYPERNOVA_VISUALS.breachTradeStyle, 'dashed');
+  assert.strictEqual(cfgCtx.DEFAULT_HYPERNOVA_VISUALS.breachTradeText, 'Breach Trade');
+  assert.strictEqual(cfgCtx.DEFAULT_HYPERNOVA_VISUALS.breachTradeBoxDashedOutline, true);
+
+  const normBt = cfgCtx.normalizeHypernovaVisualsConfig({
+    breachTradeColor: 'invalid-color',
+    breachTradeStyle: 'wavy',
+    breachTradeWidth: 99,
+    breachTradeOpacity: 5,
+    breachTradeFontSize: 40,
+    breachTradeBoxDashedOutline: false
+  });
+  assert.strictEqual(normBt.breachTradeColor, '#3b82f6');
+  assert.strictEqual(normBt.breachTradeStyle, 'dashed');
+  assert.strictEqual(normBt.breachTradeWidth, 4);
+  assert.strictEqual(normBt.breachTradeOpacity, 15);
+  assert.strictEqual(normBt.breachTradeFontSize, 22);
+  assert.strictEqual(normBt.breachTradeBoxDashedOutline, false);
+
+  // Verify all Settings UI controls exist in content-isolated.js
+  for (const token of [
+    'id="vest-pf-hn-breach-trade-line"',
+    'id="vest-pf-hn-breach-trade-color"',
+    'id="vest-pf-hn-breach-trade-style"',
+    'id="vest-pf-hn-breach-trade-width"',
+    'id="vest-pf-hn-breach-trade-opacity"',
+    'id="vest-pf-hn-breach-trade-text"',
+    'id="vest-pf-hn-breach-trade-font-size"',
+    'id="vest-pf-hn-breach-trade-align"',
+    'id="vest-pf-hn-breach-trade-show-label"',
+    'id="vest-pf-hn-breach-trade-show-price"',
+    'id="vest-pf-hn-breach-trade-box-dashed"'
+  ]) {
+    assert.strictEqual(isolatedSrc.includes(token), true, `content-isolated.js missing Breach Trade control: ${token}`);
+  }
+
+  // Verify resolveActiveHypernovaBreachTradePrice VM behavior (ONLY when in a trade AND Order Ticket has breach price)
+  const resolveBlock = extractBlock(
+    mainSrc,
+    'function resolveActiveHypernovaBreachPrice(',
+    'function ensureHypernovaVisualStyles('
+  );
+  const normSymBlock = extractBlock(
+    mainSrc,
+    'function normalizeHypernovaMainSymbol(',
+    'function extractNativeHypernovaChartLines('
+  );
+  const btCtx = { firmId: 'hypernova', liveHypernovaOrderTicketBreach: null };
+  vm.runInNewContext(
+    `function getChartVisualsMainWorldFirmId() { return firmId; }
+     ${normSymBlock}
+     ${resolveBlock}
+     this.resolveActiveHypernovaBreachPrice = resolveActiveHypernovaBreachPrice;
+     this.resolveActiveHypernovaBreachTradePrice = resolveActiveHypernovaBreachTradePrice;`,
+    btCtx
+  );
+
+  const openPos = { symbol: 'GOLD', side: 'short', entryPrice: 3570.1, sizeQty: 27.744 };
+  btCtx.liveHypernovaOrderTicketBreach = { price: 3574.5, decimals: 1, symbol: 'GOLD', source: 'order-ticket' };
+
+  // When FLAT: Red pre-trade Breach shows, Blue in-trade Breach Trade stays hidden
+  assert.strictEqual(btCtx.resolveActiveHypernovaBreachPrice('GOLD/USDC', null).price, 3574.5);
+  assert.strictEqual(btCtx.resolveActiveHypernovaBreachTradePrice('GOLD/USDC', null), null, 'In-trade Breach Trade must be hidden while flat');
+
+  // When IN A TRADE + sizing an add-on order: Red pre-trade hides, Blue in-trade Breach Trade shows!
+  assert.strictEqual(btCtx.resolveActiveHypernovaBreachPrice('GOLD/USDC', openPos), null, 'Pre-trade red Breach must stay hidden while in a trade');
+  const inTradeBreach = btCtx.resolveActiveHypernovaBreachTradePrice('GOLD/USDC', openPos);
+  assert.ok(inTradeBreach, 'In-trade Breach Trade must show when in a trade and sizing an add-on order');
+  assert.strictEqual(inTradeBreach.price, 3574.5);
+  assert.strictEqual(inTradeBreach.source, 'order-ticket-add');
+
+  // When IN A TRADE + Order Ticket is N/A (0 amount): stays hidden
+  btCtx.liveHypernovaOrderTicketBreach = null;
+  assert.strictEqual(btCtx.resolveActiveHypernovaBreachTradePrice('GOLD/USDC', openPos), null);
+
+  // Non-Hypernova venue: stays hidden
+  btCtx.firmId = 'kalshipro';
+  btCtx.liveHypernovaOrderTicketBreach = { price: 3574.5, decimals: 1, symbol: 'GOLD', source: 'order-ticket' };
+  assert.strictEqual(btCtx.resolveActiveHypernovaBreachTradePrice('GOLD/USDC', openPos), null);
+
+  // Verify canvas rendering block draws blue dashed line AND dashed outline around the pill box
+  const btRenderBlock = extractBlock(
+    mainSrc,
+    '// 1c. Hypernova Live In-Trade "Breach Trade"',
+    '// 2. Active Position Overlay'
+  );
+  assert.strictEqual(btRenderBlock.includes('ctx.lineTo(cssWidth, clampedBtY)'), true, 'Must draw horizontal Breach Trade line across chart');
+  assert.strictEqual(btRenderBlock.includes('ctx.setLineDash([4, 3])'), true, 'Must draw dashed outline around the Breach Trade pill box');
+  assert.strictEqual(btRenderBlock.includes('hnCfg.breachTradeBoxDashedOutline'), true, 'Must honor breachTradeBoxDashedOutline setting');
+  console.log('✓ Hypernova In-Trade "Breach Trade" blue dashed line, dashed-outline pill box, Settings UI & mutual exclusivity verified');
+}
+
 console.log('All Hypernova Chart Visuals tests passed!');
